@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>claudit report</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --surface: #fff;
+    --border: #e1e4e8;
+    --ink: #1f2328;
+    --muted: #6e7781;
+    --accent: #4a90e2;
+    --accent-2: #50a87a;
+    --warn: #d97706;
+    --hot: #d6336c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-size: 13px; line-height: 1.45;
+  }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 1.7em; margin: 0 0 4px; }
+  h2 { font-size: 1.15em; margin: 32px 0 8px; padding-bottom: 4px;
+       border-bottom: 1px solid var(--border); }
+  h3 { font-size: 1em; margin: 16px 0 6px; }
+  .subtitle { color: var(--muted); margin-bottom: 16px; }
+  .totals {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 12px;
+  }
+  .stat {
+    background: var(--surface); padding: 12px 14px; border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .stat .label { font-size: 0.8em; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: 0.05em; }
+  .stat .value { font-size: 1.5em; font-weight: 600; margin-top: 2px;
+                 font-variant-numeric: tabular-nums; }
+  .controls {
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    background: var(--surface); padding: 10px 14px; border: 1px solid var(--border);
+    border-radius: 6px; margin: 16px 0; position: sticky; top: 0; z-index: 10;
+  }
+  .controls label { display: flex; align-items: center; gap: 6px; }
+  .controls input {
+    font: inherit; padding: 4px 8px; border: 1px solid var(--border);
+    border-radius: 4px; background: #fff; color: var(--ink);
+  }
+  .controls input[type="search"] { width: 280px; }
+  .controls input[type="number"] { width: 80px; }
+  .hint { color: var(--muted); font-size: 0.85em; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border);
+           text-align: left; vertical-align: top; }
+  th { background: #eef0f2; cursor: pointer; user-select: none;
+       font-weight: 600; white-space: nowrap; }
+  th:hover { background: #e3e7eb; }
+  th.sorted-asc::after { content: " ▲"; color: var(--accent); }
+  th.sorted-desc::after { content: " ▼"; color: var(--accent); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.heat { position: relative; }
+  td.heat::before {
+    content: ""; position: absolute; inset: 0; right: auto;
+    background: var(--hot); opacity: 0.18; pointer-events: none;
+    width: var(--heat, 0%);
+  }
+  td.heat > * { position: relative; }
+  tr.hidden { display: none; }
+  details { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+            margin: 8px 0; padding: 8px 14px; }
+  summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+  summary > .small { color: var(--muted); font-weight: normal; margin-left: 8px; }
+  .charts { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: start; }
+  .donut { display: block; }
+  .legend { font-size: 0.9em; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .legend-swatch { width: 12px; height: 12px; flex-shrink: 0; border-radius: 2px; }
+  .hbar-list { display: flex; flex-direction: column; gap: 2px; max-width: 100%; }
+  .hbar { position: relative; height: 22px; background: #eef0f2; }
+  .hbar > .fill { position: absolute; left: 0; top: 0; bottom: 0;
+                  background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .hbar > .lbl, .hbar > .val { position: absolute; top: 0; line-height: 22px;
+                                 font-size: 0.85em; padding: 0 6px; white-space: nowrap; }
+  .hbar > .lbl { left: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+  .hbar > .val { right: 0; color: #333; }
+  .stacked { height: 28px; display: flex; background: #eef0f2; border-radius: 4px;
+             overflow: hidden; margin: 8px 0; }
+  .stacked > div { display: flex; align-items: center; justify-content: center;
+                   color: white; font-size: 0.85em; font-weight: 600; }
+  .pill { display: inline-block; background: #eef0f2; color: var(--muted);
+          padding: 1px 8px; border-radius: 12px; font-size: 0.8em; }
+  .small { font-size: 0.85em; color: var(--muted); }
+  .danger { color: var(--hot); }
+  .truncate { display: inline-block; max-width: 380px; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  details.tool-drill summary code { background: #f0f2f4; padding: 1px 6px;
+                                    border-radius: 3px; }
+  .row-count { color: var(--muted); font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>claudit report</h1>
+  <div class="subtitle"><span id="date-range"></span> · <span id="row-count" class="row-count"></span></div>
+
+  <div class="totals" id="totals"></div>
+
+  <div id="warnings"></div>
+
+  <div class="controls">
+    <label>Filter rows: <input id="filter" type="search" placeholder="model, path, command, agent…"></label>
+    <label>Min cost: <input id="mincost" type="number" value="0" step="0.01" min="0"></label>
+    <span class="hint">Click any column header to sort. Filter and min-cost apply to every table.</span>
+  </div>
+
+  <h2>By model</h2>
+  <div class="charts">
+    <svg class="donut" width="200" height="200" viewBox="-100 -100 200 200" id="donut-model"></svg>
+    <div class="legend" id="legend-model"></div>
+  </div>
+  <table data-table="model">
+    <thead><tr>
+      <th data-key="Model">Model</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="Pct" class="num">%</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="OutputTokens" class="num">Output tokens</th>
+      <th data-key="CacheReadTokens" class="num">Cache read tokens</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>By project</h2>
+  <div class="hbar-list" id="bars-project"></div>
+  <table data-table="project">
+    <thead><tr>
+      <th data-key="Project">Project</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="Pct" class="num">%</th>
+      <th data-key="Sessions" class="num">Sessions</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="DominantModel">Dominant model</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>By tool</h2>
+  <div class="hbar-list" id="bars-tool"></div>
+  <table data-table="tool">
+    <thead><tr>
+      <th data-key="Name">Tool</th>
+      <th data-key="Count" class="num">Calls</th>
+      <th data-key="TurnCount" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="Pct" class="num">%</th>
+      <th data-key="OutputTokens" class="num">Output tokens</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Drill-down by tool</h2>
+  <div class="small">Each section is a (tool, argument-pattern) breakdown — e.g. Bash + <code>git status</code>. Open one to dig in.</div>
+  <div id="drill-container"></div>
+
+  <h2>By skill &amp; slash command</h2>
+  <table data-table="skill">
+    <thead><tr>
+      <th data-key="Key">Key</th>
+      <th data-key="Count" class="num">Calls</th>
+      <th data-key="TurnCount" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="OutputTokens" class="num">Output tokens</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Main vs sidechain</h2>
+  <div class="stacked" id="stacked-main"></div>
+  <table data-table="mainside">
+    <thead><tr>
+      <th>Bucket</th>
+      <th class="num">Cost</th>
+      <th class="num">%</th>
+      <th class="num">Turns</th>
+      <th class="num">Cache read</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>By subagent type</h2>
+  <table data-table="subagent">
+    <thead><tr>
+      <th data-key="Type">Subagent</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="PctSide" class="num">% of sidechain</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="OutputTokens" class="num">Output</th>
+      <th data-key="CacheReadTokens" class="num">Cache read</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Top subagent invocations</h2>
+  <div class="small">Each row is one subagent run (one <code>agent-&lt;id&gt;.jsonl</code> file). Use the global filter above to narrow by subagent type, description, or project.</div>
+  <table data-table="invocation">
+    <thead><tr>
+      <th data-key="SubagentType">Subagent</th>
+      <th data-key="Description">Description</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="Project">Project</th>
+      <th data-key="First">Started</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script id="claudit-data" type="application/json">{{.DataJSON}}</script>
+<script>
+(function() {
+  const D = JSON.parse(document.getElementById('claudit-data').textContent);
+
+  // ── formatting helpers ─────────────────────────────────────────────────
+  const fmtMoney = v => {
+    if (v == null) return '—';
+    if (v >= 1000) return '$' + Math.round(v).toLocaleString();
+    return '$' + v.toFixed(2);
+  };
+  const fmtPct = (part, total) => total > 0 ? (100 * part / total).toFixed(1) + '%' : '—';
+  const fmtNum = v => v == null ? '0' : Number(v).toLocaleString();
+  const fmtDate = ts => {
+    if (!ts) return '—';
+    try { return new Date(ts).toISOString().slice(0, 16).replace('T', ' '); }
+    catch { return ts; }
+  };
+  const truncate = (s, n) => {
+    if (!s) return '';
+    if (s.length <= n) return s;
+    return '…' + s.slice(s.length - n + 1);
+  };
+  const escHtml = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // ── palette ───────────────────────────────────────────────────────────
+  const COLORS = [
+    '#4a90e2', '#50a87a', '#d97706', '#9013fe', '#d6336c',
+    '#0ea5e9', '#dc2626', '#16a34a', '#a855f7', '#f59e0b',
+    '#64748b'
+  ];
+
+  // ── header & warnings ──────────────────────────────────────────────────
+  const T = D.totals || {};
+  const totalCost = T.CostUSD || 0;
+  const sideCost = (D.sidechain && D.sidechain.cost) || 0;
+
+  const dateRange = (T.First && T.Last)
+    ? `${T.First.slice(0,10)} → ${T.Last.slice(0,10)}`
+    : '—';
+  document.getElementById('date-range').textContent = dateRange;
+  document.getElementById('row-count').textContent =
+    `${fmtNum(T.Sessions)} sessions · ${fmtNum(T.Turns)} assistant turns`;
+
+  const totalsHtml = [
+    ['Total cost', fmtMoney(totalCost)],
+    ['Sessions', fmtNum(T.Sessions)],
+    ['Assistant turns', fmtNum(T.Turns)],
+    ['Cache read tokens', fmtNum(T.CacheReadTokens)],
+  ].map(([l, v]) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+  document.getElementById('totals').innerHTML = totalsHtml;
+
+  if (D.unknown_models && D.unknown_models.length) {
+    document.getElementById('warnings').innerHTML =
+      `<div class="stat" style="border-color:var(--warn);background:#fef9e7"><strong class="danger">⚠ Unpriced models:</strong> ${D.unknown_models.map(escHtml).join(', ')} — add them to <code>~/.config/claudit/prices.yaml</code>.</div>`;
+  }
+
+  // ── tables: build then attach data ─────────────────────────────────────
+  // Each row carries its raw cost in data-cost so the global min-cost
+  // filter can hide it without re-rendering.
+  function attachHeat(td, value, max) {
+    if (max <= 0) return;
+    td.classList.add('heat');
+    td.style.setProperty('--heat', Math.min(100, 100 * value / max).toFixed(1) + '%');
+  }
+
+  function buildRows(table, rows, mapper) {
+    const tbody = table.querySelector('tbody');
+    tbody.innerHTML = '';
+    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD || 0));
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.dataset.cost = r.CostUSD || 0;
+      const cells = mapper(r);
+      cells.forEach(([html, isNum, heatVal]) => {
+        const td = document.createElement('td');
+        if (isNum) td.classList.add('num');
+        td.innerHTML = html;
+        if (heatVal != null) attachHeat(td, heatVal, maxCost);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.dataset.rows = JSON.stringify(rows);
+  }
+
+  // By model
+  buildRows(document.querySelector('[data-table="model"]'), D.by_model || [], r => [
+    [escHtml(r.Model), false],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtPct(r.CostUSD, totalCost), true],
+    [fmtNum(r.Turns), true],
+    [fmtNum(r.OutputTokens), true],
+    [fmtNum(r.CacheReadTokens), true],
+  ]);
+
+  // Donut + legend for by-model
+  (function donut() {
+    const svg = document.getElementById('donut-model');
+    const leg = document.getElementById('legend-model');
+    const rows = (D.by_model || []).filter(r => r.CostUSD > 0);
+    const total = rows.reduce((s, r) => s + r.CostUSD, 0);
+    if (total <= 0) { leg.innerHTML = '<em>(no priced data)</em>'; return; }
+    let acc = 0;
+    const r1 = 90, r0 = 55;
+    const arcs = rows.map((row, i) => {
+      const a0 = (acc / total) * Math.PI * 2 - Math.PI / 2;
+      acc += row.CostUSD;
+      const a1 = (acc / total) * Math.PI * 2 - Math.PI / 2;
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const p0 = [Math.cos(a0)*r1, Math.sin(a0)*r1];
+      const p1 = [Math.cos(a1)*r1, Math.sin(a1)*r1];
+      const q1 = [Math.cos(a1)*r0, Math.sin(a1)*r0];
+      const q0 = [Math.cos(a0)*r0, Math.sin(a0)*r0];
+      const color = COLORS[i % COLORS.length];
+      const d = `M ${p0[0]} ${p0[1]} A ${r1} ${r1} 0 ${large} 1 ${p1[0]} ${p1[1]} L ${q1[0]} ${q1[1]} A ${r0} ${r0} 0 ${large} 0 ${q0[0]} ${q0[1]} Z`;
+      return { d, color, row };
+    });
+    svg.innerHTML = arcs.map(a => `<path d="${a.d}" fill="${a.color}"><title>${escHtml(a.row.Model)}: ${fmtMoney(a.row.CostUSD)}</title></path>`).join('');
+    leg.innerHTML = arcs.map(a => `<div class="legend-item">
+      <span class="legend-swatch" style="background:${a.color}"></span>
+      <span><strong>${escHtml(a.row.Model)}</strong> · ${fmtMoney(a.row.CostUSD)} (${fmtPct(a.row.CostUSD, total)})</span>
+    </div>`).join('');
+  })();
+
+  // By project
+  buildRows(document.querySelector('[data-table="project"]'), D.by_project || [], r => [
+    [`<span class="truncate" title="${escHtml(r.Project)}">${escHtml(r.Project)}</span>`, false],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtPct(r.CostUSD, totalCost), true],
+    [fmtNum(r.Sessions), true],
+    [fmtNum(r.Turns), true],
+    [escHtml(r.DominantModel), false],
+  ]);
+
+  // Horizontal bar list — top 20 projects
+  (function projectBars() {
+    const rows = (D.by_project || []).slice(0, 20);
+    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
+    document.getElementById('bars-project').innerHTML = rows.map(r => {
+      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      return `<div class="hbar">
+        <div class="fill" style="width:${w}%"></div>
+        <div class="lbl" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 70))}</div>
+        <div class="val">${fmtMoney(r.CostUSD)} (${fmtPct(r.CostUSD, totalCost)})</div>
+      </div>`;
+    }).join('');
+  })();
+
+  // By tool
+  buildRows(document.querySelector('[data-table="tool"]'), D.by_tool || [], r => [
+    [escHtml(r.Name), false],
+    [fmtNum(r.Count), true],
+    [fmtNum(r.TurnCount), true],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtPct(r.CostUSD, totalCost), true],
+    [fmtNum(r.OutputTokens), true],
+  ]);
+
+  // Tool bars
+  (function toolBars() {
+    const rows = D.by_tool || [];
+    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
+    document.getElementById('bars-tool').innerHTML = rows.map(r => {
+      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      return `<div class="hbar">
+        <div class="fill" style="width:${w}%"></div>
+        <div class="lbl">${escHtml(r.Name)}</div>
+        <div class="val">${fmtMoney(r.CostUSD)} · ${fmtNum(r.Count)} calls</div>
+      </div>`;
+    }).join('');
+  })();
+
+  // Drill-down per tool
+  (function drill() {
+    const det = D.by_tool_detail || {};
+    const tools = (D.by_tool || []).filter(t => det[t.Name] && det[t.Name].length);
+    const container = document.getElementById('drill-container');
+    container.innerHTML = tools.map(tool => {
+      const rows = det[tool.Name];
+      const max = tool.CostUSD || 1;
+      const tbody = rows.slice(0, 50).map(r => `<tr data-cost="${r.CostUSD}">
+        <td><code>${escHtml(r.Detail)}</code></td>
+        <td class="num">${fmtNum(r.Count)}</td>
+        <td class="num">${fmtNum(r.TurnCount)}</td>
+        <td class="num heat" style="--heat:${Math.min(100,100*r.CostUSD/max).toFixed(1)}%">${fmtMoney(r.CostUSD)}</td>
+        <td class="num">${fmtPct(r.CostUSD, tool.CostUSD)}</td>
+        <td class="num">${fmtNum(r.OutputTokens)}</td>
+      </tr>`).join('');
+      const more = rows.length > 50 ? `<tr><td colspan="6" class="small"><em>${rows.length - 50} more rows hidden — use the JSON output (<code>--json</code>) for the full list.</em></td></tr>` : '';
+      return `<details class="tool-drill" data-table="drill-${escHtml(tool.Name)}">
+        <summary>${escHtml(tool.Name)} <span class="small">— ${fmtMoney(tool.CostUSD)} across ${fmtNum(tool.Count)} call(s) · ${rows.length} pattern(s)</span></summary>
+        <table>
+          <thead><tr>
+            <th data-key="Detail">Pattern</th>
+            <th data-key="Count" class="num">Calls</th>
+            <th data-key="TurnCount" class="num">Turns</th>
+            <th data-key="CostUSD" class="num">Cost</th>
+            <th data-key="Pct" class="num">% of ${escHtml(tool.Name)}</th>
+            <th data-key="OutputTokens" class="num">Output tokens</th>
+          </tr></thead>
+          <tbody>${tbody}${more}</tbody>
+        </table>
+      </details>`;
+    }).join('');
+  })();
+
+  // By skill
+  buildRows(document.querySelector('[data-table="skill"]'), D.by_skill || [], r => [
+    [`<code>${escHtml(r.Key)}</code>`, false],
+    [fmtNum(r.Count), true],
+    [fmtNum(r.TurnCount), true],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtNum(r.OutputTokens), true],
+  ]);
+
+  // Main vs sidechain stacked bar + table
+  (function mainSide() {
+    const main = D.main || {cost:0,turns:0,tokens:{}};
+    const side = D.sidechain || {cost:0,turns:0,tokens:{}};
+    const total = main.cost + side.cost;
+    const stacked = document.getElementById('stacked-main');
+    if (total > 0) {
+      const mp = 100 * main.cost / total, sp = 100 - mp;
+      stacked.innerHTML = `
+        <div style="width:${mp}%;background:var(--accent)" title="main: ${fmtMoney(main.cost)}">main · ${mp.toFixed(1)}%</div>
+        <div style="width:${sp}%;background:var(--accent-2)" title="sidechain: ${fmtMoney(side.cost)}">sidechain · ${sp.toFixed(1)}%</div>`;
+    }
+    const tbody = document.querySelector('[data-table="mainside"] tbody');
+    const buckets = [
+      ['main', main.cost, main.turns, (main.tokens||{}).CacheReadTokens],
+      ['sidechain', side.cost, side.turns, (side.tokens||{}).CacheReadTokens],
+    ];
+    tbody.innerHTML = buckets.map(([n, c, t, cr]) =>
+      `<tr data-cost="${c}"><td>${n}</td><td class="num">${fmtMoney(c)}</td><td class="num">${fmtPct(c, total)}</td><td class="num">${fmtNum(t)}</td><td class="num">${fmtNum(cr)}</td></tr>`
+    ).join('');
+  })();
+
+  // By subagent
+  buildRows(document.querySelector('[data-table="subagent"]'), D.by_subagent || [], r => [
+    [escHtml(r.Type), false],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtPct(r.CostUSD, sideCost), true],
+    [fmtNum(r.Turns), true],
+    [fmtNum(r.OutputTokens), true],
+    [fmtNum(r.CacheReadTokens), true],
+  ]);
+
+  // Agent invocations
+  buildRows(document.querySelector('[data-table="invocation"]'), D.agent_invocations || [], r => [
+    [escHtml(r.SubagentType || '(unknown)'), false],
+    [`<span title="${escHtml(r.Description)}">${escHtml(truncate(r.Description, 80))}</span>`, false],
+    [fmtMoney(r.CostUSD), true, r.CostUSD],
+    [fmtNum(r.Turns), true],
+    [`<span class="truncate" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 50))}</span>`, false],
+    [fmtDate(r.First), false],
+  ]);
+
+  // ── sorting ───────────────────────────────────────────────────────────
+  document.querySelectorAll('table thead th[data-key]').forEach(th => {
+    th.addEventListener('click', () => {
+      const table = th.closest('table');
+      const tbody = table.querySelector('tbody');
+      const idx = Array.from(th.parentNode.children).indexOf(th);
+      const asc = !th.classList.contains('sorted-asc');
+      table.querySelectorAll('thead th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+      th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a, b) => {
+        const av = a.children[idx]?.textContent.trim() || '';
+        const bv = b.children[idx]?.textContent.trim() || '';
+        const an = parseFloat(av.replace(/[^0-9.\-]/g, ''));
+        const bn = parseFloat(bv.replace(/[^0-9.\-]/g, ''));
+        const numeric = !isNaN(an) && !isNaN(bn) && (av.match(/[0-9]/) || bv.match(/[0-9]/));
+        const cmp = numeric ? (an - bn) : av.localeCompare(bv);
+        return asc ? cmp : -cmp;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
+
+  // ── global filter + min cost ──────────────────────────────────────────
+  function applyFilters() {
+    const q = document.getElementById('filter').value.trim().toLowerCase();
+    const minCost = parseFloat(document.getElementById('mincost').value || '0');
+    document.querySelectorAll('table tbody tr, details tbody tr').forEach(tr => {
+      const cost = parseFloat(tr.dataset.cost || '0');
+      const text = tr.textContent.toLowerCase();
+      const matches = (!q || text.includes(q)) && (cost >= minCost);
+      tr.classList.toggle('hidden', !matches);
+    });
+  }
+  document.getElementById('filter').addEventListener('input', applyFilters);
+  document.getElementById('mincost').addEventListener('input', applyFilters);
+})();
+</script>
+</body>
+</html>

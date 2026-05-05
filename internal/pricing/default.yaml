@@ -1,0 +1,75 @@
+# claudit pricing — USD per million tokens.
+#
+# Prices verified against https://platform.claude.com/docs/en/docs/about-claude/pricing
+# on 2026-05-05. Sources are tagged "# verified 2026-05-05" — refresh those
+# tags if you re-check the page.
+#
+# Cache pricing follows Anthropic's standard ratios off the input rate:
+#   cache_read     = input * 0.10
+#   cache_write_5m = input * 1.25
+#   cache_write_1h = input * 2.00
+#
+# 1M-context-window pricing: Opus 4.6, Opus 4.7, and Sonnet 4.6 include the
+# full 1M context at *standard* rates — no premium tier. The "[1m]" suffix
+# claudit may see in the wild is just a context-mode marker, not a pricing
+# tier, so we list those at the same prices as their base model.
+
+models:
+  # ── Opus 4.5/4.6/4.7 family — $5 / $25 base ──
+  claude-opus-4-7:                  # verified 2026-05-05
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  "claude-opus-4-7[1m]":             # verified 2026-05-05 — 1M context bundled at standard rates
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  claude-opus-4-6:                  # verified 2026-05-05
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  claude-opus-4-5-20251101:         # verified 2026-05-05 — Opus 4.5 dated id
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  # ── Sonnet 4.x family — $3 / $15 base ──
+  claude-sonnet-4-6:                # verified 2026-05-05
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  "claude-sonnet-4-6[1m]":           # verified 2026-05-05 — 1M context bundled at standard rates
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  claude-sonnet-4-5-20250929:       # verified 2026-05-05 — Sonnet 4.5 dated id
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  # ── Haiku 4.5 — $1 / $5 base ──
+  claude-haiku-4-5-20251001:        # verified 2026-05-05
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+    cache_read_per_mtok: 0.10
+    cache_write_5m_per_mtok: 1.25
+    cache_write_1h_per_mtok: 2.00

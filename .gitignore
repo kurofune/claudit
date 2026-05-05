@@ -1,0 +1,8 @@
+# Generated reports
+cost.md
+report.html
+*.html
+
+# Build artifacts
+/claudit
+/dist/

@@ -1,0 +1,5 @@
+{"type":"assistant","sessionId":"sess-C","uuid":"a1","parentUuid":null,"isSidechain":false,"timestamp":"2026-04-12T00:00:00.000Z","cwd":"/Users/x/Projects/foo","message":{"model":"claude-opus-4-7","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+this is not json at all
+{"type":"assistant","missing closing brace
+{"type":"assistant","sessionId":"sess-C","uuid":"a2","parentUuid":"a1","isSidechain":false,"timestamp":"2026-04-12T00:00:01.000Z","cwd":"/Users/x/Projects/foo","message":{"model":"unknown-model-xyz","role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"assistant","sessionId":"sess-C","uuid":"a3","parentUuid":"a2","isSidechain":false,"timestamp":"2026-04-12T00:00:02.000Z","cwd":"/Users/x/Projects/foo","message":{"model":"claude-opus-4-7","role":"assistant","content":[]}}
