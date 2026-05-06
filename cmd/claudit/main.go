@@ -47,6 +47,8 @@ func run() error {
 	drillTop := fs.Int("drill-top", 15, "show top-N rows per tool in the drill-down section (0 disables)")
 	agentTop := fs.Int("agent-top", 20, "show top-N most expensive subagent invocations (0 disables)")
 	agentType := fs.String("agent-type", "", "restrict the invocation section to one subagent type (e.g. general-purpose)")
+	hotspots := fs.Int("hotspots", 10, "show top-N cost hotspots at the top of the report, each with a copyable LLM prompt (0 disables)")
+	by := fs.String("by", "", "trend mode: bucket spend over time — one of day|week|month (empty disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -87,7 +89,12 @@ func run() error {
 
 	turns, malformed, fileErrs := parseConcurrently(files)
 
-	agg := aggregate.New(prices).WithFilter(filter)
+	period := aggregate.Period(*by)
+	if *by != "" && !period.Valid() {
+		return fmt.Errorf("--by: must be one of day|week|month, got %q", *by)
+	}
+
+	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period)
 
 	// Subagent meta cache — keyed on the source jsonl path so we don't
 	// re-stat / re-read the sibling .meta.json across the file's many turns.
@@ -128,6 +135,7 @@ func run() error {
 			DrillTop:        *drillTop,
 			AgentTop:        *agentTop,
 			AgentTypeFilter: *agentType,
+			Hotspots:        *hotspots,
 		}); err != nil {
 			return err
 		}

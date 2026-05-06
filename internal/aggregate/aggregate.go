@@ -148,6 +148,14 @@ type Aggregator struct {
 	projectSession map[string]map[string]struct{}
 
 	unknownModels map[string]struct{}
+
+	// Trend mode. Zero-valued (PeriodNone) means trend tracking is off
+	// and the per-bucket maps stay nil. WithPeriod flips it on.
+	period         Period
+	trendTotals    map[time.Time]*TrendPoint
+	trendByModel   map[string]map[time.Time]*TrendPoint
+	trendByProject map[string]map[time.Time]*TrendPoint
+	trendByTool    map[string]map[time.Time]*TrendPoint
 }
 
 // New returns an empty aggregator using the given pricing table.
@@ -171,6 +179,19 @@ func New(p *pricing.Table) *Aggregator {
 // WithFilter sets a filter and returns the aggregator (chainable).
 func (a *Aggregator) WithFilter(f Filter) *Aggregator {
 	a.filter = f
+	return a
+}
+
+// WithPeriod enables trend tracking at the given bucket size. Pass
+// PeriodNone to disable. Must be called before Add().
+func (a *Aggregator) WithPeriod(p Period) *Aggregator {
+	a.period = p
+	if p.Valid() {
+		a.trendTotals = map[time.Time]*TrendPoint{}
+		a.trendByModel = map[string]map[time.Time]*TrendPoint{}
+		a.trendByProject = map[string]map[time.Time]*TrendPoint{}
+		a.trendByTool = map[string]map[time.Time]*TrendPoint{}
+	}
 	return a
 }
 
@@ -230,6 +251,16 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		a.totals.Last = t.Timestamp
 	}
 
+	// Trend bucketing — only when WithPeriod was called and the turn has
+	// a real timestamp. Per-tool trend is filled inside the tool loop
+	// below to dedupe multi-tool-call turns.
+	var bucket time.Time
+	trendOn := a.period.Valid() && !t.Timestamp.IsZero()
+	if trendOn {
+		bucket = a.period.Truncate(t.Timestamp)
+		addTrend(a.trendTotals, bucket, cost)
+	}
+
 	// By model.
 	mb := a.byModel[t.Model]
 	if mb == nil {
@@ -239,6 +270,15 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	mb.Tokens.addUsage(t.Usage)
 	mb.CostUSD += cost
 	mb.Turns++
+
+	if trendOn {
+		m := a.trendByModel[t.Model]
+		if m == nil {
+			m = map[time.Time]*TrendPoint{}
+			a.trendByModel[t.Model] = m
+		}
+		addTrend(m, bucket, cost)
+	}
 
 	// By project. Use cwd; fall back to "(unknown)".
 	proj := t.CWD
@@ -256,6 +296,15 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	pb.CostUSD += cost
 	pb.Turns++
 	a.projectModelTurns[proj][t.Model]++
+
+	if trendOn {
+		m := a.trendByProject[proj]
+		if m == nil {
+			m = map[time.Time]*TrendPoint{}
+			a.trendByProject[proj] = m
+		}
+		addTrend(m, bucket, cost)
+	}
 	if t.SessionID != "" {
 		pb.Sessions = 0 // recomputed below
 		a.projectSession[proj][t.SessionID] = struct{}{}
@@ -336,6 +385,14 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			tb.CostUSD += cost
 			tb.TurnCount++
 			seen[tu.Name] = true
+			if trendOn {
+				m := a.trendByTool[tu.Name]
+				if m == nil {
+					m = map[time.Time]*TrendPoint{}
+					a.trendByTool[tu.Name] = m
+				}
+				addTrend(m, bucket, cost)
+			}
 		}
 
 		// Detail rollup. Same TurnCount-style accounting: each turn

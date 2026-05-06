@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/nategross/claudit/internal/aggregate"
 )
@@ -25,6 +26,10 @@ type Options struct {
 	// AgentTypeFilter, when non-empty, restricts the invocation section to
 	// runs whose subagent type matches exactly (e.g. "general-purpose").
 	AgentTypeFilter string
+
+	// Hotspots controls the count of "top cost hotspots" rows at the top
+	// of the report (each with a copyable LLM prompt). 0 disables it.
+	Hotspots int
 }
 
 // Markdown writes the full report to w with default options.
@@ -41,6 +46,9 @@ func pct(part, total float64) string {
 	return fmt.Sprintf("%.1f%%", 100*part/total)
 }
 
+// pctOf formats an already-computed percentage like 12.3 as "12.3%".
+func pctOf(v float64) string { return fmt.Sprintf("%.1f%%", v) }
+
 // MarkdownWithOptions writes the full report with custom render options.
 func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) error {
 	tot := a.Totals()
@@ -53,6 +61,36 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 
 	fmt.Fprintln(w, "# claudit report")
 	fmt.Fprintln(w)
+
+	// Top-of-report: cost hotspots, each with a tailored LLM prompt the user
+	// can copy and paste into Claude / GPT / etc. for tool & workflow advice.
+	if opt.Hotspots > 0 {
+		hs := a.Hotspots(opt.Hotspots)
+		if len(hs) > 0 {
+			fmt.Fprintln(w, "## Top cost hotspots")
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "_The highest-cost optimization targets in your data. Each row expands to show a tailored prompt — copy it into an LLM (Claude, GPT, etc.) for specific advice on tools, MCPs, CLIs, and workflow patterns. The prompts explicitly forbid the trivial \"use a cheaper model\" answer._")
+			fmt.Fprintln(w)
+			for i, h := range hs {
+				fmt.Fprintf(w, "### %d. %s — %s (%s of total)\n\n",
+					i+1, h.Title, money(h.CostUSD), pctOf(h.PctOfTotal))
+				prompt, err := HotspotPrompt(h)
+				if err != nil {
+					fmt.Fprintf(w, "_(no prompt template available for kind %q)_\n\n", h.Kind)
+					continue
+				}
+				fmt.Fprintln(w, "<details><summary>📋 Copy this prompt to ask an LLM how to address it</summary>")
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, "```")
+				fmt.Fprint(w, prompt)
+				fmt.Fprintln(w, "```")
+				fmt.Fprintln(w)
+				fmt.Fprintln(w, "</details>")
+				fmt.Fprintln(w)
+			}
+		}
+	}
+
 	fmt.Fprintln(w, "## Top-line totals")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "- **Total cost:** %s\n", money(tot.CostUSD))
@@ -77,25 +115,54 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 		fmt.Fprintln(w)
 	}
 
+	period := a.Period()
+	trendTotals := a.TrendTotals()
+	if period.Valid() && len(trendTotals) > 0 {
+		renderTrendSection(w, period, trendTotals)
+	}
+
+	trendByModel := a.TrendByModel()
+	trendByProject := a.TrendByProject()
+	trendByTool := a.TrendByTool()
+
 	// By model.
 	fmt.Fprintln(w, "## By model")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Model | Cost | % | Turns | Input | Output | Cache create (5m) | Cache create (1h) | Cache read |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+	if period.Valid() {
+		fmt.Fprintln(w, "| Model | Cost | % | Turns | Trend | Input | Output | Cache create (5m) | Cache create (1h) | Cache read |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---|---:|---:|---:|---:|---:|")
+	} else {
+		fmt.Fprintln(w, "| Model | Cost | % | Turns | Input | Output | Cache create (5m) | Cache create (1h) | Cache read |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+	}
 	for _, m := range a.ByModel() {
-		fmt.Fprintf(w, "| %s | %s | %s | %d | %s | %s | %s | %s | %s |\n",
-			m.Model, money(m.CostUSD), pct(m.CostUSD, tot.CostUSD), m.Turns,
-			num(m.InputTokens), num(m.OutputTokens),
-			num(m.CacheCreate5mTokens), num(m.CacheCreate1hTokens),
-			num(m.CacheReadTokens))
+		if period.Valid() {
+			fmt.Fprintf(w, "| %s | %s | %s | %d | `%s` | %s | %s | %s | %s | %s |\n",
+				m.Model, money(m.CostUSD), pct(m.CostUSD, tot.CostUSD), m.Turns,
+				sparkline(trendByModel[m.Model], 30),
+				num(m.InputTokens), num(m.OutputTokens),
+				num(m.CacheCreate5mTokens), num(m.CacheCreate1hTokens),
+				num(m.CacheReadTokens))
+		} else {
+			fmt.Fprintf(w, "| %s | %s | %s | %d | %s | %s | %s | %s | %s |\n",
+				m.Model, money(m.CostUSD), pct(m.CostUSD, tot.CostUSD), m.Turns,
+				num(m.InputTokens), num(m.OutputTokens),
+				num(m.CacheCreate5mTokens), num(m.CacheCreate1hTokens),
+				num(m.CacheReadTokens))
+		}
 	}
 	fmt.Fprintln(w)
 
 	// By project.
 	fmt.Fprintln(w, "## By project")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Project | Cost | % | Sessions | Turns | Dominant model |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|---:|---|")
+	if period.Valid() {
+		fmt.Fprintln(w, "| Project | Cost | % | Sessions | Turns | Trend | Dominant model |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---:|---|---|")
+	} else {
+		fmt.Fprintln(w, "| Project | Cost | % | Sessions | Turns | Dominant model |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---:|---|")
+	}
 	rows := a.ByProject()
 	hidden := 0
 	for _, p := range rows {
@@ -103,9 +170,15 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 			hidden++
 			continue
 		}
-		fmt.Fprintf(w, "| %s | %s | %s | %d | %d | %s |\n",
-			truncate(p.Project, 60), money(p.CostUSD), pct(p.CostUSD, tot.CostUSD),
-			p.Sessions, p.Turns, p.DominantModel)
+		if period.Valid() {
+			fmt.Fprintf(w, "| %s | %s | %s | %d | %d | `%s` | %s |\n",
+				truncate(p.Project, 60), money(p.CostUSD), pct(p.CostUSD, tot.CostUSD),
+				p.Sessions, p.Turns, sparkline(trendByProject[p.Project], 30), p.DominantModel)
+		} else {
+			fmt.Fprintf(w, "| %s | %s | %s | %d | %d | %s |\n",
+				truncate(p.Project, 60), money(p.CostUSD), pct(p.CostUSD, tot.CostUSD),
+				p.Sessions, p.Turns, p.DominantModel)
+		}
 	}
 	if hidden > 0 {
 		fmt.Fprintf(w, "\n_…and %d project(s) below $%.2f hidden (use --min-cost 0 to show all)._\n",
@@ -116,12 +189,24 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	// By tool.
 	fmt.Fprintln(w, "## By tool")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Tool | Calls | Turns | Cost | % | Output tokens |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|---:|---:|")
+	if period.Valid() {
+		fmt.Fprintln(w, "| Tool | Calls | Turns | Cost | % | Trend | Output tokens |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---:|---|---:|")
+	} else {
+		fmt.Fprintln(w, "| Tool | Calls | Turns | Cost | % | Output tokens |")
+		fmt.Fprintln(w, "|---|---:|---:|---:|---:|---:|")
+	}
 	for _, b := range a.ByTool() {
-		fmt.Fprintf(w, "| %s | %d | %d | %s | %s | %s |\n",
-			b.Name, b.Count, b.TurnCount,
-			money(b.CostUSD), pct(b.CostUSD, tot.CostUSD), num(b.OutputTokens))
+		if period.Valid() {
+			fmt.Fprintf(w, "| %s | %d | %d | %s | %s | `%s` | %s |\n",
+				b.Name, b.Count, b.TurnCount,
+				money(b.CostUSD), pct(b.CostUSD, tot.CostUSD),
+				sparkline(trendByTool[b.Name], 30), num(b.OutputTokens))
+		} else {
+			fmt.Fprintf(w, "| %s | %d | %d | %s | %s | %s |\n",
+				b.Name, b.Count, b.TurnCount,
+				money(b.CostUSD), pct(b.CostUSD, tot.CostUSD), num(b.OutputTokens))
+		}
 	}
 	fmt.Fprintln(w)
 
@@ -258,6 +343,62 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	}
 
 	return nil
+}
+
+// renderTrendSection writes the "Cost by <period>" overview: a sparkline
+// of the full series, then a per-bucket table with cost, turns, and
+// percent-change vs the prior bucket. Used when --by is set.
+func renderTrendSection(w io.Writer, period aggregate.Period, points []aggregate.TrendPoint) {
+	label := string(period)
+	fmt.Fprintf(w, "## Cost by %s\n\n", label)
+	fmt.Fprintf(w, "_Spend bucketed by %s. The trend column on each by-row table below uses the same buckets, downsampled when wider than 30 cells._\n\n", label)
+	fmt.Fprintf(w, "Overall trend: `%s`\n\n", sparkline(points, 0))
+
+	fmt.Fprintln(w, "| Period | Cost | Δ vs prior | Turns |")
+	fmt.Fprintln(w, "|---|---:|---:|---:|")
+	var prev float64
+	havePrev := false
+	for _, p := range points {
+		delta := "—"
+		if havePrev {
+			delta = deltaPct(prev, p.CostUSD)
+		}
+		fmt.Fprintf(w, "| %s | %s | %s | %d |\n",
+			formatBucket(period, p.Time), money(p.CostUSD), delta, p.Turns)
+		prev = p.CostUSD
+		havePrev = true
+	}
+	fmt.Fprintln(w)
+}
+
+// formatBucket prints a bucket time the way the reader expects for that
+// period: "2026-05-06" for day, "wk of 2026-05-04" for week, "2026-05"
+// for month.
+func formatBucket(p aggregate.Period, t time.Time) string {
+	switch p {
+	case aggregate.PeriodWeek:
+		return "wk of " + t.UTC().Format("2006-01-02")
+	case aggregate.PeriodMonth:
+		return t.UTC().Format("2006-01")
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
+// deltaPct formats a signed percent-change. Returns "—" when prior is
+// zero (any change from zero is undefined as a percentage).
+func deltaPct(prev, cur float64) string {
+	if prev <= 0 {
+		if cur <= 0 {
+			return "0%"
+		}
+		return "new"
+	}
+	d := 100 * (cur - prev) / prev
+	sign := "+"
+	if d < 0 {
+		sign = ""
+	}
+	return fmt.Sprintf("%s%.1f%%", sign, d)
 }
 
 func money(v float64) string {
