@@ -34,6 +34,8 @@ func run() error {
 			return runReport(args[1:])
 		case "diff":
 			return runDiff(args[1:])
+		case "watch":
+			return runWatch(args[1:])
 		}
 	}
 	return runReport(args)
