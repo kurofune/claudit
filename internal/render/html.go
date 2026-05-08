@@ -74,6 +74,7 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		CacheBySession   []aggregate.CacheRow                `json:"cache_by_session"`
 		CacheBySubagent  []aggregate.CacheRow                `json:"cache_by_subagent"`
 		CacheByInvocation []aggregate.CacheRow               `json:"cache_by_invocation"`
+		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
 	}{
 		Totals:           a.Totals(),
 		Hotspots:         hotspots,
@@ -97,6 +98,7 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		CacheBySession:    a.CacheBySession(),
 		CacheBySubagent:   a.CacheBySubagent(),
 		CacheByInvocation: a.CacheByInvocation(),
+		ByPrompt:          a.ByPrompt(),
 	}
 
 	data, err := json.Marshal(payload)

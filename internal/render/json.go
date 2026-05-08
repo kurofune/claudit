@@ -22,6 +22,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		Sidechain     sidechainPart                          `json:"sidechain"`
 		BySubagent       []aggregate.SubagentBucket          `json:"by_subagent"`
 		AgentInvocations []aggregate.AgentInvocation         `json:"agent_invocations"`
+		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
 		UnknownModels    []string                            `json:"unknown_models"`
 	}{
 		Totals:        a.Totals(),
@@ -34,6 +35,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		Sidechain:     sidechainPart{Tokens: sideTok, CostUSD: sideCost, Turns: sideTurns},
 		BySubagent:       a.BySubagent(),
 		AgentInvocations: a.AgentInvocations(""),
+		ByPrompt:         a.ByPrompt(),
 		UnknownModels:    a.UnknownModels(),
 	}
 	enc := json.NewEncoder(w)

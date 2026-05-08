@@ -268,6 +268,20 @@
     <tbody></tbody>
   </table>
 
+  <h2>Top expensive prompts</h2>
+  <div class="small">User prompts ranked by the total cost of the assistant turn chain each one kicked off. Prompts cluster on the first 120 chars of normalized text — trivially-different repeats of the same ask appear in the same row. Hover a row's snippet for the full prompt.</div>
+  <table data-table="prompt">
+    <thead><tr>
+      <th data-key="Sample">Snippet</th>
+      <th data-key="Invocations" class="num">Invocations</th>
+      <th data-key="Sessions" class="num">Sessions</th>
+      <th data-key="TurnCount" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+      <th data-key="Pct" class="num">%</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
   <h2>By tool</h2>
   <div class="hbar-list" id="bars-tool"></div>
   <table data-table="tool">
@@ -868,6 +882,21 @@
       </details>`;
     }).join('');
   })();
+
+  // Top expensive prompts. Sample is the full text; show the head as the
+  // visible snippet, full text on hover.
+  buildRows(document.querySelector('[data-table="prompt"]'), D.by_prompt || [], r => {
+    const sample = r.Sample || r.Key || '';
+    const head = sample.length > 80 ? sample.slice(0, 79) + '…' : sample;
+    return [
+      [`<span title="${escHtml(sample)}">${escHtml(head)}</span>`, false],
+      [fmtNum(r.Invocations), true],
+      [fmtNum(r.Sessions), true],
+      [fmtNum(r.TurnCount || r.turn_count || 0), true],
+      [fmtMoney(r.CostUSD), true, r.CostUSD],
+      [fmtPct(r.CostUSD, totalCost), true],
+    ];
+  });
 
   // By skill
   buildRows(document.querySelector('[data-table="skill"]'), D.by_skill || [], r => [

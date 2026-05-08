@@ -66,11 +66,23 @@ type UserMessage struct {
 	SourceFile string
 }
 
+// ParentLink is one (child UUID → parent UUID) edge from any line type.
+// Surface for chain walks that need to climb through non-content lines
+// (system events, file-history-snapshots, agent-color markers) which
+// sit between an assistant turn and the originating user message.
+type ParentLink struct {
+	UUID, ParentUUID string
+}
+
 // Result is what ParseFile returns.
 type Result struct {
 	Turns        []Turn
 	UserMessages []UserMessage
-	Malformed    int // count of lines we couldn't decode
+	// ParentLinks contains uuid → parentUuid edges from every line that
+	// has both fields, including non-content message types. The chain
+	// walk needs these to bridge over hooks and snapshots.
+	ParentLinks []ParentLink
+	Malformed   int // count of lines we couldn't decode
 }
 
 // rawLine is the wire format. Only the fields we care about.
@@ -220,6 +232,12 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 		case LineUserMessage:
 			res.UserMessages = append(res.UserMessages, u)
 		}
+		// Always extract the parent link if present, even for line types
+		// we otherwise ignore. This bridges system / snapshot rows that
+		// would otherwise break the prompt-attribution chain.
+		if uuid, parentUUID := peekParentLink(line); uuid != "" && parentUUID != "" {
+			res.ParentLinks = append(res.ParentLinks, ParentLink{UUID: uuid, ParentUUID: parentUUID})
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return res, err
@@ -242,6 +260,23 @@ func convertUsage(u *rawUsage) Usage {
 		out.CacheCreate5mTokens = u.CacheCreate
 	}
 	return out
+}
+
+// peekParentLink decodes only the uuid and parentUuid fields off a line.
+// Cheaper than the full rawLine decode and tolerates any line shape; we
+// only use it to build the parent-link index for chain walking.
+func peekParentLink(line []byte) (uuid, parentUUID string) {
+	if len(line) == 0 {
+		return "", ""
+	}
+	var raw struct {
+		UUID       string `json:"uuid"`
+		ParentUUID string `json:"parentUuid"`
+	}
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return "", ""
+	}
+	return raw.UUID, raw.ParentUUID
 }
 
 // extractUserText pulls the human-readable text out of a user message's

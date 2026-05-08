@@ -174,6 +174,28 @@ Specifically address:
 Be specific. The launch description is "{{.description}}" — use it.
 `)
 
+	parse(string(aggregate.HotspotPromptPattern), `
+**Cost driver:** A habitual user prompt (a normalized prefix of one I keep sending the agent).
+**Cost:** ${{printf "%.2f" .cost}} ({{printf "%.1f" .pct}}% of my total Claude Code spend over the report window)
+**Invocations:** {{.invocations}} time(s) across {{.sessions}} session(s) ({{.turns}} downstream assistant turn(s) attributed)
+
+The prompt itself (full text):
+"""
+{{.sample}}
+"""
+
+This is the dimension closest to my actual intent — assistant turns get attributed back through `+"`parentUuid`"+` to the originating user message, so this number captures everything the agent did because of *this specific kind of ask*. If this prompt is recurring and expensive, restructuring how I ask is likely the highest-leverage change available.
+
+Specifically address:
+1. Reframe the ask itself: how would an experienced Claude Code user phrase this prompt to get the same outcome with materially less context churn? Show 2-3 reframings, each with the trade-off (more setup time vs. cheaper turns, narrower scope vs. broader, etc.).
+2. Should this be a Skill or a slash command instead of a fresh prompt each time? When does codifying repeated prompts as a skill (with pre-canned context, narrowed tool list, deterministic behavior) pay off vs. when does it ossify the workflow?
+3. Pre-canned context patterns: would a CLAUDE.md addition, a checked-in handoff doc, or a pinned reference file remove the need to re-establish context every time this prompt is issued?
+4. Plan-then-implement: if the agent does a lot of exploratory work in response to this prompt, would running Plan mode first (cheaper) and only then committing to implementation reduce total cost?
+5. Are there well-reviewed prompt-engineering patterns specifically for agentic coding (Anthropic's docs, popular Claude Code dotfiles, public agent-prompt libraries) that target prompts of this shape?
+
+Be specific to the actual prompt text above — don't give generic prompt-engineering advice.
+`)
+
 	parse(string(aggregate.HotspotSkill), `
 **Cost driver:** Skill or slash command `+"`{{.skill_key}}`"+`
 **Cost:** ${{printf "%.2f" .cost}} ({{printf "%.1f" .pct}}% of my total Claude Code spend)

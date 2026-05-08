@@ -20,6 +20,7 @@ const (
 	HotspotInvocation    HotspotKind = "invocation"   // a single subagent run
 	HotspotSkill         HotspotKind = "skill"        // a Skill or SlashCommand
 	HotspotCacheMiss     HotspotKind = "cache_miss"   // low cache hit rate at a project
+	HotspotPromptPattern HotspotKind = "prompt_pattern" // an expensive habitual user prompt
 )
 
 // Hotspot is one ranked optimization target. Title is what the renderer
@@ -159,6 +160,37 @@ func (a *Aggregator) Hotspots(top int) []Hotspot {
 				"cache_create_1h": r.CacheCreate1hTokens,
 				"turns":           r.Turns,
 				"row_cost":        r.CostUSD,
+			},
+		})
+	}
+
+	// Top expensive prompts. Habitual user asks are often the highest-
+	// leverage thing to restructure — usually invisible because they're
+	// hidden inside the agent's intent rather than tool output.
+	prompts := a.ByPrompt()
+	for i, p := range prompts {
+		if i >= 5 {
+			break
+		}
+		// Skip the orphan bucket — there's nothing for the LLM to
+		// reformulate, and it would drown out real prompts.
+		if p.Key == noPromptKey {
+			continue
+		}
+		title := p.Sample
+		if len(title) > 80 {
+			title = title[:80] + "…"
+		}
+		cands = append(cands, Hotspot{
+			Kind:    HotspotPromptPattern,
+			Title:   "Prompt: " + title,
+			CostUSD: p.CostUSD,
+			Context: map[string]any{
+				"sample":      p.Sample,
+				"key":         p.Key,
+				"invocations": p.Invocations,
+				"sessions":    p.Sessions,
+				"turns":       p.TurnCount,
 			},
 		})
 	}

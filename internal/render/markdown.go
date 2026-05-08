@@ -34,6 +34,10 @@ type Options struct {
 	// CacheTop limits the per-dimension tables in the cache efficiency
 	// section. 0 disables the section entirely.
 	CacheTop int
+
+	// PromptTop limits the "Top expensive prompts" section. 0 disables
+	// the section entirely (e.g. when no PromptIndex was attached).
+	PromptTop int
 }
 
 // Markdown writes the full report to w with default options.
@@ -198,6 +202,10 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 		renderCacheSection(w, a, opt.CacheTop)
 	}
 
+	if opt.PromptTop > 0 {
+		renderPromptSection(w, a, opt.PromptTop, tot.CostUSD)
+	}
+
 	// By tool.
 	fmt.Fprintln(w, "## By tool")
 	fmt.Fprintln(w)
@@ -355,6 +363,43 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	}
 
 	return nil
+}
+
+// renderPromptSection writes the "Top expensive prompts" table. Empty
+// (or PromptIndex-less) aggregators silently produce no section.
+func renderPromptSection(w io.Writer, a *aggregate.Aggregator, top int, totalCost float64) {
+	rows := a.ByPrompt()
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "## Top expensive prompts")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "_User prompts ranked by the total cost of the assistant turn chain each one kicked off. Prompts cluster on the first 120 chars of normalized text — trivially-different repeats of the same ask appear in the same row. \"Invocations\" is the number of distinct prompt instances; \"Sessions\" is how many sessions issued this prompt; \"Turns\" counts downstream assistant turns attributed via parentUuid._")
+	fmt.Fprintln(w)
+	limit := top
+	if limit > len(rows) {
+		limit = len(rows)
+	}
+	fmt.Fprintln(w, "| # | Snippet | Invocations | Sessions | Turns | Cost | % |")
+	fmt.Fprintln(w, "|---:|---|---:|---:|---:|---:|---:|")
+	for i, r := range rows[:limit] {
+		snippet := r.Sample
+		if snippet == "" {
+			snippet = r.Key
+		}
+		fmt.Fprintf(w, "| %d | %s | %d | %d | %d | %s | %s |\n",
+			i+1, escapePipes(truncateHead(snippet, 80)),
+			r.Invocations, r.Sessions, r.TurnCount,
+			money(r.CostUSD), pct(r.CostUSD, totalCost))
+	}
+	if len(rows) > limit {
+		var rest float64
+		for _, r := range rows[limit:] {
+			rest += r.CostUSD
+		}
+		fmt.Fprintf(w, "| _(%d more prompts totaling %s)_ | | | | | | |\n", len(rows)-limit, money(rest))
+	}
+	fmt.Fprintln(w)
 }
 
 // renderCacheSection writes the "Cache efficiency" deep dive — one
@@ -534,6 +579,20 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return "…" + s[len(s)-max+1:]
+}
+
+// truncateHead keeps the FIRST max-1 runes and appends "…". For things
+// like prompt text where the start identifies the row; truncate's
+// keep-the-tail behavior is wrong for prose.
+func truncateHead(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max < 1 {
+		return ""
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 // escapePipes prevents detail strings (which may contain "|" or backticks)

@@ -56,6 +56,7 @@ func runReport(args []string) error {
 	hotspots := fs.Int("hotspots", 10, "show top-N cost hotspots at the top of the report, each with a copyable LLM prompt (0 disables)")
 	by := fs.String("by", "", "trend mode: bucket spend over time — one of day|week|month (empty disables)")
 	cacheTop := fs.Int("cache-top", 10, "show top-N cache-miss offenders per dimension in the cache efficiency section (0 disables)")
+	promptTop := fs.Int("prompt-top", 15, "show top-N most expensive user prompts (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -86,14 +87,18 @@ func runReport(args []string) error {
 		return err
 	}
 
-	turns, _, malformed, fileErrs := parseConcurrently(files)
+	turns, userMsgs, parentLinks, malformed, fileErrs := parseConcurrently(files)
 
 	period := aggregate.Period(*by)
 	if *by != "" && !period.Valid() {
 		return fmt.Errorf("--by: must be one of day|week|month, got %q", *by)
 	}
 
-	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period)
+	// PromptIndex is built from the full corpus (unfiltered) — the
+	// chain walk is structural, and a turn's originating prompt is the
+	// same regardless of whether the report's date window includes it.
+	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
+	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period).WithPromptIndex(promptIdx)
 
 	lookup := newSubagentLookup()
 	for _, t := range turns {
@@ -121,6 +126,7 @@ func runReport(args []string) error {
 			AgentTypeFilter: *agentType,
 			Hotspots:        *hotspots,
 			CacheTop:        *cacheTop,
+			PromptTop:       *promptTop,
 		}); err != nil {
 			return err
 		}
@@ -166,14 +172,15 @@ func runDiff(args []string) error {
 	if err != nil {
 		return err
 	}
-	turns, _, malformed, fileErrs := parseConcurrently(files)
+	turns, userMsgs, parentLinks, malformed, fileErrs := parseConcurrently(files)
 
+	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
 	aAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
 		Since: sinceA, Until: untilA, ProjectSubstring: *project,
-	})
+	}).WithPromptIndex(promptIdx)
 	bAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
 		Since: sinceB, Until: untilB, ProjectSubstring: *project,
-	})
+	}).WithPromptIndex(promptIdx)
 
 	lookup := newSubagentLookup()
 	for _, t := range turns {
@@ -294,9 +301,9 @@ func listJSONL(root string) ([]string, error) {
 }
 
 // parseConcurrently fans out parsing to GOMAXPROCS workers and returns the
-// concatenated turns, user messages, the malformed count, and any
-// non-fatal file errors.
-func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, int, []error) {
+// concatenated turns, user messages, parent links, the malformed count,
+// and any non-fatal file errors.
+func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, []parse.ParentLink, int, []error) {
 	workers := runtime.GOMAXPROCS(0)
 	if workers < 1 {
 		workers = 1
@@ -305,6 +312,7 @@ func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, int, 
 	type result struct {
 		turns     []parse.Turn
 		users     []parse.UserMessage
+		links     []parse.ParentLink
 		malformed int
 		err       error
 	}
@@ -323,10 +331,10 @@ func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, int, 
 				r, err := parse.ParseFile(f, path)
 				f.Close()
 				if err != nil {
-					results <- result{err: fmt.Errorf("parse %s: %w", path, err), malformed: r.Malformed, turns: r.Turns, users: r.UserMessages}
+					results <- result{err: fmt.Errorf("parse %s: %w", path, err), malformed: r.Malformed, turns: r.Turns, users: r.UserMessages, links: r.ParentLinks}
 					continue
 				}
-				results <- result{turns: r.Turns, users: r.UserMessages, malformed: r.Malformed}
+				results <- result{turns: r.Turns, users: r.UserMessages, links: r.ParentLinks, malformed: r.Malformed}
 			}
 		}()
 	}
@@ -344,16 +352,18 @@ func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, int, 
 	var (
 		allTurns  []parse.Turn
 		allUsers  []parse.UserMessage
+		allLinks  []parse.ParentLink
 		malformed int
 		errs      []error
 	)
 	for r := range results {
 		allTurns = append(allTurns, r.turns...)
 		allUsers = append(allUsers, r.users...)
+		allLinks = append(allLinks, r.links...)
 		malformed += r.malformed
 		if r.err != nil {
 			errs = append(errs, r.err)
 		}
 	}
-	return allTurns, allUsers, malformed, errs
+	return allTurns, allUsers, allLinks, malformed, errs
 }

@@ -157,6 +157,11 @@ type Aggregator struct {
 	trendByModel   map[string]map[time.Time]*TrendPoint
 	trendByProject map[string]map[time.Time]*TrendPoint
 	trendByTool    map[string]map[time.Time]*TrendPoint
+
+	// Per-prompt attribution. WithPromptIndex sets promptIndex; without
+	// it, byPrompt stays empty and ByPrompt() returns nil.
+	promptIndex *PromptIndex
+	byPrompt    map[string]*promptBucketInternal
 }
 
 // New returns an empty aggregator using the given pricing table.
@@ -175,12 +180,21 @@ func New(p *pricing.Table) *Aggregator {
 		projectSession:    map[string]map[string]struct{}{},
 		bySession:         map[string]*SessionBucket{},
 		unknownModels:     map[string]struct{}{},
+		byPrompt:          map[string]*promptBucketInternal{},
 	}
 }
 
 // WithFilter sets a filter and returns the aggregator (chainable).
 func (a *Aggregator) WithFilter(f Filter) *Aggregator {
 	a.filter = f
+	return a
+}
+
+// WithPromptIndex enables per-prompt attribution. Without one,
+// ByPrompt() returns nil and per-prompt buckets aren't populated.
+// Must be set before Add() runs.
+func (a *Aggregator) WithPromptIndex(p *PromptIndex) *Aggregator {
+	a.promptIndex = p
 	return a
 }
 
@@ -325,6 +339,38 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		sb.Tokens.addUsage(t.Usage)
 		sb.CostUSD += cost
 		sb.Turns++
+	}
+
+	// Per-prompt attribution. Walks back to the originating user
+	// message via the prompt index built before Add() ran. Orphans
+	// bucket under noPromptKey so the renderer can show "(no prompt)"
+	// rather than dropping spend on the floor.
+	if a.promptIndex != nil {
+		entry := a.promptIndex.Lookup(t.UUID)
+		pb := a.byPrompt[entry.Key]
+		if pb == nil {
+			pb = &promptBucketInternal{
+				Key:      entry.Key,
+				Sample:   entry.Sample,
+				InvocSet: map[string]struct{}{},
+				SessSet:  map[string]struct{}{},
+			}
+			a.byPrompt[entry.Key] = pb
+		}
+		// First non-empty sample wins; later turns can attach without
+		// overwriting a real prompt with an orphan placeholder.
+		if pb.Sample == "" && entry.Sample != "" {
+			pb.Sample = entry.Sample
+		}
+		pb.Tokens.addUsage(t.Usage)
+		pb.CostUSD += cost
+		pb.TurnCount++
+		if entry.UserUUID != "" {
+			pb.InvocSet[entry.UserUUID] = struct{}{}
+		}
+		if t.SessionID != "" {
+			pb.SessSet[t.SessionID] = struct{}{}
+		}
 	}
 
 	// Sidechain split.
