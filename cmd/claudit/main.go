@@ -86,7 +86,7 @@ func runReport(args []string) error {
 		return err
 	}
 
-	turns, malformed, fileErrs := parseConcurrently(files)
+	turns, _, malformed, fileErrs := parseConcurrently(files)
 
 	period := aggregate.Period(*by)
 	if *by != "" && !period.Valid() {
@@ -166,7 +166,7 @@ func runDiff(args []string) error {
 	if err != nil {
 		return err
 	}
-	turns, malformed, fileErrs := parseConcurrently(files)
+	turns, _, malformed, fileErrs := parseConcurrently(files)
 
 	aAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
 		Since: sinceA, Until: untilA, ProjectSubstring: *project,
@@ -294,8 +294,9 @@ func listJSONL(root string) ([]string, error) {
 }
 
 // parseConcurrently fans out parsing to GOMAXPROCS workers and returns the
-// concatenated turns, the malformed count, and any non-fatal file errors.
-func parseConcurrently(files []string) ([]parse.Turn, int, []error) {
+// concatenated turns, user messages, the malformed count, and any
+// non-fatal file errors.
+func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, int, []error) {
 	workers := runtime.GOMAXPROCS(0)
 	if workers < 1 {
 		workers = 1
@@ -303,6 +304,7 @@ func parseConcurrently(files []string) ([]parse.Turn, int, []error) {
 	jobs := make(chan string, workers*2)
 	type result struct {
 		turns     []parse.Turn
+		users     []parse.UserMessage
 		malformed int
 		err       error
 	}
@@ -321,10 +323,10 @@ func parseConcurrently(files []string) ([]parse.Turn, int, []error) {
 				r, err := parse.ParseFile(f, path)
 				f.Close()
 				if err != nil {
-					results <- result{err: fmt.Errorf("parse %s: %w", path, err), malformed: r.Malformed, turns: r.Turns}
+					results <- result{err: fmt.Errorf("parse %s: %w", path, err), malformed: r.Malformed, turns: r.Turns, users: r.UserMessages}
 					continue
 				}
-				results <- result{turns: r.Turns, malformed: r.Malformed}
+				results <- result{turns: r.Turns, users: r.UserMessages, malformed: r.Malformed}
 			}
 		}()
 	}
@@ -340,16 +342,18 @@ func parseConcurrently(files []string) ([]parse.Turn, int, []error) {
 	}()
 
 	var (
-		all       []parse.Turn
+		allTurns  []parse.Turn
+		allUsers  []parse.UserMessage
 		malformed int
 		errs      []error
 	)
 	for r := range results {
-		all = append(all, r.turns...)
+		allTurns = append(allTurns, r.turns...)
+		allUsers = append(allUsers, r.users...)
 		malformed += r.malformed
 		if r.err != nil {
 			errs = append(errs, r.err)
 		}
 	}
-	return all, malformed, errs
+	return allTurns, allUsers, malformed, errs
 }

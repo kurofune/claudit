@@ -52,10 +52,25 @@ type Turn struct {
 	SourceFile string
 }
 
+// UserMessage is one human-authored prompt (or a slash-command line) — i.e.
+// a `type:"user"` line whose content is text rather than tool_result. We
+// keep these separately from Turn so the aggregator can walk parentUuid
+// chains back to the originating prompt and attribute downstream cost.
+type UserMessage struct {
+	SessionID  string
+	UUID       string
+	ParentUUID string
+	Timestamp  time.Time
+	CWD        string
+	Text       string // full text — render layer truncates
+	SourceFile string
+}
+
 // Result is what ParseFile returns.
 type Result struct {
-	Turns     []Turn
-	Malformed int // count of lines we couldn't decode
+	Turns        []Turn
+	UserMessages []UserMessage
+	Malformed    int // count of lines we couldn't decode
 }
 
 // rawLine is the wire format. Only the fields we care about.
@@ -68,6 +83,7 @@ type rawLine struct {
 	Timestamp  string          `json:"timestamp"`
 	CWD        string          `json:"cwd"`
 	Message    json.RawMessage `json:"message"`
+	IsMeta     bool            `json:"isMeta"`
 }
 
 type rawMessage struct {
@@ -96,10 +112,94 @@ type rawContentEntry struct {
 	Input json.RawMessage `json:"input"`
 }
 
+// rawUserContentEntry decodes the `{"type":"text","text":"..."}` blocks
+// found in user messages. Sharing rawContentEntry would conflate fields
+// (Input is for tool_use blocks; Text here is for text blocks).
+type rawUserContentEntry struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 type rawSkillInput struct {
 	Skill        string `json:"skill"`
 	Command      string `json:"command"`
 	SubagentType string `json:"subagent_type"`
+}
+
+// LineKind classifies what ParseLine recognized in a single JSONL line.
+type LineKind int
+
+const (
+	LineUnknown LineKind = iota
+	LineMalformed
+	LineAssistant
+	LineUserMessage
+)
+
+// ParseLine decodes one JSONL line. Returns the turn or user-message it
+// produced (only one is non-zero per call) and the kind. path is recorded
+// on each surface object so callers can later resolve subagent metadata.
+//
+// This exists so streaming consumers (like `claudit watch`) can reuse the
+// same decoding logic ParseFile uses, without re-implementing JSON
+// schema knowledge.
+func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
+	if len(line) == 0 {
+		return Turn{}, UserMessage{}, LineUnknown
+	}
+	var raw rawLine
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return Turn{}, UserMessage{}, LineMalformed
+	}
+	switch raw.Type {
+	case "assistant":
+		if len(raw.Message) == 0 {
+			return Turn{}, UserMessage{}, LineUnknown
+		}
+		var msg rawMessage
+		if err := json.Unmarshal(raw.Message, &msg); err != nil {
+			return Turn{}, UserMessage{}, LineMalformed
+		}
+		if msg.Usage == nil {
+			return Turn{}, UserMessage{}, LineUnknown
+		}
+		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+		return Turn{
+			SessionID:  raw.SessionID,
+			UUID:       raw.UUID,
+			ParentUUID: raw.ParentUUID,
+			Sidechain:  raw.Sidechain,
+			Timestamp:  ts,
+			CWD:        raw.CWD,
+			Model:      msg.Model,
+			Usage:      convertUsage(msg.Usage),
+			ToolUses:   extractToolUses(msg.Content),
+			SourceFile: path,
+		}, UserMessage{}, LineAssistant
+	case "user":
+		if raw.IsMeta || len(raw.Message) == 0 {
+			return Turn{}, UserMessage{}, LineUnknown
+		}
+		var msg rawMessage
+		if err := json.Unmarshal(raw.Message, &msg); err != nil {
+			return Turn{}, UserMessage{}, LineMalformed
+		}
+		text, hasToolResult := extractUserText(msg.Content)
+		if hasToolResult || text == "" {
+			return Turn{}, UserMessage{}, LineUnknown
+		}
+		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+		return Turn{}, UserMessage{
+			SessionID:  raw.SessionID,
+			UUID:       raw.UUID,
+			ParentUUID: raw.ParentUUID,
+			Timestamp:  ts,
+			CWD:        raw.CWD,
+			Text:       text,
+			SourceFile: path,
+		}, LineUserMessage
+	}
+	return Turn{}, UserMessage{}, LineUnknown
 }
 
 // ParseFile streams r line-by-line. path is recorded on each Turn so the
@@ -111,40 +211,15 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var raw rawLine
-		if err := json.Unmarshal(line, &raw); err != nil {
+		t, u, kind := ParseLine(line, path)
+		switch kind {
+		case LineMalformed:
 			res.Malformed++
-			continue
+		case LineAssistant:
+			res.Turns = append(res.Turns, t)
+		case LineUserMessage:
+			res.UserMessages = append(res.UserMessages, u)
 		}
-		if raw.Type != "assistant" || len(raw.Message) == 0 {
-			continue
-		}
-		var msg rawMessage
-		if err := json.Unmarshal(raw.Message, &msg); err != nil {
-			res.Malformed++
-			continue
-		}
-		if msg.Usage == nil {
-			// No usage means nothing to bill — skip silently.
-			continue
-		}
-		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
-		t := Turn{
-			SessionID:  raw.SessionID,
-			UUID:       raw.UUID,
-			ParentUUID: raw.ParentUUID,
-			Sidechain:  raw.Sidechain,
-			Timestamp:  ts,
-			CWD:        raw.CWD,
-			Model:      msg.Model,
-			Usage:      convertUsage(msg.Usage),
-			ToolUses:   extractToolUses(msg.Content),
-			SourceFile: path,
-		}
-		res.Turns = append(res.Turns, t)
 	}
 	if err := sc.Err(); err != nil {
 		return res, err
@@ -167,6 +242,43 @@ func convertUsage(u *rawUsage) Usage {
 		out.CacheCreate5mTokens = u.CacheCreate
 	}
 	return out
+}
+
+// extractUserText pulls the human-readable text out of a user message's
+// content. Returns hasToolResult=true if any block is a tool_result —
+// callers skip those entirely because the spec attributes cost only to
+// non-tool-result user messages (i.e. real prompts and slash commands).
+//
+// Content may be a JSON string (older sessions) or an array of typed
+// blocks (newer). For arrays, text blocks are joined with newlines.
+func extractUserText(content json.RawMessage) (text string, hasToolResult bool) {
+	if len(content) == 0 {
+		return "", false
+	}
+	if content[0] == '"' {
+		var s string
+		if err := json.Unmarshal(content, &s); err == nil {
+			return s, false
+		}
+		return "", false
+	}
+	var entries []rawUserContentEntry
+	if err := json.Unmarshal(content, &entries); err != nil {
+		return "", false
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.Type == "tool_result" {
+			return "", true
+		}
+		if e.Type == "text" && e.Text != "" {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(e.Text)
+		}
+	}
+	return b.String(), false
 }
 
 func extractToolUses(content json.RawMessage) []ToolUse {

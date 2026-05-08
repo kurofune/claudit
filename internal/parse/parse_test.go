@@ -176,6 +176,72 @@ func TestDecodeProjectDir(t *testing.T) {
 	}
 }
 
+func TestParseFile_UserMessages(t *testing.T) {
+	f, err := os.Open("testdata/user_messages.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	res, err := ParseFile(f, "testdata/user_messages.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Malformed != 0 {
+		t.Errorf("malformed: %d", res.Malformed)
+	}
+	// Want only u-string and u-array. The meta/tool_result/empty are filtered.
+	if len(res.UserMessages) != 2 {
+		t.Fatalf("user messages: %d, want 2 (got %+v)", len(res.UserMessages), res.UserMessages)
+	}
+	got := map[string]string{}
+	for _, m := range res.UserMessages {
+		got[m.UUID] = m.Text
+	}
+	if got["u-string"] != "please add a new feature" {
+		t.Errorf("string content: %q", got["u-string"])
+	}
+	if got["u-array"] != "first part\nsecond part" {
+		t.Errorf("array text content: %q", got["u-array"])
+	}
+	if _, ok := got["u-meta"]; ok {
+		t.Errorf("meta user message must be filtered out")
+	}
+	if _, ok := got["u-toolresult"]; ok {
+		t.Errorf("tool_result user message must be filtered out")
+	}
+	if _, ok := got["u-empty"]; ok {
+		t.Errorf("empty user message must be filtered out")
+	}
+	// And one assistant turn from the same file should still come through.
+	if len(res.Turns) != 1 || res.Turns[0].UUID != "a-after-toolresult" {
+		t.Errorf("turns: %+v", res.Turns)
+	}
+}
+
+func TestParseLine_KindClassification(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want LineKind
+	}{
+		{"assistant", `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1}}}`, LineAssistant},
+		{"user-string", `{"type":"user","uuid":"u","timestamp":"2026-04-10T10:00:00Z","message":{"role":"user","content":"hi"}}`, LineUserMessage},
+		{"user-meta-skipped", `{"type":"user","uuid":"u","isMeta":true,"timestamp":"2026-04-10T10:00:00Z","message":{"role":"user","content":"hi"}}`, LineUnknown},
+		{"user-tool-result-skipped", `{"type":"user","uuid":"u","timestamp":"2026-04-10T10:00:00Z","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}`, LineUnknown},
+		{"system", `{"type":"system","uuid":"s","timestamp":"2026-04-10T10:00:00Z","content":"x"}`, LineUnknown},
+		{"malformed", `{not json}`, LineMalformed},
+		{"empty", ``, LineUnknown},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, got := ParseLine([]byte(c.line), "test")
+			if got != c.want {
+				t.Errorf("kind = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestParseFile_StreamingNotInMemory(t *testing.T) {
 	// Smoke test that we use a Scanner (won't allocate the whole file).
 	// Verify by reading a moderately long synthetic input.
