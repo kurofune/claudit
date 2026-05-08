@@ -69,6 +69,11 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		TrendByModel     map[string][]aggregate.TrendPoint   `json:"trend_by_model"`
 		TrendByProject   map[string][]aggregate.TrendPoint   `json:"trend_by_project"`
 		TrendByTool      map[string][]aggregate.TrendPoint   `json:"trend_by_tool"`
+		OverallHitRatio  float64                             `json:"overall_hit_ratio"`
+		CacheByProject   []aggregate.CacheRow                `json:"cache_by_project"`
+		CacheBySession   []aggregate.CacheRow                `json:"cache_by_session"`
+		CacheBySubagent  []aggregate.CacheRow                `json:"cache_by_subagent"`
+		CacheByInvocation []aggregate.CacheRow               `json:"cache_by_invocation"`
 	}{
 		Totals:           a.Totals(),
 		Hotspots:         hotspots,
@@ -87,6 +92,11 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		TrendByModel:     a.TrendByModel(),
 		TrendByProject:   a.TrendByProject(),
 		TrendByTool:      a.TrendByTool(),
+		OverallHitRatio:  a.OverallHitRatio(),
+		CacheByProject:    a.CacheByProject(),
+		CacheBySession:    a.CacheBySession(),
+		CacheBySubagent:   a.CacheBySubagent(),
+		CacheByInvocation: a.CacheByInvocation(),
 	}
 
 	data, err := json.Marshal(payload)

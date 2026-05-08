@@ -30,6 +30,10 @@ type Options struct {
 	// Hotspots controls the count of "top cost hotspots" rows at the top
 	// of the report (each with a copyable LLM prompt). 0 disables it.
 	Hotspots int
+
+	// CacheTop limits the per-dimension tables in the cache efficiency
+	// section. 0 disables the section entirely.
+	CacheTop int
 }
 
 // Markdown writes the full report to w with default options.
@@ -97,6 +101,10 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	fmt.Fprintf(w, "- **Sessions:** %d\n", tot.Sessions)
 	fmt.Fprintf(w, "- **Assistant turns:** %d\n", tot.Turns)
 	fmt.Fprintf(w, "- **Date range:** %s\n", dateRange)
+	if tot.Tokens.CacheableTokens() > 0 {
+		fmt.Fprintf(w, "- **Cache hit ratio:** %s _(read / (read + input + cache_create))_\n",
+			ratioPct(tot.Tokens.HitRatio()))
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "| Bucket | Tokens |")
 	fmt.Fprintln(w, "|---|---:|")
@@ -185,6 +193,10 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 			hidden, opt.MinProjectCost)
 	}
 	fmt.Fprintln(w)
+
+	if opt.CacheTop > 0 {
+		renderCacheSection(w, a, opt.CacheTop)
+	}
 
 	// By tool.
 	fmt.Fprintln(w, "## By tool")
@@ -345,6 +357,87 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	return nil
 }
 
+// renderCacheSection writes the "Cache efficiency" deep dive — one
+// table per dimension, ranked by miss tokens descending. Skips
+// dimensions that have no rows w/ cacheable traffic.
+func renderCacheSection(w io.Writer, a *aggregate.Aggregator, top int) {
+	projRows := a.CacheByProject()
+	sessRows := a.CacheBySession()
+	if len(projRows) == 0 && len(sessRows) == 0 {
+		return
+	}
+
+	fmt.Fprintln(w, "## Cache efficiency")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "_Hit ratio = `cache_read / (cache_read + input + cache_create_5m + cache_create_1h)`. Higher is better. Rows are ranked by **miss tokens** (input + cache_create) — the volume of context you're paying to upload or freshly cache that should have been a cache hit. Tool dimension is omitted because tool-level cache hit rate is dominated by surrounding-turn context, not the tool itself._")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "**Overall hit ratio:** %s · **Total miss tokens:** %s\n\n",
+		ratioPct(a.OverallHitRatio()), num(a.Totals().Tokens.MissTokens()))
+
+	if len(projRows) > 0 {
+		fmt.Fprintln(w, "### Worst projects by miss tokens")
+		fmt.Fprintln(w)
+		writeCacheTable(w, projRows, top, "Project")
+	}
+	if len(sessRows) > 0 {
+		fmt.Fprintln(w, "### Worst sessions by miss tokens")
+		fmt.Fprintln(w)
+		writeCacheTable(w, sessRows, top, "Session")
+	}
+	if subRows := a.CacheBySubagent(); len(subRows) > 0 {
+		fmt.Fprintln(w, "### Worst subagent types by miss tokens")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "_Subagents start with a cold cache by definition (each invocation is a fresh context). The miss-token volume below is the structural tax for using each subagent type in this report's window._")
+		fmt.Fprintln(w)
+		writeCacheTable(w, subRows, top, "Subagent type")
+	}
+	if invRows := a.CacheByInvocation(); len(invRows) > 0 {
+		fmt.Fprintln(w, "### Worst single subagent invocations by miss tokens")
+		fmt.Fprintln(w)
+		writeCacheTable(w, invRows, top, "Description")
+	}
+}
+
+// writeCacheTable emits one ranked sub-table. keyLabel is the column
+// header for the first column (e.g. "Project" / "Session").
+func writeCacheTable(w io.Writer, rows []aggregate.CacheRow, top int, keyLabel string) {
+	limit := top
+	if limit > len(rows) {
+		limit = len(rows)
+	}
+	fmt.Fprintf(w, "| %s | Hit ratio | Miss tokens | Cache read | Turns | Cost |\n", keyLabel)
+	fmt.Fprintln(w, "|---|---:|---:|---:|---:|---:|")
+	for _, r := range rows[:limit] {
+		key := r.Key
+		if r.Subtitle != "" {
+			// Append the project so a session row reads on its own.
+			key = key + " · " + truncate(r.Subtitle, 50)
+		} else {
+			key = truncate(key, 70)
+		}
+		fmt.Fprintf(w, "| %s | %s | %s | %s | %d | %s |\n",
+			key, ratioPct(r.HitRatio), num(r.Miss),
+			num(r.CacheReadTokens), r.Turns, money(r.CostUSD))
+	}
+	if len(rows) > limit {
+		var restMiss int64
+		for _, r := range rows[limit:] {
+			restMiss += r.Miss
+		}
+		fmt.Fprintf(w, "| _(%d more rows totaling %s miss tokens)_ | | | | | |\n",
+			len(rows)-limit, num(restMiss))
+	}
+	fmt.Fprintln(w)
+}
+
+// ratioPct formats a 0..1 ratio as a percent string, "—" when zero.
+func ratioPct(r float64) string {
+	if r <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", 100*r)
+}
+
 // renderTrendSection writes the "Cost by <period>" overview: a sparkline
 // of the full series, then a per-bucket table with cost, turns, and
 // percent-change vs the prior bucket. Used when --by is set.
@@ -354,8 +447,8 @@ func renderTrendSection(w io.Writer, period aggregate.Period, points []aggregate
 	fmt.Fprintf(w, "_Spend bucketed by %s. The trend column on each by-row table below uses the same buckets, downsampled when wider than 30 cells._\n\n", label)
 	fmt.Fprintf(w, "Overall trend: `%s`\n\n", sparkline(points, 0))
 
-	fmt.Fprintln(w, "| Period | Cost | Δ vs prior | Turns |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|")
+	fmt.Fprintln(w, "| Period | Cost | Δ vs prior | Turns | Hit ratio |")
+	fmt.Fprintln(w, "|---|---:|---:|---:|---:|")
 	var prev float64
 	havePrev := false
 	for _, p := range points {
@@ -363,8 +456,12 @@ func renderTrendSection(w io.Writer, period aggregate.Period, points []aggregate
 		if havePrev {
 			delta = deltaPct(prev, p.CostUSD)
 		}
-		fmt.Fprintf(w, "| %s | %s | %s | %d |\n",
-			formatBucket(period, p.Time), money(p.CostUSD), delta, p.Turns)
+		hit := "—"
+		if p.Tokens.CacheableTokens() > 0 {
+			hit = ratioPct(p.Tokens.HitRatio())
+		}
+		fmt.Fprintf(w, "| %s | %s | %s | %d | %s |\n",
+			formatBucket(period, p.Time), money(p.CostUSD), delta, p.Turns, hit)
 		prev = p.CostUSD
 		havePrev = true
 	}

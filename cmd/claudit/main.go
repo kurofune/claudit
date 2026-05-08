@@ -49,6 +49,7 @@ func run() error {
 	agentType := fs.String("agent-type", "", "restrict the invocation section to one subagent type (e.g. general-purpose)")
 	hotspots := fs.Int("hotspots", 10, "show top-N cost hotspots at the top of the report, each with a copyable LLM prompt (0 disables)")
 	by := fs.String("by", "", "trend mode: bucket spend over time — one of day|week|month (empty disables)")
+	cacheTop := fs.Int("cache-top", 10, "show top-N cache-miss offenders per dimension in the cache efficiency section (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -136,6 +137,7 @@ func run() error {
 			AgentTop:        *agentTop,
 			AgentTypeFilter: *agentType,
 			Hotspots:        *hotspots,
+			CacheTop:        *cacheTop,
 		}); err != nil {
 			return err
 		}

@@ -213,6 +213,61 @@
     <tbody></tbody>
   </table>
 
+  <h2>Cache efficiency</h2>
+  <div class="small">Hit ratio = <code>cache_read / (cache_read + input + cache_create_5m + cache_create_1h)</code>. Higher is better. Rows ranked by <strong>miss tokens</strong> — context paid for at full price (input) or cache-write price (cache_create) instead of cheap cache reads. Tool dimension omitted: tool-level cache hit rate is dominated by surrounding-turn context, not the tool itself.</div>
+  <div id="cache-summary" class="trend-summary"></div>
+  <h3 style="margin-top:18px">Worst projects by miss tokens</h3>
+  <table data-table="cache-project">
+    <thead><tr>
+      <th data-key="Key">Project</th>
+      <th data-key="HitRatio" class="num">Hit ratio</th>
+      <th data-key="Miss" class="num">Miss tokens</th>
+      <th data-key="CacheReadTokens" class="num">Cache read</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <h3 style="margin-top:18px">Worst sessions by miss tokens</h3>
+  <table data-table="cache-session">
+    <thead><tr>
+      <th data-key="Key">Session</th>
+      <th data-key="Subtitle">Project</th>
+      <th data-key="HitRatio" class="num">Hit ratio</th>
+      <th data-key="Miss" class="num">Miss tokens</th>
+      <th data-key="CacheReadTokens" class="num">Cache read</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <h3 style="margin-top:18px">Worst subagent types by miss tokens</h3>
+  <div class="small">Subagents start with a cold cache (each invocation is a fresh context). The miss-token volume below is the structural tax for using each subagent type.</div>
+  <table data-table="cache-subagent">
+    <thead><tr>
+      <th data-key="Key">Subagent type</th>
+      <th data-key="HitRatio" class="num">Hit ratio</th>
+      <th data-key="Miss" class="num">Miss tokens</th>
+      <th data-key="CacheReadTokens" class="num">Cache read</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <h3 style="margin-top:18px">Worst single subagent invocations by miss tokens</h3>
+  <table data-table="cache-invocation">
+    <thead><tr>
+      <th data-key="Key">Description</th>
+      <th data-key="Subtitle">Type</th>
+      <th data-key="HitRatio" class="num">Hit ratio</th>
+      <th data-key="Miss" class="num">Miss tokens</th>
+      <th data-key="CacheReadTokens" class="num">Cache read</th>
+      <th data-key="Turns" class="num">Turns</th>
+      <th data-key="CostUSD" class="num">Cost</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
   <h2>By tool</h2>
   <div class="hbar-list" id="bars-tool"></div>
   <table data-table="tool">
@@ -343,6 +398,52 @@
     return `<svg class="trend-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bars}</svg>`;
   }
 
+  // Cache hit ratio per trend point. Returns 0 when no cacheable
+  // traffic, mirroring the Go-side Tokens.HitRatio().
+  function pointHitRatio(p) {
+    const cr = p.CacheReadTokens || 0;
+    const inp = p.InputTokens || 0;
+    const c5 = p.CacheCreate5mTokens || 0;
+    const c1 = p.CacheCreate1hTokens || 0;
+    const cacheable = cr + inp + c5 + c1;
+    return cacheable > 0 ? cr / cacheable : 0;
+  }
+
+  // Mini SVG line chart for hit ratio over time. Y axis fixed 0..100%
+  // so the chart shape is always comparable.
+  function hitRatioChart(points, period) {
+    if (!points || points.length < 2) return '';
+    const w = 1100, h = 90;
+    const pad = { l: 60, r: 16, t: 8, b: 22 };
+    const innerW = w - pad.l - pad.r;
+    const innerH = h - pad.t - pad.b;
+    const n = points.length;
+    const xAt = i => pad.l + (i / (n - 1)) * innerW;
+    const yAt = r => pad.t + innerH - r * innerH;  // r in [0,1]
+
+    let linePts = '';
+    for (let i = 0; i < n; i++) {
+      linePts += `${xAt(i).toFixed(2)},${yAt(pointHitRatio(points[i])).toFixed(2)} `;
+    }
+    // Y gridlines at 0, 50, 100%.
+    let yAxis = '';
+    for (const r of [0, 0.5, 1.0]) {
+      yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(r).toFixed(2)}" y2="${yAt(r).toFixed(2)}" stroke-dasharray="2,3"/>`;
+      yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(r) + 4).toFixed(2)}" text-anchor="end">${(r*100).toFixed(0)}%</text>`;
+    }
+    let dots = '';
+    for (let i = 0; i < n; i++) {
+      const r = pointHitRatio(points[i]);
+      dots += `<circle class="trend-pt" cx="${xAt(i).toFixed(2)}" cy="${yAt(r).toFixed(2)}" r="3"><title>${escHtml(bucketLabel(points[i].time, period))}: ${(r*100).toFixed(1)}% hit</title></circle>`;
+    }
+    return `<div class="small" style="margin-top:14px;font-weight:600">Cache hit ratio over ${escHtml(period)}</div>
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="height:90px">
+        ${yAxis}
+        <polyline class="trend-line" points="${linePts.trim()}" style="stroke:var(--accent-2)"/>
+        ${dots}
+      </svg>`;
+  }
+
   // Larger inline SVG line+area chart for the headline trend section.
   // Returns a placeholder when there's <2 points to plot.
   function trendLineChart(points, period) {
@@ -423,11 +524,12 @@
   document.getElementById('row-count').textContent =
     `${fmtNum(T.Sessions)} sessions · ${fmtNum(T.Turns)} assistant turns`;
 
+  const fmtPct1 = v => (v == null || isNaN(v)) ? '—' : (100 * v).toFixed(1) + '%';
   const totalsHtml = [
     ['Total cost', fmtMoney(totalCost)],
     ['Sessions', fmtNum(T.Sessions)],
     ['Assistant turns', fmtNum(T.Turns)],
-    ['Cache read tokens', fmtNum(T.CacheReadTokens)],
+    ['Cache hit ratio', fmtPct1(D.overall_hit_ratio)],
   ].map(([l, v]) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
   document.getElementById('totals').innerHTML = totalsHtml;
 
@@ -513,15 +615,20 @@
       }
     }
 
+    // Latest-bucket hit ratio for the summary line.
+    const latestHit = pointHitRatio(points[points.length - 1]);
+
     host.innerHTML = `
       <h2>Cost by ${escHtml(PERIOD)}</h2>
       <div class="small">Spend bucketed by ${escHtml(PERIOD)}. Per-row trend columns below use the same buckets, downsampled to ~30 cells when wider.</div>
       <div class="trend-chart">
         ${trendLineChart(points, PERIOD)}
+        ${hitRatioChart(points, PERIOD)}
         <div class="trend-summary">
           <span>Buckets: <strong>${points.length}</strong></span>
           <span>Peak: <strong>${escHtml(fmtMoney(peak))}</strong></span>
           <span>Mean: <strong>${escHtml(fmtMoney(mean))}</strong></span>
+          <span>Latest hit ratio: <strong>${(latestHit*100).toFixed(1)}%</strong></span>
           ${deltaHtml}
         </div>
       </div>
@@ -647,6 +754,61 @@
         <div class="val">${fmtMoney(r.CostUSD)} (${fmtPct(r.CostUSD, totalCost)})</div>
       </div>`;
     }).join('');
+  })();
+
+  // Cache efficiency: project + session worst-offender tables. Sorted
+  // server-side by miss tokens desc; we just render.
+  (function cacheSection() {
+    const proj = D.cache_by_project || [];
+    const sess = D.cache_by_session || [];
+    let totalMiss = 0;
+    for (const r of proj) totalMiss += r.Miss || 0;
+    document.getElementById('cache-summary').innerHTML = `
+      <span>Overall hit ratio: <strong>${fmtPct1(D.overall_hit_ratio)}</strong></span>
+      <span>Total miss tokens: <strong>${fmtNum(totalMiss)}</strong></span>
+      <span>Projects with cacheable traffic: <strong>${proj.length}</strong></span>
+      <span>Sessions with cacheable traffic: <strong>${sess.length}</strong></span>
+    `;
+
+    buildRows(document.querySelector('[data-table="cache-project"]'), proj, r => [
+      [`<span class="truncate" title="${escHtml(r.Key)}">${escHtml(r.Key)}</span>`, false],
+      [fmtPct1(r.HitRatio), true],
+      [fmtNum(r.Miss), true, r.Miss],
+      [fmtNum(r.CacheReadTokens), true],
+      [fmtNum(r.Turns), true],
+      [fmtMoney(r.CostUSD), true],
+    ]);
+
+    buildRows(document.querySelector('[data-table="cache-session"]'), sess, r => [
+      [`<code>${escHtml((r.Key || '').slice(0, 8))}…</code>`, false],
+      [`<span class="truncate" title="${escHtml(r.Subtitle)}">${escHtml(truncate(r.Subtitle || '', 60))}</span>`, false],
+      [fmtPct1(r.HitRatio), true],
+      [fmtNum(r.Miss), true, r.Miss],
+      [fmtNum(r.CacheReadTokens), true],
+      [fmtNum(r.Turns), true],
+      [fmtMoney(r.CostUSD), true],
+    ]);
+
+    const subs = D.cache_by_subagent || [];
+    buildRows(document.querySelector('[data-table="cache-subagent"]'), subs, r => [
+      [escHtml(r.Key), false],
+      [fmtPct1(r.HitRatio), true],
+      [fmtNum(r.Miss), true, r.Miss],
+      [fmtNum(r.CacheReadTokens), true],
+      [fmtNum(r.Turns), true],
+      [fmtMoney(r.CostUSD), true],
+    ]);
+
+    const invs = D.cache_by_invocation || [];
+    buildRows(document.querySelector('[data-table="cache-invocation"]'), invs, r => [
+      [`<span class="truncate" title="${escHtml(r.Key)}">${escHtml(truncate(r.Key, 80))}</span>`, false],
+      [escHtml(r.Subtitle || '(unknown)'), false],
+      [fmtPct1(r.HitRatio), true],
+      [fmtNum(r.Miss), true, r.Miss],
+      [fmtNum(r.CacheReadTokens), true],
+      [fmtNum(r.Turns), true],
+      [fmtMoney(r.CostUSD), true],
+    ]);
   })();
 
   // By tool

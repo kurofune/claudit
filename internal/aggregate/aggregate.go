@@ -146,6 +146,7 @@ type Aggregator struct {
 
 	sessions       map[string]struct{}
 	projectSession map[string]map[string]struct{}
+	bySession      map[string]*SessionBucket
 
 	unknownModels map[string]struct{}
 
@@ -172,6 +173,7 @@ func New(p *pricing.Table) *Aggregator {
 		projectModelTurns: map[string]map[string]int{},
 		sessions:          map[string]struct{}{},
 		projectSession:    map[string]map[string]struct{}{},
+		bySession:         map[string]*SessionBucket{},
 		unknownModels:     map[string]struct{}{},
 	}
 }
@@ -258,7 +260,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	trendOn := a.period.Valid() && !t.Timestamp.IsZero()
 	if trendOn {
 		bucket = a.period.Truncate(t.Timestamp)
-		addTrend(a.trendTotals, bucket, cost)
+		addTrend(a.trendTotals, bucket, cost, t.Usage)
 	}
 
 	// By model.
@@ -277,7 +279,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			m = map[time.Time]*TrendPoint{}
 			a.trendByModel[t.Model] = m
 		}
-		addTrend(m, bucket, cost)
+		addTrend(m, bucket, cost, t.Usage)
 	}
 
 	// By project. Use cwd; fall back to "(unknown)".
@@ -303,16 +305,26 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			m = map[time.Time]*TrendPoint{}
 			a.trendByProject[proj] = m
 		}
-		addTrend(m, bucket, cost)
+		addTrend(m, bucket, cost, t.Usage)
 	}
 	if t.SessionID != "" {
 		pb.Sessions = 0 // recomputed below
 		a.projectSession[proj][t.SessionID] = struct{}{}
 	}
 
-	// Sessions overall.
+	// Sessions overall + per-session bucket. The per-session bucket is
+	// what powers the cache-efficiency by-session view; we never sort by
+	// it elsewhere, so we only roll up Tokens / cost / turns / project.
 	if t.SessionID != "" {
 		a.sessions[t.SessionID] = struct{}{}
+		sb := a.bySession[t.SessionID]
+		if sb == nil {
+			sb = &SessionBucket{SessionID: t.SessionID, Project: proj}
+			a.bySession[t.SessionID] = sb
+		}
+		sb.Tokens.addUsage(t.Usage)
+		sb.CostUSD += cost
+		sb.Turns++
 	}
 
 	// Sidechain split.
@@ -391,7 +403,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 					m = map[time.Time]*TrendPoint{}
 					a.trendByTool[tu.Name] = m
 				}
-				addTrend(m, bucket, cost)
+				addTrend(m, bucket, cost, t.Usage)
 			}
 		}
 

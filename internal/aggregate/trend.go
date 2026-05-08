@@ -3,6 +3,8 @@ package aggregate
 import (
 	"sort"
 	"time"
+
+	"github.com/nategross/claudit/internal/parse"
 )
 
 // Period is a fixed-size time bucket for trend mode. PeriodNone disables
@@ -57,14 +59,17 @@ func (p Period) Step(t time.Time) time.Time {
 }
 
 // TrendPoint is one (period, key) cell. Time is the bucket start in UTC.
+// Tokens is embedded so renderers can derive HitRatio() / MissTokens()
+// per bucket — that's how "hit ratio over time" works.
 type TrendPoint struct {
 	Time    time.Time `json:"time"`
 	CostUSD float64   `json:"cost_usd"`
 	Turns   int       `json:"turns"`
+	Tokens
 }
 
 // addTrend bumps the (key, bucket) cell. m must be non-nil.
-func addTrend(m map[time.Time]*TrendPoint, bucket time.Time, cost float64) {
+func addTrend(m map[time.Time]*TrendPoint, bucket time.Time, cost float64, u parse.Usage) {
 	tp := m[bucket]
 	if tp == nil {
 		tp = &TrendPoint{Time: bucket}
@@ -72,6 +77,7 @@ func addTrend(m map[time.Time]*TrendPoint, bucket time.Time, cost float64) {
 	}
 	tp.CostUSD += cost
 	tp.Turns++
+	tp.Tokens.addUsage(u)
 }
 
 // gapFill returns the points sorted ascending, with zero-cost cells

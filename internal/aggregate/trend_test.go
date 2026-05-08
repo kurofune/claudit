@@ -82,6 +82,30 @@ func TestTrend_DailyGapFill(t *testing.T) {
 	}
 }
 
+func TestTrend_HitRatioPerBucket(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithPeriod(PeriodDay)
+
+	d1 := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	d2 := d1.AddDate(0, 0, 1)
+
+	// d1: bad cache — input=1000, cache_read=0  → hit ratio 0%.
+	agg.Add(fullTurn("s1", "/p/x", "claude-opus-4-7", 1000, 0, 0, 0, 0, d1))
+	// d2: great cache — input=100, cache_read=900  → hit ratio 90%.
+	agg.Add(fullTurn("s1", "/p/x", "claude-opus-4-7", 100, 0, 0, 0, 900, d2))
+
+	pts := agg.TrendTotals()
+	if len(pts) != 2 {
+		t.Fatalf("want 2 buckets, got %d", len(pts))
+	}
+	if got := pts[0].Tokens.HitRatio(); got != 0 {
+		t.Errorf("d1 hit ratio: %v, want 0", got)
+	}
+	if got := pts[1].Tokens.HitRatio(); got != 0.9 {
+		t.Errorf("d2 hit ratio: %v, want 0.9", got)
+	}
+}
+
 func TestTrend_PerKey_NotEnabledByDefault(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices) // no WithPeriod

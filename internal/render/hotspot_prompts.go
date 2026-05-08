@@ -57,6 +57,27 @@ Specifically address:
 For context, common Bash patterns in my data include things like `+"`grep`, `bd show`, `git log`, `go test`, `ls`"+`. The pattern in question is `+"`{{.pattern}}`"+`.
 `)
 
+	parse(string(aggregate.HotspotCacheMiss), `
+**Cost driver:** Low cache hit rate in project `+"`{{.key}}`"+`
+**Estimated wasteable cost:** ${{printf "%.2f" .cost}} ({{printf "%.1f" .pct}}% of my total Claude Code spend over the report window) — i.e. the row's total cost weighted by (1 − hit_ratio), an estimate of dollars that went to fresh upload + cache writes instead of cheap cache reads.
+**Hit ratio:** {{printf "%.1f" .hit_ratio_pct}}%
+**Miss tokens (input + cache_create):** {{.miss_tokens}}
+**Cache read tokens:** {{.cache_read}}
+**Breakdown of miss tokens:** input={{.input_tokens}}, cache_create_5m={{.cache_create_5m}}, cache_create_1h={{.cache_create_1h}}
+**Turns in this project:** {{.turns}}
+
+Anthropic prompt-cache primer (so we're aligned on terms): Claude reads context from a content-addressed prefix cache. A "cache hit" is `+"`cache_read`"+` — context already stored, billed at ~10% of input price. A "cache miss" causes either an `+"`input`"+` charge (no cache attempted, full price) or a `+"`cache_create`"+` charge (one-time write at ~125% of input price for 5m TTL, ~200% for 1h TTL). Subsequent turns within the TTL hit on that prefix and pay the cheap read price. A low hit ratio means either (a) the prefix the agent is sending changes turn-to-turn so the cache key keeps missing, (b) the TTL is expiring before the next turn (long gaps between turns), or (c) the agent is in mostly-fresh-input mode (lots of new files / lots of small sessions).
+
+Specifically address:
+1. What changes the prefix between turns in a Claude Code session (system prompt, tools list, conversation history, current task message)? Which of these are most prone to drift in a long-running coding session, and how do experienced Claude Code users keep them stable?
+2. Are there workflow patterns that *cause* prefix churn — e.g. a CLAUDE.md that changes on every turn, hooks that mutate session state, frequent `+"`/clear`"+`, frequent compaction — and what's the fix for each?
+3. For projects where many short sessions run instead of one long session, the 5m/1h cache TTLs expire between sessions. Are there proven techniques (long-running headless sessions, persistent context warmup, context-priming skills) that keep the cache warm across what would otherwise be cold-start sessions?
+4. Are there well-reviewed Claude Code skills, hooks, or settings.json keys that explicitly target cache hit rate (cache-aware system prompts, conversation pinning, deterministic tool ordering, pre-warmed context)?
+5. Is there an Anthropic-recommended pattern for very long sessions where context window pressure forces compaction, since compaction inherently invalidates the cached prefix? Specifically: compact-and-resume vs new-session-with-handoff-doc.
+
+The project in question is `+"`{{.key}}`"+`. Don't tell me to "just shorten my system prompt" — I want to understand which specific elements of a Claude Code session most commonly cause prefix drift, and the proven workflow patterns to keep them stable.
+`)
+
 	parse(string(aggregate.HotspotFileExt), `
 **Cost driver:** {{.tool}} of files with extension `+"`{{.pattern}}`"+`
 **Cost:** ${{printf "%.2f" .cost}} ({{printf "%.1f" .pct}}% of my total Claude Code spend)

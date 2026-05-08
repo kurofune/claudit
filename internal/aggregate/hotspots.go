@@ -19,6 +19,7 @@ const (
 	HotspotSubagentType  HotspotKind = "subagent_type"
 	HotspotInvocation    HotspotKind = "invocation"   // a single subagent run
 	HotspotSkill         HotspotKind = "skill"        // a Skill or SlashCommand
+	HotspotCacheMiss     HotspotKind = "cache_miss"   // low cache hit rate at a project
 )
 
 // Hotspot is one ranked optimization target. Title is what the renderer
@@ -126,6 +127,38 @@ func (a *Aggregator) Hotspots(top int) []Hotspot {
 				"project":       inv.Project,
 				"started":       inv.First.UTC().Format("2006-01-02 15:04 UTC"),
 				"source_file":   inv.SourceFile,
+			},
+		})
+	}
+
+	// Cache-miss hotspots: projects w/ poor hit ratio AND non-trivial
+	// miss volume. Ranked by "wasteable cost" — the row's spend weighted
+	// by (1 − hit_ratio), an estimate of dollars that went to fresh
+	// upload/cache-create instead of cheap cache reads.
+	const cacheHotspotMinMiss = int64(1_000_000)
+	const cacheHotspotMaxRatio = 0.85
+	for i, r := range a.CacheByProject() {
+		if i >= 5 {
+			break
+		}
+		if r.Miss < cacheHotspotMinMiss || r.HitRatio >= cacheHotspotMaxRatio {
+			continue
+		}
+		wasteable := r.CostUSD * (1 - r.HitRatio)
+		cands = append(cands, Hotspot{
+			Kind:    HotspotCacheMiss,
+			Title:   "Cache miss: " + r.Key,
+			CostUSD: wasteable,
+			Context: map[string]any{
+				"key":             r.Key,
+				"hit_ratio_pct":   100 * r.HitRatio,
+				"miss_tokens":     r.Miss,
+				"cache_read":      r.CacheReadTokens,
+				"input_tokens":    r.InputTokens,
+				"cache_create_5m": r.CacheCreate5mTokens,
+				"cache_create_1h": r.CacheCreate1hTokens,
+				"turns":           r.Turns,
+				"row_cost":        r.CostUSD,
 			},
 		})
 	}
