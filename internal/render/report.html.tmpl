@@ -892,7 +892,7 @@
       [`<span title="${escHtml(sample)}">${escHtml(head)}</span>`, false],
       [fmtNum(r.Invocations), true],
       [fmtNum(r.Sessions), true],
-      [fmtNum(r.TurnCount || r.turn_count || 0), true],
+      [fmtNum(r.TurnCount), true],
       [fmtMoney(r.CostUSD), true, r.CostUSD],
       [fmtPct(r.CostUSD, totalCost), true],
     ];

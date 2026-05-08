@@ -27,15 +27,17 @@ type promptBucketInternal struct {
 	CostUSD float64
 }
 
-// PromptBucket is the renderer-facing per-prompt row.
+// PromptBucket is the renderer-facing per-prompt row. JSON keys use Go
+// field names (no tags) to match the convention in the rest of this
+// package — the HTML template's JS reads r.Sample / r.CostUSD / etc.
 type PromptBucket struct {
-	Key         string  `json:"key"`
-	Sample      string  `json:"sample"` // full text of one example
-	Invocations int     `json:"invocations"`
-	Sessions    int     `json:"sessions"`
-	TurnCount   int     `json:"turn_count"`
+	Key         string
+	Sample      string // full text of one example
+	Invocations int
+	Sessions    int
+	TurnCount   int
 	Tokens
-	CostUSD float64 `json:"cost_usd"`
+	CostUSD float64
 }
 
 // promptIndexEntry resolves one turn UUID to its originating prompt.
