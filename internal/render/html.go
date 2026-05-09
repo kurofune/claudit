@@ -69,6 +69,8 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		TrendByModel     map[string][]aggregate.TrendPoint   `json:"trend_by_model"`
 		TrendByProject   map[string][]aggregate.TrendPoint   `json:"trend_by_project"`
 		TrendByTool      map[string][]aggregate.TrendPoint   `json:"trend_by_tool"`
+		TrendBySession   map[string][]aggregate.TrendPoint   `json:"trend_by_session"`
+		TrendBySubagent  map[string][]aggregate.TrendPoint   `json:"trend_by_subagent"`
 		OverallHitRatio  float64                             `json:"overall_hit_ratio"`
 		CacheByProject   []aggregate.CacheRow                `json:"cache_by_project"`
 		CacheBySession   []aggregate.CacheRow                `json:"cache_by_session"`
@@ -93,6 +95,8 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		TrendByModel:     a.TrendByModel(),
 		TrendByProject:   a.TrendByProject(),
 		TrendByTool:      a.TrendByTool(),
+		TrendBySession:   a.TrendBySession(),
+		TrendBySubagent:  a.TrendBySubagent(),
 		OverallHitRatio:  a.OverallHitRatio(),
 		CacheByProject:    a.CacheByProject(),
 		CacheBySession:    a.CacheBySession(),

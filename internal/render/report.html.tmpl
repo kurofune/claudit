@@ -3,158 +3,1118 @@
 <head>
 <meta charset="utf-8">
 <title>claudit report</title>
+<!-- Inter (variable, with optical sizing) for display numerics on the
+     headline + totals values. Loaded with display=swap so text shows in
+     the system fallback first and silently swaps when Inter arrives.
+     If offline, the fallback chain (SF Pro Display → system sans) is
+     already excellent — the report stays fully readable. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #f7f8fa;
-    --surface: #fff;
-    --border: #e1e4e8;
-    --ink: #1f2328;
-    --muted: #6e7781;
-    --accent: #4a90e2;
-    --accent-2: #50a87a;
-    --warn: #d97706;
-    --hot: #d6336c;
+    color-scheme: light dark;
+
+    /* Single brand hue (violet ~280) tints every neutral. Soft + warm,
+       distinct from generic dashboard blue. */
+    --brand-h: 280;
+
+    /* Surfaces & ink — light */
+    --bg:           oklch(98.4% 0.005 var(--brand-h));
+    --surface:      oklch(100%  0     0);
+    --surface-2:    oklch(96.5% 0.008 var(--brand-h));
+    --surface-3:    oklch(94%   0.012 var(--brand-h));
+    --border:       oklch(89%   0.012 var(--brand-h));
+    --border-strong:oklch(78%   0.018 var(--brand-h));
+    --ink:          oklch(22%   0.020 var(--brand-h));
+    --ink-2:        oklch(40%   0.015 var(--brand-h));
+    --muted:        oklch(55%   0.012 var(--brand-h));
+
+    /* Accents — semantic */
+    --accent:       oklch(58% 0.16 var(--brand-h));   /* primary brand (violet) */
+    --accent-2:     oklch(62% 0.14 160);              /* good / pass-through (green) */
+    --warn:         oklch(70% 0.16 60);               /* amber */
+    --hot:          oklch(62% 0.20 15);               /* danger / cost-hot (coral) */
+
+    /* Heat-overlay color (used by td.heat). Defined as alpha-coral
+       rather than color-mix with surface — mixing in oklch interpolates
+       hues, which would pull a coral (hue 15) toward the violet brand
+       hue (280) through magenta. Alpha overlay composites the coral
+       directly over the cell bg, so the result is unambiguously red.
+       warn-soft and accent-soft keep the mix because they tint full
+       panels (.warning-card / .guide / icon chips) where hue blending
+       with the surface IS what we want. */
+    --hot-soft:     oklch(60% 0.20 15 / 0.22);
+    --warn-soft:    color-mix(in oklch, var(--warn) 14%, var(--surface));
+    --accent-soft:  color-mix(in oklch, var(--accent) 14%, var(--surface));
+
+    /* Five-color palette for ranked-list charts (top models, projects,
+       tools, hotspots). Spaced around the wheel for max separation while
+       staying within a warm pastel feel. */
+    --c-1: oklch(60% 0.16 280);  /* violet — primary */
+    --c-2: oklch(62% 0.13 200);  /* cyan */
+    --c-3: oklch(64% 0.16 150);  /* green */
+    --c-4: oklch(70% 0.15  80);  /* amber */
+    --c-5: oklch(64% 0.20  20);  /* coral */
+
+    /* Spacing scale (4px base) */
+    --s-1:  4px;
+    --s-2:  8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+    --s-7: 48px;
+
+    /* Type scale (modular 1.2 from a 14px body) */
+    --t-1:  0.6875rem;  /* 11 — micro labels */
+    --t-2:  0.8125rem;  /* 13 — small captions */
+    --t-3:  0.875rem;   /* 14 — body */
+    --t-4:  1rem;       /* 16 — h3 / emphasized body */
+    --t-5:  1.25rem;    /* 20 — h2 */
+    --t-6:  1.75rem;    /* 28 — h1 */
+    --t-7:  2.5rem;     /* 40 — page headline (total cost) */
+
+    /* Typography — sans for prose, mono reserved for numerics & code,
+       display for big headline values. The display stack prefers Inter
+       (loaded via Google Fonts), then SF Pro Display on macOS/iOS, then
+       falls back to the regular sans stack if neither is available. */
+    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue",
+                 system-ui, sans-serif;
+    --font-display: "Inter", "InterVariable",
+                    "SF Pro Display", -apple-system, BlinkMacSystemFont,
+                    "Segoe UI Variable Display", "Helvetica Neue",
+                    system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono",
+                 Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* Radius scale — soft corners. */
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-pill: 999px;
+
+    /* Shadows — soft, layered. */
+    --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
+    --shadow-md: 0 1px 2px  color-mix(in oklch, black 4%, transparent),
+                 0 4px 12px color-mix(in oklch, black 6%, transparent);
+    --shadow-lift: 0 2px 4px color-mix(in oklch, black 6%, transparent),
+                   0 12px 28px color-mix(in oklch, black 8%, transparent);
+
+    /* Motion — slight-overshoot easing for the friendly feel. */
+    --motion-fast:   200ms;
+    --motion-med:    320ms;
+    --motion-slow:   420ms;
+    --motion-ease:   cubic-bezier(0.34, 1.2, 0.64, 1);    /* slight overshoot */
+    --motion-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
   }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:           oklch(15%   0.012 var(--brand-h));
+      --surface:      oklch(19%   0.014 var(--brand-h));
+      --surface-2:    oklch(23%   0.016 var(--brand-h));
+      --surface-3:    oklch(28%   0.018 var(--brand-h));
+      --border:       oklch(32%   0.020 var(--brand-h));
+      --border-strong:oklch(45%   0.022 var(--brand-h));
+      --ink:          oklch(94%   0.010 var(--brand-h));
+      --ink-2:        oklch(78%   0.012 var(--brand-h));
+      --muted:        oklch(62%   0.015 var(--brand-h));
+
+      --accent:       oklch(72% 0.15 var(--brand-h));
+      --accent-2:     oklch(74% 0.14 160);
+      --warn:         oklch(78% 0.15 60);
+      --hot:          oklch(74% 0.18 15);
+
+      /* Same alpha-coral approach as light mode (see comment there).
+         Higher alpha so the coral reads clearly against the dark surface. */
+      --hot-soft:     oklch(70% 0.20 15 / 0.42);
+      --warn-soft:    color-mix(in oklch, var(--warn) 18%, var(--surface));
+      --accent-soft:  color-mix(in oklch, var(--accent) 18%, var(--surface));
+
+      --c-1: oklch(72% 0.16 280);
+      --c-2: oklch(74% 0.13 200);
+      --c-3: oklch(76% 0.16 150);
+      --c-4: oklch(80% 0.15  80);
+      --c-5: oklch(74% 0.18  20);
+
+      --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
+      --shadow-md: 0 1px 2px  color-mix(in oklch, black 25%, transparent),
+                   0 4px 12px color-mix(in oklch, black 35%, transparent);
+      --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
+                     0 12px 28px color-mix(in oklch, black 40%, transparent);
+    }
+  }
+
+  /* ─── Card surfaces — round, lifted, generous ─────────────────────────
+     Most callouts and controls round at --r-lg with a soft shadow. The
+     guide and warning callouts skip the shadow because they live inline
+     and read more like "labeled regions" than free-floating tiles. */
+  .controls,
+  .hotspot,
+  details:not(.guide):not(.hotspot) {
+    box-shadow: var(--shadow-sm);
+  }
+  table {
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  thead th:first-child { border-top-left-radius: var(--r-lg); }
+  thead th:last-child  { border-top-right-radius: var(--r-lg); }
+
+  /* Totals tiles — each metric becomes a soft elevated card.
+     (Layout — flex / flex-basis / wrap — lives with the other .totals
+     rules further down in the file.) */
+  .totals .headline,
+  .totals .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-3) var(--s-4);
+    box-shadow: var(--shadow-sm);
+    margin-right: 0;
+  }
+
+  /* Hover lift on hotspots — soft elevation reflects the rounded language. */
+  .hotspot {
+    transition: box-shadow var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+  }
+  .hotspot:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  /* Ranked-list color rotation — hbar fills, per-row sparklines, and
+     hotspot rank chips all pull from the 5-color palette so adjacent
+     items are visually distinct. */
+  .hbar-list .hbar:nth-child(5n+1) > .fill { background: var(--c-1); }
+  .hbar-list .hbar:nth-child(5n+2) > .fill { background: var(--c-2); }
+  .hbar-list .hbar:nth-child(5n+3) > .fill { background: var(--c-3); }
+  .hbar-list .hbar:nth-child(5n+4) > .fill { background: var(--c-4); }
+  .hbar-list .hbar:nth-child(5n+5) > .fill { background: var(--c-5); }
+
+  tbody tr:nth-child(5n+1) .trend-spark rect { fill: var(--c-1); }
+  tbody tr:nth-child(5n+2) .trend-spark rect { fill: var(--c-2); }
+  tbody tr:nth-child(5n+3) .trend-spark rect { fill: var(--c-3); }
+  tbody tr:nth-child(5n+4) .trend-spark rect { fill: var(--c-4); }
+  tbody tr:nth-child(5n+5) .trend-spark rect { fill: var(--c-5); }
+
+  .stacked .bucket-main { background: var(--c-1); }
+  .stacked .bucket-side { background: var(--c-3); }
+
+  /* Inline icons — Lucide-style, sized to 1em by default, currentColor
+     stroke so they pick up the surrounding text color. Per-context size
+     overrides live with the components that use them. */
+  .icon {
+    display: inline-block;
+    width: 1em; height: 1em;
+    vertical-align: -0.15em;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* Sidebar nav: small muted glyph that brightens to accent when active. */
+  .nav-label {
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .nav-label .icon {
+    width: 15px; height: 15px;
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--motion-ease);
+  }
+  .nav-item:hover .nav-label .icon { color: var(--ink-2); }
+  .nav-item.is-active .nav-label .icon { color: var(--accent); }
+
+  /* View headers: larger, accent-colored icon paired with the h1. */
+  .view-head h1 {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .view-head h1 .icon {
+    width: 28px; height: 28px;
+    color: var(--accent);
+    stroke-width: 1.75;
+    padding: 4px;
+    background: var(--accent-soft);
+    border-radius: var(--r-md);
+    box-sizing: content-box;
+  }
+
+  /* Totals tile labels: tiny inline icon, sits flush before the label text. */
+  .totals .label .icon, .totals .headline .label .icon {
+    width: 12px; height: 12px;
+    margin-right: 5px;
+    vertical-align: -0.1em;
+    color: var(--muted);
+    stroke-width: 2.25;
+  }
+
+  /* Period-over-period delta indicator under each totals value.
+     Semantic colors: -good = green (the desirable direction happened),
+     -bad = red (undesirable direction), -neutral/-flat = quiet. */
+  .totals .delta {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--t-1);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    margin-top: var(--s-1);
+    line-height: 1;
+  }
+  .totals .delta .icon {
+    width: 12px; height: 12px;
+    stroke-width: 2.5;
+    color: currentColor;
+  }
+  .totals .delta-tail {
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+  /* Pure semantic colors — no mixing with --ink, since OKLCH hue
+     interpolation between green/coral and the violet ink hue desaturates
+     the result through cyan/magenta. The base accent-2 / hot tokens are
+     already tuned for readable contrast in both modes. */
+  .totals .delta-good    { color: var(--accent-2); }
+  .totals .delta-bad     { color: var(--hot); }
+  .totals .delta-neutral { color: var(--ink-2); }
+  .totals .delta-flat    { color: var(--muted); }
+
+  /* Section h2s gain a small accent-colored icon prefix when they
+     opt-in by including <svg class="icon"> as a child. */
+  h2 {
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .icon {
+    width: 18px; height: 18px;
+    color: var(--accent);
+    stroke-width: 2;
+  }
+
+  /* Semantic tier pill — used for hit-ratio cells where the value sits
+     on a known scale. Tinted background + colored numeric. The ranges:
+       good ≥ 70%   strong cache reuse, low waste
+       ok   40-70%  typical for mixed workloads
+       bad  < 40%   most context paid full price; biggest cost lever  */
+  .tier {
+    display: inline-block;
+    padding: 2px var(--s-2);
+    border-radius: var(--r-pill);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: var(--t-2);
+    letter-spacing: 0.005em;
+    line-height: 1.2;
+  }
+  .tier-good {
+    background: color-mix(in oklch, var(--c-3) 14%, var(--surface));
+    color: color-mix(in oklch, var(--c-3) 80%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--c-3) 28%, transparent);
+  }
+  .tier-ok {
+    background: color-mix(in oklch, var(--c-4) 14%, var(--surface));
+    color: color-mix(in oklch, var(--c-4) 60%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--c-4) 28%, transparent);
+  }
+  .tier-bad {
+    background: color-mix(in oklch, var(--hot) 14%, var(--surface));
+    color: color-mix(in oklch, var(--hot) 80%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--hot) 32%, transparent);
+  }
+  /* Compact variant for the tight totals tile and nav metrics. */
+  .tier-sm {
+    padding: 1px var(--s-1);
+    font-size: var(--t-1);
+    font-weight: 600;
+  }
+
+  .hotspot:nth-child(5n+1) .hotspot-kind { background: color-mix(in oklch, var(--c-1) 18%, var(--surface)); color: var(--c-1); }
+  .hotspot:nth-child(5n+2) .hotspot-kind { background: color-mix(in oklch, var(--c-2) 18%, var(--surface)); color: var(--c-2); }
+  .hotspot:nth-child(5n+3) .hotspot-kind { background: color-mix(in oklch, var(--c-3) 18%, var(--surface)); color: var(--c-3); }
+  .hotspot:nth-child(5n+4) .hotspot-kind { background: color-mix(in oklch, var(--c-4) 18%, var(--surface)); color: var(--c-4); }
+  .hotspot:nth-child(5n+5) .hotspot-kind { background: color-mix(in oklch, var(--c-5) 18%, var(--surface)); color: var(--c-5); }
+
+  .hotspot:nth-child(5n+1) .rank { color: var(--c-1); }
+  .hotspot:nth-child(5n+2) .rank { color: var(--c-2); }
+  .hotspot:nth-child(5n+3) .rank { color: var(--c-3); }
+  .hotspot:nth-child(5n+4) .rank { color: var(--c-4); }
+  .hotspot:nth-child(5n+5) .rank { color: var(--c-5); }
+
   * { box-sizing: border-box; }
   body {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-sans);
     margin: 0; padding: 0; background: var(--bg); color: var(--ink);
-    font-size: 13px; line-height: 1.45;
+    font-size: var(--t-3); line-height: 1.5;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
-  .wrap { max-width: 1300px; margin: 0 auto; padding: 24px; }
-  h1 { font-size: 1.7em; margin: 0 0 4px; }
-  h2 { font-size: 1.15em; margin: 32px 0 8px; padding-bottom: 4px;
-       border-bottom: 1px solid var(--border); }
-  h3 { font-size: 1em; margin: 16px 0 6px; }
-  .subtitle { color: var(--muted); margin-bottom: 16px; }
+  code, pre, .mono { font-family: var(--font-mono); }
+  /* App shell: fixed sidebar + scrolling main panel. */
+  .app {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+  .nav {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: var(--s-5) var(--s-3) var(--s-4);
+    display: flex; flex-direction: column; gap: var(--s-5);
+  }
+  .brand { display: flex; flex-direction: column; gap: 2px;
+           padding: 0 var(--s-2); }
+  .brand-name { font-size: var(--t-5); font-weight: 700; letter-spacing: -0.01em;
+                color: var(--ink); }
+  .brand-name::after {
+    /* a tiny brand mark — a 6px square in accent — gives the wordmark
+       a piece of identity without leaning on a logo */
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    background: var(--accent); margin-left: 6px; vertical-align: 0.18em;
+    border-radius: 1px;
+  }
+  .brand-sub { font-size: var(--t-2); color: var(--muted);
+               font-variant-numeric: tabular-nums;
+               font-family: var(--font-mono); }
+  .nav-list { display: flex; flex-direction: column; gap: 2px;
+              list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    position: relative;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: var(--s-2) var(--s-3);
+    border-radius: 4px;
+    color: var(--ink-2); text-decoration: none;
+    transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item::before {
+    /* accent stripe on left edge — animates in via scaleY */
+    content: ""; position: absolute; left: -2px; top: 50%;
+    width: 2px; height: 60%; transform: translateY(-50%) scaleY(0);
+    transform-origin: center; background: var(--accent);
+    border-radius: 0 2px 2px 0;
+    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active::before { transform: translateY(-50%) scaleY(1); }
+  .nav-item:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .nav-label { font-size: var(--t-3); font-weight: 600; letter-spacing: -0.005em; }
+  .nav-metric { font-size: var(--t-2); color: var(--muted);
+                font-variant-numeric: tabular-nums;
+                font-family: var(--font-mono);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-item.is-active .nav-metric { color: var(--ink-2); }
+
+  /* Main panel scrolls; max width caps so very-wide displays stay readable. */
+  .panel {
+    /* Adaptive width with ~10% horizontal breathing room. Side padding
+       grows with viewport (5vw on each side ≈ 10% total) and caps at
+       200px so 8K+ monitors don't waste absurd margins. On narrow
+       viewports the floor of var(--s-4) keeps content from kissing the
+       edge. Prose readability is preserved by .guide .body
+       { max-width: 75ch }; tables/charts/hbars fill the panel. */
+    padding: var(--s-5) clamp(var(--s-4), 5vw, 200px);
+  }
+
+  /* View system — only the active view is shown. Cross-fade in via opacity
+     on activation; reduced-motion users get an instant swap. */
+  .view { display: none; opacity: 0;
+          transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .view.is-active { display: block; opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .view, .nav-item, .nav-item::before { transition: none; }
+  }
+
+  /* View header — view-level h1 with a thin meta line. The view's first
+     h2 sits below this, no chapter-rule (the view-head already separates). */
+  .view-head { display: flex; align-items: baseline; gap: var(--s-3);
+               margin-bottom: var(--s-3); }
+  .view-head h1 { margin: 0; }
+  .view-head .meta { color: var(--muted); font-size: var(--t-2);
+                     font-variant-numeric: tabular-nums; }
+
+  /* Sub-tabs within a view (Cost/Cache/Tools/Subagents). One row of
+     anchor-tabs with an underline on the active item. Hash route is
+     `#view/subview`. */
+  .subtabs {
+    display: flex; flex-wrap: wrap; gap: 0;
+    margin: 0 0 var(--s-4);
+    border-bottom: 1px solid var(--border);
+  }
+  .subtab {
+    position: relative;
+    padding: var(--s-2) var(--s-3);
+    font: inherit; font-size: var(--t-3); font-weight: 500;
+    color: var(--muted); text-decoration: none;
+    background: transparent; border: 0; cursor: pointer;
+    margin-bottom: -1px;  /* overlap parent border */
+    border-bottom: 2px solid transparent;
+    transition: color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .subtab:hover { color: var(--ink); }
+  .subtab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+  .subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+                          border-radius: 2px; }
+
+  /* Sub-views — only the active one renders. */
+  .subview { display: none; }
+  .subview.is-active { display: block; }
+  @media (prefers-reduced-motion: reduce) {
+    .subtab { transition: none; }
+  }
+
+  /* The subview's first h2/h3 sits right under the tab strip — pull it
+     in tight, no chapter rule. */
+  .subview > h2:first-child,
+  .subview > h3:first-child {
+    border-top: 0; padding-top: 0; margin-top: 0;
+  }
+
+  /* Pager — one per paged table, hidden when total rows fit on a page. */
+  .pager {
+    display: flex; align-items: center; gap: var(--s-3);
+    padding: var(--s-2) 0; margin: var(--s-1) 0 var(--s-3);
+    font-size: var(--t-2); color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pager-btn {
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface); color: var(--ink-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .pager-btn:hover:not(:disabled) {
+    background: var(--surface-2); color: var(--ink);
+    border-color: var(--border-strong);
+  }
+  .pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pager-btn:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .pager-info { display: flex; gap: var(--s-3); align-items: baseline; }
+  .pager-page strong { color: var(--ink); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    .pager-btn { transition: none; }
+  }
+
+  h1 { font-family: var(--font-display);
+       font-optical-sizing: auto;
+       font-size: var(--t-6); font-weight: 600; letter-spacing: -0.02em;
+       margin: 0 0 var(--s-1); }
+  h2 { font-size: var(--t-5); font-weight: 600; letter-spacing: -0.005em;
+       margin: var(--s-6) 0 var(--s-2); padding-top: var(--s-3);
+       border-top: 1px solid var(--border); }
+  /* First h2 in a view sits right under the view-head — no chapter rule needed. */
+  .view > h2:first-of-type { border-top: 0; padding-top: 0;
+                              margin-top: var(--s-3); }
+  h3 { font-size: var(--t-4); font-weight: 600; margin: var(--s-4) 0 var(--s-2);
+       color: var(--ink-2); }
+  .subtitle { color: var(--muted); margin-bottom: var(--s-5);
+              font-variant-numeric: tabular-nums; }
+
+  /* Narrow viewport: collapse sidebar to a top horizontal rail. */
+  @media (max-width: 800px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .nav { position: sticky; top: 0; height: auto; flex-direction: row;
+           align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3);
+           border-right: 0; border-bottom: 1px solid var(--border);
+           overflow-x: auto; }
+    .brand { flex-direction: row; align-items: baseline; gap: var(--s-2); }
+    .brand-name::after { display: none; }
+    .nav-list { flex-direction: row; gap: 2px; flex: 1; }
+    .nav-item { flex-direction: row; align-items: center; gap: var(--s-2);
+                padding: var(--s-1) var(--s-2); }
+    .nav-item::before { display: none; }
+    .nav-item.is-active { box-shadow: inset 0 -2px 0 var(--accent); }
+    .nav-metric { display: none; }
+    .panel { padding: var(--s-3); }
+  }
+
+  /* Totals tiles laid out as equal-width, equal-height cards. flex:1
+     spreads them across the row; align-items: stretch (the flex default)
+     equalizes height so a tile with no delta still matches a tile that
+     has one. flex-basis 220px sets the wrap threshold for narrow viewports.
+     border-bottom + padding-bottom are unset because each tile already
+     has its own border + shadow card treatment (above). */
   .totals {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px; margin-bottom: 12px;
+    display: flex; flex-wrap: wrap;
+    gap: var(--s-3);
+    margin-bottom: var(--s-5);
   }
-  .stat {
-    background: var(--surface); padding: 12px 14px; border: 1px solid var(--border);
-    border-radius: 6px;
+  .totals .headline,
+  .totals .metric {
+    flex: 1 1 220px;
   }
-  .stat .label { font-size: 0.8em; color: var(--muted); text-transform: uppercase;
-                 letter-spacing: 0.05em; }
-  .stat .value { font-size: 1.5em; font-weight: 600; margin-top: 2px;
-                 font-variant-numeric: tabular-nums; }
+  .totals .headline { display: flex; flex-direction: column; gap: 2px; }
+  .totals .headline .label { font-size: var(--t-1); color: var(--muted);
+                             text-transform: uppercase; letter-spacing: 0.08em;
+                             font-weight: 500; }
+  /* Display-font treatment for the headline cost. Inter Display via
+     opsz axis with tight tracking + tabular figures + stylistic
+     alternates (ss01 enables the rounded tail on common digits). */
+  .totals .headline .value {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum", "ss01", "cv01";
+    font-size: var(--t-7); font-weight: 700;
+    line-height: 1; letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums lining-nums;
+    color: var(--ink);
+  }
+  .totals .metric { display: flex; flex-direction: column; gap: 1px; }
+  .totals .metric .label { font-size: var(--t-1); color: var(--muted);
+                           text-transform: uppercase; letter-spacing: 0.08em;
+                           font-weight: 500; }
+  /* Same display treatment for tile values, scaled down. */
+  .totals .metric .value {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum";
+    font-size: var(--t-4); font-weight: 600;
+    letter-spacing: -0.015em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Warning callout — soft warn surface, accent-colored rule. */
+  .warning-card {
+    background: var(--warn-soft);
+    padding: var(--s-3) var(--s-4);
+    border: 1px solid var(--warn);
+    border-radius: var(--r-lg);
+    margin-bottom: var(--s-3);
+  }
+
+  /* Reading guide — collapsible "how to interpret this section" callout.
+     Sits under each view-head; default open so first-time readers get
+     oriented, but a click on the summary hides it for subsequent visits. */
+  .guide {
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--surface));
+    border-radius: var(--r-lg);
+    margin: var(--s-3) 0 var(--s-4);
+    padding: 0;
+  }
+  .guide > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-2) var(--s-3);
+    font-weight: 600;
+    color: var(--ink);
+    font-size: var(--t-3);
+    display: flex; align-items: center; gap: var(--s-2);
+  }
+  .guide > summary::-webkit-details-marker { display: none; }
+  .guide > summary::before {
+    content: "▸"; color: var(--accent);
+    transition: transform 0.15s ease;
+    display: inline-block; width: 0.8em;
+  }
+  .guide[open] > summary::before { transform: rotate(90deg); }
+  .guide .body {
+    padding: 0 var(--s-3) var(--s-3) var(--s-4);
+    font-size: var(--t-3); color: var(--ink-2); line-height: 1.55;
+    /* Cap prose line length so reading stays comfortable even when the
+       panel is wide. Cards/tables fill the panel; only the body text
+       wraps tighter. */
+    max-width: 75ch;
+  }
+  .guide .body p { margin: var(--s-2) 0; }
+  .guide .body p:first-child { margin-top: 0; }
+  .guide .body ul { margin: var(--s-2) 0; padding-left: var(--s-4); }
+  .guide .body li { margin: var(--s-1) 0; }
+  .guide .body strong { color: var(--ink); }
+  .guide .body code {
+    background: var(--surface-2);
+    padding: 1px 4px; border-radius: 3px;
+    font-size: 0.92em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .guide > summary::before { transition: none; }
+  }
+  /* Column-header tooltip affordance — subtle dotted underline signals
+     "more info on hover" without conflicting with the sort-direction
+     glyph rendered after. The actual tooltip is a custom popover (see
+     #claudit-tooltip below), not the native `title=`. */
+  th[title], th[data-tooltip] {
+    text-decoration: underline dotted var(--border-strong);
+    text-underline-offset: 3px;
+  }
+
+  /* Custom tooltip popover — soft, light, lifted, matching the rounded
+     card language. Kept on a real surface (not an inverted dark panel)
+     so it feels of-a-piece with the rest of the report rather than like
+     a heavy floating chip. The accent-tinted border + lift shadow give
+     it elevation without harshness. */
+  #claudit-tooltip {
+    --tip-bg:     var(--surface);
+    --tip-border: color-mix(in oklch, var(--accent) 30%, var(--border));
+    --tip-fg:     var(--ink);
+    --tip-shadow: var(--shadow-lift),
+                  inset 0 1px 0 color-mix(in oklch, white 60%, transparent);
+    position: fixed; z-index: 1000;
+    max-width: 320px;
+    padding: var(--s-2) var(--s-3);
+    background: var(--tip-bg);
+    color: var(--tip-fg);
+    border: 1px solid var(--tip-border);
+    font-size: var(--t-2); line-height: 1.45;
+    letter-spacing: 0.005em;
+    border-radius: var(--r-md);
+    box-shadow: var(--tip-shadow);
+    pointer-events: none;
+    opacity: 0; transform: translateY(2px) scale(0.98);
+    transform-origin: var(--arrow-x, 50%) bottom;
+    transition: opacity var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+    will-change: opacity, transform;
+  }
+  #claudit-tooltip.is-visible {
+    opacity: 1; transform: translateY(0) scale(1);
+  }
+  #claudit-tooltip[data-side="bottom"] {
+    transform-origin: var(--arrow-x, 50%) top;
+    transform: translateY(-2px) scale(0.98);
+  }
+  #claudit-tooltip[data-side="bottom"].is-visible {
+    transform: translateY(0) scale(1);
+  }
+  /* Arrow inherits panel bg + border so it reads as a continuous
+     extension of the popover, not a separate triangle. */
+  #claudit-tooltip::after {
+    content: ""; position: absolute;
+    width: 9px; height: 9px;
+    background: var(--tip-bg);
+    border-right: 1px solid var(--tip-border);
+    border-bottom: 1px solid var(--tip-border);
+    transform: rotate(45deg);
+    left: var(--arrow-x, 50%);
+    margin-left: -4.5px;
+  }
+  #claudit-tooltip[data-side="top"]::after    { bottom: -5px; }
+  #claudit-tooltip[data-side="bottom"]::after {
+    top: -5px;
+    border-right: 0; border-bottom: 0;
+    border-top: 1px solid var(--tip-border);
+    border-left: 1px solid var(--tip-border);
+  }
+  #claudit-tooltip code {
+    background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 0.92em;
+    border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+  }
+  #claudit-tooltip strong { color: var(--accent); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    #claudit-tooltip { transition: opacity var(--motion-fast) linear; }
+  }
+
+  /* Generic <select> styling for any future controls (safe to leave even
+     after removing the theme picker). */
+  .controls select {
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  .controls select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
+  }
+
+  /* Hotspot hover lift — base/Linear keeps it subtle (border tint).
+     Notion theme overrides above for full elevation. */
+  .hotspot {
+    transition: border-color var(--motion-fast) var(--motion-ease),
+                background-color var(--motion-fast) var(--motion-ease);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hotspot { transition: none; }
+  }
+
+  /* Chart line-draw entrance. JS triggers by toggling a class. */
+  .trend-line.draw-in {
+    stroke-dasharray: var(--len, 1000);
+    stroke-dashoffset: var(--len, 1000);
+    animation: cl-draw var(--motion-slow) var(--motion-ease) forwards;
+  }
+  @keyframes cl-draw {
+    to { stroke-dashoffset: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trend-line.draw-in { animation: none; stroke-dashoffset: 0; }
+  }
+
+  /* Number count-up — applied to .totals .value during initial paint.
+     Uses content visibility transition so the number lands smoothly. */
+  .totals .value.cl-counting { color: color-mix(in oklch, var(--ink) 70%, var(--accent)); }
+  @media (prefers-reduced-motion: reduce) {
+    .totals .value.cl-counting { color: var(--ink); }
+  }
+
+  /* Animate-in stagger on initial paint. Each element fades + translates
+     up; cumulative delay creates a "cascade" that signals the page is
+     hand-assembled rather than dumped. `backwards` fill keeps the element
+     at the start state until its delay elapses (otherwise it flashes
+     visible at full opacity before animating down and back). */
+  @keyframes cl-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .totals .headline,
+  .totals .metric,
+  .hotspot {
+    animation: cl-fade-up var(--motion-med) var(--motion-ease) backwards;
+  }
+  .totals .headline    { animation-delay:  40ms; }
+  .totals .metric:nth-of-type(1) { animation-delay: 100ms; }
+  .totals .metric:nth-of-type(2) { animation-delay: 160ms; }
+  .totals .metric:nth-of-type(3) { animation-delay: 220ms; }
+  .totals .metric:nth-of-type(4) { animation-delay: 280ms; }
+  /* Hotspots cascade after the totals settle. */
+  .hotspot:nth-child(1)  { animation-delay: 360ms; }
+  .hotspot:nth-child(2)  { animation-delay: 410ms; }
+  .hotspot:nth-child(3)  { animation-delay: 460ms; }
+  .hotspot:nth-child(4)  { animation-delay: 510ms; }
+  .hotspot:nth-child(5)  { animation-delay: 560ms; }
+  .hotspot:nth-child(6)  { animation-delay: 610ms; }
+  .hotspot:nth-child(7)  { animation-delay: 660ms; }
+  .hotspot:nth-child(8)  { animation-delay: 700ms; }
+  .hotspot:nth-child(9)  { animation-delay: 740ms; }
+  .hotspot:nth-child(10) { animation-delay: 780ms; }
+  /* Reduced-motion users skip the staggered cascade entirely. */
+  @media (prefers-reduced-motion: reduce) {
+    .totals .headline,
+    .totals .metric,
+    .hotspot { animation: none; }
+  }
   .controls {
-    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
-    background: var(--surface); padding: 10px 14px; border: 1px solid var(--border);
-    border-radius: 6px; margin: 16px 0; position: sticky; top: 0; z-index: 10;
+    display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap;
+    background: var(--surface);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    margin: var(--s-4) 0;
+    position: sticky; top: 0; z-index: 10;
   }
-  .controls label { display: flex; align-items: center; gap: 6px; }
+  .controls label { display: flex; align-items: center; gap: var(--s-1); }
   .controls input {
-    font: inherit; padding: 4px 8px; border: 1px solid var(--border);
-    border-radius: 4px; background: #fff; color: var(--ink);
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--ink);
+  }
+  .controls input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
   }
   .controls input[type="search"] { width: 280px; }
   .controls input[type="number"] { width: 80px; }
-  .hint { color: var(--muted); font-size: 0.85em; }
-  table { width: 100%; border-collapse: collapse; background: var(--surface); }
-  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border);
+  .hint { color: var(--muted); font-size: var(--t-2); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+          font-variant-numeric: tabular-nums; }
+  th, td { padding: var(--s-2) var(--s-3);
+           border-bottom: 1px solid var(--border);
            text-align: left; vertical-align: top; }
-  th { background: #eef0f2; cursor: pointer; user-select: none;
-       font-weight: 600; white-space: nowrap; }
-  th:hover { background: #e3e7eb; }
-  th.sorted-asc::after { content: " ▲"; color: var(--accent); }
+  th { background: var(--surface-2); cursor: pointer; user-select: none;
+       font-weight: 600; white-space: nowrap; color: var(--ink-2);
+       font-size: var(--t-2); letter-spacing: 0.01em; }
+  th:hover { background: var(--surface-3); color: var(--ink); }
+  /* Default low-contrast sort glyph signals "sortable" before any click. */
+  th[data-key]::after { content: " ↕"; color: var(--border-strong);
+                        font-size: 0.9em; }
+  th.sorted-asc::after  { content: " ▲"; color: var(--accent); }
   th.sorted-desc::after { content: " ▼"; color: var(--accent); }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td.heat { position: relative; }
-  td.heat::before {
-    content: ""; position: absolute; inset: 0; right: auto;
-    background: var(--hot); opacity: 0.18; pointer-events: none;
-    width: var(--heat, 0%);
+  td.num, th.num { text-align: right; }
+  td code { font-size: var(--t-2); }
+  /* Heat overlay as a CSS gradient on the cell background. Text sits
+     above the background naturally — no positioning gymnastics, no
+     pseudo-element painting over plain-text cell content. */
+  td.heat {
+    background: linear-gradient(
+      to right,
+      var(--hot-soft) 0,
+      var(--hot-soft) var(--heat, 0%),
+      transparent var(--heat, 0%)
+    );
   }
-  td.heat > * { position: relative; }
   tr.hidden { display: none; }
-  details { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-            margin: 8px 0; padding: 8px 14px; }
+
+  details { background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--r-lg); margin: var(--s-2) 0;
+            padding: var(--s-2) var(--s-3); }
   summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
-  summary > .small { color: var(--muted); font-weight: normal; margin-left: 8px; }
-  .charts { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: start; }
-  .donut { display: block; }
-  .legend { font-size: 0.9em; }
-  .legend-item { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-  .legend-swatch { width: 12px; height: 12px; flex-shrink: 0; border-radius: 2px; }
-  .hbar-list { display: flex; flex-direction: column; gap: 2px; max-width: 100%; }
-  .hbar { position: relative; height: 22px; background: #eef0f2; }
+  summary > .small { color: var(--muted); font-weight: normal;
+                     margin-left: var(--s-2); }
+
+  .hbar-list { display: flex; flex-direction: column; gap: 2px;
+               max-width: 100%; margin-bottom: var(--s-3); }
+  .hbar { position: relative; height: 26px;
+          background: var(--surface-2); border-radius: var(--r-md); overflow: hidden;
+          /* Subtle border so the unfilled portion of the track is
+             visible against the page bg in dark mode (where surface-2
+             and bg differ by only a few percent of lightness). */
+          border: 1px solid var(--border); }
   .hbar > .fill { position: absolute; left: 0; top: 0; bottom: 0;
-                  background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-  .hbar > .lbl, .hbar > .val { position: absolute; top: 0; line-height: 22px;
-                                 font-size: 0.85em; padding: 0 6px; white-space: nowrap; }
-  .hbar > .lbl { left: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
-  .hbar > .val { right: 0; color: #333; }
-  .stacked { height: 28px; display: flex; background: #eef0f2; border-radius: 4px;
-             overflow: hidden; margin: 8px 0; }
+                  background: var(--accent); opacity: 0.85; }
+  .hbar > .lbl, .hbar > .val {
+    position: absolute; top: 0; line-height: 26px;
+    font-size: var(--t-2); padding: 0 var(--s-2); white-space: nowrap;
+  }
+  .hbar > .lbl { left: 0; max-width: 70%; overflow: hidden;
+                 text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
+  .hbar > .val { right: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .stacked { height: 32px; display: flex; background: var(--surface-2);
+             border-radius: var(--r-md); overflow: hidden; margin: var(--s-2) 0; }
   .stacked > div { display: flex; align-items: center; justify-content: center;
-                   color: white; font-size: 0.85em; font-weight: 600; }
-  .pill { display: inline-block; background: #eef0f2; color: var(--muted);
-          padding: 1px 8px; border-radius: 12px; font-size: 0.8em; }
-  .small { font-size: 0.85em; color: var(--muted); }
+                   color: var(--surface); font-size: var(--t-2); font-weight: 600;
+                   font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; background: var(--surface-2); color: var(--muted);
+          padding: 1px var(--s-2); border-radius: var(--r-pill); font-size: var(--t-2); }
+  .small { font-size: var(--t-2); color: var(--muted); }
+  .empty-state {
+    margin: var(--s-2) 0;
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-lg);
+    color: var(--ink-2);
+  }
+  .empty-state code { color: var(--ink); }
+  td.empty-state-row {
+    text-align: center;
+    padding: var(--s-4) var(--s-3);
+    color: var(--muted);
+    font-size: var(--t-2);
+  }
   .danger { color: var(--hot); }
-  .truncate { display: inline-block; max-width: 380px; overflow: hidden;
-              text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-  details.tool-drill summary code { background: #f0f2f4; padding: 1px 6px;
-                                    border-radius: 3px; }
-  .row-count { color: var(--muted); font-size: 0.85em; }
+  /* Project paths run long. Fluid cap so wide displays get more room. */
+  .truncate { display: inline-block; max-width: clamp(360px, 55vw, 820px);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              vertical-align: bottom; }
+  /* Path-style cells (project paths, session subtitles) read better in
+     mono — fixed character width keeps paths column-aligned. */
+  .path { font-family: var(--font-mono); font-size: var(--t-2); }
+  /* Reserve enough min-width on project-bearing columns so the table's
+     auto-layout doesn't squeeze them when other columns get greedy. */
+  th[data-key="Project"], th[data-key="Subtitle"] {
+    min-width: clamp(280px, 30vw, 460px);
+  }
+  /* For cache-project, the project path lives under the generic "Key"
+     column header. Same min-width treatment via a class on the table. */
+  table[data-table="cache-project"] th[data-key="Key"] {
+    min-width: clamp(280px, 30vw, 460px);
+  }
+  details.tool-drill summary code {
+    background: var(--surface-2); padding: 1px var(--s-2);
+    border-radius: 3px; font-size: var(--t-2);
+  }
 
   /* Hotspot cards */
-  .hotspots { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .hotspots { display: grid; grid-template-columns: 1fr; gap: var(--s-2); }
   .hotspot {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    padding: 10px 14px; transition: border-color 0.15s;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-2) var(--s-3);
+    /* transition is set by the consolidated rule above (box-shadow + transform);
+       we add border-color here so the hover state animates that too. */
+    transition: box-shadow var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease),
+                border-color var(--motion-fast) var(--motion-ease);
   }
-  .hotspot:hover { border-color: #c8cdd2; }
-  .hotspot summary { display: flex; align-items: baseline; gap: 12px;
+  .hotspot:hover { border-color: var(--border-strong); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hotspot { transition: none; }
+  }
+  .hotspot summary { display: flex; align-items: baseline; gap: var(--s-3);
                      list-style: none; cursor: pointer; }
   .hotspot summary::-webkit-details-marker { display: none; }
-  .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.5em; }
+  .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.5em;
+                   font-variant-numeric: tabular-nums; }
   .hotspot .h-title { font-weight: 600; flex: 1; overflow: hidden;
-                      text-overflow: ellipsis; white-space: nowrap; }
+                      text-overflow: ellipsis; white-space: nowrap;
+                      color: var(--ink); }
   .hotspot .h-cost { font-weight: 600; color: var(--hot);
                      font-variant-numeric: tabular-nums; }
-  .hotspot .h-pct { color: var(--muted); font-size: 0.9em;
+  .hotspot .h-pct { color: var(--muted); font-size: var(--t-2);
                     font-variant-numeric: tabular-nums; }
   .hotspot[open] { border-color: var(--accent); }
-  .hotspot .body { margin-top: 10px; }
-  .hotspot .actions { display: flex; gap: 8px; margin: 0 0 8px; align-items: center; }
+  .hotspot .body { margin-top: var(--s-2); }
+  .hotspot .actions { display: flex; gap: var(--s-2);
+                      margin: 0 0 var(--s-2); align-items: center; }
   .hotspot button.copy {
-    font: inherit; padding: 4px 10px; background: var(--accent); color: white;
-    border: none; border-radius: 4px; cursor: pointer;
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: var(--accent); color: var(--surface);
+    border: none; border-radius: var(--r-sm); cursor: pointer;
   }
-  .hotspot button.copy:hover { filter: brightness(1.1); }
+  .hotspot button.copy:hover { filter: brightness(1.06); }
+  .hotspot button.copy:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
   .hotspot button.copy.copied { background: var(--accent-2); }
   .hotspot pre {
-    margin: 0; padding: 10px 12px; background: #f6f8fa; border: 1px solid var(--border);
-    border-radius: 4px; font-size: 12px; line-height: 1.4;
-    max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    margin: 0; padding: var(--s-2) var(--s-3);
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r-sm); font-size: var(--t-2); line-height: 1.5;
+    max-height: 360px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--ink-2);
   }
   .hotspot-kind {
-    display: inline-block; background: #eef0f2; color: var(--muted);
-    padding: 1px 6px; border-radius: 3px; font-size: 0.75em; text-transform: uppercase;
-    letter-spacing: 0.05em;
+    display: inline-block; background: var(--surface-2); color: var(--muted);
+    padding: 1px var(--s-2); border-radius: var(--r-sm);
+    font-size: var(--t-1); text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 500;
   }
 
   /* Trend section + sparkline column */
   .trend-chart {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    padding: 14px; margin: 8px 0 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-3);
+    margin: var(--s-2) 0 var(--s-4);
+    box-shadow: var(--shadow-sm);
   }
-  .trend-chart svg { display: block; width: 100%; height: 220px; }
+  /* Per-chart heights — viewBox is sized to the actual panel width at
+     render time (see trendLineChart / hitRatioChart in JS), so these
+     CSS heights match the viewBox h value exactly and the chart fills
+     end-to-end with no preserveAspectRatio padding. */
+  .chart-host[data-chart-type="cost"] svg     { display: block; width: 100%; height: 320px; }
+  .chart-host[data-chart-type="hitratio"] svg { display: block; width: 100%; height: 110px; }
   .trend-axis { stroke: var(--border); stroke-width: 1; }
-  .trend-line { fill: none; stroke: var(--accent); stroke-width: 2; }
-  .trend-area { fill: var(--accent); opacity: 0.12; }
-  .trend-pt { fill: var(--accent); stroke: white; stroke-width: 2; }
-  .trend-tick { font-size: 11px; fill: var(--muted);
-                font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* Line path. Stroke-linecap/linejoin round to match the soft corner
+     language; the bezier-smoothed path benefits from rounded joins. */
+  .trend-line {
+    fill: none; stroke: var(--accent); stroke-width: 2.25;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .trend-line-2 { stroke: var(--accent-2); }
+  .trend-hitratio { margin-top: var(--s-2); }
+  .trend-subtitle { color: var(--ink-2); font-weight: 600;
+                    font-size: var(--t-2); margin-top: var(--s-3); }
+  .trend-area { stroke: none; }
+  /* Gradient stops referenced from inline <linearGradient>s. Defined as
+     CSS classes so the gradient inherits the live --accent / --accent-2,
+     which would not happen with hardcoded SVG attributes. */
+  .grad-stop-cost-top { stop-color: var(--accent); stop-opacity: 0.32; }
+  .grad-stop-cost-mid { stop-color: var(--accent); stop-opacity: 0.10; }
+  .grad-stop-cost-bot { stop-color: var(--accent); stop-opacity: 0; }
+  .grad-stop-hit-top  { stop-color: var(--accent-2); stop-opacity: 0.28; }
+  .grad-stop-hit-bot  { stop-color: var(--accent-2); stop-opacity: 0; }
+  /* Data points — soft drop shadow gives a tactile feel; they grow on
+     hover via a sibling-target rule on the crosshair. */
+  .trend-pt {
+    fill: var(--accent); stroke: var(--surface); stroke-width: 2;
+    transition: r var(--motion-fast) var(--motion-ease);
+  }
+  .chart-host[data-chart-type="hitratio"] .trend-pt { fill: var(--accent-2); }
+  /* Tick labels — a touch quieter than the body. */
+  .trend-tick {
+    font-size: 11px; fill: var(--muted);
+    font-family: var(--font-mono);
+    letter-spacing: 0.02em;
+  }
   .trend-spark { vertical-align: middle; }
   .trend-spark rect { fill: var(--accent); }
+
+  /* Chart hover affordances — crosshair + chart-anchored tooltip. */
+  .chart-host { position: relative; }
+  .chart-host svg { cursor: crosshair; }
+  .crosshair {
+    pointer-events: none;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .crosshair-line {
+    stroke: var(--border-strong);
+    stroke-width: 1; stroke-dasharray: 2 3;
+  }
+  .crosshair-dot {
+    fill: var(--accent); stroke: var(--surface); stroke-width: 3;
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent) 40%, transparent));
+  }
+  .chart-host[data-chart-type="hitratio"] .crosshair-dot {
+    fill: var(--accent-2);
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent-2) 40%, transparent));
+  }
+  /* Chart-anchored tooltip — same surface treatment as #claudit-tooltip
+     but lives inside the chart-host so it tracks the chart on resize. */
+  .chart-tooltip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 4;
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lift);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--t-2); line-height: 1.35;
+    transform: translate(-50%, calc(-100% - 14px));
+    white-space: nowrap;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+    will-change: transform, left, top, opacity;
+  }
+  .chart-host[data-chart-type="hitratio"] .chart-tooltip {
+    border-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+  }
+  .chart-tooltip .ct-label {
+    color: var(--muted);
+    font-size: var(--t-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .chart-tooltip .ct-primary {
+    font-size: var(--t-4);
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .chart-tooltip[data-chart-type="hitratio"] .ct-primary {
+    color: var(--accent-2);
+  }
+  .chart-tooltip .ct-meta {
+    color: var(--ink-2); font-size: var(--t-2);
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Tooltip arrow — small triangle on the bottom edge that points
+     down at the crosshair dot. */
+  .chart-tooltip::after {
+    content: ""; position: absolute;
+    width: 9px; height: 9px;
+    background: var(--surface);
+    border-right: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-bottom: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    transform: rotate(45deg);
+    left: 50%; bottom: -5px;
+    margin-left: -4.5px;
+  }
+  .chart-host[data-chart-type="hitratio"] .chart-tooltip::after {
+    border-right-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+    border-bottom-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .crosshair, .chart-tooltip, .trend-pt { transition: none; }
+  }
   .trend-cell { white-space: nowrap; }
   .trend-summary {
-    display: flex; gap: 16px; margin-top: 6px;
-    color: var(--muted); font-size: 0.85em; flex-wrap: wrap;
+    display: flex; gap: var(--s-4); margin-top: var(--s-1);
+    color: var(--muted); font-size: var(--t-2); flex-wrap: wrap;
   }
   .trend-summary strong { color: var(--ink); font-variant-numeric: tabular-nums; }
   .trend-delta-up { color: var(--hot); }
@@ -162,195 +1122,411 @@
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>claudit report</h1>
-  <div class="subtitle"><span id="date-range"></span> · <span id="row-count" class="row-count"></span></div>
 
-  <div class="totals" id="totals"></div>
+<!-- Icon sprite (Lucide-style, 2px stroke, currentColor). One <symbol>
+     per icon, referenced via <svg class="icon"><use href="#icon-…"/></svg>.
+     Hidden but accessible to <use>. ~1.5kb total. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="icon-overview" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="7" height="9" rx="1"/>
+      <rect x="14" y="3" width="7" height="5" rx="1"/>
+      <rect x="14" y="12" width="7" height="9" rx="1"/>
+      <rect x="3" y="16" width="7" height="5" rx="1"/>
+    </symbol>
+    <symbol id="icon-cost" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
+      <path d="M12 18V6"/>
+    </symbol>
+    <symbol id="icon-cache" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+      <path d="M3 5v14a9 3 0 0 0 18 0V5"/>
+      <path d="M3 12a9 3 0 0 0 18 0"/>
+    </symbol>
+    <symbol id="icon-tools" viewBox="0 0 24 24">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+    </symbol>
+    <symbol id="icon-subagents" viewBox="0 0 24 24">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </symbol>
+    <symbol id="icon-sessions" viewBox="0 0 24 24">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+    </symbol>
+    <symbol id="icon-turns" viewBox="0 0 24 24">
+      <path d="m17 2 4 4-4 4"/>
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14"/>
+      <path d="m7 22-4-4 4-4"/>
+      <path d="M21 13v1a4 4 0 0 1-4 4H3"/>
+    </symbol>
+    <symbol id="icon-gauge" viewBox="0 0 24 24">
+      <path d="m12 14 4-4"/>
+      <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+    </symbol>
+    <symbol id="icon-flame" viewBox="0 0 24 24">
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+    </symbol>
+    <symbol id="icon-chevron-up" viewBox="0 0 24 24">
+      <polyline points="18 15 12 9 6 15"/>
+    </symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24">
+      <polyline points="6 9 12 15 18 9"/>
+    </symbol>
+  </defs>
+</svg>
 
-  <div id="warnings"></div>
+<div class="app">
 
-  <h2>Top cost hotspots</h2>
-  <div class="small">Each card opens to reveal a tailored prompt — click <strong>Copy prompt</strong> and paste into Claude (or any LLM) for specific advice on tools, MCPs, CLIs, and workflow patterns. The prompts forbid the trivial "use a cheaper model" answer.</div>
-  <div class="hotspots" id="hotspots"></div>
+  <aside class="nav" aria-label="Sections">
+    <div class="brand">
+      <div class="brand-name">claudit</div>
+      <div class="brand-sub" id="date-range"></div>
+    </div>
+    <nav class="nav-list">
+      <a class="nav-item is-active" href="#overview" data-view="overview">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</span>
+        <span class="nav-metric" id="nav-metric-overview">—</span>
+      </a>
+      <a class="nav-item" href="#cost" data-view="cost">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</span>
+        <span class="nav-metric" id="nav-metric-cost">—</span>
+      </a>
+      <a class="nav-item" href="#cache" data-view="cache">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache</span>
+        <span class="nav-metric" id="nav-metric-cache">—</span>
+      </a>
+      <a class="nav-item" href="#tools" data-view="tools">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tools"/></svg>Tools</span>
+        <span class="nav-metric" id="nav-metric-tools">—</span>
+      </a>
+      <a class="nav-item" href="#subagents" data-view="subagents">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-subagents"/></svg>Subagents</span>
+        <span class="nav-metric" id="nav-metric-subagents">—</span>
+      </a>
+    </nav>
+  </aside>
 
-  <div class="controls">
-    <label>Filter rows: <input id="filter" type="search" placeholder="model, path, command, agent…"></label>
-    <label>Min cost: <input id="mincost" type="number" value="0" step="0.01" min="0"></label>
-    <span class="hint">Click any column header to sort. Filter and min-cost apply to every table.</span>
-  </div>
+  <main class="panel">
 
-  <div id="trend-section"></div>
+    <div class="controls" role="search">
+      <label>Filter rows: <input id="filter" type="search" placeholder="model, path, command, agent…"></label>
+      <label>Min cost: <input id="mincost" type="number" value="0" step="0.01" min="0"></label>
+      <span class="hint">Filter and min-cost apply across every section. Click any column header to sort.</span>
+    </div>
 
-  <h2>By model</h2>
-  <div class="charts">
-    <svg class="donut" width="200" height="200" viewBox="-100 -100 200 200" id="donut-model"></svg>
-    <div class="legend" id="legend-model"></div>
-  </div>
-  <table data-table="model">
-    <thead><tr>
-      <th data-key="Model">Model</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="Pct" class="num">%</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="OutputTokens" class="num">Output tokens</th>
-      <th data-key="CacheReadTokens" class="num">Cache read tokens</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+    <section class="view is-active" id="view-overview" data-view="overview">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</h1></header>
 
-  <h2>By project</h2>
-  <div class="hbar-list" id="bars-project"></div>
-  <table data-table="project">
-    <thead><tr>
-      <th data-key="Project">Project</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="Pct" class="num">%</th>
-      <th data-key="Sessions" class="num">Sessions</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="DominantModel">Dominant model</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <details class="guide">
+        <summary>How to read this report</summary>
+        <div class="body">
+          <p>This report shows where your Claude Code spend went in the selected window, and where it's likely worth attention. Each section in the left nav is one perspective on the same data:</p>
+          <ul>
+            <li><strong>Cost</strong> — dollars sliced by model, project, skill / slash command, and prompt</li>
+            <li><strong>Cache efficiency</strong> — how much of your context paid full price vs the cheap cache-read price</li>
+            <li><strong>Tools</strong> — which tools (Read, Bash, Edit…) drove the most spend</li>
+            <li><strong>Subagents</strong> — main thread vs sidechain, and which subagent types cost most</li>
+          </ul>
+          <p><strong>How to use it:</strong></p>
+          <ul>
+            <li>The <strong>hotspots</strong> below are the highest-leverage targets in this window. Open a card, click <strong>Copy prompt</strong>, paste into Claude (or any LLM) for tailored remediation advice.</li>
+            <li><strong>Hover any column header</strong> for a one-line definition of that metric.</li>
+            <li>Each section opens with a callout like this one — short rules of thumb for what high values usually mean and what to try.</li>
+            <li>The <strong>Filter</strong> and <strong>Min cost</strong> controls at the top apply across every section.</li>
+          </ul>
+        </div>
+      </details>
 
-  <h2>Cache efficiency</h2>
-  <div class="small">Hit ratio = <code>cache_read / (cache_read + input + cache_create_5m + cache_create_1h)</code>. Higher is better. Rows ranked by <strong>miss tokens</strong> — context paid for at full price (input) or cache-write price (cache_create) instead of cheap cache reads. Tool dimension omitted: tool-level cache hit rate is dominated by surrounding-turn context, not the tool itself.</div>
-  <div id="cache-summary" class="trend-summary"></div>
-  <h3 style="margin-top:18px">Worst projects by miss tokens</h3>
-  <table data-table="cache-project">
-    <thead><tr>
-      <th data-key="Key">Project</th>
-      <th data-key="HitRatio" class="num">Hit ratio</th>
-      <th data-key="Miss" class="num">Miss tokens</th>
-      <th data-key="CacheReadTokens" class="num">Cache read</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
-  <h3 style="margin-top:18px">Worst sessions by miss tokens</h3>
-  <table data-table="cache-session">
-    <thead><tr>
-      <th data-key="Key">Session</th>
-      <th data-key="Subtitle">Project</th>
-      <th data-key="HitRatio" class="num">Hit ratio</th>
-      <th data-key="Miss" class="num">Miss tokens</th>
-      <th data-key="CacheReadTokens" class="num">Cache read</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
-  <h3 style="margin-top:18px">Worst subagent types by miss tokens</h3>
-  <div class="small">Subagents start with a cold cache (each invocation is a fresh context). The miss-token volume below is the structural tax for using each subagent type.</div>
-  <table data-table="cache-subagent">
-    <thead><tr>
-      <th data-key="Key">Subagent type</th>
-      <th data-key="HitRatio" class="num">Hit ratio</th>
-      <th data-key="Miss" class="num">Miss tokens</th>
-      <th data-key="CacheReadTokens" class="num">Cache read</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
-  <h3 style="margin-top:18px">Worst single subagent invocations by miss tokens</h3>
-  <table data-table="cache-invocation">
-    <thead><tr>
-      <th data-key="Key">Description</th>
-      <th data-key="Subtitle">Type</th>
-      <th data-key="HitRatio" class="num">Hit ratio</th>
-      <th data-key="Miss" class="num">Miss tokens</th>
-      <th data-key="CacheReadTokens" class="num">Cache read</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <div class="totals" id="totals"></div>
+      <div id="warnings"></div>
+      <div id="trend-section"></div>
 
-  <h2>Top expensive prompts</h2>
-  <div class="small">User prompts ranked by the total cost of the assistant turn chain each one kicked off. Prompts cluster on the first 120 chars of normalized text — trivially-different repeats of the same ask appear in the same row. Hover a row's snippet for the full prompt.</div>
-  <table data-table="prompt">
-    <thead><tr>
-      <th data-key="Sample">Snippet</th>
-      <th data-key="Invocations" class="num">Invocations</th>
-      <th data-key="Sessions" class="num">Sessions</th>
-      <th data-key="TurnCount" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="Pct" class="num">%</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <h2><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>Top cost hotspots</h2>
+      <div class="small">Each card opens to reveal a tailored prompt — click <strong>Copy prompt</strong> and paste into Claude (or any LLM) for specific advice on tools, MCPs, CLIs, and workflow patterns. The prompts forbid the trivial "use a cheaper model" answer.</div>
+      <div class="hotspots" id="hotspots"></div>
+    </section>
 
-  <h2>By tool</h2>
-  <div class="hbar-list" id="bars-tool"></div>
-  <table data-table="tool">
-    <thead><tr>
-      <th data-key="Name">Tool</th>
-      <th data-key="Count" class="num">Calls</th>
-      <th data-key="TurnCount" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="Pct" class="num">%</th>
-      <th data-key="OutputTokens" class="num">Output tokens</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+    <section class="view" id="view-cost" data-view="cost">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</h1></header>
 
-  <h2>Drill-down by tool</h2>
-  <div class="small">Each section is a (tool, argument-pattern) breakdown — e.g. Bash + <code>git status</code>. Open one to dig in.</div>
-  <div id="drill-container"></div>
+      <details class="guide">
+        <summary>Reading these tables</summary>
+        <div class="body">
+          <ul>
+            <li><strong>By model</strong> — what fraction of spend went to each model. Opus dominating is expected for hard work; if it's also serving small or repetitive tasks, those are candidates to route to Sonnet or Haiku.</li>
+            <li><strong>By project</strong> — which working directories cost the most. A surprise winner here is usually a side project quietly running up more spend than you realized.</li>
+            <li><strong>By skill &amp; slash command</strong> — cost per invoked <code>/command</code> or skill. A high <em>cost-per-call</em> ratio flags candidates for tightening (smaller starting context, less tool output) or replacement.</li>
+            <li><strong>Top expensive prompts</strong> — recurring prompts that kicked off long, costly turn chains. Repeated expensive prompts often justify a custom skill or compact agent that does the same job with less context.</li>
+          </ul>
+        </div>
+      </details>
 
-  <h2>By skill &amp; slash command</h2>
-  <table data-table="skill">
-    <thead><tr>
-      <th data-key="Key">Key</th>
-      <th data-key="Count" class="num">Calls</th>
-      <th data-key="TurnCount" class="num">Turns</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="OutputTokens" class="num">Output tokens</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <nav class="subtabs" aria-label="Cost sections">
+        <a class="subtab is-active" href="#cost/model"   data-subtab="model">By model</a>
+        <a class="subtab"           href="#cost/project" data-subtab="project">By project</a>
+        <a class="subtab"           href="#cost/skill"   data-subtab="skill">By skill &amp; slash command</a>
+        <a class="subtab"           href="#cost/prompt"  data-subtab="prompt">Top expensive prompts</a>
+      </nav>
 
-  <h2>Main vs sidechain</h2>
-  <div class="stacked" id="stacked-main"></div>
-  <table data-table="mainside">
-    <thead><tr>
-      <th>Bucket</th>
-      <th class="num">Cost</th>
-      <th class="num">%</th>
-      <th class="num">Turns</th>
-      <th class="num">Cache read</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <div class="subview is-active" data-subview="model">
+        <div class="hbar-list" id="bars-model"></div>
+        <table data-table="model">
+          <thead><tr>
+            <th data-key="Model" title="Claude model ID, e.g. claude-sonnet-4-6.">Model</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of all assistant turns on this model in this window. Priced via ~/.config/claudit/prices.yaml.">Cost</th>
+            <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
+            <th data-key="Turns" class="num" title="Number of assistant turns generated by this model.">Turns</th>
+            <th data-key="OutputTokens" class="num" title="Tokens the model generated. Output is the most expensive token type per unit.">Output tokens</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache (cheapest input price, ~10% of fresh input).">Cache read tokens</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
-  <h2>By subagent type</h2>
-  <table data-table="subagent">
-    <thead><tr>
-      <th data-key="Type">Subagent</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="PctSide" class="num">% of sidechain</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="OutputTokens" class="num">Output</th>
-      <th data-key="CacheReadTokens" class="num">Cache read</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <div class="subview" data-subview="project">
+        <div class="hbar-list" id="bars-project"></div>
+        <table data-table="project">
+          <thead><tr>
+            <th data-key="Project" title="Working directory the session ran in (its CWD when Claude Code was launched).">Project</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of all sessions whose CWD was this project.">Cost</th>
+            <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
+            <th data-key="Sessions" class="num" title="Number of distinct session IDs that ran in this project.">Sessions</th>
+            <th data-key="Turns" class="num" title="Number of assistant turns across those sessions.">Turns</th>
+            <th data-key="DominantModel" title="The model that produced the most output tokens in this project.">Dominant model</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
-  <h2>Top subagent invocations</h2>
-  <div class="small">Each row is one subagent run (one <code>agent-&lt;id&gt;.jsonl</code> file). Use the global filter above to narrow by subagent type, description, or project.</div>
-  <table data-table="invocation">
-    <thead><tr>
-      <th data-key="SubagentType">Subagent</th>
-      <th data-key="Description">Description</th>
-      <th data-key="CostUSD" class="num">Cost</th>
-      <th data-key="Turns" class="num">Turns</th>
-      <th data-key="Project">Project</th>
-      <th data-key="First">Started</th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+      <div class="subview" data-subview="skill">
+        <table data-table="skill">
+          <thead><tr>
+            <th data-key="Key" title="Skill name or slash-command (e.g. /review, skill:tdd) that was invoked.">Key</th>
+            <th data-key="Count" class="num" title="Number of times this skill or slash command was invoked.">Calls</th>
+            <th data-key="TurnCount" class="num" title="Assistant turns that ran while this skill was active.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of those turns. Cost ÷ Calls is your cost-per-invocation lever.">Cost</th>
+            <th data-key="OutputTokens" class="num" title="Tokens the model generated during this skill's turns.">Output tokens</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="prompt">
+        <div class="small">User prompts ranked by the total cost of the assistant turn chain each one kicked off. Prompts cluster on the first 120 chars of normalized text — trivially-different repeats of the same ask appear in the same row. Hover a row's snippet for the full prompt.</div>
+        <table data-table="prompt">
+          <thead><tr>
+            <th data-key="Sample" title="First ~120 characters of the user prompt. Rows cluster by normalized prefix, so trivially-different repeats appear in one row. Hover the cell for full text.">Snippet</th>
+            <th data-key="Invocations" class="num" title="How many times this prompt cluster was sent.">Invocations</th>
+            <th data-key="Sessions" class="num" title="Distinct sessions in which this prompt was sent.">Sessions</th>
+            <th data-key="TurnCount" class="num" title="Assistant turns that this prompt's chain produced (one prompt can fan out into many turns).">Turns</th>
+            <th data-key="CostUSD" class="num" title="Total dollar cost of the assistant turn chain this prompt kicked off.">Cost</th>
+            <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="view" id="view-cache" data-view="cache">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache efficiency</h1></header>
+
+      <details class="guide">
+        <summary>Why miss tokens matter — and what you can do about them</summary>
+        <div class="body">
+          <p><strong>Cached input tokens cost roughly a tenth of fresh input.</strong> Every time the cache misses, you pay ~10× more for the same context. Getting your hit ratio up is usually the single biggest cost lever in this report.</p>
+          <ul>
+            <li><strong>Hit ratio</strong> = <code>cache_read / (cache_read + input + cache_create_5m + cache_create_1h)</code>. Higher is better.</li>
+            <li><strong>Miss tokens</strong> = the volume that paid full price (<code>input</code>) or cache-write price (<code>cache_create</code>) instead of the cheap <code>cache_read</code> price. Rows in the tables below are ranked by this number — these are your cost levers.</li>
+          </ul>
+          <p><strong>What high miss tokens usually mean:</strong></p>
+          <ul>
+            <li><em>Many short sessions, low hit ratio</em> → you keep starting fresh sessions before the cache warms up. Try staying in one session longer; restarts are expensive.</li>
+            <li><em>Long sessions, still high miss</em> → context keeps getting invalidated. Common causes: editing very large files (each edit invalidates downstream cache), running <code>/compact</code> often, or jumping between unrelated tasks in one session.</li>
+            <li><em>Subagents dominating miss tokens</em> → expected. Every subagent invocation starts with an empty cache, so their miss volume is a structural tax (see the <strong>Subagent types</strong> sub-tab). The only lever is invoking subagents less, or with smaller starting context.</li>
+          </ul>
+        </div>
+      </details>
+
+      <div id="cache-summary" class="trend-summary"></div>
+
+      <nav class="subtabs" aria-label="Cache breakdowns">
+        <a class="subtab is-active" href="#cache/projects"    data-subtab="projects">Projects</a>
+        <a class="subtab"           href="#cache/sessions"    data-subtab="sessions">Sessions</a>
+        <a class="subtab"           href="#cache/subagents"   data-subtab="subagents">Subagent types</a>
+        <a class="subtab"           href="#cache/invocations" data-subtab="invocations">Invocations</a>
+      </nav>
+
+      <div class="subview is-active" data-subview="projects">
+        <table data-table="cache-project">
+          <thead><tr>
+            <th data-key="Key" title="Working directory the session ran in.">Project</th>
+            <th data-key="HitRatio" class="num" title="cache_read / (cache_read + input + cache_create_5m + cache_create_1h). Higher is better.">Hit ratio</th>
+            <th data-key="Miss" class="num" title="Tokens paid full price (input) or cache-write price (cache_create) instead of the cheap cache-read price. Lower is better — this is your cost lever.">Miss tokens</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache. Cheapest input price (~10% of fresh).">Cache read</th>
+            <th data-key="Turns" class="num" title="Number of assistant turns across this project's sessions.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of those turns.">Cost</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="sessions">
+        <table data-table="cache-session">
+          <thead><tr>
+            <th data-key="Key" title="Session ID (matches the .jsonl filename in ~/.claude/projects/…).">Session</th>
+            <th data-key="Subtitle" title="Working directory of this session.">Project</th>
+            <th data-key="HitRatio" class="num" title="cache_read / (cache_read + input + cache_create_5m + cache_create_1h). Higher is better.">Hit ratio</th>
+            <th data-key="Miss" class="num" title="Tokens paid full price or cache-write price in this session. High in long sessions = cache invalidated often (large file edits, /compact, jumping tasks).">Miss tokens</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache in this session.">Cache read</th>
+            <th data-key="Turns" class="num" title="Assistant turns in this session.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of this session.">Cost</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="subagents">
+        <div class="small">Subagents start with a cold cache (each invocation is a fresh context). The miss-token volume below is the structural tax for using each subagent type.</div>
+        <table data-table="cache-subagent">
+          <thead><tr>
+            <th data-key="Key" title="Subagent type (the agent name from ~/.claude/agents or the built-in Agent tool).">Subagent type</th>
+            <th data-key="HitRatio" class="num" title="Hit ratio across all invocations of this subagent. Structurally low — every invocation starts cold.">Hit ratio</th>
+            <th data-key="Miss" class="num" title="Total miss tokens across all invocations of this subagent type. The structural tax for using it; lever is invoke less or with smaller starting context.">Miss tokens</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache (only possible within a single invocation, after the first turn).">Cache read</th>
+            <th data-key="Turns" class="num" title="Total assistant turns across all invocations of this subagent type.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Total dollar cost of all invocations of this subagent type.">Cost</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="invocations">
+        <table data-table="cache-invocation">
+          <thead><tr>
+            <th data-key="Key" title="The description argument passed when this subagent was invoked.">Description</th>
+            <th data-key="Subtitle" title="Subagent type for this invocation.">Type</th>
+            <th data-key="HitRatio" class="num" title="Hit ratio for this single invocation.">Hit ratio</th>
+            <th data-key="Miss" class="num" title="Miss tokens for this single invocation. Useful for spotting individual runs that paid an unusually large cold-cache tax.">Miss tokens</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache within this invocation (only after the first turn).">Cache read</th>
+            <th data-key="Turns" class="num" title="Assistant turns in this invocation.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of this invocation.">Cost</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="view" id="view-tools" data-view="tools">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-tools"/></svg>Tools</h1></header>
+
+      <details class="guide">
+        <summary>What "tool cost" means</summary>
+        <div class="body">
+          <p>Cost attributed to a tool is the cost of the <em>assistant turns that called it</em> — the model has to read the tool's output back into context, so a tool that returns large results inflates the next turn's input cost.</p>
+          <ul>
+            <li><strong>High Read or Grep cost</strong> → likely reading huge files or grepping with broad patterns. Open the <strong>Drill-down</strong> tab to see the (tool, args) breakdown and look for arguments hitting big files.</li>
+            <li><strong>High Bash cost</strong> → often <code>tail</code>, <code>npm test</code>, log streaming, or other commands whose stdout streams large output back into context. Consider redirecting to a file and reading a slice.</li>
+            <li><strong>High Edit cost</strong> → not the edit itself; usually the file was large enough that subsequent reads got expensive.</li>
+          </ul>
+        </div>
+      </details>
+
+      <nav class="subtabs" aria-label="Tools sections">
+        <a class="subtab is-active" href="#tools/by-tool" data-subtab="by-tool">By tool</a>
+        <a class="subtab"           href="#tools/drill"   data-subtab="drill">Drill-down</a>
+      </nav>
+
+      <div class="subview is-active" data-subview="by-tool">
+        <div class="hbar-list" id="bars-tool"></div>
+        <table data-table="tool">
+          <thead><tr>
+            <th data-key="Name" title="Tool name (Read, Bash, Edit, Grep, Agent, …).">Tool</th>
+            <th data-key="Count" class="num" title="Number of times this tool was invoked across all sessions.">Calls</th>
+            <th data-key="TurnCount" class="num" title="Assistant turns that called this tool.">Turns</th>
+            <th data-key="CostUSD" class="num" title="Cost of the assistant turns that called this tool. Large tool output inflates the next turn's input cost.">Cost</th>
+            <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
+            <th data-key="OutputTokens" class="num" title="Tokens the model generated on those turns (does not include the tool's own output, which is input on the next turn).">Output tokens</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="drill">
+        <div class="small">Each section is a (tool, argument-pattern) breakdown — e.g. Bash + <code>git status</code>. Open one to dig in.</div>
+        <div id="drill-container"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-subagents" data-view="subagents">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-subagents"/></svg>Subagents</h1></header>
+
+      <details class="guide">
+        <summary>Main thread vs sidechain — when delegation pays off</summary>
+        <div class="body">
+          <p>The <strong>main</strong> thread is your direct conversation. <strong>Sidechain</strong> = work delegated to subagents (the Agent tool, custom agents in <code>~/.claude/agents</code>). Sidechains keep main context lean, but every invocation starts with a cold cache.</p>
+          <ul>
+            <li><strong>Sidechain cost &gt; main cost</strong> → likely over-delegating. A subagent that does &lt; ~2 minutes of real work usually costs more in cold-cache tax than the main-context bytes it saves.</li>
+            <li><strong>One subagent type dominating sidechain</strong> → that agent is the highest-value optimization target. Trim its system prompt and tool list — smaller starting context means a smaller cold-cache tax on every invocation.</li>
+            <li><strong>Top invocations</strong> surfaces single subagent runs that took unusually long — often a sign the agent's task was poorly scoped, or the agent kept thrashing instead of converging.</li>
+          </ul>
+        </div>
+      </details>
+
+      <nav class="subtabs" aria-label="Subagents sections">
+        <a class="subtab is-active" href="#subagents/mainside"    data-subtab="mainside">Main vs sidechain</a>
+        <a class="subtab"           href="#subagents/by-type"     data-subtab="by-type">By subagent type</a>
+        <a class="subtab"           href="#subagents/invocations" data-subtab="invocations">Top invocations</a>
+      </nav>
+
+      <div class="subview is-active" data-subview="mainside">
+        <div class="stacked" id="stacked-main"></div>
+        <table data-table="mainside">
+          <thead><tr>
+            <th title="main = your direct conversation. sidechain = work done in subagents (Agent tool, custom agents).">Bucket</th>
+            <th class="num" title="Dollar cost of this bucket.">Cost</th>
+            <th class="num" title="Share of total cost in this window.">%</th>
+            <th class="num" title="Assistant turns in this bucket.">Turns</th>
+            <th class="num" title="Tokens served from cache in this bucket. Sidechain cache reads are usually small — every invocation starts cold.">Cache read</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="by-type">
+        <table data-table="subagent">
+          <thead><tr>
+            <th data-key="Type" title="Subagent type (the agent name from ~/.claude/agents or the built-in Agent tool).">Subagent</th>
+            <th data-key="CostUSD" class="num" title="Total dollar cost across all invocations of this subagent type.">Cost</th>
+            <th data-key="PctSide" class="num" title="Share of sidechain cost (not total cost). Use to spot which subagent type dominates your delegation.">% of sidechain</th>
+            <th data-key="Turns" class="num" title="Total assistant turns across all invocations of this subagent type.">Turns</th>
+            <th data-key="OutputTokens" class="num" title="Tokens the model generated across those turns.">Output</th>
+            <th data-key="CacheReadTokens" class="num" title="Tokens served from cache (only possible within a single invocation, after the first turn).">Cache read</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="subview" data-subview="invocations">
+        <div class="small">Each row is one subagent run (one <code>agent-&lt;id&gt;.jsonl</code> file). Use the global filter above to narrow by subagent type, description, or project.</div>
+        <table data-table="invocation">
+          <thead><tr>
+            <th data-key="SubagentType" title="Subagent type for this invocation.">Subagent</th>
+            <th data-key="Description" title="The description argument passed when this subagent was invoked.">Description</th>
+            <th data-key="CostUSD" class="num" title="Dollar cost of this single invocation. Outliers here often signal a poorly-scoped delegation.">Cost</th>
+            <th data-key="Turns" class="num" title="Assistant turns in this invocation.">Turns</th>
+            <th data-key="Project" title="Working directory the parent session was running in.">Project</th>
+            <th data-key="First" title="Timestamp this subagent invocation started.">Started</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
 </div>
 
 <script id="claudit-data" type="application/json">{{.DataJSON}}</script>
@@ -378,6 +1554,45 @@
   };
   const escHtml = s => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // ── view + subtab routing ─────────────────────────────────────────────
+  // Hash format is `#view` or `#view/subtab` (e.g. `#cost/project`).
+  // Browser back/forward works because anchor clicks update location.hash.
+  const VIEWS = ['overview', 'cost', 'cache', 'tools', 'subagents'];
+  function parseHash() {
+    const h = (location.hash || '#overview').slice(1);
+    const [view, subtab] = h.split('/');
+    return {
+      view: VIEWS.includes(view) ? view : 'overview',
+      subtab: subtab || null,
+    };
+  }
+  function activate({ view, subtab }) {
+    document.querySelectorAll('.view').forEach(v => {
+      v.classList.toggle('is-active', v.dataset.view === view);
+    });
+    document.querySelectorAll('.nav-item').forEach(a => {
+      a.classList.toggle('is-active', a.dataset.view === view);
+    });
+    // If the active view has subtabs, default to the first when none specified.
+    const activeView = document.querySelector(`.view[data-view="${view}"]`);
+    if (activeView) {
+      const subtabs = activeView.querySelectorAll('.subtab');
+      if (subtabs.length) {
+        const target = subtab && activeView.querySelector(`.subtab[data-subtab="${subtab}"]`)
+          ? subtab
+          : subtabs[0].dataset.subtab;
+        subtabs.forEach(t =>
+          t.classList.toggle('is-active', t.dataset.subtab === target));
+        activeView.querySelectorAll('.subview').forEach(s =>
+          s.classList.toggle('is-active', s.dataset.subview === target));
+      }
+    }
+    // Bring the panel back to the top so the user lands on the section header.
+    if (window.scrollY > 0) window.scrollTo({top: 0, behavior: 'instant'});
+  }
+  activate(parseHash());
+  window.addEventListener('hashchange', () => activate(parseHash()));
 
   // ── trend helpers ─────────────────────────────────────────────────────
   // Period is one of "day" | "week" | "month" | "" (disabled).
@@ -407,7 +1622,8 @@
       const bh = max > 0 ? (v / max) * (h - 1) : 0;
       const x = i * bw;
       const y = h - bh;
-      bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(bw*0.85).toFixed(2)}" height="${bh.toFixed(2)}"><title>${escHtml(bucketLabel(points[i].time, PERIOD))}: ${fmtMoney(v)}</title></rect>`;
+      const label = `${escHtml(bucketLabel(points[i].time, PERIOD))}: ${fmtMoney(v)}`;
+      bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(bw*0.85).toFixed(2)}" height="${bh.toFixed(2)}" data-tooltip="${label}"></rect>`;
     }
     return `<svg class="trend-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bars}</svg>`;
   }
@@ -423,11 +1639,56 @@
     return cacheable > 0 ? cr / cacheable : 0;
   }
 
+  // Catmull-Rom → cubic-bezier path. Tension 0.5 (the standard) gives
+  // natural-looking curves without overshoot on monotone-ish data. For
+  // sharp peaks the smoothing is gentle enough that no clipping occurs.
+  function smoothPath(pts) {
+    if (!pts || pts.length === 0) return '';
+    if (pts.length === 1) return `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+    let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(pts.length - 1, i + 2)];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+      const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+      const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
+    }
+    return d;
+  }
+
+  // HTML-attribute-safe JSON encoder for embedding chart points in
+  // data-chart-points. Escapes the five characters that matter inside a
+  // single-quoted attribute (& ' " < >). Browsers round-trip these via
+  // dataset.* automatically, so JSON.parse on the other end works.
+  function encodeChartData(arr) {
+    return JSON.stringify(arr).replace(/[&'"<>]/g, c => `&#${c.charCodeAt(0)};`);
+  }
+
+  // Read the panel's interior width once at chart-render time so the
+  // viewBox can be sized to match the actual rendered SVG. With matching
+  // viewBox/CSS dimensions, preserveAspectRatio="meet" introduces no
+  // padding — the chart fills the full container end-to-end. Falls back
+  // to 1100 if the panel isn't measurable yet (initial paint edge case).
+  function chartViewboxWidth() {
+    const p = document.querySelector('.panel');
+    if (!p) return 1100;
+    const r = p.getBoundingClientRect();
+    const cs = window.getComputedStyle(p);
+    const inner = r.width - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+    // Subtract .trend-chart's own padding (s-3 each side ≈ 12px) so the
+    // chart bg and the axis labels don't overlap the rounded corners.
+    return Math.max(800, Math.round(inner - 24));
+  }
+
   // Mini SVG line chart for hit ratio over time. Y axis fixed 0..100%
-  // so the chart shape is always comparable.
+  // so the chart shape is always comparable across reports.
   function hitRatioChart(points, period) {
     if (!points || points.length < 2) return '';
-    const w = 1100, h = 90;
+    const w = chartViewboxWidth(), h = 110;
     const pad = { l: 60, r: 16, t: 8, b: 22 };
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
@@ -435,10 +1696,12 @@
     const xAt = i => pad.l + (i / (n - 1)) * innerW;
     const yAt = r => pad.t + innerH - r * innerH;  // r in [0,1]
 
-    let linePts = '';
-    for (let i = 0; i < n; i++) {
-      linePts += `${xAt(i).toFixed(2)},${yAt(pointHitRatio(points[i])).toFixed(2)} `;
-    }
+    const coords = points.map((p, i) => [xAt(i), yAt(pointHitRatio(p))]);
+    const linePath = smoothPath(coords);
+    const areaPath = linePath +
+      ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)}` +
+      ` L ${xAt(0).toFixed(2)} ${(pad.t + innerH).toFixed(2)} Z`;
+
     // Y gridlines at 0, 50, 100%.
     let yAxis = '';
     for (const r of [0, 0.5, 1.0]) {
@@ -448,44 +1711,65 @@
     let dots = '';
     for (let i = 0; i < n; i++) {
       const r = pointHitRatio(points[i]);
-      dots += `<circle class="trend-pt" cx="${xAt(i).toFixed(2)}" cy="${yAt(r).toFixed(2)}" r="3"><title>${escHtml(bucketLabel(points[i].time, period))}: ${(r*100).toFixed(1)}% hit</title></circle>`;
+      dots += `<circle class="trend-pt" cx="${xAt(i).toFixed(2)}" cy="${yAt(r).toFixed(2)}" r="3" data-i="${i}"/>`;
     }
-    return `<div class="small" style="margin-top:14px;font-weight:600">Cache hit ratio over ${escHtml(period)}</div>
-      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="height:90px">
-        ${yAxis}
-        <polyline class="trend-line" points="${linePts.trim()}" style="stroke:var(--accent-2)"/>
-        ${dots}
-      </svg>`;
+
+    const data = points.map(p => ({
+      label: bucketLabel(p.time, period),
+      ratio: pointHitRatio(p),
+    }));
+
+    return `<div class="trend-subtitle">Cache hit ratio over ${escHtml(period)}</div>
+      <div class="chart-host" data-chart-type="hitratio"
+           data-chart-points='${encodeChartData(data)}'
+           data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+           data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+           data-vb-w="${w}" data-vb-h="${h}">
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" class="trend-hitratio">
+          <defs>
+            <linearGradient id="grad-hit" x1="0" x2="0" y1="0" y2="1">
+              <stop class="grad-stop-hit-top" offset="0%"/>
+              <stop class="grad-stop-hit-bot" offset="100%"/>
+            </linearGradient>
+          </defs>
+          ${yAxis}
+          <path class="trend-area" d="${areaPath}" fill="url(#grad-hit)"/>
+          <path class="trend-line trend-line-2" d="${linePath}"/>
+          ${dots}
+          <g class="crosshair" style="opacity:0">
+            <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+            <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+          </g>
+        </svg>
+        <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+      </div>`;
   }
 
-  // Larger inline SVG line+area chart for the headline trend section.
-  // Returns a placeholder when there's <2 points to plot.
+  // Headline trend chart — line + gradient area, hover crosshair, smooth
+  // bezier interpolation. Returns a placeholder when there's <2 points.
   function trendLineChart(points, period) {
     if (!points || points.length === 0) return '<div class="small">(no trend data)</div>';
     if (points.length === 1) {
       return `<div class="small">Only one ${escHtml(period)} of data — chart hidden.</div>`;
     }
-    const w = 1100, h = 220;
+    const w = chartViewboxWidth(), h = 320;
     const pad = { l: 60, r: 16, t: 12, b: 32 };
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
     let max = 0;
     for (const p of points) { if ((p.cost_usd || 0) > max) max = p.cost_usd; }
-    if (max <= 0) max = 1;  // avoid div-by-zero; flat line at zero
+    if (max <= 0) max = 1;
     const n = points.length;
     const xAt = i => pad.l + (i / (n - 1)) * innerW;
     const yAt = v => pad.t + innerH - (v / max) * innerH;
 
-    let linePts = '';
-    for (let i = 0; i < n; i++) {
-      linePts += `${xAt(i).toFixed(2)},${yAt(points[i].cost_usd || 0).toFixed(2)} `;
-    }
-    const areaPath =
-      `M ${xAt(0).toFixed(2)} ${(pad.t + innerH).toFixed(2)} ` +
-      points.map((p, i) => `L ${xAt(i).toFixed(2)} ${yAt(p.cost_usd || 0).toFixed(2)}`).join(' ') +
-      ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)} Z`;
+    const coords = points.map((p, i) => [xAt(i), yAt(p.cost_usd || 0)]);
+    const linePath = smoothPath(coords);
+    const areaPath = linePath +
+      ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)}` +
+      ` L ${xAt(0).toFixed(2)} ${(pad.t + innerH).toFixed(2)} Z`;
 
-    // Y gridlines + labels at 0, max/2, max.
+    // Y gridlines at 0, max/2, max.
     let yAxis = '';
     for (const v of [0, max / 2, max]) {
       yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(v).toFixed(2)}" y2="${yAt(v).toFixed(2)}" stroke-dasharray="2,3"/>`;
@@ -499,7 +1783,6 @@
     for (let i = 0; i < n; i += tickStep) {
       xTicks += `<text class="trend-tick" x="${xAt(i).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${escHtml(bucketLabel(points[i].time, period))}</text>`;
     }
-    // Ensure last tick is shown.
     if ((n - 1) % tickStep !== 0) {
       xTicks += `<text class="trend-tick" x="${xAt(n-1).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${escHtml(bucketLabel(points[n-1].time, period))}</text>`;
     }
@@ -507,24 +1790,42 @@
     let dots = '';
     for (let i = 0; i < n; i++) {
       const v = points[i].cost_usd || 0;
-      dots += `<circle class="trend-pt" cx="${xAt(i).toFixed(2)}" cy="${yAt(v).toFixed(2)}" r="3"><title>${escHtml(bucketLabel(points[i].time, period))}: ${fmtMoney(v)} · ${fmtNum(points[i].turns)} turns</title></circle>`;
+      dots += `<circle class="trend-pt" cx="${xAt(i).toFixed(2)}" cy="${yAt(v).toFixed(2)}" r="3" data-i="${i}"/>`;
     }
 
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
-      ${yAxis}
-      <path class="trend-area" d="${areaPath}"/>
-      <polyline class="trend-line" points="${linePts.trim()}"/>
-      ${dots}
-      ${xTicks}
-    </svg>`;
-  }
+    const data = points.map(p => ({
+      label: bucketLabel(p.time, period),
+      cost: p.cost_usd || 0,
+      turns: p.turns || 0,
+    }));
 
-  // ── palette ───────────────────────────────────────────────────────────
-  const COLORS = [
-    '#4a90e2', '#50a87a', '#d97706', '#9013fe', '#d6336c',
-    '#0ea5e9', '#dc2626', '#16a34a', '#a855f7', '#f59e0b',
-    '#64748b'
-  ];
+    return `
+      <div class="chart-host" data-chart-type="cost"
+           data-chart-points='${encodeChartData(data)}'
+           data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+           data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+           data-vb-w="${w}" data-vb-h="${h}">
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="grad-cost" x1="0" x2="0" y1="0" y2="1">
+              <stop class="grad-stop-cost-top" offset="0%"/>
+              <stop class="grad-stop-cost-mid" offset="60%"/>
+              <stop class="grad-stop-cost-bot" offset="100%"/>
+            </linearGradient>
+          </defs>
+          ${yAxis}
+          <path class="trend-area" d="${areaPath}" fill="url(#grad-cost)"/>
+          <path class="trend-line" d="${linePath}"/>
+          ${dots}
+          ${xTicks}
+          <g class="crosshair" style="opacity:0">
+            <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+            <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+          </g>
+        </svg>
+        <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+      </div>`;
+  }
 
   // ── header & warnings ──────────────────────────────────────────────────
   const T = D.totals || {};
@@ -535,23 +1836,83 @@
     ? `${T.First.slice(0,10)} → ${T.Last.slice(0,10)}`
     : '—';
   document.getElementById('date-range').textContent = dateRange;
-  document.getElementById('row-count').textContent =
-    `${fmtNum(T.Sessions)} sessions · ${fmtNum(T.Turns)} assistant turns`;
 
   const fmtPct1 = v => (v == null || isNaN(v)) ? '—' : (100 * v).toFixed(1) + '%';
-  const totalsHtml = [
-    ['Total cost', fmtMoney(totalCost)],
-    ['Sessions', fmtNum(T.Sessions)],
-    ['Assistant turns', fmtNum(T.Turns)],
-    ['Cache hit ratio', fmtPct1(D.overall_hit_ratio)],
-  ].map(([l, v]) => `<div class="stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
-  document.getElementById('totals').innerHTML = totalsHtml;
+
+  // Semantic pill for hit-ratio values. Tier thresholds match the rules-
+  // of-thumb in the cache guide — keep them in sync if either changes.
+  // Pass extraClass="tier-sm" for the compact totals/nav-metric variant.
+  function hitRatioPill(v, extraClass) {
+    if (v == null || isNaN(v)) return '—';
+    const tier = v >= 0.70 ? 'good' : v >= 0.40 ? 'ok' : 'bad';
+    const cls = `tier tier-${tier}` + (extraClass ? ' ' + extraClass : '');
+    return `<span class="${cls}">${fmtPct1(v)}</span>`;
+  }
+  // Helper to render a Lucide-style icon by sprite ID. Used for the
+  // small label glyphs on totals tiles.
+  const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
+
+  // Period-over-period delta block. Compares the most recent trend
+  // bucket to the one before it (e.g. this week vs last week when the
+  // report ran with --by week). Returns '' when there's no comparison
+  // available — single bucket, no --by, or zero prior value.
+  //
+  //   semantics: 'bad'  → upward direction is bad  (e.g. cost)
+  //              'good' → upward direction is good (e.g. hit ratio)
+  //              'neutral' → directional, but not value-laden (e.g. turns)
+  //   asPP:     when true, value is interpreted as percentage POINTS
+  //             instead of relative %. Used for ratios like hit ratio
+  //             where "50% → 55%" reads more clearly as "+5pp" than "+10%".
+  function deltaBlock(latest, prior, semantics, asPP) {
+    if (latest == null || prior == null || !isFinite(latest) || !isFinite(prior)) return '';
+    if (!asPP && (prior === 0 || !isFinite(latest / prior))) return '';
+    const v = asPP ? (latest - prior) * 100 : (latest - prior) / prior * 100;
+    if (!isFinite(v)) return '';
+    const period = PERIOD ? `vs prior ${escHtml(PERIOD)}` : 'vs prior';
+    const tail = `<span class="delta-tail">${period}</span>`;
+    const eps = asPP ? 0.5 : 0.1;
+    if (Math.abs(v) < eps) {
+      return `<div class="delta delta-flat">flat <span class="delta-tail">${period}</span></div>`;
+    }
+    const isUp = v > 0;
+    let cls = 'delta-neutral';
+    if (semantics === 'bad')  cls = isUp ? 'delta-bad'  : 'delta-good';
+    if (semantics === 'good') cls = isUp ? 'delta-good' : 'delta-bad';
+    const iconId = isUp ? 'chevron-up' : 'chevron-down';
+    const arrow = `<svg class="icon" aria-hidden="true"><use href="#icon-${iconId}"/></svg>`;
+    const unit = asPP ? 'pp' : '%';
+    return `<div class="delta ${cls}">${arrow}${Math.abs(v).toFixed(1)}${unit} ${tail}</div>`;
+  }
+
+  // Compute the deltas if we have at least two trend buckets.
+  const _haveTrend = PERIOD && D.trend_totals && D.trend_totals.length >= 2;
+  const _latest = _haveTrend ? D.trend_totals[D.trend_totals.length - 1] : null;
+  const _prior  = _haveTrend ? D.trend_totals[D.trend_totals.length - 2] : null;
+
+  const _costDelta     = _haveTrend ? deltaBlock(_latest.cost_usd || 0, _prior.cost_usd || 0, 'bad', false) : '';
+  const _sessionsDelta = _haveTrend ? deltaBlock(_latest.sessions || 0, _prior.sessions || 0, 'neutral', false) : '';
+  const _turnsDelta    = _haveTrend ? deltaBlock(_latest.turns || 0, _prior.turns || 0, 'neutral', false) : '';
+  const _hitDelta      = _haveTrend ? deltaBlock(pointHitRatio(_latest), pointHitRatio(_prior), 'good', true) : '';
+
+  document.getElementById('totals').innerHTML = `
+    <div class="headline">
+      <div class="label">${labelIcon('cost')}Total cost</div>
+      <div class="value">${fmtMoney(totalCost)}</div>
+      ${_costDelta}
+    </div>
+    <div class="metric"><div class="label">${labelIcon('sessions')}Sessions</div><div class="value">${fmtNum(T.Sessions)}</div>${_sessionsDelta}</div>
+    <div class="metric"><div class="label">${labelIcon('turns')}Assistant turns</div><div class="value">${fmtNum(T.Turns)}</div>${_turnsDelta}</div>
+    <div class="metric"><div class="label">${labelIcon('gauge')}Cache hit ratio</div><div class="value">${hitRatioPill(D.overall_hit_ratio)}</div>${_hitDelta}</div>
+  `;
 
   // ── hotspots ──────────────────────────────────────────────────────────
   (function hotspots() {
     const container = document.getElementById('hotspots');
     const list = D.hotspots || [];
-    if (list.length === 0) { container.innerHTML = '<em class="small">(no hotspots — try widening --since)</em>'; return; }
+    if (list.length === 0) {
+      container.innerHTML = '<p class="small empty-state">No hotspots in this window. Try widening the time range with <code>--since</code>, or lowering <code>-hotspots</code>.</p>';
+      return;
+    }
     container.innerHTML = list.map((h, i) => `<details class="hotspot">
       <summary>
         <span class="rank">#${i+1}</span>
@@ -562,7 +1923,7 @@
       </summary>
       <div class="body">
         <div class="actions">
-          <button class="copy" data-hotspot="${i}">📋 Copy prompt</button>
+          <button class="copy" data-hotspot="${i}">Copy prompt</button>
           <span class="small">Paste this into Claude or another LLM for specific advice.</span>
         </div>
         <pre>${escHtml(h.prompt)}</pre>
@@ -593,7 +1954,7 @@
           try { ok = document.execCommand('copy'); } catch { ok = false; }
         }
         const old = btn.textContent;
-        btn.textContent = ok ? '✓ Copied — paste into your LLM' : '⚠ Select & copy manually';
+        btn.textContent = ok ? 'Copied — paste into your LLM' : 'Select & copy manually';
         btn.classList.add('copied');
         setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 2200);
       });
@@ -602,7 +1963,7 @@
 
   if (D.unknown_models && D.unknown_models.length) {
     document.getElementById('warnings').innerHTML =
-      `<div class="stat" style="border-color:var(--warn);background:#fef9e7"><strong class="danger">⚠ Unpriced models:</strong> ${D.unknown_models.map(escHtml).join(', ')} — add them to <code>~/.config/claudit/prices.yaml</code>.</div>`;
+      `<div class="warning-card" role="alert"><strong class="danger">Unpriced models:</strong> ${D.unknown_models.map(escHtml).join(', ')} — add them to <code>~/.config/claudit/prices.yaml</code>.</div>`;
   }
 
   // ── trend overview section (only when --by is set) ────────────────────
@@ -650,8 +2011,8 @@
   })();
 
   // Inject Trend column header into by-model / by-project / by-tool when
-  // period is on. We do this by DOM mutation rather than templating so
-  // the no-period path stays byte-identical to the prior layout.
+  // period is on. The Trend column is presentation-only — no data-key, so
+  // it isn't sortable.
   function injectTrendColumn(tableSelector, beforeKey) {
     if (!PERIOD) return;
     const table = document.querySelector(tableSelector);
@@ -660,51 +2021,216 @@
     const ths = Array.from(headRow.children);
     const idx = ths.findIndex(th => th.dataset.key === beforeKey);
     const th = document.createElement('th');
-    th.dataset.key = 'Trend';
     th.textContent = 'Trend';
+    th.title = 'Per-row sparkline of cost across the report buckets (day/week/month, set by --by). Bars are downsampled to ~30 cells when wider.';
     if (idx >= 0) headRow.insertBefore(th, ths[idx]);
     else headRow.appendChild(th);
   }
   injectTrendColumn('[data-table="model"]', 'OutputTokens');
   injectTrendColumn('[data-table="project"]', 'DominantModel');
   injectTrendColumn('[data-table="tool"]', 'OutputTokens');
+  // Cache tables: trend column shows hit ratio over time, placed right
+  // after the rolled-up Hit ratio (column key "Miss" sits next to it).
+  injectTrendColumn('[data-table="cache-project"]',  'Miss');
+  injectTrendColumn('[data-table="cache-session"]',  'Miss');
+  injectTrendColumn('[data-table="cache-subagent"]', 'Miss');
 
-  // ── tables: build then attach data ─────────────────────────────────────
-  // Each row carries its raw cost in data-cost so the global min-cost
-  // filter can hide it without re-rendering.
+  // ── paginated tables ──────────────────────────────────────────────────
+  // Each paged table holds its full row data + page/sort state in
+  // `tableStates`. renderTable() filters → sorts → slices to current page →
+  // builds tbody and updates the pager. Sort, filter, and pager events all
+  // call renderTable() rather than mutating DOM directly.
+  const PAGE_SIZE = 25;
+  const tableStates = new WeakMap();
+
   function attachHeat(td, value, max) {
-    if (max <= 0) return;
+    if (max <= 0 || value == null) return;
     td.classList.add('heat');
-    td.style.setProperty('--heat', Math.min(100, 100 * value / max).toFixed(1) + '%');
+    td.style.setProperty('--heat',
+      Math.min(100, 100 * value / max).toFixed(1) + '%');
   }
 
-  function buildRows(table, rows, mapper) {
+  // Insert a trend-sparkline cell at the same column index where
+  // injectTrendColumn() placed the header. PERIOD-conditional.
+  // Pass `kind: 'hit'` to render a hit-ratio sparkline (0..1 normalized,
+  // axis-fixed) instead of the default cost sparkline (max-normalized).
+  function withTrend(cells, idx, series, kind) {
+    if (!PERIOD) return cells;
+    const spark = (kind === 'hit') ? trendSparkHit(series) : trendSpark(series);
+    const cell = [`<span class="trend-cell">${spark}</span>`, false];
+    return cells.slice(0, idx).concat([cell]).concat(cells.slice(idx));
+  }
+
+  // Hit-ratio sparkline. Bars from 0..1 (axis-fixed) so a 30%-hit row
+  // reads as visibly shorter bars than a 90%-hit row, even if their max
+  // bucket has identical absolute volume. Tooltip on each bar shows the
+  // exact ratio for that bucket.
+  function trendSparkHit(points, w, h) {
+    w = w || 90; h = h || 18;
+    if (!points || points.length === 0) return '<span class="small">—</span>';
+    const n = points.length;
+    const bw = w / n;
+    let bars = '';
+    for (let i = 0; i < n; i++) {
+      const r = pointHitRatio(points[i]);  // 0..1
+      const bh = r * (h - 1);
+      const x = i * bw;
+      const y = h - bh;
+      const label = `${escHtml(bucketLabel(points[i].time, PERIOD))}: ${(r * 100).toFixed(1)}% hit`;
+      bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(bw*0.85).toFixed(2)}" height="${bh.toFixed(2)}" data-tooltip="${label}"></rect>`;
+    }
+    return `<svg class="trend-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bars}</svg>`;
+  }
+
+  // Build a single lowercased haystack from a row's string fields so the
+  // global filter can match any of them without per-call re-stringifying.
+  function rowSearchText(r) {
+    let s = '';
+    for (const k in r) {
+      const v = r[k];
+      if (typeof v === 'string') s += ' ' + v;
+    }
+    return s.toLowerCase();
+  }
+
+  function getFilterParams() {
+    const q = document.getElementById('filter').value.trim().toLowerCase();
+    const minCost = parseFloat(document.getElementById('mincost').value || '0') || 0;
+    return { q, minCost };
+  }
+
+  function filterRows(st) {
+    const { q, minCost } = getFilterParams();
+    return st.rows.filter(r => {
+      if (minCost > 0 && (r.CostUSD || 0) < minCost) return false;
+      if (q && !rowSearchText(r).includes(q)) return false;
+      return true;
+    });
+  }
+
+  function sortRows(rows, key, dir) {
+    if (!key || !rows.length || !(key in rows[0])) return rows;
+    const sign = dir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const av = a[key], bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return sign;
+      if (bv == null) return -sign;
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sign * (av - bv);
+      }
+      return sign * String(av).localeCompare(String(bv));
+    });
+  }
+
+  function ensurePager(table) {
+    let pager = table.parentNode.querySelector(
+      `:scope > .pager[data-pager-for="${table.dataset.table}"]`);
+    if (pager) return pager;
+    pager = document.createElement('div');
+    pager.className = 'pager';
+    pager.dataset.pagerFor = table.dataset.table;
+    pager.innerHTML = `
+      <button class="pager-btn" data-pager-action="prev" aria-label="Previous page">‹ Prev</button>
+      <span class="pager-info">
+        <span class="pager-page">Page <strong class="pager-cur">1</strong> / <strong class="pager-total">1</strong></span>
+        <span class="pager-count">0 entries</span>
+      </span>
+      <button class="pager-btn" data-pager-action="next" aria-label="Next page">Next ›</button>
+    `;
+    table.parentNode.insertBefore(pager, table.nextSibling);
+    pager.querySelector('[data-pager-action="prev"]').addEventListener('click', () => {
+      const st = tableStates.get(table);
+      if (st && st.page > 0) { st.page--; renderTable(table); }
+    });
+    pager.querySelector('[data-pager-action="next"]').addEventListener('click', () => {
+      const st = tableStates.get(table);
+      if (!st) return;
+      const totalPages = Math.max(1, Math.ceil(filterRows(st).length / st.pageSize));
+      if (st.page < totalPages - 1) { st.page++; renderTable(table); }
+    });
+    return pager;
+  }
+
+  function renderTable(table) {
+    const st = tableStates.get(table);
+    if (!st) return;
+
+    const filtered = filterRows(st);
+    const sorted = sortRows(filtered, st.sortKey, st.sortDir);
+    const totalRows = sorted.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / st.pageSize));
+    if (st.page >= totalPages) st.page = totalPages - 1;
+    if (st.page < 0) st.page = 0;
+    const pageRows = sorted.slice(st.page * st.pageSize, (st.page + 1) * st.pageSize);
+
+    // Heat scales per-column: a column's overlay maxes at the largest
+    // heatVal seen in that column among filtered rows. This keeps the
+    // Miss-tokens column from being scaled against CostUSD (which would
+    // always clip to 100%).
+    const heatMax = {};
+    filtered.forEach(r => {
+      const cells = st.mapper(r);
+      cells.forEach((c, i) => {
+        const v = c[2];
+        if (v != null && v > 0) {
+          heatMax[i] = Math.max(heatMax[i] || 0, v);
+        }
+      });
+    });
+
     const tbody = table.querySelector('tbody');
     tbody.innerHTML = '';
-    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD || 0));
-    rows.forEach(r => {
-      const tr = document.createElement('tr');
-      tr.dataset.cost = r.CostUSD || 0;
-      const cells = mapper(r);
-      cells.forEach(([html, isNum, heatVal]) => {
-        const td = document.createElement('td');
-        if (isNum) td.classList.add('num');
-        td.innerHTML = html;
-        if (heatVal != null) attachHeat(td, heatVal, maxCost);
-        tr.appendChild(td);
+
+    if (totalRows === 0) {
+      const colCount = table.querySelectorAll('thead th').length;
+      tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-state-row">No matching rows.</td></tr>`;
+    } else {
+      pageRows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.dataset.cost = r.CostUSD || 0;
+        const cells = st.mapper(r);
+        cells.forEach(([html, isNum, heatVal], i) => {
+          const td = document.createElement('td');
+          if (isNum) td.classList.add('num');
+          td.innerHTML = html;
+          if (heatVal != null) attachHeat(td, heatVal, heatMax[i] || 0);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
       });
-      tbody.appendChild(tr);
-    });
-    table.dataset.rows = JSON.stringify(rows);
+    }
+
+    // Pager: hide entirely when total fits on a single page.
+    const pager = ensurePager(table);
+    pager.querySelector('.pager-cur').textContent = totalRows === 0 ? 0 : st.page + 1;
+    pager.querySelector('.pager-total').textContent = totalRows === 0 ? 0 : totalPages;
+    pager.querySelector('.pager-count').textContent =
+      totalRows + (totalRows === 1 ? ' entry' : ' entries');
+    pager.querySelector('[data-pager-action="prev"]').disabled = st.page <= 0 || totalRows === 0;
+    pager.querySelector('[data-pager-action="next"]').disabled =
+      st.page >= totalPages - 1 || totalRows === 0;
+    pager.style.display = totalRows > st.pageSize ? '' : 'none';
+
+    // Sort indicators on header cells.
+    table.querySelectorAll('thead th').forEach(h =>
+      h.classList.remove('sorted-asc', 'sorted-desc'));
+    if (st.sortKey) {
+      const th = table.querySelector(`thead th[data-key="${st.sortKey}"]`);
+      if (th) th.classList.add(st.sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    }
   }
 
-  // Helper: insert a trend-sparkline cell into a row's cell list at the
-  // given column index, but only when PERIOD is on. The index must match
-  // the slot where injectTrendColumn() placed the header.
-  function withTrend(cells, idx, series) {
-    if (!PERIOD) return cells;
-    const cell = [`<span class="trend-cell">${trendSpark(series)}</span>`, false];
-    return cells.slice(0, idx).concat([cell]).concat(cells.slice(idx));
+  // Public callers retain the same `buildRows(table, rows, mapper)` signature.
+  function buildRows(table, rows, mapper) {
+    tableStates.set(table, {
+      rows, mapper,
+      pageSize: PAGE_SIZE,
+      page: 0,
+      sortKey: null,
+      sortDir: null,
+    });
+    renderTable(table);
   }
 
   // By model
@@ -717,38 +2243,29 @@
     [fmtNum(r.CacheReadTokens), true],
   ], 4, (D.trend_by_model || {})[r.Model]));
 
-  // Donut + legend for by-model
-  (function donut() {
-    const svg = document.getElementById('donut-model');
-    const leg = document.getElementById('legend-model');
+  // Horizontal bar list for by-model. Same pattern as by-project / by-tool —
+  // one share-viz vocabulary across the page.
+  (function modelBars() {
+    const host = document.getElementById('bars-model');
     const rows = (D.by_model || []).filter(r => r.CostUSD > 0);
-    const total = rows.reduce((s, r) => s + r.CostUSD, 0);
-    if (total <= 0) { leg.innerHTML = '<em>(no priced data)</em>'; return; }
-    let acc = 0;
-    const r1 = 90, r0 = 55;
-    const arcs = rows.map((row, i) => {
-      const a0 = (acc / total) * Math.PI * 2 - Math.PI / 2;
-      acc += row.CostUSD;
-      const a1 = (acc / total) * Math.PI * 2 - Math.PI / 2;
-      const large = (a1 - a0) > Math.PI ? 1 : 0;
-      const p0 = [Math.cos(a0)*r1, Math.sin(a0)*r1];
-      const p1 = [Math.cos(a1)*r1, Math.sin(a1)*r1];
-      const q1 = [Math.cos(a1)*r0, Math.sin(a1)*r0];
-      const q0 = [Math.cos(a0)*r0, Math.sin(a0)*r0];
-      const color = COLORS[i % COLORS.length];
-      const d = `M ${p0[0]} ${p0[1]} A ${r1} ${r1} 0 ${large} 1 ${p1[0]} ${p1[1]} L ${q1[0]} ${q1[1]} A ${r0} ${r0} 0 ${large} 0 ${q0[0]} ${q0[1]} Z`;
-      return { d, color, row };
-    });
-    svg.innerHTML = arcs.map(a => `<path d="${a.d}" fill="${a.color}"><title>${escHtml(a.row.Model)}: ${fmtMoney(a.row.CostUSD)}</title></path>`).join('');
-    leg.innerHTML = arcs.map(a => `<div class="legend-item">
-      <span class="legend-swatch" style="background:${a.color}"></span>
-      <span><strong>${escHtml(a.row.Model)}</strong> · ${fmtMoney(a.row.CostUSD)} (${fmtPct(a.row.CostUSD, total)})</span>
-    </div>`).join('');
+    if (rows.length === 0) {
+      host.innerHTML = '<p class="small empty-state">No priced model data. Add prices for any unknown models in <code>~/.config/claudit/prices.yaml</code>.</p>';
+      return;
+    }
+    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
+    host.innerHTML = rows.map(r => {
+      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      return `<div class="hbar">
+        <div class="fill" style="width:${w}%"></div>
+        <div class="lbl" title="${escHtml(r.Model)}">${escHtml(r.Model)}</div>
+        <div class="val">${fmtMoney(r.CostUSD)} (${fmtPct(r.CostUSD, totalCost)})</div>
+      </div>`;
+    }).join('');
   })();
 
   // By project
   buildRows(document.querySelector('[data-table="project"]'), D.by_project || [], r => withTrend([
-    [`<span class="truncate" title="${escHtml(r.Project)}">${escHtml(r.Project)}</span>`, false],
+    [`<span class="truncate path" title="${escHtml(r.Project)}">${escHtml(r.Project)}</span>`, false],
     [fmtMoney(r.CostUSD), true, r.CostUSD],
     [fmtPct(r.CostUSD, totalCost), true],
     [fmtNum(r.Sessions), true],
@@ -778,46 +2295,46 @@
     let totalMiss = 0;
     for (const r of proj) totalMiss += r.Miss || 0;
     document.getElementById('cache-summary').innerHTML = `
-      <span>Overall hit ratio: <strong>${fmtPct1(D.overall_hit_ratio)}</strong></span>
+      <span>Overall hit ratio: ${hitRatioPill(D.overall_hit_ratio)}</span>
       <span>Total miss tokens: <strong>${fmtNum(totalMiss)}</strong></span>
       <span>Projects with cacheable traffic: <strong>${proj.length}</strong></span>
       <span>Sessions with cacheable traffic: <strong>${sess.length}</strong></span>
     `;
 
-    buildRows(document.querySelector('[data-table="cache-project"]'), proj, r => [
-      [`<span class="truncate" title="${escHtml(r.Key)}">${escHtml(r.Key)}</span>`, false],
-      [fmtPct1(r.HitRatio), true],
+    buildRows(document.querySelector('[data-table="cache-project"]'), proj, r => withTrend([
+      [`<span class="truncate path" title="${escHtml(r.Key)}">${escHtml(r.Key)}</span>`, false],
+      [hitRatioPill(r.HitRatio), true],
       [fmtNum(r.Miss), true, r.Miss],
       [fmtNum(r.CacheReadTokens), true],
       [fmtNum(r.Turns), true],
       [fmtMoney(r.CostUSD), true],
-    ]);
+    ], 2, (D.trend_by_project || {})[r.Key], 'hit'));
 
-    buildRows(document.querySelector('[data-table="cache-session"]'), sess, r => [
+    buildRows(document.querySelector('[data-table="cache-session"]'), sess, r => withTrend([
       [`<code>${escHtml((r.Key || '').slice(0, 8))}…</code>`, false],
-      [`<span class="truncate" title="${escHtml(r.Subtitle)}">${escHtml(truncate(r.Subtitle || '', 60))}</span>`, false],
-      [fmtPct1(r.HitRatio), true],
+      [`<span class="truncate path" title="${escHtml(r.Subtitle)}">${escHtml(truncate(r.Subtitle || '', 80))}</span>`, false],
+      [hitRatioPill(r.HitRatio), true],
       [fmtNum(r.Miss), true, r.Miss],
       [fmtNum(r.CacheReadTokens), true],
       [fmtNum(r.Turns), true],
       [fmtMoney(r.CostUSD), true],
-    ]);
+    ], 3, (D.trend_by_session || {})[r.Key], 'hit'));
 
     const subs = D.cache_by_subagent || [];
-    buildRows(document.querySelector('[data-table="cache-subagent"]'), subs, r => [
+    buildRows(document.querySelector('[data-table="cache-subagent"]'), subs, r => withTrend([
       [escHtml(r.Key), false],
-      [fmtPct1(r.HitRatio), true],
+      [hitRatioPill(r.HitRatio), true],
       [fmtNum(r.Miss), true, r.Miss],
       [fmtNum(r.CacheReadTokens), true],
       [fmtNum(r.Turns), true],
       [fmtMoney(r.CostUSD), true],
-    ]);
+    ], 2, (D.trend_by_subagent || {})[r.Key], 'hit'));
 
     const invs = D.cache_by_invocation || [];
     buildRows(document.querySelector('[data-table="cache-invocation"]'), invs, r => [
       [`<span class="truncate" title="${escHtml(r.Key)}">${escHtml(truncate(r.Key, 80))}</span>`, false],
       [escHtml(r.Subtitle || '(unknown)'), false],
-      [fmtPct1(r.HitRatio), true],
+      [hitRatioPill(r.HitRatio), true],
       [fmtNum(r.Miss), true, r.Miss],
       [fmtNum(r.CacheReadTokens), true],
       [fmtNum(r.Turns), true],
@@ -916,8 +2433,8 @@
     if (total > 0) {
       const mp = 100 * main.cost / total, sp = 100 - mp;
       stacked.innerHTML = `
-        <div style="width:${mp}%;background:var(--accent)" title="main: ${fmtMoney(main.cost)}">main · ${mp.toFixed(1)}%</div>
-        <div style="width:${sp}%;background:var(--accent-2)" title="sidechain: ${fmtMoney(side.cost)}">sidechain · ${sp.toFixed(1)}%</div>`;
+        <div class="bucket bucket-main" style="width:${mp}%" title="main: ${fmtMoney(main.cost)}">main · ${mp.toFixed(1)}%</div>
+        <div class="bucket bucket-side" style="width:${sp}%" title="sidechain: ${fmtMoney(side.cost)}">sidechain · ${sp.toFixed(1)}%</div>`;
     }
     const tbody = document.querySelector('[data-table="mainside"] tbody');
     const buckets = [
@@ -945,38 +2462,44 @@
     [`<span title="${escHtml(r.Description)}">${escHtml(truncate(r.Description, 80))}</span>`, false],
     [fmtMoney(r.CostUSD), true, r.CostUSD],
     [fmtNum(r.Turns), true],
-    [`<span class="truncate" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 50))}</span>`, false],
+    [`<span class="truncate path" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 80))}</span>`, false],
     [fmtDate(r.First), false],
   ]);
 
   // ── sorting ───────────────────────────────────────────────────────────
+  // Click a th[data-key] to sort the underlying data array; default is
+  // descending (biggest first), repeat click flips direction.
   document.querySelectorAll('table thead th[data-key]').forEach(th => {
     th.addEventListener('click', () => {
       const table = th.closest('table');
-      const tbody = table.querySelector('tbody');
-      const idx = Array.from(th.parentNode.children).indexOf(th);
-      const asc = !th.classList.contains('sorted-asc');
-      table.querySelectorAll('thead th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
-      th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
-      const rows = Array.from(tbody.querySelectorAll('tr'));
-      rows.sort((a, b) => {
-        const av = a.children[idx]?.textContent.trim() || '';
-        const bv = b.children[idx]?.textContent.trim() || '';
-        const an = parseFloat(av.replace(/[^0-9.\-]/g, ''));
-        const bn = parseFloat(bv.replace(/[^0-9.\-]/g, ''));
-        const numeric = !isNaN(an) && !isNaN(bn) && (av.match(/[0-9]/) || bv.match(/[0-9]/));
-        const cmp = numeric ? (an - bn) : av.localeCompare(bv);
-        return asc ? cmp : -cmp;
-      });
-      rows.forEach(r => tbody.appendChild(r));
+      const st = tableStates.get(table);
+      if (!st) return;  // unpaged tables (e.g. mainside) ignore clicks
+      const key = th.dataset.key;
+      // The injected Trend column has no underlying field — skip silently.
+      if (st.rows.length && !(key in st.rows[0])) return;
+      if (st.sortKey === key) {
+        st.sortDir = st.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        st.sortKey = key;
+        st.sortDir = 'desc';
+      }
+      st.page = 0;
+      renderTable(table);
     });
   });
 
   // ── global filter + min cost ──────────────────────────────────────────
+  // Paged tables re-render against the filter; drill-down internals (which
+  // are render-once + capped) keep using the older class-based hide.
   function applyFilters() {
-    const q = document.getElementById('filter').value.trim().toLowerCase();
-    const minCost = parseFloat(document.getElementById('mincost').value || '0');
-    document.querySelectorAll('table tbody tr, details tbody tr').forEach(tr => {
+    document.querySelectorAll('table[data-table]').forEach(table => {
+      const st = tableStates.get(table);
+      if (!st) return;
+      st.page = 0;
+      renderTable(table);
+    });
+    const { q, minCost } = getFilterParams();
+    document.querySelectorAll('details tbody tr').forEach(tr => {
       const cost = parseFloat(tr.dataset.cost || '0');
       const text = tr.textContent.toLowerCase();
       const matches = (!q || text.includes(q)) && (cost >= minCost);
@@ -985,6 +2508,302 @@
   }
   document.getElementById('filter').addEventListener('input', applyFilters);
   document.getElementById('mincost').addEventListener('input', applyFilters);
+
+  // ── sidebar metrics ───────────────────────────────────────────────────
+  // The sidebar carries each section's headline number so the nav itself
+  // works as a glanceable summary, not just a list of words.
+  (function navMetrics() {
+    const set = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+
+    // Overview — total cost.
+    set('nav-metric-overview', fmtMoney(totalCost));
+
+    // Cost — top model by spend.
+    const topModel = (D.by_model || []).filter(r => r.CostUSD > 0)[0];
+    set('nav-metric-cost', topModel
+      ? `${truncate(topModel.Model, 18)} · ${fmtMoney(topModel.CostUSD)}`
+      : '—');
+
+    // Cache — overall hit ratio. Uses HTML for the colored tier pill.
+    const cacheNav = document.getElementById('nav-metric-cache');
+    if (cacheNav) {
+      cacheNav.innerHTML = D.overall_hit_ratio != null
+        ? hitRatioPill(D.overall_hit_ratio, 'tier-sm') + ' <span class="small">hit</span>'
+        : '—';
+    }
+
+    // Tools — top tool by cost.
+    const topTool = (D.by_tool || [])[0];
+    set('nav-metric-tools', topTool
+      ? `${truncate(topTool.Name, 14)} · ${fmtMoney(topTool.CostUSD)}`
+      : '—');
+
+    // Subagents — sidechain share of total spend.
+    set('nav-metric-subagents',
+      totalCost > 0
+        ? `${fmtMoney(sideCost)} · ${fmtPct(sideCost, totalCost)}`
+        : '—');
+  })();
+
+  // ── custom tooltip ─────────────────────────────────────────────────────
+  // Single floating element repositioned to whichever [title]/[data-tooltip]
+  // the cursor is over. We migrate `title` → `data-tooltip` on each element
+  // so the native browser tooltip stays suppressed (otherwise both render).
+  (function tooltips() {
+    if (!window.matchMedia) return;
+    // Skip on touch devices — there's no hover affordance, and the
+    // popover would interfere with tap-to-sort on column headers.
+    if (window.matchMedia('(hover: none)').matches) return;
+
+    const tip = document.createElement('div');
+    tip.id = 'claudit-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    document.body.appendChild(tip);
+
+    let showTimer = null;
+    let hideTimer = null;
+    let activeEl = null;
+
+    function captureTitles(root) {
+      // Move title="" → data-tooltip="" so native tooltip is suppressed
+      // but the text remains discoverable for our handler.
+      root.querySelectorAll('[title]').forEach(el => {
+        if (!el.dataset.tooltip) el.dataset.tooltip = el.getAttribute('title');
+        el.removeAttribute('title');
+      });
+    }
+    captureTitles(document);
+
+    // Re-capture after dynamic table renders inject new <th> nodes.
+    const mo = new MutationObserver(() => captureTitles(document));
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    function position(el) {
+      const r = el.getBoundingClientRect();
+      const tipR = tip.getBoundingClientRect();
+      const margin = 10;
+      // Default above; flip below if no room.
+      let top = r.top - tipR.height - margin;
+      let side = 'top';
+      if (top < 6) {
+        top = r.bottom + margin;
+        side = 'bottom';
+      }
+      // Center horizontally on the target, clamp to viewport.
+      let left = r.left + r.width / 2 - tipR.width / 2;
+      left = Math.max(6, Math.min(left, window.innerWidth - tipR.width - 6));
+      const arrowX = (r.left + r.width / 2) - left;
+      tip.style.top  = `${Math.round(top)}px`;
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.setProperty('--arrow-x', `${Math.round(arrowX)}px`);
+      tip.dataset.side = side;
+    }
+
+    function show(el) {
+      const text = el.dataset.tooltip;
+      if (!text) return;
+      activeEl = el;
+      // Lightweight markdown: backticks → <code>. Everything else escaped.
+      const safe = text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+                       .replace(/`([^`]+)`/g, '<code>$1</code>');
+      tip.innerHTML = safe;
+      tip.classList.add('is-visible');
+      // Two-frame trick: render → measure → position → reveal.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (activeEl === el) position(el);
+      }));
+    }
+    function hide() {
+      tip.classList.remove('is-visible');
+      activeEl = null;
+    }
+
+    function onEnter(e) {
+      const el = e.target.closest('[data-tooltip]');
+      if (!el) return;
+      clearTimeout(hideTimer);
+      clearTimeout(showTimer);
+      showTimer = setTimeout(() => show(el), 220);
+    }
+    function onLeave(e) {
+      const el = e.target.closest('[data-tooltip]');
+      if (!el) return;
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(hide, 80);
+    }
+    document.addEventListener('mouseover', onEnter);
+    document.addEventListener('mouseout', onLeave);
+    document.addEventListener('focusin',  e => {
+      const el = e.target.closest('[data-tooltip]');
+      if (el) show(el);
+    });
+    document.addEventListener('focusout', e => {
+      const el = e.target.closest('[data-tooltip]');
+      if (el) hide();
+    });
+    window.addEventListener('scroll',  hide, true);
+    window.addEventListener('resize',  hide);
+    // Re-position on viewport resize while visible (rare).
+    window.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  })();
+
+  // ── motion polish ──────────────────────────────────────────────────────
+  // Number count-up on the totals headline + chart line draw-on. Both
+  // respect prefers-reduced-motion (CSS guards animation; JS bails early).
+  (function motion() {
+    const reduce = window.matchMedia &&
+                   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return;
+
+    // Headline cost count-up. Reads target from textContent and replays
+    // it from a low fraction up to full value over ~700ms.
+    const headline = document.querySelector('.totals .headline .value');
+    if (headline) {
+      const finalText = headline.textContent;
+      const target = totalCost;
+      if (target > 0) {
+        headline.classList.add('cl-counting');
+        const start = performance.now();
+        const dur = 700;
+        function tick(now) {
+          const t = Math.min(1, (now - start) / dur);
+          const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+          const v = target * eased;
+          headline.textContent = v >= 1000
+            ? '$' + Math.round(v).toLocaleString()
+            : '$' + v.toFixed(2);
+          if (t < 1) requestAnimationFrame(tick);
+          else { headline.textContent = finalText; headline.classList.remove('cl-counting'); }
+        }
+        requestAnimationFrame(tick);
+      }
+    }
+
+    // Chart line draw-on. Tag any rendered .trend-line with .draw-in and
+    // set --len from getTotalLength for an accurate dasharray.
+    function animateLines(scope) {
+      (scope || document).querySelectorAll('polyline.trend-line, path.trend-line').forEach(line => {
+        if (line.classList.contains('draw-in')) return;
+        try {
+          const len = line.getTotalLength ? line.getTotalLength() : 1000;
+          line.style.setProperty('--len', Math.ceil(len));
+          line.classList.add('draw-in');
+        } catch {}
+      });
+    }
+    // Run once after initial render, then on every view activation.
+    requestAnimationFrame(() => animateLines(document));
+    document.querySelectorAll('.nav-item').forEach(a => {
+      a.addEventListener('click', () => {
+        // Strip the class so re-entry replays the animation.
+        document.querySelectorAll('.trend-line.draw-in').forEach(l => {
+          l.classList.remove('draw-in');
+          l.style.removeProperty('--len');
+        });
+        requestAnimationFrame(() => requestAnimationFrame(() => animateLines(document)));
+      });
+    });
+  })();
+
+  // ── chart interactivity (hover crosshair + tooltip) ────────────────────
+  // Each chart-host carries its data + viewBox padding as data-* attrs.
+  // We bind one mousemove listener per host, find the closest x-bucket,
+  // and reposition the in-SVG crosshair + an HTML tooltip anchored to
+  // the host. Pure DOM, no chart lib.
+  (function chartInteractivity() {
+    document.querySelectorAll('.chart-host').forEach(host => {
+      let pts;
+      try { pts = JSON.parse(host.dataset.chartPoints); }
+      catch { return; }
+      if (!pts || pts.length < 2) return;
+
+      const svg     = host.querySelector('svg');
+      const cross   = host.querySelector('.crosshair');
+      const cline   = cross && cross.querySelector('.crosshair-line');
+      const cdot    = cross && cross.querySelector('.crosshair-dot');
+      const tip     = host.querySelector('.chart-tooltip');
+      if (!svg || !cross || !tip) return;
+
+      const padL  = parseFloat(host.dataset.padL);
+      const padR  = parseFloat(host.dataset.padR);
+      const padT  = parseFloat(host.dataset.padT);
+      const padB  = parseFloat(host.dataset.padB);
+      const vbW   = parseFloat(host.dataset.vbW);
+      const vbH   = parseFloat(host.dataset.vbH);
+      const innerW = vbW - padL - padR;
+      const innerH = vbH - padT - padB;
+      const n = pts.length;
+      const xAt = i => padL + (i / (n - 1)) * innerW;
+      const type = host.dataset.chartType;
+
+      // Pre-compute Y for each point (cost: scale by max; hitratio: 0..1).
+      let yAt;
+      if (type === 'cost') {
+        let max = 0;
+        for (const p of pts) { if ((p.cost || 0) > max) max = p.cost; }
+        if (max <= 0) max = 1;
+        yAt = i => padT + innerH - ((pts[i].cost || 0) / max) * innerH;
+      } else {
+        yAt = i => padT + innerH - (pts[i].ratio || 0) * innerH;
+      }
+
+      function fmtCostLocal(v) {
+        if (v >= 1000) return '$' + Math.round(v).toLocaleString();
+        return '$' + v.toFixed(2);
+      }
+      function tooltipHTML(i) {
+        const p = pts[i];
+        if (type === 'cost') {
+          return `<div class="ct-label">${escHtml(p.label)}</div>
+                  <div class="ct-primary">${fmtCostLocal(p.cost)}</div>
+                  <div class="ct-meta">${Number(p.turns).toLocaleString()} turns</div>`;
+        }
+        return `<div class="ct-label">${escHtml(p.label)}</div>
+                <div class="ct-primary">${(p.ratio * 100).toFixed(1)}% hit</div>`;
+      }
+
+      function show() { cross.style.opacity = '1'; tip.style.opacity = '1'; }
+      function hide() { cross.style.opacity = '0'; tip.style.opacity = '0'; }
+      hide();
+
+      svg.addEventListener('mousemove', (e) => {
+        // Convert the cursor's screen position into the SVG's viewBox
+        // coordinate space. getScreenCTM gives the inverse mapping for free.
+        const ctm = svg.getScreenCTM();
+        if (!ctm) return;
+        const inv = ctm.inverse();
+        const ept = svg.createSVGPoint();
+        ept.x = e.clientX; ept.y = e.clientY;
+        const sp = ept.matrixTransform(inv);
+        // Convert SVG x to nearest data index.
+        const t = (sp.x - padL) / innerW;
+        let i = Math.round(t * (n - 1));
+        if (i < 0) i = 0;
+        if (i > n - 1) i = n - 1;
+        // Crosshair position in SVG coords.
+        const cx = xAt(i);
+        const cy = yAt(i);
+        cline.setAttribute('x1', cx);
+        cline.setAttribute('x2', cx);
+        cdot.setAttribute('cx', cx);
+        cdot.setAttribute('cy', cy);
+        // Tooltip in DOM coords — map the SVG point back to screen, then
+        // subtract host's offset to get host-relative pixels.
+        const sptOut = svg.createSVGPoint();
+        sptOut.x = cx; sptOut.y = cy;
+        const dom = sptOut.matrixTransform(ctm);
+        const hostRect = host.getBoundingClientRect();
+        tip.style.left = `${dom.x - hostRect.left}px`;
+        tip.style.top  = `${dom.y - hostRect.top}px`;
+        tip.innerHTML  = tooltipHTML(i);
+        show();
+      });
+      svg.addEventListener('mouseleave', hide);
+    });
+  })();
 })();
 </script>
 </body>

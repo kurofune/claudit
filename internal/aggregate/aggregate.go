@@ -157,6 +157,12 @@ type Aggregator struct {
 	trendByModel   map[string]map[time.Time]*TrendPoint
 	trendByProject map[string]map[time.Time]*TrendPoint
 	trendByTool    map[string]map[time.Time]*TrendPoint
+	trendBySession map[string]map[time.Time]*TrendPoint
+	trendBySub     map[string]map[time.Time]*TrendPoint
+	// Per-bucket session-id sets, used to backfill TrendPoint.Sessions
+	// in TrendTotals(). Counted at gap-fill time rather than in addTrend
+	// because addTrend doesn't have the session ID in scope.
+	bucketSessions map[time.Time]map[string]struct{}
 
 	// Per-prompt attribution. WithPromptIndex sets promptIndex; without
 	// it, byPrompt stays empty and ByPrompt() returns nil.
@@ -207,6 +213,9 @@ func (a *Aggregator) WithPeriod(p Period) *Aggregator {
 		a.trendByModel = map[string]map[time.Time]*TrendPoint{}
 		a.trendByProject = map[string]map[time.Time]*TrendPoint{}
 		a.trendByTool = map[string]map[time.Time]*TrendPoint{}
+		a.trendBySession = map[string]map[time.Time]*TrendPoint{}
+		a.trendBySub = map[string]map[time.Time]*TrendPoint{}
+		a.bucketSessions = map[time.Time]map[string]struct{}{}
 	}
 	return a
 }
@@ -339,6 +348,23 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		sb.Tokens.addUsage(t.Usage)
 		sb.CostUSD += cost
 		sb.Turns++
+
+		if trendOn {
+			m := a.trendBySession[t.SessionID]
+			if m == nil {
+				m = map[time.Time]*TrendPoint{}
+				a.trendBySession[t.SessionID] = m
+			}
+			addTrend(m, bucket, cost, t.Usage)
+			// Record this bucket → session ID so TrendTotals() can
+			// backfill TrendPoint.Sessions for the headline delta.
+			s := a.bucketSessions[bucket]
+			if s == nil {
+				s = map[string]struct{}{}
+				a.bucketSessions[bucket] = s
+			}
+			s[t.SessionID] = struct{}{}
+		}
 	}
 
 	// Per-prompt attribution. Walks back to the originating user
@@ -400,6 +426,15 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		sb.Tokens.addUsage(t.Usage)
 		sb.CostUSD += cost
 		sb.Turns++
+
+		if trendOn {
+			m := a.trendBySub[bucketKey]
+			if m == nil {
+				m = map[time.Time]*TrendPoint{}
+				a.trendBySub[bucketKey] = m
+			}
+			addTrend(m, bucket, cost, t.Usage)
+		}
 
 		// Per-invocation row, one per source file.
 		if t.SourceFile != "" {

@@ -61,10 +61,16 @@ func (p Period) Step(t time.Time) time.Time {
 // TrendPoint is one (period, key) cell. Time is the bucket start in UTC.
 // Tokens is embedded so renderers can derive HitRatio() / MissTokens()
 // per bucket — that's how "hit ratio over time" works.
+//
+// Sessions is the count of distinct session IDs active in this bucket.
+// Only populated for the totals-level series (TrendTotals()); per-key
+// series leave it zero. Used for the sessions period-over-period delta
+// on the headline tiles.
 type TrendPoint struct {
-	Time    time.Time `json:"time"`
-	CostUSD float64   `json:"cost_usd"`
-	Turns   int       `json:"turns"`
+	Time     time.Time `json:"time"`
+	CostUSD  float64   `json:"cost_usd"`
+	Turns    int       `json:"turns"`
+	Sessions int       `json:"sessions"`
 	Tokens
 }
 
@@ -105,12 +111,19 @@ func gapFill(p Period, m map[time.Time]*TrendPoint) []TrendPoint {
 }
 
 // TrendTotals returns gap-filled cost-by-period for the report. Empty
-// slice when period is not set or no turns were counted.
+// slice when period is not set or no turns were counted. Sessions count
+// is backfilled here from the per-bucket session sets recorded in Add().
 func (a *Aggregator) TrendTotals() []TrendPoint {
 	if !a.period.Valid() {
 		return nil
 	}
-	return gapFill(a.period, a.trendTotals)
+	pts := gapFill(a.period, a.trendTotals)
+	for i := range pts {
+		if s, ok := a.bucketSessions[pts[i].Time]; ok {
+			pts[i].Sessions = len(s)
+		}
+	}
+	return pts
 }
 
 // TrendByModel returns gap-filled per-model time series. Each series
@@ -127,6 +140,18 @@ func (a *Aggregator) TrendByProject() map[string][]TrendPoint {
 // TrendByTool returns gap-filled per-tool time series.
 func (a *Aggregator) TrendByTool() map[string][]TrendPoint {
 	return a.trendByKey(a.trendByTool)
+}
+
+// TrendBySession returns gap-filled per-session time series. Powers the
+// hit-ratio sparkline column on the cache-by-session view.
+func (a *Aggregator) TrendBySession() map[string][]TrendPoint {
+	return a.trendByKey(a.trendBySession)
+}
+
+// TrendBySubagent returns gap-filled per-subagent-type time series.
+// Powers the hit-ratio sparkline column on the cache-by-subagent view.
+func (a *Aggregator) TrendBySubagent() map[string][]TrendPoint {
+	return a.trendByKey(a.trendBySub)
 }
 
 // Period exposes the period the aggregator is bucketing on.
