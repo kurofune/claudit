@@ -6,3 +6,6 @@ report.html
 # Build artifacts
 /claudit
 /dist/
+
+# Session handoff notes (per-session, not shared)
+HANDOFF.md
