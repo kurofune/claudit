@@ -3,7 +3,9 @@ package parse
 import (
 	"encoding/json"
 	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -192,20 +194,55 @@ func fileExt(path string) string {
 	return ext
 }
 
-// topLevelDir extracts a coarse "where" from an absolute path. We only keep
-// the segment after $HOME (or the leading "/" segment if not under home) so
-// /Users/x/Projects/foo/bar → "Projects/foo".
+// topLevelDir extracts a coarse "where" from an absolute path. The two
+// segments after $HOME bucket the work (so /Users/x/Projects/foo/bar →
+// "Projects/foo"); paths outside any home fall back to their leading
+// filesystem segment.
 func topLevelDir(p string) string {
 	p = filepath.Clean(p)
-	parts := strings.Split(strings.Trim(p, "/"), "/")
-	// /Users/<name>/<top>/<sub>/...
-	if len(parts) >= 4 && parts[0] == "Users" {
-		return strings.Join(parts[2:4], "/")
+	if rel := relativeToHome(p); rel != "" {
+		parts := strings.Split(rel, "/")
+		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+			return parts[0] + "/" + parts[1]
+		}
 	}
-	if len(parts) >= 1 {
-		return "/" + parts[0]
+	slash := strings.ReplaceAll(p, `\`, "/")
+	trimmed := strings.Trim(slash, "/")
+	if trimmed == "" {
+		return p
 	}
-	return p
+	first := strings.SplitN(trimmed, "/", 2)[0]
+	// Strip a Windows drive letter so C:\etc\hosts → "/etc" (matches the
+	// Unix shape of this function's other return values).
+	if len(first) == 2 && first[1] == ':' {
+		rest := strings.SplitN(trimmed, "/", 2)
+		if len(rest) == 2 {
+			first = strings.SplitN(rest[1], "/", 2)[0]
+		}
+	}
+	return "/" + first
+}
+
+// homePathRE matches the common home-directory shapes from foreign OSes,
+// for the case where a JSONL was produced on a different machine than the
+// one parsing it. Drive letter is optional so it works on Windows paths
+// after backslash normalization.
+var homePathRE = regexp.MustCompile(`(?i)^(?:[a-z]:)?/(?:Users|home)/[^/]+/(.+)$`)
+
+// relativeToHome returns p stripped of its home-directory prefix, with
+// forward-slash separators. Empty result means p is not under any home.
+func relativeToHome(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rel, err := filepath.Rel(home, p); err == nil &&
+			!strings.HasPrefix(rel, "..") && rel != "." {
+			return strings.ReplaceAll(rel, `\`, "/")
+		}
+	}
+	slash := strings.ReplaceAll(p, `\`, "/")
+	if m := homePathRE.FindStringSubmatch(slash); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func urlHost(u string) string {

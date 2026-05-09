@@ -68,10 +68,22 @@ func TestUrlHost(t *testing.T) {
 }
 
 func TestTopLevelDir(t *testing.T) {
+	// Pin HOME so the os.UserHomeDir() branch is deterministic regardless
+	// of where the tests run.
+	t.Setenv("HOME", "/Users/x")
 	cases := []struct{ in, want string }{
+		// macOS — under HOME.
 		{"/Users/x/Projects/claudit/cmd/main.go", "Projects/claudit"},
 		{"/Users/x/Projects/foo", "Projects/foo"},
+		// Linux JSONL parsed on a non-Linux runner — regex fallback.
+		{"/home/y/Projects/bar", "Projects/bar"},
+		{"/home/y/code/api/handler.go", "code/api"},
+		// Windows JSONL parsed on a non-Windows runner — regex fallback.
+		{`C:\Users\z\Projects\baz`, "Projects/baz"},
+		{`C:\Users\z\Projects\baz\src\main.go`, "Projects/baz"},
+		// Outside any home — fall through to leading segment.
 		{"/etc/hosts", "/etc"},
+		{`C:\Windows\System32`, "/Windows"},
 		{"/", "/"},
 	}
 	for _, c := range cases {

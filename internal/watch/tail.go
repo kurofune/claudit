@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/nategross/claudit/internal/parse"
@@ -62,8 +61,8 @@ type TailOptions struct {
 // non-blocking.
 //
 // If path doesn't exist yet, Tail polls (emitting NoticeWaiting once)
-// until it appears. If the file rotates (inode changes) or shrinks,
-// Tail re-opens from the start and emits a notice.
+// until it appears. If the file rotates (os.SameFile reports a different
+// file) or shrinks, Tail re-opens from the start and emits a notice.
 func Tail(ctx context.Context, path string, opts TailOptions, onEvent func(Event), onNotice func(Notice)) error {
 	if opts.Interval <= 0 {
 		opts.Interval = time.Second
@@ -112,8 +111,7 @@ type tailer struct {
 	onNotice func(Notice)
 
 	f       *os.File
-	inode   uint64
-	dev     uint64
+	prev    os.FileInfo
 	offset  int64
 	partial []byte
 }
@@ -139,7 +137,7 @@ func (t *tailer) openWhenReady(ctx context.Context) error {
 				return statErr
 			}
 			t.f = f
-			t.inode, t.dev = inodeDev(st)
+			t.prev = st
 			if t.opts.FromBeginning {
 				t.offset = 0
 			} else {
@@ -178,9 +176,8 @@ func (t *tailer) poll() error {
 		}
 		return err
 	}
-	ino, dev := inodeDev(st)
-	if t.f == nil || ino != t.inode || dev != t.dev {
-		t.onNotice(Notice{Kind: NoticeRotated, Message: "inode changed, reopening"})
+	if t.f == nil || t.prev == nil || !os.SameFile(t.prev, st) {
+		t.onNotice(Notice{Kind: NoticeRotated, Message: "file changed, reopening"})
 		t.close()
 		t.partial = nil
 		if err := t.reopenWhenReady(); err != nil {
@@ -213,7 +210,7 @@ func (t *tailer) reopenWhenReady() error {
 		return err
 	}
 	t.f = f
-	t.inode, t.dev = inodeDev(st)
+	t.prev = st
 	t.offset = 0
 	return nil
 }
@@ -265,16 +262,6 @@ func (t *tailer) consume(b []byte) {
 			t.onEvent(Event{Kind: kind, User: user})
 		}
 	}
-}
-
-// inodeDev pulls (ino, dev) off a FileInfo. POSIX-only; that's fine —
-// claudit's runtime is darwin/linux.
-func inodeDev(fi os.FileInfo) (uint64, uint64) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0
-	}
-	return uint64(st.Ino), uint64(st.Dev)
 }
 
 // MostRecentJSONL walks root and returns the JSONL with the latest
