@@ -17,10 +17,12 @@ import (
 // advice across hotspots.
 const preamble = `I'm using Claude Code (Anthropic's agentic coding CLI). I'm trying to reduce one specific cost driver in my usage. I'd like substantive, specific advice — not generic optimization tips.
 
-What I've already considered and don't want repeated:
-- "Switch to a cheaper Anthropic model (Sonnet/Haiku)" — I know about model pricing.
-- "Be more efficient" / "use less context" — too vague to act on.
-- "Run fewer commands" — I'd need to know which ones and how.
+Common suggestions I've already heard — these are still valid directions, but I only want them included if you can attach concrete substance. Don't recommend them by reflex:
+- "Switch to a cheaper model (Sonnet/Haiku)" — fine to recommend if you can name *which slices of this specific workload* tolerate the downgrade and why; skip it as a generic cost lever.
+- "Be more efficient" / "use less context" — only useful if you point to a specific lever (a CLAUDE.md line to add, a tool to drop, a context source to prune, a setting to flip).
+- "Run fewer commands" — only useful if you name which commands and what replaces them (caching, batching, an alternate tool, an MCP).
+
+Treat these three as needing to *earn* their spot in your answer by carrying the specifics above. Otherwise prefer recommendations the user hasn't already considered.
 
 What I want:
 1. Specific tools, CLIs, MCP servers, or scripts (cite repo names, doc URLs, or package names where possible).
