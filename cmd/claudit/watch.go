@@ -24,6 +24,18 @@ func runWatch(args []string) error {
 	pricesPath := fs.String("prices", "", "override pricing YAML path")
 	intervalMS := fs.Int("interval-ms", 1500, "polling interval in milliseconds")
 	budget := fs.Float64("budget", 0, "alert when running cost crosses this many USD (0 disables)")
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintln(out, "claudit watch — tail a live session JSONL and print running cost.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Usage:")
+		fmt.Fprintln(out, "  claudit watch [flags] [session-id]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "If session-id is omitted, the most recently modified session is tailed.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
