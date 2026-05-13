@@ -32,12 +32,11 @@ func TestHotspotPrompt_AllKindsProduceText(t *testing.T) {
 			t.Errorf("kind %s: %v", h.Kind, err)
 			continue
 		}
-		// Sanity assertions: non-empty, contains the preamble's no-trivial-answer line.
-		if !strings.Contains(got, "Switch to a cheaper Anthropic model") {
-			t.Errorf("kind %s: missing trivial-answer guard", h.Kind)
-		}
-		if !strings.Contains(got, "Be opinionated and prescriptive") {
-			t.Errorf("kind %s: missing specificity demand", h.Kind)
+		// Every hotspot prompt is `preamble + <kind body>` (see init in
+		// hotspot_prompts.go), so HasPrefix on the constant is the
+		// faithful contract — no brittle copy-pasted phrases.
+		if !strings.HasPrefix(got, preamble) {
+			t.Errorf("kind %s: prompt does not start with preamble", h.Kind)
 		}
 		if len(got) < 500 {
 			t.Errorf("kind %s: prompt too short (%d chars)", h.Kind, len(got))
