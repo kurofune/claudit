@@ -89,4 +89,4 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 
 ## License
 
-No license declared yet. A LICENSE file will be added before this repo is published publicly; until then, treat the code as all-rights-reserved.
+MIT — see [LICENSE](LICENSE).
