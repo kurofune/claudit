@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 // Filter narrows which turns are counted.

@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse"
 )
 
 // Event is one parsed line. Exactly one of Turn / UserMessage is

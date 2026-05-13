@@ -7,7 +7,7 @@ import (
 	"html/template"
 	"io"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 //go:embed report.html.tmpl

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 // preamble is the shared "what I want and don't want" preamble. Every

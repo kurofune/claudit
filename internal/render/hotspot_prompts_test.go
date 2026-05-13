@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 func TestHotspotPrompt_AllKindsProduceText(t *testing.T) {

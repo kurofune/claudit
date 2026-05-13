@@ -7,7 +7,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 // DiffOptions controls diff output. Zero value is fine — sensible

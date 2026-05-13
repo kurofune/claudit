@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse"
 )
 
 // Period is a fixed-size time bucket for trend mode. PeriodNone disables

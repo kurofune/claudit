@@ -1,4 +1,4 @@
-module github.com/nategross/claudit
+module github.com/kurofune/claudit
 
 go 1.26.2
 

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 func TestHotspots_RanksMixedDimensions(t *testing.T) {

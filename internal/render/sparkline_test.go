@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 func mkPts(costs ...float64) []aggregate.TrendPoint {

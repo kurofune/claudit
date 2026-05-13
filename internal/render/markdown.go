@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 // Options tweaks markdown rendering. Zero value is fine.

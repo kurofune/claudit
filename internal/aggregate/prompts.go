@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nategross/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse"
 )
 
 // promptKeyMaxRunes is how much of the normalized prompt text we use as

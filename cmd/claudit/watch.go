@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
-	"github.com/nategross/claudit/internal/watch"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/watch"
 )
 
 func runWatch(args []string) error {

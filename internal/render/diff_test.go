@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nategross/claudit/internal/aggregate"
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 func mkTurn(model, cwd string, in, out int, ts time.Time) parse.Turn {

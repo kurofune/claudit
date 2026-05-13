@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/nategross/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 // sparkBlocks: 9 levels — index 0 means "zero", 1..8 map to ascending

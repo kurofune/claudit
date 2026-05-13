@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 func turn(model string, in, out int, sidechain bool, cwd string, ts time.Time, tools ...parse.ToolUse) parse.Turn {

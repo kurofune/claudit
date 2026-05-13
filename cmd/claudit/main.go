@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nategross/claudit/internal/aggregate"
-	"github.com/nategross/claudit/internal/parse"
-	"github.com/nategross/claudit/internal/pricing"
-	"github.com/nategross/claudit/internal/render"
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/render"
 )
 
 func main() {
