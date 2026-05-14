@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
@@ -66,7 +65,7 @@ func runWatch(args []string) error {
 		fmt.Fprintf(os.Stderr, "claudit watch: budget alert at $%.2f\n", *budget)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	st := newWatchState(prices, *budget, os.Stdout)

@@ -351,7 +351,7 @@ func IsSubagentFile(path string) bool {
 	if !strings.HasPrefix(file, "agent-") || !strings.HasSuffix(file, ".jsonl") {
 		return false
 	}
-	return strings.HasSuffix(strings.TrimSuffix(dir, "/"), "subagents")
+	return filepath.Base(filepath.Clean(dir)) == "subagents"
 }
 
 // SubagentMeta is the content of a sibling agent-<id>.meta.json file —
