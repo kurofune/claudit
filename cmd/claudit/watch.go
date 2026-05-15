@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
@@ -65,7 +66,10 @@ func runWatch(args []string) error {
 		fmt.Fprintf(os.Stderr, "claudit watch: budget alert at $%.2f\n", *budget)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM: graceful shutdown on Unix (kill, docker stop, init systems)
+	// so the deferred printSummary runs. No-op on Windows — the constant is
+	// defined but the Go runtime never delivers it there.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	st := newWatchState(prices, *budget, os.Stdout)
