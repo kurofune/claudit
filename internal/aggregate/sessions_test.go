@@ -175,6 +175,50 @@ func TestBuildSessionTimelines_DistinctToolNames(t *testing.T) {
 	}
 }
 
+func TestBuildSessionTimelines_KeyMatchesPromptBucket(t *testing.T) {
+	// The cross-link feature depends on the timeline's PromptTimeline.Key
+	// matching what PromptBucket.Key (and prompt-kind Hotspot.Title) would
+	// produce for the same raw text. If these ever diverge, hotspots stop
+	// resolving to their session.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{
+		chainUser("u1", "", "s1", "Refactor the auth Middleware\n  for IDOR", t0),
+	}
+	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
+
+	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+	got := out[0].Prompts[0].Key
+	want := normalizePromptKey("Refactor the auth Middleware\n  for IDOR")
+	if got != want {
+		t.Errorf("Key = %q, want %q", got, want)
+	}
+}
+
+func TestBuildSessionTimelines_KeyIgnoresRedaction(t *testing.T) {
+	// Cross-links must work even when the visible prompt body is hidden.
+	// Key is derived from the RAW text, not the displayed Text — so a
+	// report generated with --redact still resolves hotspot clicks.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{chainUser("u1", "", "s1", "investigate flaky test", t0)}
+	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
+
+	withRedact := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{Redact: true})
+	withoutRedact := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+
+	if withRedact[0].Prompts[0].Key != withoutRedact[0].Prompts[0].Key {
+		t.Errorf("Key changed under redaction: %q vs %q",
+			withRedact[0].Prompts[0].Key, withoutRedact[0].Prompts[0].Key)
+	}
+	if withRedact[0].Prompts[0].Key == "" {
+		t.Errorf("Key should be set even under redaction")
+	}
+}
+
 func TestBuildSessionTimelines_OrphanTurnFallsIntoNoPromptBucket(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

@@ -965,6 +965,31 @@
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
   .hotspot button.copy.copied { background: var(--accent-2); }
+  .hotspot .view-session, .by-prompt-table .view-session {
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .hotspot .view-session:hover, .by-prompt-table .view-session:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .hotspot .view-session.is-disabled, .by-prompt-table .view-session.is-disabled {
+    color: var(--muted);
+    border-color: var(--border);
+    cursor: not-allowed;
+    background: var(--surface-2);
+  }
+  .hotspot .view-session.is-disabled:hover, .by-prompt-table .view-session.is-disabled:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
   .hotspot pre {
     margin: 0; padding: var(--s-2) var(--s-3);
     background: var(--surface-2); border: 1px solid var(--border);
@@ -1494,7 +1519,7 @@
 
       <div class="subview" data-subview="prompt">
         <div class="small">User prompts ranked by the total cost of the assistant turn chain each one kicked off. Prompts cluster on the first 120 chars of normalized text — trivially-different repeats of the same ask appear in the same row. Hover a row's snippet for the full prompt.</div>
-        <table data-table="prompt">
+        <table data-table="prompt" class="by-prompt-table">
           <thead><tr>
             <th data-key="Sample" title="First ~120 characters of the user prompt. Rows cluster by normalized prefix, so trivially-different repeats appear in one row. Hover the cell for full text.">Snippet</th>
             <th data-key="Invocations" class="num" title="How many times this prompt cluster was sent.">Invocations</th>
@@ -1502,6 +1527,7 @@
             <th data-key="TurnCount" class="num" title="Assistant turns that this prompt's chain produced (one prompt can fan out into many turns).">Turns</th>
             <th data-key="CostUSD" class="num" title="Total dollar cost of the assistant turn chain this prompt kicked off.">Cost</th>
             <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
+            <th title="Open this prompt in the Sessions drill-down. Disabled when the prompt's session is below the --sessions=N cap.">Session</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -1790,6 +1816,49 @@
   }
   activate(parseHash());
   window.addEventListener('hashchange', () => activate(parseHash()));
+
+  // ── cross-link to session drill-down ──────────────────────────────────
+  // Hotspot cards (kind='prompt') and the by-prompt table both want to
+  // route the user from "here's an expensive prompt" to "and here's the
+  // session it ran in." Pre-build a key → location map from the timeline
+  // payload so callers can check availability in O(1) and avoid offering
+  // a dead link.
+  const promptKeyAvailable = (function buildPromptKeySet() {
+    const set = new Set();
+    for (const s of (D.session_timelines || [])) {
+      for (const p of (s.Prompts || [])) {
+        if (p.Key) set.add(p.Key);
+      }
+    }
+    return set;
+  })();
+
+  // jumpToPrompt routes to the Sessions view, opens the matching session
+  // card + prompt block, and scrolls the prompt into view. Returns true on
+  // success, false when key isn't in the timeline (e.g. session below the
+  // --sessions=N cap, or prompt was orphaned).
+  function jumpToPrompt(key) {
+    if (!key || !promptKeyAvailable.has(key)) return false;
+    // Sessions view must be active before we can find the DOM nodes —
+    // earlier views may still have the section display:none'd.
+    if (location.hash !== '#sessions') {
+      location.hash = '#sessions';
+    } else {
+      activate(parseHash()); // idempotent; ensures Sessions is visible
+    }
+    // Defer the open+scroll one tick so the activate() above paints.
+    requestAnimationFrame(() => {
+      const block = document.querySelector(
+        `.prompt-block[data-prompt-key="${CSS.escape(key)}"]`);
+      if (!block) return;
+      // Walk up: prompt-block → session-body → session-card. Open both.
+      const card = block.closest('.session-card');
+      if (card) card.open = true;
+      block.open = true;
+      block.scrollIntoView({behavior: 'smooth', block: 'start'});
+    });
+    return true;
+  }
 
   // ── trend helpers ─────────────────────────────────────────────────────
   // Period is one of "day" | "week" | "month" | "" (disabled).
@@ -2110,7 +2179,20 @@
       container.innerHTML = '<p class="small empty-state">No hotspots in this window. Try widening the time range with <code>--since</code>, or lowering <code>-hotspots</code>.</p>';
       return;
     }
-    container.innerHTML = list.map((h, i) => `<details class="hotspot">
+    container.innerHTML = list.map((h, i) => {
+      // Prompt hotspots get a "view session" affordance when their
+      // originating prompt is in the timeline (i.e. inside --sessions=N).
+      // Out-of-cap prompts get a disabled-styled hint instead of a broken
+      // link.
+      let sessionAction = '';
+      if (h.kind === 'prompt_pattern' && h.prompt_key) {
+        if (promptKeyAvailable.has(h.prompt_key)) {
+          sessionAction = `<button class="view-session" data-key="${escHtml(h.prompt_key)}" title="Open the session this prompt ran in">view session →</button>`;
+        } else {
+          sessionAction = `<span class="view-session is-disabled" title="This prompt's session is below the --sessions=${(D.session_timelines || []).length || 'N'} cap. Re-run with a higher --sessions to include it.">view session (unavailable)</span>`;
+        }
+      }
+      return `<details class="hotspot">
       <summary>
         <span class="rank">#${i+1}</span>
         <span class="hotspot-kind">${escHtml(h.kind.replace(/_/g, ' '))}</span>
@@ -2121,11 +2203,21 @@
       <div class="body">
         <div class="actions">
           <button class="copy" data-hotspot="${i}">Copy prompt</button>
+          ${sessionAction}
           <span class="small">Paste this into Claude or another LLM for specific advice.</span>
         </div>
         <pre>${escHtml(h.prompt)}</pre>
       </div>
-    </details>`).join('');
+    </details>`;
+    }).join('');
+
+    // Wire up cross-link buttons on prompt hotspots.
+    container.querySelectorAll('button.view-session').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        jumpToPrompt(btn.dataset.key);
+      });
+    });
 
     // Wire up copy buttons. Falls back to the older execCommand path on
     // file:// pages where navigator.clipboard is unavailable.
@@ -2598,10 +2690,17 @@
   })();
 
   // Top expensive prompts. Sample is the full text; show the head as the
-  // visible snippet, full text on hover.
+  // visible snippet, full text on hover. Trailing cell is a "view session"
+  // cross-link active when the prompt's session is in the timeline cap.
   buildRows(document.querySelector('[data-table="prompt"]'), D.by_prompt || [], r => {
     const sample = r.Sample || r.Key || '';
     const head = sample.length > 80 ? sample.slice(0, 79) + '…' : sample;
+    let sessionCell;
+    if (r.Key && promptKeyAvailable.has(r.Key)) {
+      sessionCell = `<button class="view-session" data-key="${escHtml(r.Key)}" title="Jump to this prompt in the Sessions view">view →</button>`;
+    } else {
+      sessionCell = `<span class="view-session is-disabled" title="Session below the --sessions=N cap, or orphan prompt with no recognized origin">—</span>`;
+    }
     return [
       [`<span title="${escHtml(sample)}">${escHtml(head)}</span>`, false],
       [fmtNum(r.Invocations), true],
@@ -2609,7 +2708,18 @@
       [fmtNum(r.TurnCount), true],
       [fmtMoney(r.CostUSD), true, r.CostUSD],
       [fmtPct(r.CostUSD, totalCost), true],
+      [sessionCell, false],
     ];
+  });
+
+  // Delegated click handler for the per-prompt "view session" buttons.
+  // Delegated rather than bound per-row because buildRows() may paginate /
+  // re-render rows (search filter, sort) and we don't want to re-bind.
+  document.querySelector('[data-table="prompt"]')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button.view-session');
+    if (!btn) return;
+    e.preventDefault();
+    jumpToPrompt(btn.dataset.key);
   });
 
   // By skill
@@ -2784,8 +2894,9 @@
         const isOrphan = !p.UUID;
         const promptCost = p.CostUSD || 0;
         const turnN = (p.Turns || []).length;
+        const keyAttr = p.Key ? ` data-prompt-key="${escHtml(p.Key)}"` : '';
 
-        html.push(`<details class="prompt-block"${isOrphan ? ' data-orphan="1"' : ''}>`);
+        html.push(`<details class="prompt-block"${isOrphan ? ' data-orphan="1"' : ''}${keyAttr}>`);
         html.push(`<summary>`);
         if (isOrphan) {
           html.push(`<span class="p-text p-redacted">(orphan turns — no recognized originating prompt)</span>`);

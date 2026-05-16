@@ -6,6 +6,7 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ### Added
 
+- **Cross-links into Sessions view.** Prompt hotspot cards and the "Top expensive prompts" table rows now carry a "view session →" button that jumps to the Sessions drill-down with the originating session card and prompt block pre-expanded. Disabled (with a tooltip) when the prompt's session falls below the `--sessions=N` cap. Cross-links survive `--redact` because the link key is computed from raw prompt text, not the displayed body.
 - **Sessions drill-down view** in the HTML report. A new "Sessions" tab in the nav (between Cost and Cache) lists the top sessions by cost. Open a session to see its user prompts in order, and open a prompt to see the assistant turns it produced — with per-turn model, tokens, cost, and tool chips. Configurable via `--sessions=N` on `claudit report` (default 50; `--sessions=0` disables). Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing.
 - `claudit diff --html` renders the comparison as a self-contained HTML document with side-by-side A/B bars, totals tiles with delta lines, and a new-hotspots grid. Uses the same design tokens as the main report.
 - `claudit diff` now runs with no arguments, defaulting to the last 7 days vs the prior 7 days via a new `--by=week|month` flag (`--by=month` → 30d vs 30d). Equal-size rolling windows ending at midnight tonight; labels say "7 days" rather than "this week" to match the rolling math. Explicit `--a`/`--b` still wins when provided.

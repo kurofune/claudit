@@ -24,6 +24,11 @@ type hotspotForJSON struct {
 	CostUSD    float64               `json:"cost_usd"`
 	PctOfTotal float64               `json:"pct_of_total"`
 	Prompt     string                `json:"prompt"`
+	// PromptKey is the normalized prompt key for prompt_pattern hotspots,
+	// echoed from Hotspot.Context["key"]. Used by the frontend to cross-
+	// link the hotspot to its session in the drill-down view. Empty for
+	// non-prompt hotspot kinds.
+	PromptKey string `json:"prompt_key,omitempty"`
 }
 
 // HTMLOptions carries optional extras for the HTML renderer that don't
@@ -57,12 +62,19 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		if err != nil {
 			continue
 		}
+		var pk string
+		if h.Kind == aggregate.HotspotPromptPattern && h.Context != nil {
+			if v, ok := h.Context["key"].(string); ok {
+				pk = v
+			}
+		}
 		hotspots = append(hotspots, hotspotForJSON{
 			Kind:       h.Kind,
 			Title:      h.Title,
 			CostUSD:    h.CostUSD,
 			PctOfTotal: h.PctOfTotal,
 			Prompt:     prompt,
+			PromptKey:  pk,
 		})
 	}
 

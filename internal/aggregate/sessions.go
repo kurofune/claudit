@@ -29,7 +29,13 @@ type SessionTimeline struct {
 // costs — saved here too so the renderer doesn't have to re-sum at render
 // time.
 type PromptTimeline struct {
-	UUID      string
+	UUID string
+	// Key is the same normalized bucket key used by PromptBucket and the
+	// prompt-kind hotspots, computed from the RAW prompt text before any
+	// redaction. The frontend uses it to cross-link a hotspot or
+	// per-prompt row back to this session's drill-down. Empty for orphan
+	// prompts.
+	Key       string
 	Text      string // may be truncated, or "[redacted N chars]" when Redact is set
 	Truncated bool   // true when Text was shortened from the original
 	Timestamp time.Time
@@ -247,7 +253,17 @@ func BuildSessionTimelines(
 			Turns:     s.Turns,
 		}
 		for _, pa := range s.Prompts {
-			text, truncated := preparePromptText(userText[pa.UUID], opts)
+			raw := userText[pa.UUID]
+			text, truncated := preparePromptText(raw, opts)
+			// Key is computed from the raw text — never from the
+			// possibly-redacted display text — so cross-links from
+			// hotspots/by-prompt rows still match even with --redact.
+			// Orphan prompts (no resolved user UUID) get an empty key
+			// because there's nothing meaningful to link from.
+			var key string
+			if pa.UUID != "" {
+				key = normalizePromptKey(raw)
+			}
 			// Order turns within a prompt chronologically — JSONL is
 			// usually already in order but defensive sort is cheap.
 			sort.Slice(pa.Turns, func(i, j int) bool {
@@ -261,6 +277,7 @@ func BuildSessionTimelines(
 			}
 			st.Prompts = append(st.Prompts, PromptTimeline{
 				UUID:      pa.UUID,
+				Key:       key,
 				Text:      text,
 				Truncated: truncated,
 				Timestamp: ts,
