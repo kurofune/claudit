@@ -1,0 +1,193 @@
+package aggregate
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
+)
+
+func TestBuildSessionTimelines_GroupsPromptsAndOrdersChronologically(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	// One session, two prompts. Prompt P1 fires three turns; P2 fires one.
+	// The turns are interleaved in input order to confirm we group by
+	// prompt (via chain walk), not just by appearance.
+	users := []parse.UserMessage{
+		chainUser("p1", "", "s1", "first prompt", t0),
+		chainUser("p2", "", "s1", "second prompt", t0.Add(10*time.Minute)),
+	}
+	turns := []parse.Turn{
+		chainTurn("a1", "p1", "s1", t0.Add(1*time.Minute)),
+		chainTurn("a2", "a1", "s1", t0.Add(2*time.Minute)),
+		chainTurn("b1", "p2", "s1", t0.Add(11*time.Minute)),
+		chainTurn("a3", "a2", "s1", t0.Add(3*time.Minute)),
+	}
+	for i := range turns {
+		turns[i].CWD = "/p/x"
+	}
+
+	out := BuildSessionTimelines(turns, users, nil, prices, Filter{}, SessionTimelinesOptions{})
+	if len(out) != 1 {
+		t.Fatalf("want 1 session, got %d", len(out))
+	}
+	s := out[0]
+	if s.SessionID != "s1" || s.CWD != "/p/x" || s.Turns != 4 {
+		t.Errorf("session metadata wrong: %+v", s)
+	}
+	if len(s.Prompts) != 2 {
+		t.Fatalf("want 2 prompts, got %d", len(s.Prompts))
+	}
+	if s.Prompts[0].UUID != "p1" || s.Prompts[0].Text != "first prompt" {
+		t.Errorf("prompts[0] wrong: %+v", s.Prompts[0])
+	}
+	if s.Prompts[1].UUID != "p2" || s.Prompts[1].Text != "second prompt" {
+		t.Errorf("prompts[1] wrong: %+v", s.Prompts[1])
+	}
+	if len(s.Prompts[0].Turns) != 3 {
+		t.Errorf("p1 should have 3 turns, got %d", len(s.Prompts[0].Turns))
+	}
+	if len(s.Prompts[1].Turns) != 1 {
+		t.Errorf("p2 should have 1 turn, got %d", len(s.Prompts[1].Turns))
+	}
+	// Turns within a prompt must be chronological even if input order wasn't.
+	tsList := s.Prompts[0].Turns
+	for i := 1; i < len(tsList); i++ {
+		if tsList[i].Timestamp.Before(tsList[i-1].Timestamp) {
+			t.Errorf("p1 turns not in chronological order: %+v", tsList)
+		}
+	}
+}
+
+func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	// Three sessions. s_cheap < s_mid < s_expensive by token volume.
+	mkSession := func(sid string, inputMtok int) (parse.UserMessage, parse.Turn) {
+		u := chainUser("u-"+sid, "", sid, "prompt for "+sid, t0)
+		t := chainTurn("a-"+sid, "u-"+sid, sid, t0.Add(time.Second))
+		t.Usage = parse.Usage{InputTokens: inputMtok * 1_000_000}
+		return u, t
+	}
+	uCh, tCh := mkSession("s_cheap", 1)
+	uMid, tMid := mkSession("s_mid", 10)
+	uExp, tExp := mkSession("s_expensive", 100)
+
+	out := BuildSessionTimelines(
+		[]parse.Turn{tCh, tMid, tExp},
+		[]parse.UserMessage{uCh, uMid, uExp},
+		nil, prices, Filter{},
+		SessionTimelinesOptions{TopN: 2},
+	)
+	if len(out) != 2 {
+		t.Fatalf("TopN=2 should cap to 2, got %d", len(out))
+	}
+	if out[0].SessionID != "s_expensive" || out[1].SessionID != "s_mid" {
+		t.Errorf("sessions not ranked by cost desc: got %v", []string{out[0].SessionID, out[1].SessionID})
+	}
+	if out[0].CostUSD <= out[1].CostUSD {
+		t.Errorf("expected out[0].cost > out[1].cost; got %f vs %f", out[0].CostUSD, out[1].CostUSD)
+	}
+}
+
+func TestBuildSessionTimelines_Redacts(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{chainUser("u1", "", "s1", "sensitive content here", t0)}
+	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
+
+	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{Redact: true})
+	if len(out) != 1 || len(out[0].Prompts) != 1 {
+		t.Fatalf("unexpected shape: %+v", out)
+	}
+	got := out[0].Prompts[0].Text
+	if !strings.HasPrefix(got, "[redacted") {
+		t.Errorf("expected redacted body, got %q", got)
+	}
+	if !strings.Contains(got, "22") { // len("sensitive content here") = 22
+		t.Errorf("redaction should echo raw length 22, got %q", got)
+	}
+}
+
+func TestBuildSessionTimelines_TruncatesLongPrompts(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	long := strings.Repeat("x", 5000)
+	users := []parse.UserMessage{chainUser("u1", "", "s1", long, t0)}
+	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
+
+	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{MaxPromptChars: 2000})
+	p := out[0].Prompts[0]
+	if !p.Truncated {
+		t.Errorf("Truncated flag should be true for 5000-char prompt with 2000 cap")
+	}
+	if len(p.Text) != 2000 {
+		t.Errorf("text len = %d, want 2000", len(p.Text))
+	}
+}
+
+func TestBuildSessionTimelines_RespectsFilterWindow(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{
+		chainUser("u1", "", "s1", "early", t0),
+		chainUser("u2", "", "s2", "late", t0.Add(48*time.Hour)),
+	}
+	turns := []parse.Turn{
+		chainTurn("a1", "u1", "s1", t0.Add(time.Second)),
+		chainTurn("a2", "u2", "s2", t0.Add(48*time.Hour+time.Second)),
+	}
+	out := BuildSessionTimelines(turns, users, nil, prices,
+		Filter{Since: t0.Add(24 * time.Hour)},
+		SessionTimelinesOptions{})
+	if len(out) != 1 || out[0].SessionID != "s2" {
+		t.Errorf("filter should drop early session: %+v", out)
+	}
+}
+
+func TestBuildSessionTimelines_DistinctToolNames(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{chainUser("u1", "", "s1", "do work", t0)}
+	turn := chainTurn("a1", "u1", "s1", t0.Add(time.Second))
+	// Tool order in the turn is intentional: Bash, Read, Bash, Bash, Edit.
+	// Distinct, first-seen order should be: Bash, Read, Edit.
+	turn.ToolUses = []parse.ToolUse{
+		{Name: "Bash"}, {Name: "Read"}, {Name: "Bash"}, {Name: "Bash"}, {Name: "Edit"},
+	}
+	out := BuildSessionTimelines([]parse.Turn{turn}, users, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+	got := out[0].Prompts[0].Turns[0].Tools
+	want := []string{"Bash", "Read", "Edit"}
+	if len(got) != len(want) {
+		t.Fatalf("tools = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("tools[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildSessionTimelines_OrphanTurnFallsIntoNoPromptBucket(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	// Turn with no parent and no matching user message — chain walk
+	// terminates without finding a prompt UUID. Should still appear in
+	// the timeline under the "" prompt key.
+	turn := chainTurn("a1", "", "s1", t0)
+	out := BuildSessionTimelines([]parse.Turn{turn}, nil, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+	if len(out) != 1 || len(out[0].Prompts) != 1 {
+		t.Fatalf("unexpected shape: %+v", out)
+	}
+	if out[0].Prompts[0].UUID != "" {
+		t.Errorf("orphan should have empty prompt UUID, got %q", out[0].Prompts[0].UUID)
+	}
+}

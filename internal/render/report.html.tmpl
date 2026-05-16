@@ -1119,6 +1119,179 @@
   .trend-summary strong { color: var(--ink); font-variant-numeric: tabular-nums; }
   .trend-delta-up { color: var(--hot); }
   .trend-delta-down { color: var(--accent-2); }
+
+  /* ─── Sessions drill-down view ─────────────────────────────────────
+     Nested <details>: outer = session card, inner = prompt. Each prompt
+     reveals a turn-row list. No fancy virtualization yet — the backend
+     caps at --sessions=N (default 50) which keeps the payload bounded. */
+  .session-list { display: flex; flex-direction: column; gap: var(--s-3); }
+  .session-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .session-card > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-3) var(--s-4);
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    transition: background var(--motion-fast) ease;
+  }
+  .session-card > summary::-webkit-details-marker { display: none; }
+  .session-card > summary:hover { background: var(--surface-2); }
+  .session-card[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .session-card .s-id {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-card .s-cwd {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-card .s-stats {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    font-size: var(--t-2);
+    display: flex;
+    gap: var(--s-3);
+    align-items: baseline;
+    white-space: nowrap;
+  }
+  .session-card .s-stats .s-cost {
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: var(--t-4);
+  }
+  .session-card .s-time {
+    grid-column: 1 / -1;
+    font-size: var(--t-1);
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .session-body { padding: var(--s-3) var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
+  .prompt-block {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .prompt-block > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-2) var(--s-3);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    transition: background var(--motion-fast) ease;
+  }
+  .prompt-block > summary::-webkit-details-marker { display: none; }
+  .prompt-block > summary:hover { background: var(--surface-3); }
+  .prompt-block[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-3);
+  }
+  .prompt-block .p-text {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prompt-block[open] .p-text {
+    /* Once expanded, let the prompt wrap — engineers usually want to
+       read the whole thing, not be teased by an ellipsis. */
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .prompt-block .p-stats {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    font-size: var(--t-2);
+    display: flex;
+    gap: var(--s-3);
+    white-space: nowrap;
+  }
+  .prompt-block .p-stats .p-cost {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .prompt-block .p-redacted {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .prompt-block .p-truncated {
+    color: var(--muted);
+    font-size: var(--t-1);
+    font-style: italic;
+    margin-top: var(--s-1);
+  }
+  .turn-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    background: var(--surface);
+  }
+  .turn-row {
+    display: grid;
+    grid-template-columns: 9ch 16ch auto auto 1fr;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .turn-row:last-child { border-bottom: none; }
+  .turn-row .t-time { color: var(--muted); font-family: var(--font-mono); }
+  .turn-row .t-model { color: var(--ink-2); font-family: var(--font-mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .turn-row .t-tokens { color: var(--ink-2); }
+  .turn-row .t-cost { color: var(--ink); font-weight: 600; min-width: 6ch; text-align: right; }
+  .turn-row .t-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+  .turn-row .t-tool {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: var(--t-1);
+    color: var(--ink-2);
+  }
+  .turn-row .t-side {
+    margin-left: 4px;
+    padding: 0 4px;
+    background: var(--accent-soft);
+    border-radius: var(--r-sm);
+    font-size: var(--t-1);
+    color: var(--accent);
+  }
+  .empty-note {
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-md);
+    color: var(--muted);
+    font-size: var(--t-2);
+  }
 </style>
 </head>
 <body>
@@ -1194,6 +1367,10 @@
       <a class="nav-item" href="#cost" data-view="cost">
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</span>
         <span class="nav-metric" id="nav-metric-cost">—</span>
+      </a>
+      <a class="nav-item" href="#sessions" data-view="sessions">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-sessions"/></svg>Sessions</span>
+        <span class="nav-metric" id="nav-metric-sessions">—</span>
       </a>
       <a class="nav-item" href="#cache" data-view="cache">
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache</span>
@@ -1329,6 +1506,26 @@
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="view" id="view-sessions" data-view="sessions">
+      <header class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-sessions"/></svg>Sessions</h1></header>
+
+      <details class="guide">
+        <summary>Drilling into a session</summary>
+        <div class="body">
+          <p>Each card below is one Claude Code session, ranked by total cost. Open a session to see the user prompts in order, and open a prompt to see the assistant turns it produced — with per-turn model, tokens, cost, and which tools fired.</p>
+          <ul>
+            <li><strong>Read top-down.</strong> The first session is your most expensive in this window — it's usually the most informative.</li>
+            <li><strong>Look for prompt cost spikes.</strong> A single prompt that ran 30 turns and cost $5 is a prime target for tightening — fewer tool calls, narrower context, or a custom skill.</li>
+            <li><strong>Tool chips show what each turn touched</strong>, in first-occurrence order. A run of all-<code>Bash</code>-and-<code>Read</code> turns is often signal that the agent was exploring rather than converging.</li>
+          </ul>
+          <p class="small" id="session-redact-notice"></p>
+        </div>
+      </details>
+
+      <div id="session-list" class="session-list"></div>
+      <div id="session-empty" class="empty-note" hidden>No sessions in this window. Try widening <code>--since</code>/<code>--until</code>, or check that <code>--sessions</code> is non-zero.</div>
     </section>
 
     <section class="view" id="view-cache" data-view="cache">
@@ -1558,7 +1755,7 @@
   // ── view + subtab routing ─────────────────────────────────────────────
   // Hash format is `#view` or `#view/subtab` (e.g. `#cost/project`).
   // Browser back/forward works because anchor clicks update location.hash.
-  const VIEWS = ['overview', 'cost', 'cache', 'tools', 'subagents'];
+  const VIEWS = ['overview', 'cost', 'sessions', 'cache', 'tools', 'subagents'];
   function parseHash() {
     const h = (location.hash || '#overview').slice(1);
     const [view, subtab] = h.split('/');
@@ -2509,6 +2706,128 @@
   document.getElementById('filter').addEventListener('input', applyFilters);
   document.getElementById('mincost').addEventListener('input', applyFilters);
 
+  // ── sessions drill-down ───────────────────────────────────────────────
+  // Each session in D.session_timelines becomes a nested <details>: outer
+  // = session card (collapsed), inner = prompt (collapsed), revealing a
+  // per-turn list. Costs/tokens are pre-aggregated by the backend so the
+  // renderer is mostly string-shaping.
+  (function renderSessions() {
+    const host = document.getElementById('session-list');
+    const empty = document.getElementById('session-empty');
+    if (!host) return;
+    const data = D.session_timelines || [];
+    if (data.length === 0) {
+      empty && (empty.hidden = false);
+      return;
+    }
+
+    // Surface --redact state in the guide so users know prompt text was
+    // intentionally hidden — otherwise "[redacted N chars]" reads as a bug.
+    const anyRedacted = data.some(s =>
+      (s.Prompts || []).some(p => typeof p.Text === 'string' && p.Text.startsWith('[redacted ')));
+    if (anyRedacted) {
+      const notice = document.getElementById('session-redact-notice');
+      if (notice) notice.textContent =
+        'Prompts in this report were redacted at generation time (--redact). Costs and tokens are unaffected.';
+    }
+
+    const fmtTime = ts => {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      // Local time. YYYY-MM-DD HH:MM is enough resolution for drill-down.
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const fmtHMS = ts => {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+    const sumTokens = tk => (
+      (tk.InputTokens || 0) + (tk.OutputTokens || 0) +
+      (tk.CacheCreate5mTokens || 0) + (tk.CacheCreate1hTokens || 0) +
+      (tk.CacheReadTokens || 0)
+    );
+    const fmtTokens = tk => {
+      const inT = tk.InputTokens || 0;
+      const outT = tk.OutputTokens || 0;
+      const fmt = n => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
+      return `${fmt(inT)} in · ${fmt(outT)} out`;
+    };
+
+    const html = [];
+    for (const s of data) {
+      const sid = s.SessionID || '(unknown)';
+      const sidShort = sid.length > 24 ? sid.slice(0, 8) + '…' + sid.slice(-8) : sid;
+      const promptCount = (s.Prompts || []).length;
+      const timeRange = `${fmtTime(s.StartedAt)} → ${fmtTime(s.EndedAt)}`;
+
+      html.push(`<details class="session-card" data-session="${escHtml(sid)}">`);
+      html.push(`<summary>`);
+      html.push(`<span class="s-id" title="${escHtml(sid)}">${escHtml(sidShort)}</span>`);
+      html.push(`<span class="s-cwd" title="${escHtml(s.CWD || '')}">${escHtml(s.CWD || '—')}</span>`);
+      html.push(`<span class="s-stats">`);
+      html.push(`<span>${promptCount} prompt${promptCount===1?'':'s'}</span>`);
+      html.push(`<span>${s.Turns || 0} turn${s.Turns===1?'':'s'}</span>`);
+      html.push(`<span class="s-cost">${escHtml(fmtMoney(s.CostUSD || 0))}</span>`);
+      html.push(`</span>`);
+      html.push(`<span class="s-time">${escHtml(timeRange)}</span>`);
+      html.push(`</summary>`);
+      html.push(`<div class="session-body">`);
+
+      for (const p of (s.Prompts || [])) {
+        const text = p.Text || '';
+        const isRedacted = text.startsWith('[redacted ');
+        const isOrphan = !p.UUID;
+        const promptCost = p.CostUSD || 0;
+        const turnN = (p.Turns || []).length;
+
+        html.push(`<details class="prompt-block"${isOrphan ? ' data-orphan="1"' : ''}>`);
+        html.push(`<summary>`);
+        if (isOrphan) {
+          html.push(`<span class="p-text p-redacted">(orphan turns — no recognized originating prompt)</span>`);
+        } else if (isRedacted) {
+          html.push(`<span class="p-text p-redacted">${escHtml(text)}</span>`);
+        } else {
+          html.push(`<span class="p-text">${escHtml(text)}</span>`);
+        }
+        html.push(`<span class="p-stats">`);
+        html.push(`<span>${turnN} turn${turnN===1?'':'s'}</span>`);
+        html.push(`<span class="p-cost">${escHtml(fmtMoney(promptCost))}</span>`);
+        html.push(`</span>`);
+        html.push(`</summary>`);
+
+        if (p.Truncated) {
+          html.push(`<div class="p-truncated">(prompt truncated — re-run with a higher --sessions cap or check the raw JSONL for the full text)</div>`);
+        }
+
+        html.push(`<ul class="turn-list">`);
+        for (const t of (p.Turns || [])) {
+          html.push(`<li class="turn-row">`);
+          html.push(`<span class="t-time">${escHtml(fmtHMS(t.Timestamp))}</span>`);
+          html.push(`<span class="t-model" title="${escHtml(t.Model || '')}">${escHtml(t.Model || '—')}</span>`);
+          html.push(`<span class="t-tokens">${escHtml(fmtTokens(t.Tokens || {}))}</span>`);
+          html.push(`<span class="t-cost">${escHtml(fmtMoney(t.CostUSD || 0))}</span>`);
+          html.push(`<span class="t-tools">`);
+          for (const tool of (t.Tools || [])) {
+            html.push(`<span class="t-tool">${escHtml(tool)}</span>`);
+          }
+          if (t.Sidechain) html.push(`<span class="t-side">sidechain</span>`);
+          html.push(`</span>`);
+          html.push(`</li>`);
+        }
+        html.push(`</ul>`);
+        html.push(`</details>`);
+      }
+      html.push(`</div>`);
+      html.push(`</details>`);
+    }
+    host.innerHTML = html.join('');
+  })();
+
   // ── sidebar metrics ───────────────────────────────────────────────────
   // The sidebar carries each section's headline number so the nav itself
   // works as a glanceable summary, not just a list of words.
@@ -2526,6 +2845,16 @@
     set('nav-metric-cost', topModel
       ? `${truncate(topModel.Model, 18)} · ${fmtMoney(topModel.CostUSD)}`
       : '—');
+
+    // Sessions — count shown + cost of the top session, so the user knows
+    // at a glance how rich the drill-down is.
+    const sessions = D.session_timelines || [];
+    if (sessions.length > 0) {
+      const top = sessions[0];
+      set('nav-metric-sessions', `${sessions.length} · top ${fmtMoney(top.CostUSD || 0)}`);
+    } else {
+      set('nav-metric-sessions', '—');
+    }
 
     // Cache — overall hit ratio. Uses HTML for the colored tier pill.
     const cacheNav = document.getElementById('nav-metric-cache');

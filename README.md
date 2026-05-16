@@ -47,6 +47,7 @@ Run `claudit help` for the subcommand list and `claudit <cmd> --help` for per-co
 - **Per-prompt cost.** Every user prompt's downstream cost, computed by walking the conversation's parent links.
 - **Cache efficiency.** Hit ratio overall plus the worst-offender prompts and tools driving cache misses.
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.
+- **Sessions drill-down (HTML only).** Top sessions by cost, each expandable to show the ordered user prompts and the assistant turns each one produced — per-turn model, tokens, cost, and which tools fired. Capped via `--sessions=N` (default 50; `--sessions=0` disables the view). Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing a report.
 - **Trends.** Day/week/month buckets with sparklines.
 
 ## Privacy
@@ -58,6 +59,8 @@ claudit runs entirely on your machine:
 - It writes an HTML, JSON, or markdown report to stdout.
 
 The CLI makes no network calls. The HTML report references Inter from Google Fonts for typography, so opening it in a browser fetches the font from `fonts.googleapis.com` — your IP and User-Agent reach Google, but none of the report's content (prompts, paths, costs) does. Offline, the report falls back to system sans-serif. Hotspot prompts are copyable text — pasting them into a model is your decision.
+
+One thing to know if you plan to share a report: the **Sessions drill-down** view inlines your prompt text (truncated to 2000 chars per prompt). The text never leaves the report, but if the file does, the prompts go with it. Pass `--redact` to replace prompt bodies with `[redacted N chars]` — costs, tokens, tool names, and timestamps are still emitted, just not the conversation content. Pass `--sessions=0` to omit the view entirely.
 
 ## Pricing config
 

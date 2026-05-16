@@ -78,6 +78,8 @@ func runReport(args []string) error {
 	by := fs.String("by", "day", "trend mode: bucket spend over time — one of day|week|month (empty disables)")
 	cacheTop := fs.Int("cache-top", 10, "show top-N cache-miss offenders per dimension in the cache efficiency section (0 disables)")
 	promptTop := fs.Int("prompt-top", 15, "show top-N most expensive user prompts (0 disables)")
+	sessionsTop := fs.Int("sessions", 50, "show top-N most expensive sessions in the drill-down view (0 disables the Sessions section; HTML only)")
+	redact := fs.Bool("redact", false, "replace prompt text in the Sessions view with '[redacted N chars]' (HTML only)")
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "claudit report — generate a cost/usage report from session JSONL files.")
@@ -148,6 +150,22 @@ func runReport(args []string) error {
 		agg.AddWithSubagent(t, lookup)
 	}
 
+	// Build per-session drill-down timelines. Done outside the aggregator
+	// because it needs the raw turn/msg/parent-link arrays (which the
+	// aggregator doesn't retain). Skipped when --sessions=0 or rendering
+	// non-HTML — keeps the markdown/JSON paths unchanged.
+	var sessionTimelines []aggregate.SessionTimeline
+	if *asHTML && !*asJSON && *sessionsTop > 0 {
+		sessionTimelines = aggregate.BuildSessionTimelines(
+			turns, userMsgs, parentLinks, prices, filter,
+			aggregate.SessionTimelinesOptions{
+				TopN:           *sessionsTop,
+				Redact:         *redact,
+				MaxPromptChars: 2000,
+			},
+		)
+	}
+
 	// Render. --json takes precedence over --html so an explicit --json
 	// wins against the html-by-default behavior.
 	if *asJSON {
@@ -155,7 +173,9 @@ func runReport(args []string) error {
 			return err
 		}
 	} else if *asHTML {
-		if err := render.HTML(os.Stdout, agg); err != nil {
+		if err := render.HTMLWithOptions(os.Stdout, agg, render.HTMLOptions{
+			SessionTimelines: sessionTimelines,
+		}); err != nil {
 			return err
 		}
 	} else {

@@ -26,12 +26,27 @@ type hotspotForJSON struct {
 	Prompt     string                `json:"prompt"`
 }
 
-// HTML writes a self-contained interactive HTML report to w. The page has
-// inline CSS/JS, a global text filter, a min-cost threshold, sortable
-// tables, donut + horizontal bar charts, collapsible per-tool drill-downs,
-// heat-shaded cost columns, and a top-of-report "hotspots" section where
-// each row carries a copyable LLM prompt.
+// HTMLOptions carries optional extras for the HTML renderer that don't
+// fit naturally on the Aggregator (most commonly because they require raw
+// parse arrays the aggregator doesn't retain). Zero value is fine — the
+// renderer skips any section whose payload is empty.
+type HTMLOptions struct {
+	// SessionTimelines is the v2.0 drill-down payload: per-session
+	// ordered prompts + per-turn summaries. Built by
+	// aggregate.BuildSessionTimelines. nil/empty hides the Sessions view.
+	SessionTimelines []aggregate.SessionTimeline
+}
+
+// HTML writes a self-contained interactive HTML report to w. Equivalent
+// to HTMLWithOptions with a zero-value HTMLOptions — kept as a thin alias
+// for callers that don't need the drill-down extras.
 func HTML(w io.Writer, a *aggregate.Aggregator) error {
+	return HTMLWithOptions(w, a, HTMLOptions{})
+}
+
+// HTMLWithOptions writes the HTML report and includes any optional
+// sections supplied via opts (currently: SessionTimelines).
+func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
 	mainTok, mainCost, mainTurns := a.MainTotals()
 	sideTok, sideCost, sideTurns := a.SidechainTotals()
 
@@ -77,6 +92,7 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		CacheBySubagent  []aggregate.CacheRow                `json:"cache_by_subagent"`
 		CacheByInvocation []aggregate.CacheRow               `json:"cache_by_invocation"`
 		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
+		SessionTimelines []aggregate.SessionTimeline         `json:"session_timelines"`
 	}{
 		Totals:           a.Totals(),
 		Hotspots:         hotspots,
@@ -103,6 +119,7 @@ func HTML(w io.Writer, a *aggregate.Aggregator) error {
 		CacheBySubagent:   a.CacheBySubagent(),
 		CacheByInvocation: a.CacheByInvocation(),
 		ByPrompt:          a.ByPrompt(),
+		SessionTimelines:  opts.SessionTimelines,
 	}
 
 	data, err := json.Marshal(payload)
