@@ -84,7 +84,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 
 - The JSONL schema is Claude Code's. If Anthropic changes it, the parser may need to catch up.
 - Prices are manually maintained in `prices.yaml`. When Anthropic publishes new rates, you update the YAML.
-- Developed on macOS. Path and file-rotation handling are platform-agnostic, but Linux and Windows are not actively exercised.
+- Developed and dogfooded on macOS. CI runs the test suite on Linux, macOS, and Windows. On Windows, `claudit watch`'s live status line uses ANSI escape sequences — Windows Terminal and PowerShell 7 render them correctly; legacy `cmd.exe` will show the escapes literally.
 - The HTML report is a single self-contained file (no CDN fonts, no external CSS/JS) — it renders offline.
 
 ## License
