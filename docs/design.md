@@ -1,6 +1,6 @@
 # claudit — Design Context
 
-This file captures design context for the claudit project so impeccable skills can produce work grounded in the project's purpose and aesthetic, not generic AI defaults.
+This file captures design context for the claudit project so contributors (human or AI) can produce work grounded in the project's purpose and aesthetic, not generic defaults.
 
 ## Design Context
 
