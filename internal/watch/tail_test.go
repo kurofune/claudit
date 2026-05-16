@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -162,6 +163,14 @@ func TestTail_PartialLineBuffersAcrossReads(t *testing.T) {
 }
 
 func TestTail_RotationReopens(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows refuses os.Remove on a file with open handles unless the
+		// opener requested FILE_SHARE_DELETE (Go's os.Open does not). The
+		// rotation-detection logic under test (os.SameFile + reopen) is
+		// platform-neutral; only this test's delete-and-recreate simulation
+		// is Unix-specific.
+		t.Skip("delete-while-open simulation cannot run on Windows")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "live.jsonl")
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

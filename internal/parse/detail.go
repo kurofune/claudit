@@ -209,7 +209,10 @@ func topLevelDir(p string) string {
 	slash := strings.ReplaceAll(p, `\`, "/")
 	trimmed := strings.Trim(slash, "/")
 	if trimmed == "" {
-		return p
+		// p is root after filepath.Clean — on Windows that's "\", which
+		// would leak the native separator. Return the slash-normalized
+		// form so callers get "/" on every OS.
+		return slash
 	}
 	first := strings.SplitN(trimmed, "/", 2)[0]
 	// Strip a Windows drive letter so C:\etc\hosts → "/etc" (matches the
