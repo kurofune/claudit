@@ -3,7 +3,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultProjectsRoot(t *testing.T) {
@@ -28,3 +30,67 @@ func TestDefaultProjectsRoot(t *testing.T) {
 		t.Errorf("empty env: got %q want %q", got, want)
 	}
 }
+
+func TestDefaultDiffWindows_Week(t *testing.T) {
+	// Pin "now" to a known instant so the rolling-window math is
+	// deterministic. 2026-05-16 12:34:00 UTC — midnight tonight is
+	// 2026-05-16 00:00 UTC, which is what the helper anchors against.
+	now := time.Date(2026, 5, 16, 12, 34, 0, 0, time.UTC)
+	aStart, aEnd, bStart, bEnd, labelA, labelB, err := defaultDiffWindows("week", now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantB := []time.Time{
+		time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 16, 0, 0, 0, 0, time.UTC),
+	}
+	wantA := []time.Time{
+		time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
+	}
+	if !bStart.Equal(wantB[0]) || !bEnd.Equal(wantB[1]) {
+		t.Errorf("B window: got [%s, %s), want [%s, %s)", bStart, bEnd, wantB[0], wantB[1])
+	}
+	if !aStart.Equal(wantA[0]) || !aEnd.Equal(wantA[1]) {
+		t.Errorf("A window: got [%s, %s), want [%s, %s)", aStart, aEnd, wantA[0], wantA[1])
+	}
+	// Labels should be honest: they say "7 days", not "week", because the
+	// window is a rolling 7-day slice (not a calendar Mon-Sun).
+	for _, want := range []string{"prior 7 days", "2026-05-02", "2026-05-09"} {
+		if !strings.Contains(labelA, want) {
+			t.Errorf("labelA %q missing %q", labelA, want)
+		}
+	}
+	for _, want := range []string{"last 7 days", "2026-05-09", "2026-05-16"} {
+		if !strings.Contains(labelB, want) {
+			t.Errorf("labelB %q missing %q", labelB, want)
+		}
+	}
+}
+
+func TestDefaultDiffWindows_Month(t *testing.T) {
+	// Month windows are 30d, not calendar months — keeps A and B the
+	// same size so delta percentages stay honest.
+	now := time.Date(2026, 5, 16, 0, 0, 0, 0, time.UTC)
+	aStart, aEnd, bStart, bEnd, _, _, err := defaultDiffWindows("month", now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bEnd.Sub(bStart) != 30*24*time.Hour {
+		t.Errorf("B should span 30d, got %s", bEnd.Sub(bStart))
+	}
+	if aEnd.Sub(aStart) != 30*24*time.Hour {
+		t.Errorf("A should span 30d, got %s", aEnd.Sub(aStart))
+	}
+	if !aEnd.Equal(bStart) {
+		t.Errorf("A should butt up against B: aEnd=%s bStart=%s", aEnd, bStart)
+	}
+}
+
+func TestDefaultDiffWindows_RejectsUnknownUnit(t *testing.T) {
+	_, _, _, _, _, _, err := defaultDiffWindows("fortnight", time.Now())
+	if err == nil {
+		t.Errorf("expected error for unknown --by value")
+	}
+}
+

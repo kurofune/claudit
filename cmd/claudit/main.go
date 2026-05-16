@@ -182,8 +182,10 @@ func runDiff(args []string) error {
 	root := fs.String("root", defaultRoot, "root directory to walk (defaults to $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 	rangeA := fs.String("a", "", "baseline range, format YYYY-MM-DD..YYYY-MM-DD (inclusive-start, exclusive-end)")
 	rangeB := fs.String("b", "", "current range, same format as --a")
+	by := fs.String("by", "week", "default comparison window when --a/--b are absent: week (7d vs prior 7d) or month (30d vs prior 30d)")
 	project := fs.String("project", "", "case-insensitive substring match on cwd")
 	asJSON := fs.Bool("json", false, "emit JSON instead of markdown")
+	asHTML := fs.Bool("html", false, "emit a self-contained HTML diff (overrides --json if both are set)")
 	pricesPath := fs.String("prices", "", "override pricing YAML path (default: ~/.config/claudit/prices.yaml)")
 	topMovers := fs.Int("top", 10, "show top-N rows per dimension in the movers tables")
 	hotspotN := fs.Int("hotspots", 10, "size of the hotspot pool used to find new-in-B hotspots (0 disables that section)")
@@ -192,7 +194,9 @@ func runDiff(args []string) error {
 		fmt.Fprintln(out, "claudit diff — compare two date ranges and report top movers.")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Usage:")
-		fmt.Fprintln(out, "  claudit diff --a=YYYY-MM-DD..YYYY-MM-DD --b=YYYY-MM-DD..YYYY-MM-DD [flags]")
+		fmt.Fprintln(out, "  claudit diff [flags]                       (defaults to last 7 days vs prior 7 days)")
+		fmt.Fprintln(out, "  claudit diff --by=month                    (last 30 days vs prior 30 days)")
+		fmt.Fprintln(out, "  claudit diff --a=YYYY-MM-DD..YYYY-MM-DD --b=YYYY-MM-DD..YYYY-MM-DD")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		fs.PrintDefaults()
@@ -201,8 +205,26 @@ func runDiff(args []string) error {
 		return err
 	}
 
-	if *rangeA == "" || *rangeB == "" {
-		return fmt.Errorf("diff requires --a=YYYY-MM-DD..YYYY-MM-DD and --b=YYYY-MM-DD..YYYY-MM-DD")
+	// Derive default ranges when both --a and --b are absent. Equal-size
+	// rolling windows ending at midnight tonight keep the delta math
+	// honest: B = the last 7d/30d, A = the 7d/30d before that. Mixing one
+	// --a with no --b (or vice versa) is still an error — partial overrides
+	// invite footguns.
+	hasA, hasB := *rangeA != "", *rangeB != ""
+	if !hasA && !hasB {
+		sinceA, untilA, sinceB, untilB, labelA, labelB, err := defaultDiffWindows(*by, time.Now())
+		if err != nil {
+			return err
+		}
+		return runDiffWithRanges(*root, *project, *pricesPath, *asJSON, *asHTML, *topMovers, *hotspotN,
+			sinceA, untilA, sinceB, untilB, labelA, labelB)
+	}
+	if !hasA || !hasB {
+		dayCount := 7
+		if *by == "month" {
+			dayCount = 30
+		}
+		return fmt.Errorf("diff requires both --a and --b, or neither (defaults to last %d days vs prior %d days)", dayCount, dayCount)
 	}
 	sinceA, untilA, err := parseDateRange(*rangeA)
 	if err != nil {
@@ -212,13 +234,24 @@ func runDiff(args []string) error {
 	if err != nil {
 		return fmt.Errorf("--b: %w", err)
 	}
+	return runDiffWithRanges(*root, *project, *pricesPath, *asJSON, *asHTML, *topMovers, *hotspotN,
+		sinceA, untilA, sinceB, untilB, *rangeA, *rangeB)
+}
 
-	prices, err := loadPrices(*pricesPath)
+func runDiffWithRanges(
+	root, project, pricesPath string,
+	asJSON, asHTML bool,
+	topMovers, hotspotN int,
+	sinceA, untilA, sinceB, untilB time.Time,
+	labelA, labelB string,
+) error {
+
+	prices, err := loadPrices(pricesPath)
 	if err != nil {
 		return err
 	}
 
-	files, err := listJSONL(*root)
+	files, err := listJSONL(root)
 	if err != nil {
 		return err
 	}
@@ -226,10 +259,10 @@ func runDiff(args []string) error {
 
 	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
 	aAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
-		Since: sinceA, Until: untilA, ProjectSubstring: *project,
+		Since: sinceA, Until: untilA, ProjectSubstring: project,
 	}).WithPromptIndex(promptIdx)
 	bAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
-		Since: sinceB, Until: untilB, ProjectSubstring: *project,
+		Since: sinceB, Until: untilB, ProjectSubstring: project,
 	}).WithPromptIndex(promptIdx)
 
 	lookup := newSubagentLookup()
@@ -239,16 +272,22 @@ func runDiff(args []string) error {
 	}
 
 	opt := render.DiffOptions{
-		LabelA:    *rangeA,
-		LabelB:    *rangeB,
-		TopMovers: *topMovers,
-		Hotspots:  *hotspotN,
+		LabelA:    labelA,
+		LabelB:    labelB,
+		TopMovers: topMovers,
+		Hotspots:  hotspotN,
 	}
-	if *asJSON {
+	// --html wins over --json so users can opt up from the default markdown.
+	switch {
+	case asHTML:
+		if err := render.DiffHTML(os.Stdout, aAgg, bAgg, opt); err != nil {
+			return err
+		}
+	case asJSON:
 		if err := render.DiffJSON(os.Stdout, aAgg, bAgg, opt); err != nil {
 			return err
 		}
-	} else {
+	default:
 		if err := render.DiffMarkdown(os.Stdout, aAgg, bAgg, opt); err != nil {
 			return err
 		}
@@ -256,6 +295,43 @@ func runDiff(args []string) error {
 
 	emitWarnings(malformed, fileErrs)
 	return nil
+}
+
+// defaultDiffWindows derives equal-size rolling windows for `claudit diff`
+// when --a and --b are absent. Windows end at midnight tonight (local) so
+// the same invocation across the day produces identical results.
+//
+//	by="week"  → B = [today-7d, today),  A = [today-14d, today-7d)
+//	by="month" → B = [today-30d, today), A = [today-60d, today-30d)
+//
+// Labels read "last 7 days" / "prior 7 days" (or 30) — NOT "this week" —
+// because the window is a rolling 7d slice, not a calendar Mon-Sun. Honest
+// labels matter for honest delta percentages.
+func defaultDiffWindows(by string, now time.Time) (time.Time, time.Time, time.Time, time.Time, string, string, error) {
+	var d time.Duration
+	var nDays int
+	switch by {
+	case "week":
+		d = 7 * 24 * time.Hour
+		nDays = 7
+	case "month":
+		d = 30 * 24 * time.Hour
+		nDays = 30
+	default:
+		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, "", "",
+			fmt.Errorf("--by: must be week or month, got %q", by)
+	}
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	bEnd := midnight
+	bStart := midnight.Add(-d)
+	aEnd := bStart
+	aStart := bStart.Add(-d)
+	fmtRange := func(s, e time.Time) string {
+		return s.Format("2006-01-02") + ".." + e.Format("2006-01-02")
+	}
+	labelA := fmt.Sprintf("prior %d days (%s)", nDays, fmtRange(aStart, aEnd))
+	labelB := fmt.Sprintf("last %d days (%s)", nDays, fmtRange(bStart, bEnd))
+	return aStart, aEnd, bStart, bEnd, labelA, labelB, nil
 }
 
 // loadPrices resolves the prices file (default or override) and parses it.

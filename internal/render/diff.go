@@ -1,14 +1,133 @@
 package render
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"math"
 	"sort"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
+
+//go:embed diff.html.tmpl
+var diffHTMLTemplate string
+
+// diffTpl is parsed once at init time. Template funcs handle all numeric
+// formatting so the template stays readable.
+var diffTpl = template.Must(template.New("diff").Funcs(template.FuncMap{
+	"money":          money,
+	"deltaMoney":     deltaMoney,
+	"deltaPct":       deltaPct,
+	"deltaInt":       deltaInt,
+	"deltaRatio":     deltaRatio,
+	"ratioPctOrDash": ratioPctOrDash,
+	"pctOf":          pctOf,
+	"truncate":       truncate,
+	"barPct":         barPct,
+	"deltaSign":      deltaSign,
+}).Parse(diffHTMLTemplate))
+
+// barPct returns the width percent (0..100) of a value relative to a
+// section's max. Returns 0 when max is zero. Bars below 1% bump to 1
+// so a nonzero row never renders as an invisible sliver.
+func barPct(v, max float64) string {
+	if max <= 0 || v <= 0 {
+		return "0"
+	}
+	p := 100 * v / max
+	if p < 1 {
+		p = 1
+	}
+	if p > 100 {
+		p = 100
+	}
+	return fmt.Sprintf("%.2f", p)
+}
+
+// deltaSign classifies a B−A delta as "up" / "down" / "zero" so the
+// template can map to coral / green / muted without re-doing the math.
+func deltaSign(a, b float64) string {
+	switch {
+	case b > a:
+		return "up"
+	case b < a:
+		return "down"
+	default:
+		return "zero"
+	}
+}
+
+// diffHTMLSection bundles one movers table with its display title and the
+// per-section bar max. Computing max once on the server side beats asking
+// the browser to do it for every row.
+type diffHTMLSection struct {
+	Title   string
+	Rows    []DiffMover
+	Max     float64
+	Empty   bool
+}
+
+// diffHTMLData is the full payload passed to diff.html.tmpl.
+type diffHTMLData struct {
+	LabelA, LabelB  string
+	TotalsA         aggregate.Totals
+	TotalsB         aggregate.Totals
+	HitRatioA       float64
+	HitRatioB       float64
+	Sections        []diffHTMLSection
+	NewHotspots     []aggregate.Hotspot
+	NewHotspotsShow bool // true when the section is enabled (Hotspots > 0)
+}
+
+// DiffHTML writes a self-contained HTML diff to w. Server-side rendered;
+// no client JS. Reuses the design tokens from the main report so the two
+// surfaces feel like one product.
+func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
+	opt.defaults()
+
+	mkSection := func(title string, rows []DiffMover) diffHTMLSection {
+		rows = rankMovers(rows, opt.TopMovers)
+		max := 0.0
+		for _, r := range rows {
+			if r.CostA > max {
+				max = r.CostA
+			}
+			if r.CostB > max {
+				max = r.CostB
+			}
+		}
+		return diffHTMLSection{
+			Title: title,
+			Rows:  rows,
+			Max:   max,
+			Empty: len(rows) == 0,
+		}
+	}
+
+	data := diffHTMLData{
+		LabelA:    opt.LabelA,
+		LabelB:    opt.LabelB,
+		TotalsA:   a.Totals(),
+		TotalsB:   b.Totals(),
+		HitRatioA: a.Totals().Tokens.HitRatio(),
+		HitRatioB: b.Totals().Tokens.HitRatio(),
+		Sections: []diffHTMLSection{
+			mkSection("By model", ModelMovers(a, b)),
+			mkSection("By project", ProjectMovers(a, b)),
+			mkSection("By tool", ToolMovers(a, b)),
+			mkSection("By skill / slash command", SkillMovers(a, b)),
+			mkSection("By subagent type", SubagentMovers(a, b)),
+		},
+	}
+	if opt.Hotspots > 0 {
+		data.NewHotspots = newHotspots(a, b, opt.Hotspots)
+		data.NewHotspotsShow = true
+	}
+	return diffTpl.Execute(w, data)
+}
 
 // DiffOptions controls diff output. Zero value is fine — sensible
 // defaults are filled in.

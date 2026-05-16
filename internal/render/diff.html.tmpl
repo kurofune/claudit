@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claudit diff</title>
+<!-- Inter for the headline numerics. Same loading approach as the main
+     report so the two surfaces feel like one product. Display=swap means
+     content shows in the system fallback first and silently swaps when
+     Inter arrives. Offline, the fallback chain (SF Pro Display → system
+     sans) keeps everything readable. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+<style>
+  /* ─── Design tokens (mirrors internal/render/report.html.tmpl)
+     If you change anything here, update the report template too — the
+     two surfaces are meant to feel like one product. v2.2 (`serve`) will
+     extract these into a shared partial; until then, duplicate. */
+  :root {
+    color-scheme: light dark;
+    --brand-h: 280;
+    --bg:           oklch(98.4% 0.005 var(--brand-h));
+    --surface:      oklch(100%  0     0);
+    --surface-2:    oklch(96.5% 0.008 var(--brand-h));
+    --surface-3:    oklch(94%   0.012 var(--brand-h));
+    --border:       oklch(89%   0.012 var(--brand-h));
+    --border-strong:oklch(78%   0.018 var(--brand-h));
+    --ink:          oklch(22%   0.020 var(--brand-h));
+    --ink-2:        oklch(40%   0.015 var(--brand-h));
+    --muted:        oklch(55%   0.012 var(--brand-h));
+    --accent:       oklch(58% 0.16 var(--brand-h));
+    --accent-2:     oklch(62% 0.14 160);
+    --hot:          oklch(62% 0.20 15);
+    --warn:         oklch(70% 0.16 60);
+    --accent-soft:  color-mix(in oklch, var(--accent) 14%, var(--surface));
+    --hot-soft:     oklch(60% 0.20 15 / 0.22);
+    --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+    --c-1: oklch(60% 0.16 280);
+    --c-2: oklch(62% 0.13 200);
+    --c-3: oklch(64% 0.16 150);
+    --c-4: oklch(70% 0.15  80);
+    --c-5: oklch(64% 0.20  20);
+
+    --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
+    --s-5: 24px; --s-6: 32px; --s-7: 48px;
+
+    --t-1: 0.6875rem; --t-2: 0.8125rem; --t-3: 0.875rem;
+    --t-4: 1rem;      --t-5: 1.25rem;   --t-6: 1.75rem;  --t-7: 2.5rem;
+
+    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue",
+                 system-ui, sans-serif;
+    --font-display: "Inter", "InterVariable", "SF Pro Display",
+                    -apple-system, BlinkMacSystemFont,
+                    "Segoe UI Variable Display", system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono",
+                 Menlo, Consolas, monospace;
+
+    --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
+    --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
+    --shadow-md: 0 1px 2px color-mix(in oklch, black 4%, transparent),
+                 0 4px 12px color-mix(in oklch, black 6%, transparent);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:           oklch(15%   0.012 var(--brand-h));
+      --surface:      oklch(19%   0.014 var(--brand-h));
+      --surface-2:    oklch(23%   0.016 var(--brand-h));
+      --surface-3:    oklch(28%   0.018 var(--brand-h));
+      --border:       oklch(32%   0.020 var(--brand-h));
+      --border-strong:oklch(45%   0.022 var(--brand-h));
+      --ink:          oklch(94%   0.010 var(--brand-h));
+      --ink-2:        oklch(78%   0.012 var(--brand-h));
+      --muted:        oklch(62%   0.015 var(--brand-h));
+      --accent:       oklch(72% 0.15 var(--brand-h));
+      --accent-2:     oklch(74% 0.14 160);
+      --hot:          oklch(74% 0.18 15);
+      --warn:         oklch(78% 0.15 60);
+      --hot-soft:     oklch(70% 0.20 15 / 0.42);
+      --accent-soft:  color-mix(in oklch, var(--accent) 18%, var(--surface));
+      --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+      --c-1: oklch(72% 0.16 280);
+      --c-2: oklch(74% 0.13 200);
+      --c-3: oklch(76% 0.16 150);
+      --c-4: oklch(80% 0.15  80);
+      --c-5: oklch(74% 0.18  20);
+      --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
+      --shadow-md: 0 1px 2px color-mix(in oklch, black 25%, transparent),
+                   0 4px 12px color-mix(in oklch, black 35%, transparent);
+    }
+  }
+
+  /* ─── Page shell ─────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--t-3);
+    line-height: 1.5;
+    padding: var(--s-7) clamp(var(--s-4), 5vw, 200px) var(--s-7);
+    -webkit-font-smoothing: antialiased;
+  }
+  .panel { max-width: none; }
+
+  /* ─── Header ─────────────────────────────────────────────────────── */
+  header { margin-bottom: var(--s-6); }
+  h1 {
+    font-family: var(--font-display);
+    font-size: var(--t-6);
+    font-weight: 600;
+    margin: 0 0 var(--s-2);
+    letter-spacing: -0.015em;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: var(--t-3);
+    margin: 0;
+  }
+  .subtitle .ab {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    margin: 0 2px;
+  }
+  .subtitle .label-a { border-color: color-mix(in oklch, var(--muted) 40%, var(--border)); }
+  .subtitle .label-b { border-color: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: var(--t-5);
+    font-weight: 600;
+    margin: var(--s-6) 0 var(--s-3);
+    letter-spacing: -0.01em;
+  }
+
+  /* ─── Totals tiles ───────────────────────────────────────────────── */
+  .totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-3);
+    margin: 0;
+  }
+  .totals .metric {
+    flex: 1 1 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--s-4);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .totals .label {
+    font-size: var(--t-1);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .totals .ab-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+  }
+  .totals .ab-row .value-a {
+    color: var(--muted);
+    font-size: var(--t-4);
+  }
+  .totals .ab-row .arrow {
+    color: var(--ink-2);
+    font-size: var(--t-3);
+  }
+  .totals .ab-row .value-b {
+    color: var(--ink);
+    font-size: var(--t-6);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .totals .delta {
+    font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .totals .delta-up   { color: var(--hot); }       /* cost up = bad */
+  .totals .delta-down { color: var(--accent-2); }  /* cost down = good */
+  .totals .delta-zero { color: var(--muted); }
+
+  /* For hit ratio: up is good, down is bad — flip the semantics. */
+  .totals .metric.hit .delta-up   { color: var(--accent-2); }
+  .totals .metric.hit .delta-down { color: var(--hot); }
+
+  /* For sessions / turns: neutral — neither up nor down is loaded. */
+  .totals .metric.neutral .delta-up,
+  .totals .metric.neutral .delta-down { color: var(--ink-2); }
+
+  /* ─── Mover sections ─────────────────────────────────────────────── */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-4) var(--s-5);
+    margin-bottom: var(--s-4);
+    box-shadow: var(--shadow-sm);
+  }
+  .section h2 { margin-top: 0; }
+  .section .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: var(--s-3) 0;
+  }
+
+  .mover {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-1);
+    padding: var(--s-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .mover:last-child { border-bottom: none; }
+  .mover .key {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--ink);
+    word-break: break-word;
+  }
+
+  /* Each bar row: [A|B] tag · bar · value */
+  .mover .bar-row {
+    display: grid;
+    grid-template-columns: 18px 1fr 9ch;
+    align-items: center;
+    gap: var(--s-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .mover .bar-row .tag {
+    font-size: var(--t-1);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+  .mover .bar-row .val {
+    font-size: var(--t-3);
+    color: var(--ink);
+    text-align: right;
+  }
+  .mover .bar-row.a-row .val { color: var(--ink-2); }
+
+  .bar {
+    position: relative;
+    height: 14px;
+    background: var(--surface-2);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .bar .fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    border-radius: var(--r-sm);
+  }
+  .bar.a .fill { background: color-mix(in oklch, var(--muted) 50%, var(--surface-3)); }
+  .bar.b .fill { background: var(--accent); }
+  .bar.zero { opacity: 0.5; }
+
+  .mover .delta-line {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s-3);
+    margin-top: 2px;
+    font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+  }
+  .mover .delta-line .delta-money { font-weight: 600; }
+  .mover .delta-line .delta-pct   { color: var(--ink-2); }
+  .mover .delta-line.up   .delta-money { color: var(--hot); }
+  .mover .delta-line.down .delta-money { color: var(--accent-2); }
+  .mover .delta-line.zero .delta-money { color: var(--muted); }
+
+  /* ─── New hotspots ───────────────────────────────────────────────── */
+  .hotspots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--s-3);
+  }
+  .hotspot {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-4);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+  .hotspot .kind {
+    font-size: var(--t-1);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .hotspot .title {
+    font-family: var(--font-mono);
+    font-size: var(--t-3);
+    color: var(--ink);
+    word-break: break-word;
+  }
+  .hotspot .meta {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--t-4);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .hotspot .meta .pct {
+    font-size: var(--t-2);
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: var(--s-2);
+  }
+
+  /* ─── Footer note ────────────────────────────────────────────────── */
+  footer {
+    margin-top: var(--s-7);
+    color: var(--muted);
+    font-size: var(--t-2);
+    border-top: 1px solid var(--border);
+    padding-top: var(--s-4);
+  }
+  footer code {
+    font-family: var(--font-mono);
+    background: var(--surface-2);
+    padding: 1px 6px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+  }
+
+  /* ─── Print: drop shadows + backgrounds, keep structure ──────────── */
+  @media print {
+    body { padding: var(--s-4); background: white; color: black; }
+    .totals .metric, .section, .hotspot {
+      box-shadow: none;
+      border-color: #ccc;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>claudit diff</h1>
+  <p class="subtitle">
+    Comparing baseline
+    <span class="ab label-a">A · {{ .LabelA }}</span>
+    against current
+    <span class="ab label-b">B · {{ .LabelB }}</span>.
+    Δ$ is B − A.
+  </p>
+</header>
+
+<section>
+  <h2>Totals</h2>
+  <div class="totals">
+    <div class="metric">
+      <span class="label">Total cost</span>
+      <div class="ab-row">
+        <span class="value-a">{{ money .TotalsA.CostUSD }}</span>
+        <span class="arrow">→</span>
+        <span class="value-b">{{ money .TotalsB.CostUSD }}</span>
+      </div>
+      <div class="delta delta-{{ deltaSign .TotalsA.CostUSD .TotalsB.CostUSD }}">
+        {{ deltaMoney .TotalsA.CostUSD .TotalsB.CostUSD }}
+        ({{ deltaPct .TotalsA.CostUSD .TotalsB.CostUSD }})
+      </div>
+    </div>
+
+    <div class="metric neutral">
+      <span class="label">Sessions</span>
+      <div class="ab-row">
+        <span class="value-a">{{ .TotalsA.Sessions }}</span>
+        <span class="arrow">→</span>
+        <span class="value-b">{{ .TotalsB.Sessions }}</span>
+      </div>
+      <div class="delta">
+        {{ deltaInt .TotalsA.Sessions .TotalsB.Sessions }}
+      </div>
+    </div>
+
+    <div class="metric neutral">
+      <span class="label">Turns</span>
+      <div class="ab-row">
+        <span class="value-a">{{ .TotalsA.Turns }}</span>
+        <span class="arrow">→</span>
+        <span class="value-b">{{ .TotalsB.Turns }}</span>
+      </div>
+      <div class="delta">
+        {{ deltaInt .TotalsA.Turns .TotalsB.Turns }}
+      </div>
+    </div>
+
+    <div class="metric hit">
+      <span class="label">Overall hit ratio</span>
+      <div class="ab-row">
+        <span class="value-a">{{ ratioPctOrDash .HitRatioA }}</span>
+        <span class="arrow">→</span>
+        <span class="value-b">{{ ratioPctOrDash .HitRatioB }}</span>
+      </div>
+      <div class="delta delta-{{ deltaSign .HitRatioA .HitRatioB }}">
+        {{ deltaRatio .HitRatioA .HitRatioB }}
+      </div>
+    </div>
+  </div>
+</section>
+
+{{ range .Sections }}
+<section class="section">
+  <h2>Top movers — {{ .Title }}</h2>
+  {{ if .Empty }}
+    <div class="empty">(no rows)</div>
+  {{ else }}
+    {{ $max := .Max }}
+    {{ range .Rows }}
+    <div class="mover">
+      <div class="key">{{ truncate .Key 90 }}</div>
+      <div class="bar-row a-row">
+        <span class="tag">A</span>
+        <div class="bar a{{ if eq .CostA 0.0 }} zero{{ end }}">
+          <div class="fill" style="width: {{ barPct .CostA $max }}%"></div>
+        </div>
+        <span class="val">{{ money .CostA }}</span>
+      </div>
+      <div class="bar-row b-row">
+        <span class="tag">B</span>
+        <div class="bar b{{ if eq .CostB 0.0 }} zero{{ end }}">
+          <div class="fill" style="width: {{ barPct .CostB $max }}%"></div>
+        </div>
+        <span class="val">{{ money .CostB }}</span>
+      </div>
+      <div class="delta-line {{ deltaSign .CostA .CostB }}">
+        <span class="delta-money">{{ deltaMoney .CostA .CostB }}</span>
+        <span class="delta-pct">{{ deltaPct .CostA .CostB }}</span>
+      </div>
+    </div>
+    {{ end }}
+  {{ end }}
+</section>
+{{ end }}
+
+{{ if .NewHotspotsShow }}
+<section class="section">
+  <h2>New hotspots in B</h2>
+  {{ if not .NewHotspots }}
+    <div class="empty">B&rsquo;s top hotspots all appear in A&rsquo;s top hotspots — no new headline movers.</div>
+  {{ else }}
+    <p class="subtitle" style="margin-bottom: var(--s-3);">
+      Hotspots that appear in B&rsquo;s top {{ len .NewHotspots }} but not in A&rsquo;s.
+    </p>
+    <div class="hotspots">
+      {{ range .NewHotspots }}
+      <div class="hotspot">
+        <span class="kind">{{ .Kind }}</span>
+        <span class="title">{{ truncate .Title 80 }}</span>
+        <span class="meta">
+          {{ money .CostUSD }}
+          <span class="pct">{{ pctOf .PctOfTotal }} of B total</span>
+        </span>
+      </div>
+      {{ end }}
+    </div>
+  {{ end }}
+</section>
+{{ end }}
+
+<footer>
+  Generated by <code>claudit diff</code>. Self-contained — no JS runtime, all data inline.
+</footer>
+
+</body>
+</html>

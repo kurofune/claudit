@@ -154,6 +154,79 @@ func TestDiffMarkdown_EmptySections(t *testing.T) {
 	}
 }
 
+func TestDiffHTML_RendersCoreSections(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	a := aggregate.New(prices)
+	a.Add(mkTurn("claude-opus-4-7", "/p/old", 1_000_000, 0, t0))
+
+	b := aggregate.New(prices)
+	b.Add(mkTurn("claude-opus-4-7", "/p/old", 1_000_000, 0, t0))
+	b.Add(mkTurn("claude-opus-4-7", "/p/new", 5_000_000, 0, t0))
+
+	var buf bytes.Buffer
+	err := DiffHTML(&buf, a, b, DiffOptions{
+		LabelA: "prior week (2026-04-25..2026-05-02)",
+		LabelB: "this week (2026-05-02..2026-05-09)",
+		TopMovers: 5,
+		Hotspots: 5,
+	})
+	if err != nil {
+		t.Fatalf("DiffHTML returned error: %v", err)
+	}
+	out := buf.String()
+
+	// Document shape — confirms the template parsed and executed.
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		"<title>claudit diff</title>",
+		"prior week (2026-04-25..2026-05-02)",
+		"this week (2026-05-02..2026-05-09)",
+		"Total cost",
+		"Top movers — By model",
+		"Top movers — By project",
+		"Top movers — By tool",
+		"/p/new",
+		// Hotspot section header renders when Hotspots > 0, regardless
+		// of whether any rows ended up new — covers both code paths.
+		"hotspots",
+	} {
+		if !strings.Contains(strings.ToLower(out), strings.ToLower(want)) {
+			t.Errorf("DiffHTML output missing %q", want)
+		}
+	}
+
+	// Cost-up should render a coral delta line.
+	if !strings.Contains(out, "delta-line up") {
+		t.Errorf("expected a 'delta-line up' class somewhere (cost increased in B):\n%s", headSnippet(out))
+	}
+}
+
+func TestDiffHTML_EmptyCorpus(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	a := aggregate.New(prices)
+	b := aggregate.New(prices)
+
+	var buf bytes.Buffer
+	if err := DiffHTML(&buf, a, b, DiffOptions{LabelA: "A", LabelB: "B"}); err != nil {
+		t.Fatalf("DiffHTML returned error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "(no rows)") {
+		t.Errorf("empty corpus should mark each section as empty:\n%s", headSnippet(out))
+	}
+}
+
+// headSnippet returns the first 800 chars of an HTML doc for diagnostic
+// logging — full template output is too large to dump on every failure.
+func headSnippet(s string) string {
+	if len(s) > 800 {
+		return s[:800] + "\n... (truncated)"
+	}
+	return s
+}
+
 func TestDiffJSON_Shape(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

@@ -23,7 +23,12 @@ claudit > report.html
 # Last week, scoped to one project
 claudit --last=7d --project=myrepo > report.html
 
-# Compare two windows
+# Compare the last 7 days to the 7 days before (markdown by default; --html renders side-by-side bars)
+claudit diff
+claudit diff --html > diff.html
+claudit diff --by=month --html > diff.html   # last 30 days vs prior 30 days
+
+# Or pin the windows explicitly
 claudit diff --a=2026-04-01..2026-04-15 --b=2026-04-15..2026-05-01
 
 # Tail the currently-running session and watch cost accrue
