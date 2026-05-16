@@ -1317,6 +1317,112 @@
     color: var(--muted);
     font-size: var(--t-2);
   }
+
+  /* ─── Deep-link anchor (#) — small "copy link" affordance on each
+     hotspot card and session card. Visible but unobtrusive: muted by
+     default, brightens on hover. Click sets location.hash, which the
+     router catches and scrolls/opens. */
+  .anchor-link {
+    margin-left: var(--s-2);
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    text-decoration: none;
+    opacity: 0.55;
+    transition: opacity var(--motion-fast) ease, background var(--motion-fast) ease, color var(--motion-fast) ease;
+  }
+  .anchor-link:hover {
+    opacity: 1;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .anchor-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    opacity: 1;
+  }
+
+  /* ─── Print stylesheet ─────────────────────────────────────────────
+     Goal: a printed/PDF copy of the report contains all the data and is
+     readable on paper. Strategy: drop the app shell to single-column,
+     un-stick everything, force-show every view + every <details> body,
+     force light palette, hide interactive-only chrome, and start each
+     top-level section on a fresh page so the PDF has a sensible TOC-ish
+     structure. Tested with Chrome "Save as PDF". */
+  @media print {
+    /* Force light theme regardless of system preference — dark mode
+       blasts ink and washes out on most printers. Reset the tokens that
+       drive surfaces/text so all the component CSS inherits correctly. */
+    :root {
+      color-scheme: light;
+      --bg:           #fff;
+      --surface:      #fff;
+      --surface-2:    #fafafa;
+      --surface-3:    #f3f3f3;
+      --border:       #ccc;
+      --border-strong:#999;
+      --ink:          #111;
+      --ink-2:        #333;
+      --muted:        #666;
+      --shadow-sm:    none;
+      --shadow-md:    none;
+      --shadow-lift:  none;
+      --accent-soft:  #f5f0ff;
+      --hot-soft:     transparent;
+    }
+
+    /* Single-column layout: drop the sidebar entirely, let the panel
+       flow to full page width. The sidebar is navigation — meaningless
+       on paper. */
+    body { padding: 0; background: #fff; color: #111; }
+    .app { display: block; }
+    .nav { display: none; }
+    .panel { padding: var(--s-4); max-width: none; }
+
+    /* Un-stick the filter controls; they're inert on paper. Hide them. */
+    .controls { display: none; }
+
+    /* Show every view, not just the active one. View nav exists only on
+       screen — print needs the whole report. */
+    .view { display: block !important; opacity: 1 !important; page-break-before: always; }
+    .view:first-of-type { page-break-before: auto; }
+    .subview { display: block !important; }
+    .subtabs { display: none; } /* same reason as .controls — nav is dead on paper */
+
+    /* Force every <details> open so its body prints. The user can't
+       click to expand a PDF page. */
+    details { display: block !important; }
+    details > summary { list-style: none !important; cursor: default !important; }
+    details > summary::-webkit-details-marker { display: none !important; }
+    details:not([open]) > *:not(summary) { display: revert !important; }
+    details > *:not(summary) { display: revert !important; }
+
+    /* Hide JS-driven affordances that have no print meaning. */
+    .chart-tooltip, .cl-tooltip, [role="tooltip"] { display: none !important; }
+    button.copy, .view-session, .anchor-link, .session-card .s-cwd[title]::after { display: none !important; }
+
+    /* Avoid splitting cards/tables/rows mid-element. page-break-inside is
+       the legacy name; break-inside is the modern alias. Use both for
+       browser coverage. */
+    table, .hotspot, .session-card, .prompt-block, .totals .metric, .warning-card {
+      page-break-inside: avoid; break-inside: avoid;
+    }
+    thead { display: table-header-group; } /* repeat header on each page */
+    tr { page-break-inside: avoid; break-inside: avoid; }
+
+    /* Remove decorative shadows and gradients — they cost ink and rarely
+       reproduce well. */
+    * { box-shadow: none !important; text-shadow: none !important; }
+
+    /* Headings stay attached to their following content. */
+    h1, h2, h3 { page-break-after: avoid; break-after: avoid; }
+
+    /* Print-paper sizing. A4-friendly margins; landscape is the user's
+       call via the browser dialog. */
+    @page { margin: 12mm; }
+  }
 </style>
 </head>
 <body>
@@ -1778,19 +1884,43 @@
   const escHtml = s => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  // ── view + subtab routing ─────────────────────────────────────────────
-  // Hash format is `#view` or `#view/subtab` (e.g. `#cost/project`).
-  // Browser back/forward works because anchor clicks update location.hash.
+  // ── view + subtab + anchor routing ────────────────────────────────────
+  // Hash forms supported:
+  //   #view                       (e.g. #cost)
+  //   #view/subtab                (e.g. #cost/project)
+  //   #target                     (bare anchor: #hotspot-3, #session-abc)
+  //   #view/target                (combined: #overview/hotspot-3)
+  // Targets are scroll-and-open: the matching id'd element gets scrolled
+  // into view and, if it's a <details>, opened. Lets users copy a URL
+  // that deep-links to a specific hotspot or session card.
   const VIEWS = ['overview', 'cost', 'sessions', 'cache', 'tools', 'subagents'];
+  const TARGET_PREFIXES = ['hotspot-', 'session-'];
+  function isTargetId(s) {
+    return !!s && TARGET_PREFIXES.some(p => s.startsWith(p));
+  }
   function parseHash() {
     const h = (location.hash || '#overview').slice(1);
-    const [view, subtab] = h.split('/');
+    const parts = h.split('/');
+    let view, secondary;
+    if (VIEWS.includes(parts[0])) {
+      view = parts[0];
+      secondary = parts[1] || null;
+    } else if (isTargetId(parts[0])) {
+      // Bare anchor — pick the view that owns this target type.
+      view = parts[0].startsWith('session-') ? 'sessions' : 'overview';
+      secondary = parts[0];
+    } else {
+      view = 'overview';
+      secondary = null;
+    }
+    const target = isTargetId(secondary) ? secondary : null;
     return {
-      view: VIEWS.includes(view) ? view : 'overview',
-      subtab: subtab || null,
+      view,
+      subtab: target ? null : secondary,
+      target,
     };
   }
-  function activate({ view, subtab }) {
+  function activate({ view, subtab, target }) {
     document.querySelectorAll('.view').forEach(v => {
       v.classList.toggle('is-active', v.dataset.view === view);
     });
@@ -1802,17 +1932,28 @@
     if (activeView) {
       const subtabs = activeView.querySelectorAll('.subtab');
       if (subtabs.length) {
-        const target = subtab && activeView.querySelector(`.subtab[data-subtab="${subtab}"]`)
+        const wanted = subtab && activeView.querySelector(`.subtab[data-subtab="${subtab}"]`)
           ? subtab
           : subtabs[0].dataset.subtab;
         subtabs.forEach(t =>
-          t.classList.toggle('is-active', t.dataset.subtab === target));
+          t.classList.toggle('is-active', t.dataset.subtab === wanted));
         activeView.querySelectorAll('.subview').forEach(s =>
-          s.classList.toggle('is-active', s.dataset.subview === target));
+          s.classList.toggle('is-active', s.dataset.subview === wanted));
       }
     }
-    // Bring the panel back to the top so the user lands on the section header.
-    if (window.scrollY > 0) window.scrollTo({top: 0, behavior: 'instant'});
+    if (target) {
+      // Defer scroll one frame so the view's display:block has taken
+      // effect — otherwise the element has no layout box yet and
+      // scrollIntoView lands on the wrong position.
+      requestAnimationFrame(() => {
+        const el = document.getElementById(target);
+        if (!el) return;
+        if (el.tagName === 'DETAILS') el.open = true;
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+      });
+    } else if (window.scrollY > 0) {
+      window.scrollTo({top: 0, behavior: 'instant'});
+    }
   }
   activate(parseHash());
   window.addEventListener('hashchange', () => activate(parseHash()));
@@ -2192,13 +2333,15 @@
           sessionAction = `<span class="view-session is-disabled" title="This prompt's session is below the --sessions=${(D.session_timelines || []).length || 'N'} cap. Re-run with a higher --sessions to include it.">view session (unavailable)</span>`;
         }
       }
-      return `<details class="hotspot">
+      const anchorId = `hotspot-${i+1}`;
+      return `<details class="hotspot" id="${anchorId}">
       <summary>
         <span class="rank">#${i+1}</span>
         <span class="hotspot-kind">${escHtml(h.kind.replace(/_/g, ' '))}</span>
         <span class="h-title" title="${escHtml(h.title)}">${escHtml(h.title)}</span>
         <span class="h-cost">${fmtMoney(h.cost_usd)}</span>
         <span class="h-pct">(${h.pct_of_total.toFixed(1)}%)</span>
+        <a class="anchor-link" href="#overview/${anchorId}" title="Copy link to this hotspot" aria-label="Copy link to hotspot ${i+1}">#</a>
       </summary>
       <div class="body">
         <div class="actions">
@@ -2875,7 +3018,8 @@
       const promptCount = (s.Prompts || []).length;
       const timeRange = `${fmtTime(s.StartedAt)} → ${fmtTime(s.EndedAt)}`;
 
-      html.push(`<details class="session-card" data-session="${escHtml(sid)}">`);
+      const anchorId = `session-${sid}`;
+      html.push(`<details class="session-card" id="${escHtml(anchorId)}" data-session="${escHtml(sid)}">`);
       html.push(`<summary>`);
       html.push(`<span class="s-id" title="${escHtml(sid)}">${escHtml(sidShort)}</span>`);
       html.push(`<span class="s-cwd" title="${escHtml(s.CWD || '')}">${escHtml(s.CWD || '—')}</span>`);
@@ -2883,6 +3027,7 @@
       html.push(`<span>${promptCount} prompt${promptCount===1?'':'s'}</span>`);
       html.push(`<span>${s.Turns || 0} turn${s.Turns===1?'':'s'}</span>`);
       html.push(`<span class="s-cost">${escHtml(fmtMoney(s.CostUSD || 0))}</span>`);
+      html.push(`<a class="anchor-link" href="#sessions/${escHtml(anchorId)}" title="Copy link to this session" aria-label="Copy link to session">#</a>`);
       html.push(`</span>`);
       html.push(`<span class="s-time">${escHtml(timeRange)}</span>`);
       html.push(`</summary>`);
