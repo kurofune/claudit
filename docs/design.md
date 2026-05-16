@@ -31,12 +31,12 @@ The interface should feel like a tool an engineer reaches for, not a product pag
 - Glassmorphism, drop-shadow rounded cards.
 - Bouncy or elastic motion.
 
-A custom display font for headings is acceptable, provided it ships embedded (the report must render offline from a single self-contained HTML file).
+A custom display font for headings is acceptable, provided it ships embedded so the report degrades gracefully when offline.
 
 ### Design Principles
 
 1. **Scannability first.** Information density is a feature, not a bug. Users skim 991-line reports — never sacrifice density for whitespace.
 2. **Numbers are the protagonist.** Tabular figures, aligned columns, restrained color so quantities read clearly. Ornament defers to data.
 3. **Borrowed identity is a smell.** GitHub-clone, Linear-clone, Tailwind-default palettes all flag the design as templated. Tint neutrals toward a hue that is claudit's.
-4. **Single-file constraint is real.** No external CSS/JS, no CDN fonts. Anything visual must survive being rendered from a 64MB self-contained file opened from disk.
+4. **Single-file constraint is real.** All CSS, JS, and data inline. Typography uses Inter via Google Fonts as the one external request, with system sans-serif as the offline fallback; anything else visual must survive being rendered from a self-contained file opened from disk.
 5. **Light and dark are equal citizens.** Every color decision is two decisions. Hard-coded `#fff` / `#f6f8fa` / `#fef9e7` are bugs, not shortcuts.

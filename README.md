@@ -52,7 +52,7 @@ claudit runs entirely on your machine:
 - It reads a local pricing YAML.
 - It writes an HTML, JSON, or markdown report to stdout.
 
-There is no network call in the pipeline. Hotspot prompts are copyable text — pasting them into a model is your decision.
+The CLI makes no network calls. The HTML report references Inter from Google Fonts for typography, so opening it in a browser fetches the font from `fonts.googleapis.com` — your IP and User-Agent reach Google, but none of the report's content (prompts, paths, costs) does. Offline, the report falls back to system sans-serif. Hotspot prompts are copyable text — pasting them into a model is your decision.
 
 ## Pricing config
 
@@ -85,7 +85,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 - The JSONL schema is Claude Code's. If Anthropic changes it, the parser may need to catch up.
 - Prices are manually maintained in `prices.yaml`. When Anthropic publishes new rates, you update the YAML.
 - Developed and dogfooded on macOS. CI runs the test suite on Linux, macOS, and Windows. On Windows, `claudit watch`'s live status line uses ANSI escape sequences — Windows Terminal and PowerShell 7 render them correctly; legacy `cmd.exe` will show the escapes literally.
-- The HTML report is a single self-contained file (no CDN fonts, no external CSS/JS) — it renders offline.
+- The HTML report is a single file with all data, CSS, and JS inline. Typography uses Inter via Google Fonts (the lone external request); offline it falls back to system sans-serif.
 
 ## License
 
