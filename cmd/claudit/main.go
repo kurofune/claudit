@@ -62,7 +62,7 @@ Run "claudit <command> --help" for command-specific flags.
 func runReport(args []string) error {
 	fs := flag.NewFlagSet("claudit report", flag.ExitOnError)
 	defaultRoot := defaultProjectsRoot()
-	root := fs.String("root", defaultRoot, "root directory to walk (defaults to ~/.claude/projects/)")
+	root := fs.String("root", defaultRoot, "root directory to walk (defaults to $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 	since := fs.String("since", "", "only include turns at or after this date (YYYY-MM-DD)")
 	until := fs.String("until", "", "only include turns strictly before this date (YYYY-MM-DD)")
 	last := fs.String("last", "", "shorthand for --since: window of the last N days or weeks, e.g. 7d, 2w (conflicts with --since)")
@@ -179,7 +179,7 @@ func runReport(args []string) error {
 func runDiff(args []string) error {
 	fs := flag.NewFlagSet("claudit diff", flag.ExitOnError)
 	defaultRoot := defaultProjectsRoot()
-	root := fs.String("root", defaultRoot, "root directory to walk (defaults to ~/.claude/projects/)")
+	root := fs.String("root", defaultRoot, "root directory to walk (defaults to $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
 	rangeA := fs.String("a", "", "baseline range, format YYYY-MM-DD..YYYY-MM-DD (inclusive-start, exclusive-end)")
 	rangeB := fs.String("b", "", "current range, same format as --a")
 	project := fs.String("project", "", "case-insensitive substring match on cwd")
@@ -348,6 +348,12 @@ func emitWarnings(malformed int, fileErrs []error) {
 }
 
 func defaultProjectsRoot() string {
+	// Honor CLAUDE_CONFIG_DIR the same way Claude Code itself does: when
+	// set, every ~/.claude path is rerouted under it. Users on dotfiles
+	// setups, non-default drives, or sandboxed configs rely on this.
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return filepath.Join(dir, "projects")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
