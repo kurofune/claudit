@@ -4,6 +4,8 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-05-17
+
 ### Added
 
 - **`claudit watch` upgraded to a load-bearing live monitor.** Full-screen TUI with three stacked rounded-corner panels (TOTALS / LIVE / ALERTS) on a TTY; one-line stream fallback when piped.
@@ -78,5 +80,6 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/kurofune/claudit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kurofune/claudit/releases/tag/v1.0.0
