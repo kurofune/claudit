@@ -20,10 +20,18 @@ import (
 
 // Event is one parsed line. Exactly one of Turn / UserMessage is
 // populated; check Kind to disambiguate.
+//
+// Live distinguishes the initial-history replay from real-time tailing.
+// When Tail opens a file with FromBeginning=true it streams every line
+// already on disk before catching up to EOF; those events have
+// Live=false. Lines that arrive after the initial drain have Live=true.
+// Callers that want to alert only on real-time activity (spike
+// detection, budget crosses, desktop notifications) should gate on this.
 type Event struct {
 	Kind parse.LineKind
 	Turn parse.Turn
 	User parse.UserMessage
+	Live bool
 }
 
 // Notice is an out-of-band message about the watcher itself —
@@ -82,10 +90,12 @@ func Tail(ctx context.Context, path string, opts TailOptions, onEvent func(Event
 	}
 	t.onNotice(Notice{Kind: NoticeOpened, Message: path})
 
-	// Initial drain.
+	// Initial drain. Events emitted here have Live=false so callers
+	// can distinguish replayed history from real-time activity.
 	if err := t.readAvailable(); err != nil {
 		return err
 	}
+	t.live = true
 
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
@@ -114,6 +124,11 @@ type tailer struct {
 	prev    os.FileInfo
 	offset  int64
 	partial []byte
+	// live flips to true after openWhenReady's first readAvailable
+	// completes (or immediately, when FromBeginning=false). Subsequent
+	// reads emit Event.Live=true. Stays true across rotations — a file
+	// rotation mid-stream still represents real-time content.
+	live bool
 }
 
 func (t *tailer) close() {
@@ -257,9 +272,9 @@ func (t *tailer) consume(b []byte) {
 		case parse.LineMalformed:
 			t.onNotice(Notice{Kind: NoticeMalformed, Message: "skipped malformed line"})
 		case parse.LineAssistant:
-			t.onEvent(Event{Kind: kind, Turn: turn})
+			t.onEvent(Event{Kind: kind, Turn: turn, Live: t.live})
 		case parse.LineUserMessage:
-			t.onEvent(Event{Kind: kind, User: user})
+			t.onEvent(Event{Kind: kind, User: user, Live: t.live})
 		}
 	}
 }

@@ -20,13 +20,17 @@ type Notifier interface {
 }
 
 // Default picks the right notifier for the current OS.
-//   - darwin: osascript "display notification"
-//   - linux:  notify-send (if on PATH)
-//   - other:  a no-op
+//   - darwin:  osascript "display notification"
+//   - linux:   notify-send (if on PATH)
+//   - windows: PowerShell NotifyIcon balloon tip
+//   - other:   a no-op
 //
 // Returns a non-nil Notifier in all cases — callers don't need to
 // nil-check. The no-op variant exists so platform code stays linear.
 func Default() Notifier {
+	if n := tryWindowsNotifier(); n != nil {
+		return n
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		return macNotifier{}

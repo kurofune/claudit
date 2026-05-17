@@ -15,39 +15,27 @@ import (
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
 	"github.com/kurofune/claudit/internal/watch"
-	"github.com/kurofune/claudit/internal/watch/term"
 )
 
-// Tuning knobs for --all. These are intentionally not flags; they
-// were chosen to keep the UI calm without missing real activity.
+// Tuning knobs for --all. Chosen to keep the UI calm without missing
+// real activity. Not flags — promote to flags if someone needs them.
 const (
-	// discoveryInterval is how often we rescan the projects root for
-	// newly-touched JSONLs to tail.
-	discoveryInterval = 10 * time.Second
-	// recentWindow is the maximum mtime age for a JSONL to be picked
-	// up by the discovery loop. Older files are presumed inactive.
-	recentWindow = 15 * time.Minute
-	// idleHide is how long a tailed session can go without a new
-	// assistant turn before it drops off the live display. We don't
-	// stop tailing — Claude Code sometimes resumes a session — but we
-	// hide it so the UI stays focused on what's currently active.
-	idleHide = 15 * time.Minute
-	// maxVisibleSessions caps the per-session rows printed. Anything
-	// past this is summarized as "+N more sessions" in a single line.
+	discoveryInterval  = 10 * time.Second
+	recentWindow       = 15 * time.Minute
+	idleHide           = 15 * time.Minute
 	maxVisibleSessions = 6
 )
 
-// runWatchAll is the entry point for `claudit watch --all`. It runs
-// the discovery loop, spawns Tail goroutines for each session found,
-// fans events into a single render goroutine that owns all state and
-// all writes to the terminal.
+// runWatchAll is the entry point for `claudit watch --all`. Runs the
+// discovery loop, spawns Tail goroutines per session, fans events
+// into a single render goroutine that owns all state.
 func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool) error {
 	fmt.Fprintf(os.Stderr, "claudit watch --all: tailing every session under %s touched in the last %s\n", root, recentWindow)
 	if budget > 0 {
-		fmt.Fprintf(os.Stderr, "claudit watch --all: budget alert at $%.2f (across all sessions combined)\n", budget)
+		fmt.Fprintf(os.Stderr, "claudit watch --all: budget alert at $%.2f (combined across sessions)\n", budget)
 	}
 
-	renderer := term.New(os.Stdout)
+	p := newPainter(os.Stdout)
 	var notifier notify.Notifier
 	if notifyOn {
 		notifier = notify.Default()
@@ -62,7 +50,7 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 		}
 	}
 
-	hub := newMultiHub(prices, budget, spikeThresh, notifier, renderer, rollingState)
+	hub := newMultiHub(prices, budget, spikeThresh, notifier, p, rollingState)
 	defer hub.shutdown(os.Stderr)
 	stopCh := make(chan struct{})
 
@@ -71,28 +59,20 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 		tailInterval = time.Second
 	}
 
-	// Discovery + tailer supervision both feed into the same hub
-	// channels. The render goroutine consumes; tail goroutines and
-	// the discovery loop are pure producers.
 	var wg sync.WaitGroup
 
-	// Render goroutine: owns hub.state. All UI writes happen here.
-	// Watches stopCh (not ctx) for shutdown so it stays alive until the
-	// tail goroutines have finished posting their final-drain events.
 	renderDone := make(chan struct{})
 	go func() {
 		defer close(renderDone)
 		hub.run(stopCh)
 	}()
 
-	// Discovery loop: periodically rescan the root and ask the hub
-	// to start tailing anything new.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		tick := time.NewTicker(discoveryInterval)
 		defer tick.Stop()
-		hub.discover(ctx, root, tailInterval, &wg) // initial pass
+		hub.discover(ctx, root, tailInterval, &wg)
 		for {
 			select {
 			case <-ctx.Done():
@@ -105,31 +85,28 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 
 	<-ctx.Done()
 	wg.Wait()
-	// Tail goroutines have stopped posting. Signal hub.run to drain
-	// and exit — anything still in the channel buffer gets handled.
 	close(stopCh)
 	<-renderDone
 	return nil
 }
 
 // multiHub owns the shared state behind `watch --all`. Producers
-// (Tail goroutines, discovery loop) post messages on eventCh /
-// noticeCh; the single consumer (hub.run) mutates state.
+// (Tail goroutines, discovery) post messages on eventCh / noticeCh;
+// the single consumer (hub.run) mutates state.
 type multiHub struct {
 	prices      *pricing.Table
 	budget      float64
 	spikeThresh float64
 	notifier    notify.Notifier
-	renderer    *term.Renderer
+	painter     painter
 	rolling     *rollingTotals
 
 	eventCh  chan taggedEvent
 	noticeCh chan taggedNotice
 
-	mu       sync.Mutex // guards tailing
-	tailing  map[string]bool
+	mu      sync.Mutex
+	tailing map[string]bool
 
-	// state is only ever read/written by hub.run.
 	state *multiState
 }
 
@@ -143,13 +120,13 @@ type taggedNotice struct {
 	n    watch.Notice
 }
 
-func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, renderer *term.Renderer, rolling *rollingTotals) *multiHub {
+func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, rolling *rollingTotals) *multiHub {
 	return &multiHub{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
 		notifier:    notifier,
-		renderer:    renderer,
+		painter:     p,
 		rolling:     rolling,
 		eventCh:     make(chan taggedEvent, 256),
 		noticeCh:    make(chan taggedNotice, 64),
@@ -158,8 +135,6 @@ func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier no
 	}
 }
 
-// discover walks root, starting a Tail for every JSONL touched in the
-// last recentWindow that we are not already tailing.
 func (h *multiHub) discover(ctx context.Context, root string, interval time.Duration, wg *sync.WaitGroup) {
 	cutoff := time.Now().Add(-recentWindow)
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -170,8 +145,6 @@ func (h *multiHub) discover(ctx context.Context, root string, interval time.Dura
 			return nil
 		}
 		if parse.IsSubagentFile(path) {
-			// Subagent JSONLs are accounted via the parent session's
-			// turns; tailing them separately would double-count.
 			return nil
 		}
 		info, err := d.Info()
@@ -213,9 +186,8 @@ func (h *multiHub) discover(ctx context.Context, root string, interval time.Dura
 }
 
 // run is the single consumer that mutates state and paints frames.
-// Drains eventCh and noticeCh until stop is closed, then exits so
-// any deferred summary can run. The caller closes stop only after
-// the producing tail goroutines have finished, so no events are lost.
+// Exits when stop is closed; the caller closes stop only after the
+// producing tail goroutines have finished, so no events are lost.
 func (h *multiHub) run(stop <-chan struct{}) {
 	repaint := time.NewTicker(time.Second)
 	defer repaint.Stop()
@@ -229,9 +201,6 @@ func (h *multiHub) run(stop <-chan struct{}) {
 		case tn := <-h.noticeCh:
 			h.handleNotice(tn)
 		case <-repaint.C:
-			// Periodic repaint so rolling totals roll over visible
-			// clock minutes and idle sessions disappear in a timely way
-			// even if no new events arrive.
 			h.paint()
 		}
 	}
@@ -260,37 +229,34 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 		t.Usage.CacheReadTokens)
 	s := h.state.session(te.path, t.SessionID, t.CWD)
+	prevTurnCost := s.lastSeenCost()
 	s.totalCost += cost
 	s.turns++
 	s.lastTurnCost = cost
 	s.lastTurnAt = time.Now()
 	s.lastTools = lastToolNames(t.ToolUses)
 	h.state.combinedCost += cost
-	if h.rolling != nil {
+	if h.rolling != nil && te.ev.Live {
 		h.rolling.addLive(t.Timestamp, cost, time.Now())
 	}
-	// Spike detection runs per-session — the median that matters is
-	// the session's own recent turns, not a cross-session blend.
 	s.recordCost(cost)
-	if h.spikeThresh > 0 && s.tcCount >= spikeWindow/2 {
+	if te.ev.Live && h.spikeThresh > 0 && s.tcCount >= spikeWindow/2 && !sameCost(cost, prevTurnCost) {
 		med := stat.Median(s.snapshotCosts())
 		if med > 0 && cost/med >= h.spikeThresh {
 			tools := strings.Join(s.lastTools, "+")
 			if tools == "" {
 				tools = "no-tool"
 			}
-			msg := fmt.Sprintf("[claudit watch] SPIKE in %s: turn %d cost $%.4f — %.1fx median ($%.4f) — last: %s",
-				projectLabel(s.cwd), s.turns, cost, cost/med, med, tools)
-			h.renderer.Println(msg)
+			msg := styleSpikeMulti(h.painter.Style(), projectLabel(s.cwd), s.turns, cost, med, tools)
+			h.painter.Alert(msg)
 			if h.notifier != nil {
 				_ = h.notifier.Send("claudit: cost spike",
 					fmt.Sprintf("%s turn %d cost $%.4f (%.1fx median)", projectLabel(s.cwd), s.turns, cost, cost/med))
 			}
 		}
 	}
-	if h.budget > 0 && !h.state.budgetAlerted && h.state.combinedCost >= h.budget {
-		h.renderer.Println(fmt.Sprintf("[claudit watch] BUDGET CROSSED (all sessions): $%.2f >= $%.2f",
-			h.state.combinedCost, h.budget))
+	if te.ev.Live && h.budget > 0 && !h.state.budgetAlerted && h.state.combinedCost >= h.budget {
+		h.painter.Alert(styleBudgetMulti(h.painter.Style(), h.state.combinedCost, h.budget))
 		h.state.budgetAlerted = true
 		if h.notifier != nil {
 			_ = h.notifier.Send("claudit: budget crossed",
@@ -304,72 +270,81 @@ func (h *multiHub) handleNotice(tn taggedNotice) {
 	if tn.n.Kind == watch.NoticeMalformed {
 		return
 	}
-	// Only surface "opened" notices — the others (waiting, rotated)
-	// are noisy when 4 sessions all reopen during a `claude` restart.
+	// We don't surface NoticeOpened — too noisy when --all is tailing
+	// half a dozen sessions at startup. Other notices (rotation,
+	// truncation) get a dim alert entry.
 	if tn.n.Kind == watch.NoticeOpened {
-		h.renderer.Println(fmt.Sprintf("[claudit watch] tailing %s", tn.n.Message))
-		h.paint()
+		return
 	}
+	h.painter.Alert(h.painter.Style().Dim("[notice] " + tn.n.Message))
+	h.paint()
 }
 
-// paint builds a Frame from the current state and asks the renderer
-// to draw it. Sessions are grouped by project (cwd); within each
-// project they are sorted by most-recent activity.
+func sameCost(a, b float64) bool {
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return d < 1e-9
+}
+
+// paint builds a Frame and asks the painter to draw it.
 func (h *multiHub) paint() {
 	now := time.Now()
-	frame := term.Frame{}
-
-	// Header: rolling totals (if enabled) + combined live cost.
-	header := []string{}
+	st := h.painter.Style()
+	frame := Frame{}
 	if h.rolling != nil {
-		header = append(header, h.rolling.statusLine())
+		today, week, month := h.rolling.totals(now)
+		frame.HasRolling = true
+		frame.Rolling = RollingPanelData{Today: today, Week: week, Month: month}
 	}
-	combined := fmt.Sprintf("live: $%.4f across %d session(s)",
-		h.state.combinedCost, h.state.visibleCount(now))
-	header = append(header, combined)
-	frame.Header = header
+	visible := h.state.visibleCount(now)
+	frame.Live.Header = liveHeader(st, h.state.combinedCost, visible)
 
-	// Group sessions by project. Hide sessions whose last turn is older
-	// than idleHide, *unless* nothing else is visible (the user should
-	// always see something).
 	groups := h.state.groupByProject(now)
 	if len(groups) == 0 {
-		frame.Body = []string{"(no sessions yet — waiting for assistant turns)"}
-		h.renderer.Render(frame)
+		frame.Live.Rows = nil
+		h.painter.Render(frame)
 		return
 	}
 
-	body := []string{}
-	visible := 0
+	projectCol := 12
+	for _, g := range groups {
+		if n := len(projectLabel(g.cwd)); n > projectCol {
+			projectCol = n
+		}
+	}
+	if projectCol > 32 {
+		projectCol = 32
+	}
+
+	rows := []string{}
+	visibleRows := 0
 	overflow := 0
 	for _, g := range groups {
-		if visible >= maxVisibleSessions {
+		if visibleRows >= maxVisibleSessions {
 			overflow += len(g.sessions)
 			continue
 		}
-		// Project header row: sum of session costs in this group.
-		body = append(body, fmt.Sprintf("%s   %d turns  $%.4f",
-			projectLabel(g.cwd), g.totalTurns(), g.totalCost()))
-		for _, s := range g.sessions {
-			if visible >= maxVisibleSessions {
+		rows = append(rows, multiProjectHeader(st, projectLabel(g.cwd), g.totalTurns(), g.totalCost(), projectCol))
+		for _, sess := range g.sessions {
+			if visibleRows >= maxVisibleSessions {
 				overflow++
 				continue
 			}
-			body = append(body, fmt.Sprintf("  └ %d turns  $%.4f  last: %s (+$%.4f)",
-				s.turns, s.totalCost, lastToolsLabel(s.lastTools), s.lastTurnCost))
-			visible++
+			rows = append(rows, multiSessionRow(st, sess.turns, sess.totalCost, sess.lastTools, sess.lastTurnCost, projectCol))
+			visibleRows++
 		}
 	}
 	if overflow > 0 {
-		body = append(body, fmt.Sprintf("  +%d more session(s) hidden", overflow))
+		rows = append(rows, st.Dim(fmt.Sprintf("  +%d more session(s) hidden", overflow)))
 	}
-	frame.Body = body
-	h.renderer.Render(frame)
+	frame.Live.Rows = rows
+	h.painter.Render(frame)
 }
 
-// shutdown clears the live region and prints the cross-session summary.
 func (h *multiHub) shutdown(w *os.File) {
-	h.renderer.Clear()
+	h.painter.Close()
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "=== claudit watch --all summary ===")
 	fmt.Fprintf(w, "combined cost: $%.4f\n", h.state.combinedCost)
@@ -381,10 +356,10 @@ func (h *multiHub) shutdown(w *os.File) {
 	}
 }
 
-// multiState aggregates per-session data behind `watch --all`. All
-// access goes through hub.run, so no internal locking is needed.
+// multiState aggregates per-session data. All access through hub.run,
+// so no internal locking.
 type multiState struct {
-	sessions      map[string]*sessionAgg // keyed by JSONL path
+	sessions      map[string]*sessionAgg
 	combinedCost  float64
 	budgetAlerted bool
 }
@@ -395,8 +370,6 @@ func newMultiState() *multiState {
 
 func (m *multiState) session(path, sessID, cwd string) *sessionAgg {
 	if s, ok := m.sessions[path]; ok {
-		// Backfill identifying metadata if the first event into this
-		// session was a user-message line that lacked them.
 		if s.sessionID == "" {
 			s.sessionID = sessID
 		}
@@ -420,12 +393,7 @@ func (m *multiState) visibleCount(now time.Time) int {
 	return n
 }
 
-// groupByProject returns project groups sorted by most-recent activity
-// across their member sessions, with each group's sessions also sorted
-// by recency. Idle sessions are hidden when at least one non-idle
-// session exists overall.
 func (m *multiState) groupByProject(now time.Time) []projectGroup {
-	// First pass: bucket and decide visibility.
 	anyActive := false
 	for _, s := range m.sessions {
 		if now.Sub(s.lastTurnAt) <= idleHide {
@@ -489,9 +457,6 @@ func (g projectGroup) mostRecent() time.Time {
 	return t
 }
 
-// sessionAgg is the per-tailed-session running state inside multiHub.
-// Lighter than the single-session watchState — no rolling baselines,
-// no per-tool breakdown (deferred to a future drill-down view).
 type sessionAgg struct {
 	path       string
 	sessionID  string
@@ -522,6 +487,13 @@ func (s *sessionAgg) snapshotCosts() []float64 {
 	return out
 }
 
+func (s *sessionAgg) lastSeenCost() float64 {
+	if s.tcCount == 0 {
+		return 0
+	}
+	return s.turnCosts[(s.tcHead-1+spikeWindow)%spikeWindow]
+}
+
 func lastToolNames(uses []parse.ToolUse) []string {
 	if len(uses) == 0 {
 		return nil
@@ -537,15 +509,6 @@ func lastToolNames(uses []parse.ToolUse) []string {
 	return out
 }
 
-func lastToolsLabel(tools []string) string {
-	if len(tools) == 0 {
-		return "-"
-	}
-	return strings.Join(tools, "+")
-}
-
-// projectLabel returns the basename of cwd for compact display; falls
-// back to the full path if Base reduces to "." or empty.
 func projectLabel(cwd string) string {
 	if cwd == "" {
 		return "(unknown)"

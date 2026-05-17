@@ -294,6 +294,53 @@ func TestMostRecentJSONL_PicksLatest(t *testing.T) {
 	}
 }
 
+func TestTail_LiveFlag_FalseDuringInitialDrain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "live.jsonl")
+
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	historical := mkAssistantLine("h1", "u1", t0) + "\n" +
+		mkAssistantLine("h2", "h1", t0.Add(time.Second)) + "\n"
+	if err := os.WriteFile(path, []byte(historical), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &blockingCollector{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Tail(ctx, path, TailOptions{Interval: 25 * time.Millisecond, FromBeginning: true},
+			c.Add, nil)
+	}()
+
+	waitForCount(t, c, 2, 2*time.Second)
+	for i, e := range c.Snapshot() {
+		if e.Live {
+			t.Errorf("event %d (UUID %s): Live=true during initial drain, want false", i, e.Turn.UUID)
+		}
+	}
+
+	// Append after the initial drain — these should be marked Live.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(mkAssistantLine("a1", "h2", t0.Add(2*time.Second)) + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	waitForCount(t, c, 3, 2*time.Second)
+	final := c.Snapshot()
+	if got := final[len(final)-1]; !got.Live {
+		t.Errorf("post-drain event: Live=false, want true (%+v)", got)
+	}
+
+	cancel()
+	<-done
+}
+
 func TestFindBySessionID_PrefixMatch(t *testing.T) {
 	dir := t.TempDir()
 	// Real session.

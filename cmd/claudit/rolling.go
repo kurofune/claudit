@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,15 +143,6 @@ func (rt *rollingTotals) totals(now time.Time) (today, week, month float64) {
 		}
 	}
 	return today, week, month
-}
-
-// statusLine formats the totals as a single header line for the
-// watch UI. Uses time.Now() — tests that need determinism call
-// totals() directly.
-func (rt *rollingTotals) statusLine() string {
-	today, week, month := rt.totals(time.Now())
-	return fmt.Sprintf("$%.2f today · $%.2f this week · $%.2f this month",
-		today, week, month)
 }
 
 // baselineHitRatio returns the trailing-7-day cache hit ratio (0..1),

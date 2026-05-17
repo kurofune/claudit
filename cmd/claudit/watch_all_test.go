@@ -13,7 +13,7 @@ import (
 
 func TestMultiHub_HandleEvent_GroupsByProject(t *testing.T) {
 	var buf bytes.Buffer
-	r := term.New(&buf)
+	r := newStreamPainter(&buf, term.Style{})
 	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
 
 	// Two sessions under "claudit", one under "other-repo".
@@ -47,7 +47,7 @@ func TestMultiHub_HandleEvent_GroupsByProject(t *testing.T) {
 
 func TestMultiHub_BudgetCross_AcrossSessions(t *testing.T) {
 	var buf bytes.Buffer
-	r := term.New(&buf)
+	r := newStreamPainter(&buf, term.Style{})
 	h := newMultiHub(testPrices(t), 0.05, 0, nil, r, nil)
 
 	feed := func(path string, costUSD float64) {
@@ -56,19 +56,19 @@ func TestMultiHub_BudgetCross_AcrossSessions(t *testing.T) {
 	}
 	feed("/sess/a.jsonl", 0.02)
 	feed("/sess/b.jsonl", 0.02)
-	if strings.Contains(buf.String(), "BUDGET CROSSED") {
+	if strings.Contains(buf.String(), "BUDGET") {
 		t.Errorf("under budget, should not alert; got %q", buf.String())
 	}
 	buf.Reset()
 	feed("/sess/c.jsonl", 0.02) // combined = $0.06 >= $0.05
-	if !strings.Contains(buf.String(), "BUDGET CROSSED") {
+	if !strings.Contains(buf.String(), "BUDGET") {
 		t.Errorf("expected combined-budget alert; got %q", buf.String())
 	}
 }
 
 func TestMultiHub_IgnoresNonAssistantEvents(t *testing.T) {
 	var buf bytes.Buffer
-	r := term.New(&buf)
+	r := newStreamPainter(&buf, term.Style{})
 	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
 
 	h.handleEvent(taggedEvent{

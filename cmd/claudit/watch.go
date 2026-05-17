@@ -17,7 +17,6 @@ import (
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
 	"github.com/kurofune/claudit/internal/watch"
-	"github.com/kurofune/claudit/internal/watch/term"
 )
 
 func runWatch(args []string) error {
@@ -30,7 +29,7 @@ func runWatch(args []string) error {
 	spikeThresh := fs.Float64("spike-threshold", 5.0, "flag a turn when its cost is >= N x the rolling median of the prior 20 turns (0 disables)")
 	notifyOn := fs.Bool("notify", false, "send a desktop notification on budget cross and turn-cost spikes")
 	all := fs.Bool("all", false, "tail every recently-modified session under --root, grouped by project")
-	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals above the per-session line")
+	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals at the top of the UI")
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "claudit watch — tail a live session JSONL and print running cost.")
@@ -41,6 +40,9 @@ func runWatch(args []string) error {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "If session-id is omitted, the most recently modified session is tailed.")
 		fmt.Fprintln(out, "--all ignores any positional argument and tails every recently-modified session.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "On a TTY, watch takes over the screen (alt buffer) and restores it on Ctrl-C.")
+		fmt.Fprintln(out, "Piped output falls back to one line per status update.")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		fs.PrintDefaults()
@@ -55,8 +57,7 @@ func runWatch(args []string) error {
 	}
 
 	// SIGTERM: graceful shutdown on Unix (kill, docker stop, init systems)
-	// so the deferred printSummary runs. No-op on Windows — the constant is
-	// defined but the Go runtime never delivers it there.
+	// so the deferred summary runs. No-op on Windows.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -88,15 +89,13 @@ func runWatch(args []string) error {
 		fmt.Fprintf(os.Stderr, "claudit watch: budget alert at $%.2f\n", *budget)
 	}
 
-	renderer := term.New(os.Stdout)
+	p := newPainter(os.Stdout)
 	var notifier notify.Notifier
 	if *notifyOn {
 		notifier = notify.Default()
 	}
 	var rollingState *rollingTotals
 	if *rolling {
-		// Best-effort: a slow startup scan on a huge corpus shouldn't
-		// block the live tail. If it errors we just don't show totals.
 		rs, scanErr := newRollingTotals(*root, prices, time.Now())
 		if scanErr != nil {
 			fmt.Fprintf(os.Stderr, "claudit watch: rolling totals disabled (%v)\n", scanErr)
@@ -105,7 +104,7 @@ func runWatch(args []string) error {
 		}
 	}
 
-	st := newWatchState(prices, *budget, *spikeThresh, notifier, renderer, rollingState)
+	st := newWatchState(prices, *budget, *spikeThresh, notifier, p, rollingState)
 	defer st.shutdown(os.Stderr)
 
 	opts := watch.TailOptions{
@@ -116,20 +115,16 @@ func runWatch(args []string) error {
 }
 
 // spikeWindow is the size of the rolling-median lookback for per-turn
-// spike detection. Twenty turns is small enough to react quickly to a
-// shift in the user's question style and large enough to stabilize the
-// median against single-turn outliers.
+// spike detection. Twenty turns is small enough to react quickly and
+// large enough to stabilize against single-turn outliers.
 const spikeWindow = 20
 
-// watchState is the running aggregation behind the live status line.
-// Single-goroutine — Tail runs the callbacks on its polling goroutine,
-// and we don't hand state off elsewhere.
 type watchState struct {
 	prices      *pricing.Table
 	budget      float64
 	spikeThresh float64
 	notifier    notify.Notifier
-	renderer    *term.Renderer
+	painter     painter
 	rolling     *rollingTotals
 	started     time.Time
 
@@ -141,14 +136,10 @@ type watchState struct {
 	lastTurnCost float64
 	lastTools    []string
 
-	// turnCosts is a ring buffer of the last spikeWindow turn costs,
-	// used to compute the rolling median for spike detection.
 	turnCosts [spikeWindow]float64
-	tcCount   int // how many slots are valid (caps at spikeWindow)
-	tcHead    int // next write position
+	tcCount   int
+	tcHead    int
 
-	// maxTurnCost / maxTurnIndex track the most expensive single turn
-	// for the end-of-session anomaly callouts.
 	maxTurnCost  float64
 	maxTurnIndex int
 
@@ -169,8 +160,6 @@ func (t *tokensSum) addUsage(u parse.Usage) {
 	t.cr += int64(u.CacheReadTokens)
 }
 
-// hitRatio is cache_read / (cache_read + input + cache_create_5m +
-// cache_create_1h). Returns 0 when no cacheable traffic.
 func (t tokensSum) hitRatio() float64 {
 	denom := t.cr + t.in + t.c5m + t.c1h
 	if denom <= 0 {
@@ -179,13 +168,13 @@ func (t tokensSum) hitRatio() float64 {
 	return float64(t.cr) / float64(denom)
 }
 
-func newWatchState(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, renderer *term.Renderer, rolling *rollingTotals) *watchState {
+func newWatchState(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, rolling *rollingTotals) *watchState {
 	return &watchState{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
 		notifier:    notifier,
-		renderer:    renderer,
+		painter:     p,
 		rolling:     rolling,
 		started:     time.Now(),
 		toolCost:    map[string]float64{},
@@ -223,11 +212,13 @@ func (s *watchState) onEvent(e watch.Event) {
 			s.maxTurnCost = cost
 			s.maxTurnIndex = s.turns
 		}
-		if s.rolling != nil {
+		if s.rolling != nil && e.Live {
 			s.rolling.addLive(t.Timestamp, cost, time.Now())
 		}
-		s.checkSpike(cost)
-		s.checkBudget()
+		if e.Live {
+			s.checkSpike(cost)
+			s.checkBudget()
+		}
 		s.recordTurnCost(cost)
 	}
 	s.render()
@@ -236,11 +227,9 @@ func (s *watchState) onEvent(e watch.Event) {
 func (s *watchState) onNotice(n watch.Notice) {
 	switch n.Kind {
 	case watch.NoticeMalformed:
-		// Quietly count; don't pollute the live line.
 		return
 	default:
-		s.renderer.Println(fmt.Sprintf("[claudit watch] %s", n.Message))
-		s.render()
+		s.painter.Alert(s.painter.Style().Dim("[notice] " + n.Message))
 	}
 }
 
@@ -249,7 +238,7 @@ func (s *watchState) checkBudget() {
 		return
 	}
 	if s.totalCost >= s.budget {
-		s.renderer.Println(fmt.Sprintf("[claudit watch] BUDGET CROSSED: $%.2f >= $%.2f", s.totalCost, s.budget))
+		s.painter.Alert(styleBudgetSingle(s.painter.Style(), s.totalCost, s.budget))
 		s.budgetAlerted = true
 		if s.notifier != nil {
 			_ = s.notifier.Send("claudit: budget crossed",
@@ -260,11 +249,18 @@ func (s *watchState) checkBudget() {
 
 // checkSpike flags the just-completed turn when its cost is >=
 // spikeThresh × the rolling median of the prior spikeWindow turns.
-// Needs at least spikeWindow/2 prior samples — earlier than that, the
-// median is too noisy and false positives drown the signal.
+// Needs at least spikeWindow/2 prior samples. Dedupes against the
+// immediately-previous turn's cost so back-to-back identical-cost
+// rows (Claude Code wire pattern) only fire once.
 func (s *watchState) checkSpike(cost float64) {
 	if s.spikeThresh <= 0 || s.tcCount < spikeWindow/2 {
 		return
+	}
+	if s.tcCount > 0 {
+		prev := s.turnCosts[(s.tcHead-1+spikeWindow)%spikeWindow]
+		if sameCost(cost, prev) {
+			return
+		}
 	}
 	med := stat.Median(s.snapshotTurnCosts())
 	if med <= 0 {
@@ -278,17 +274,13 @@ func (s *watchState) checkSpike(cost float64) {
 	if tools == "" {
 		tools = "no-tool"
 	}
-	msg := fmt.Sprintf("[claudit watch] SPIKE: turn %d cost $%.4f — %.1fx your %d-turn median ($%.4f) — last tools: %s",
-		s.turns, cost, ratio, s.tcCount, med, tools)
-	s.renderer.Println(msg)
+	s.painter.Alert(styleSpikeSingle(s.painter.Style(), s.turns, cost, ratio, s.tcCount, med, tools))
 	if s.notifier != nil {
 		_ = s.notifier.Send("claudit: cost spike",
 			fmt.Sprintf("Turn %d cost $%.4f (%.1fx median)", s.turns, cost, ratio))
 	}
 }
 
-// snapshotTurnCosts returns the current contents of the ring buffer
-// in unspecified order — fine for median, which sorts anyway.
 func (s *watchState) snapshotTurnCosts() []float64 {
 	out := make([]float64, s.tcCount)
 	copy(out, s.turnCosts[:s.tcCount])
@@ -303,38 +295,31 @@ func (s *watchState) recordTurnCost(cost float64) {
 	}
 }
 
-// render assembles a Frame and asks the renderer to paint it.
 func (s *watchState) render() {
-	frame := term.Frame{}
+	st := s.painter.Style()
+	frame := Frame{
+		Live: LivePanelData{
+			Header: liveHeader(st, s.totalCost, 1),
+			Rows: []string{
+				singleSessionLine(st, s.totalCost, s.turns, s.tokens.hitRatio(), s.lastTools, s.lastTurnCost),
+			},
+		},
+	}
 	if s.rolling != nil {
-		frame.Header = []string{s.rolling.statusLine()}
+		today, week, month := s.rolling.totals(time.Now())
+		frame.HasRolling = true
+		frame.Rolling = RollingPanelData{Today: today, Week: week, Month: month}
 	}
-	frame.Body = []string{s.statusLine()}
-	s.renderer.Render(frame)
+	s.painter.Render(frame)
 }
 
-func (s *watchState) statusLine() string {
-	tools := strings.Join(s.lastTools, "+")
-	if tools == "" {
-		tools = "-"
-	}
-	hit := "—"
-	if r := s.tokens.hitRatio(); r > 0 {
-		hit = fmt.Sprintf("%.1f%%", 100*r)
-	}
-	return fmt.Sprintf("$%.2f · %d turns · %s hit · last: %s (+$%.4f)",
-		s.totalCost, s.turns, hit, tools, s.lastTurnCost)
-}
-
-// shutdown clears the live region and writes the final summary block.
 func (s *watchState) shutdown(w io.Writer) {
-	s.renderer.Clear()
+	s.painter.Close()
 	s.printSummary(w)
 }
 
-// printSummary writes a final block to w on shutdown.
 func (s *watchState) printSummary(w io.Writer) {
-	fmt.Fprintln(w) // newline to escape the rolling status line
+	fmt.Fprintln(w)
 	dur := time.Since(s.started).Truncate(time.Second)
 	fmt.Fprintln(w, "=== claudit watch summary ===")
 	fmt.Fprintf(w, "session:     %s\n", firstNonEmpty(s.sessionID, "(none seen)"))
@@ -348,10 +333,6 @@ func (s *watchState) printSummary(w io.Writer) {
 	} else {
 		fmt.Fprintf(w, "hit ratio:   —\n")
 	}
-	// Anomaly callouts. Session median is computed over the (capped)
-	// ring buffer — for a long session this is the trailing 20 turns,
-	// matching the spike detector. Two-sample sessions don't get this
-	// line; the ratio would be meaningless.
 	if s.turns >= 3 && s.maxTurnCost > 0 {
 		med := stat.Median(s.snapshotTurnCosts())
 		if med > 0 {
