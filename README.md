@@ -1,12 +1,18 @@
 # claudit
 
+[![CI](https://github.com/kurofune/claudit/actions/workflows/ci.yml/badge.svg)](https://github.com/kurofune/claudit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kurofune/claudit)](https://github.com/kurofune/claudit/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Audit your Claude Code session JSONL files for token and cost spend.
 
 claudit reads the `.jsonl` session logs that Claude Code writes under `~/.claude/projects/` and reports where the money went — by project, model, tool, subagent, and individual user prompt. The default output is a single self-contained HTML file you open in a browser; markdown and JSON are also supported for piping into other tools.
 
-![claudit report screenshot](claudit.png)
+![claudit report screenshot](docs/images/claudit.png)
 
-![claudit diff screenshot](claudit-diff.png)
+![claudit diff screenshot](docs/images/claudit-diff.png)
+
+![claudit watch screenshot](docs/images/claudit-watch.png)
 
 ## Install
 
