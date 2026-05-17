@@ -23,13 +23,12 @@ claudit > report.html
 # Last week, scoped to one project
 claudit --last=7d --project=myrepo > report.html
 
-# Compare the last 7 days to the 7 days before (markdown by default; --html renders side-by-side bars)
-claudit diff
-claudit diff --html > diff.html
-claudit diff --by=month --html > diff.html   # last 30 days vs prior 30 days
+# Compare the last 7 days to the prior 7 days (HTML by default)
+claudit diff > diff.html
+claudit diff --by=month > diff.html          # last 30 days vs prior 30 days
 
 # Or pin the windows explicitly
-claudit diff --a=2026-04-01..2026-04-15 --b=2026-04-15..2026-05-01
+claudit diff --a=2026-04-01..2026-04-15 --b=2026-04-15..2026-05-01 > diff.html
 
 # Tail the currently-running session and watch cost accrue
 claudit watch --budget=5.00
@@ -56,6 +55,7 @@ Run `claudit help` for the subcommand list and `claudit <cmd> --help` for per-co
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.
 - **Sessions drill-down (HTML only).** Top sessions by cost, each expandable to show the ordered user prompts and the assistant turns each one produced — per-turn model, tokens, cost, and which tools fired. Capped via `--sessions=N` (default 50; `--sessions=0` disables the view). Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing a report.
 - **Trends.** Day/week/month buckets with sparklines.
+- **Anomalies.** Trend buckets with abnormal cost spikes or cache hit-ratio drops are flagged inline — coral dots in the HTML chart, an `## Anomalies` section in markdown, and an `anomalies` field in JSON.
 
 ## Privacy
 
