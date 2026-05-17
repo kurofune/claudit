@@ -354,10 +354,13 @@
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
   code, pre, .mono { font-family: var(--font-mono); }
-  /* App shell: fixed sidebar + scrolling main panel. */
+  /* App shell: fixed sidebar + scrolling main panel.
+     Sidebar is 260px — wide enough to hold the calendar icon + a
+     "YYYY-MM-DD → YYYY-MM-DD" date range button on one line in the
+     mono font, with room for the nav-item metric column. */
   .app {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
     min-height: 100vh;
   }
   .nav {
@@ -382,6 +385,37 @@
   .brand-sub { font-size: var(--t-2); color: var(--muted);
                font-variant-numeric: tabular-nums;
                font-family: var(--font-mono); }
+  /* Serve-mode variant: same look as .brand-sub but clickable. Hosts
+     the calendar icon + dates and opens the date-range popover. */
+  .brand-sub-button {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px; margin: 2px 0 0 -8px;
+    background: transparent; color: var(--muted);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    font-family: var(--font-mono); font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+    cursor: pointer; text-align: left;
+    /* Date string is fixed-width — never let it wrap mid-range. The
+       sidebar width above is sized to fit; nowrap is the safety net
+       if a future locale or font change makes the string a hair
+       wider than expected. */
+    white-space: nowrap;
+    transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .brand-sub-button:hover {
+    background: var(--surface-2); border-color: var(--border);
+    color: var(--ink-2);
+  }
+  .brand-sub-button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .brand-sub-button[aria-expanded="true"] {
+    background: var(--surface-2); border-color: var(--border-strong);
+    color: var(--ink);
+  }
+  .brand-sub-button .icon {
+    width: 13px; height: 13px; opacity: 0.85;
+  }
   .nav-list { display: flex; flex-direction: column; gap: 2px;
               list-style: none; margin: 0; padding: 0; }
   .nav-item {
@@ -821,6 +855,20 @@
   .controls input[type="search"] { width: 280px; }
   .controls input[type="number"] { width: 80px; }
   .hint { color: var(--muted); font-size: var(--t-2); }
+  /* Scope note: served reports inject this into the filter bar when
+     server defaults narrow the view (last=7d / top-N sessions). Right-
+     aligned via margin-left:auto so the filter inputs stay left-anchored
+     and the scope info reads as a status, not a control. */
+  .controls .scope-note {
+    margin-left: auto;
+    color: var(--muted); font-size: var(--t-2);
+    display: inline-flex; align-items: baseline; gap: var(--s-1);
+  }
+  .controls .scope-note .sep { color: var(--border-strong); }
+  .controls .scope-note a {
+    color: var(--accent); text-decoration: none; font-weight: 600;
+  }
+  .controls .scope-note a:hover { text-decoration: underline; }
 
   table { width: 100%; border-collapse: collapse; background: var(--surface);
           font-variant-numeric: tabular-nums; }
@@ -1571,6 +1619,12 @@
     <symbol id="icon-chevron-down" viewBox="0 0 24 24">
       <polyline points="6 9 12 15 18 9"/>
     </symbol>
+    <symbol id="icon-calendar" viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <path d="M16 2v4"/>
+      <path d="M8 2v4"/>
+      <path d="M3 10h18"/>
+    </symbol>
   </defs>
 </svg>
 
@@ -1579,7 +1633,19 @@
   <aside class="nav" aria-label="Sections">
     <div class="brand">
       <div class="brand-name">claudit</div>
+      {{if .ServeMode}}
+      {{/* ServeMode: the date label becomes a button that opens a small
+           popover with two native date inputs. Without a live server to
+           navigate to, the picker has nothing to do — one-shot HTML
+           reports keep the plain <div>. */}}
+      <button type="button" class="brand-sub brand-sub-button" id="date-range-button"
+              aria-haspopup="dialog" aria-expanded="false" title="Pick a date range">
+        <svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
+        <span id="date-range"></span>
+      </button>
+      {{else}}
       <div class="brand-sub" id="date-range"></div>
+      {{end}}
     </div>
     <nav class="nav-list">
       <a class="nav-item is-active" href="#overview" data-view="overview">
@@ -1615,6 +1681,17 @@
       <label>Filter rows: <input id="filter" type="search" placeholder="model, path, command, agent…"></label>
       <label>Min cost: <input id="mincost" type="number" value="0" step="0.01" min="0"></label>
       <span class="hint">Filter and min-cost apply across every section. Click any column header to sort.</span>
+      {{if .ScopeIsDefault}}
+      <span class="scope-note" role="status">
+        <span>Showing
+          {{if .ScopeWindowLabel}}last {{.ScopeWindowLabel}}{{end}}
+          {{if and .ScopeWindowLabel .ScopeSessionsCap}}<span class="sep">·</span>{{end}}
+          {{if .ScopeSessionsCap}}top {{.ScopeSessionsCap}} sessions{{end}}
+        </span>
+        <span class="sep">·</span>
+        <a href="{{.ScopeLiftURL}}">show all</a>
+      </span>
+      {{end}}
     </div>
 
     <section class="view is-active" id="view-overview" data-view="overview">
@@ -3644,5 +3721,334 @@
   })();
 })();
 </script>
+{{if .ServeMode}}
+<style>
+  /* Reload toast — fallback when a silent reload has been deferred
+     for a long time (e.g. user has details open for minutes while new
+     data has piled up). The default reload path is silent; the toast
+     only appears as the "too stale to ignore" signal. */
+  .claudit-reload-toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 9999;
+    display: none; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: var(--r-md);
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-md);
+    font: 500 var(--t-3)/1.3 var(--font-sans);
+  }
+  .claudit-reload-toast.is-visible { display: inline-flex; }
+  .claudit-reload-toast button {
+    border: 1px solid var(--border-strong); background: var(--accent);
+    color: white; padding: 6px 10px; border-radius: var(--r-sm);
+    font: 600 var(--t-2)/1 var(--font-sans); cursor: pointer;
+  }
+  .claudit-reload-toast .dismiss {
+    background: transparent; color: var(--muted); border-color: transparent;
+  }
+  /* Date-range popover — appended to <body> at runtime by the picker
+     JS, positioned beneath the brand-sub button. */
+  .claudit-date-popover {
+    position: absolute; z-index: 9997;
+    display: none;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border-strong); border-radius: var(--r-md);
+    box-shadow: var(--shadow-md);
+    padding: var(--s-3); min-width: 240px;
+    font: 500 var(--t-3)/1.3 var(--font-sans);
+  }
+  .claudit-date-popover.is-visible { display: block; }
+  .claudit-date-popover .row {
+    display: flex; flex-direction: column; gap: 2px;
+    margin-bottom: var(--s-2);
+  }
+  .claudit-date-popover label {
+    font-size: var(--t-2); color: var(--muted); font-weight: 600;
+  }
+  .claudit-date-popover input[type="date"] {
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--ink);
+    color-scheme: light dark;
+  }
+  .claudit-date-popover input[type="date"]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  .claudit-date-popover .buttons {
+    display: flex; gap: var(--s-2); justify-content: flex-end;
+    margin-top: var(--s-2);
+  }
+  .claudit-date-popover button {
+    border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--ink); padding: 6px 10px; border-radius: var(--r-sm);
+    font: 600 var(--t-2)/1 var(--font-sans); cursor: pointer;
+  }
+  .claudit-date-popover button.primary {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  .claudit-date-popover button.subtle {
+    background: transparent; border-color: transparent; color: var(--muted);
+  }
+  @media print {
+    .claudit-reload-toast, .claudit-date-popover { display: none !important; }
+  }
+</style>
+<div id="claudit-reload-toast" class="claudit-reload-toast" role="status" aria-live="polite">
+  <span>Updated data is ready.</span>
+  <button type="button" data-action="reload">Reload now</button>
+  <button type="button" data-action="dismiss" class="dismiss" aria-label="Dismiss">×</button>
+</div>
+<script>
+(function () {
+  // Auto-reload for `claudit serve`. ServeMode=true gates this whole
+  // block, so one-shot HTML renders are unaffected.
+  //
+  // Strategy: every RELOAD_INTERVAL_MS, attempt a silent reload.
+  // Defer when the user is plausibly mid-read — a yanked-page is
+  // worse than slightly-stale data. Deferral checks:
+  //   - page is hidden (tab not focused) → wait for visibility
+  //   - any <details> is open → user expanded something specific
+  //   - mouse/keyboard/scroll activity within ACTIVITY_GRACE_MS
+  // If a reload has been deferred for OVERDUE_MS while new data has
+  // piled up, surface the toast so the user can opt in.
+  var STATUS_URL          = "{{.StatusPath}}";
+  var INITIAL_GEN         = {{.Generation}};
+  var RELOAD_INTERVAL_MS  = {{.ReloadIntervalSec}} * 1000;
+  var STATUS_POLL_MS      = 5000;
+  var ACTIVITY_GRACE_MS   = 10000;
+  var OVERDUE_MS          = 5 * 60 * 1000;
+
+  var lastActivity = Date.now();
+  var firstDeferralAt = 0;
+  var dismissed = false;
+  var currentGen = INITIAL_GEN;
+
+  function markActivity() { lastActivity = Date.now(); }
+  ['scroll', 'mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart']
+    .forEach(function (ev) {
+      window.addEventListener(ev, markActivity, { passive: true, capture: true });
+    });
+
+  var toast = document.getElementById('claudit-reload-toast');
+  if (toast) {
+    toast.querySelector('[data-action="reload"]').addEventListener('click', function () {
+      window.location.reload();
+    });
+    toast.querySelector('[data-action="dismiss"]').addEventListener('click', function () {
+      toast.classList.remove('is-visible');
+      dismissed = true;
+    });
+  }
+  function showToast() {
+    if (!toast || dismissed) return;
+    toast.classList.add('is-visible');
+  }
+
+  function canReload() {
+    if (document.hidden) return false;
+    if (Date.now() - lastActivity < ACTIVITY_GRACE_MS) return false;
+    if (document.querySelector('details[open]')) return false;
+    return true;
+  }
+
+  function attemptReload() {
+    if (currentGen <= INITIAL_GEN) {
+      // No new data — nothing to do; reset the overdue timer.
+      firstDeferralAt = 0;
+      return;
+    }
+    if (canReload()) {
+      window.location.reload();
+      return;
+    }
+    if (firstDeferralAt === 0) firstDeferralAt = Date.now();
+    if (Date.now() - firstDeferralAt >= OVERDUE_MS) {
+      showToast();
+    }
+  }
+
+  // Cadence 1: try a silent reload on a steady interval.
+  setInterval(attemptReload, RELOAD_INTERVAL_MS);
+  // Cadence 2: poll /status so currentGen tracks server-side data.
+  // Independent of the reload tick so we can react to a generation
+  // change at the next interval rather than the next poll.
+  function pollStatus() {
+    fetch(STATUS_URL, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (s && typeof s.generation === 'number') currentGen = s.generation;
+        setTimeout(pollStatus, STATUS_POLL_MS);
+      })
+      .catch(function () { setTimeout(pollStatus, STATUS_POLL_MS * 6); });
+  }
+  pollStatus();
+
+  // Reload immediately when the tab regains focus IF new data is
+  // already pending — the user wasn't watching anyway.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && currentGen > INITIAL_GEN && canReload()) {
+      window.location.reload();
+    }
+  });
+
+  // ── date-range picker ────────────────────────────────────────────
+  // Clicking the brand-sub button opens a small popover with two
+  // native <input type="date"> fields and Apply/Clear/Cancel. Apply
+  // navigates to a URL with since/until set + scope=all so server
+  // defaults don't snap back over the user's explicit choice. Clear
+  // strips the date filter. Cancel just closes.
+  (function () {
+    var btn = document.getElementById('date-range-button');
+    if (!btn) return;
+    var popover = null;
+    function ymd(d) {
+      var y = d.getFullYear();
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + dd;
+    }
+    // Add/subtract one calendar day to a YYYY-MM-DD string. UTC math
+    // dodges local-timezone DST surprises — claudit treats date-only
+    // values as UTC midnight throughout (see time.Parse callsites).
+    //
+    // The picker presents End as INCLUSIVE to the user; internally
+    // the server's `until` field is exclusive (matches --until on the
+    // report CLI). We translate at the picker boundary: +1 day on
+    // Apply, -1 day when seeding the input from a URL.
+    function addDays(ymdStr, delta) {
+      var parts = ymdStr.split('-').map(Number);
+      var dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      dt.setUTCDate(dt.getUTCDate() + delta);
+      var Y = dt.getUTCFullYear();
+      var M = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      var D = String(dt.getUTCDate()).padStart(2, '0');
+      return Y + '-' + M + '-' + D;
+    }
+    function build() {
+      if (popover) return popover;
+      popover = document.createElement('div');
+      popover.className = 'claudit-date-popover';
+      popover.setAttribute('role', 'dialog');
+      popover.setAttribute('aria-label', 'Select date range');
+      popover.innerHTML =
+        '<div class="row"><label for="claudit-date-start">Start</label>' +
+        '<input id="claudit-date-start" type="date"></div>' +
+        '<div class="row"><label for="claudit-date-end">End</label>' +
+        '<input id="claudit-date-end" type="date"></div>' +
+        '<div class="buttons">' +
+        '<button type="button" class="subtle" data-action="clear">Clear</button>' +
+        '<button type="button" data-action="cancel">Cancel</button>' +
+        '<button type="button" class="primary" data-action="apply">Apply</button>' +
+        '</div>';
+      document.body.appendChild(popover);
+      popover.querySelector('[data-action="apply"]').addEventListener('click', apply);
+      popover.querySelector('[data-action="clear"]').addEventListener('click', clear);
+      popover.querySelector('[data-action="cancel"]').addEventListener('click', close);
+      // Don't let clicks inside the popover bubble up to the doc-click
+      // handler, which would close it.
+      popover.addEventListener('click', function (e) { e.stopPropagation(); });
+      popover.querySelector('#claudit-date-start')
+        .addEventListener('keydown', onPopoverKey);
+      popover.querySelector('#claudit-date-end')
+        .addEventListener('keydown', onPopoverKey);
+      return popover;
+    }
+    function onPopoverKey(e) {
+      if (e.key === 'Enter') { e.preventDefault(); apply(); }
+    }
+    function position() {
+      if (!popover) return;
+      var rect = btn.getBoundingClientRect();
+      popover.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+      popover.style.left = (rect.left + window.scrollX) + 'px';
+    }
+    function seedInputs() {
+      var p = new URLSearchParams(window.location.search);
+      var start = p.get('since');
+      var endExcl = p.get('until');
+      // Translate the URL's exclusive `until` into the user-facing
+      // inclusive End: subtract one day for display so the picker
+      // shows what they actually selected last time.
+      var end = endExcl ? addDays(endExcl, -1) : '';
+      if (!start && !end) {
+        // Default seed mirrors the server's last=7d default scope so
+        // the picker opens onto values that match what the user is
+        // currently seeing.
+        var now = new Date();
+        var weekAgo = new Date(now);
+        weekAgo.setDate(now.getDate() - 7);
+        start = ymd(weekAgo);
+        end = ymd(now);
+      }
+      popover.querySelector('#claudit-date-start').value = start || '';
+      popover.querySelector('#claudit-date-end').value = end || '';
+    }
+    function open() {
+      build();
+      seedInputs();
+      position();
+      popover.classList.add('is-visible');
+      btn.setAttribute('aria-expanded', 'true');
+      // Delay the doc-click binding by a tick so the click that
+      // opened us doesn't immediately close us.
+      setTimeout(function () {
+        document.addEventListener('click', onDocClick);
+        document.addEventListener('keydown', onDocKey);
+        window.addEventListener('resize', position);
+        window.addEventListener('scroll', position, true);
+      }, 0);
+      popover.querySelector('#claudit-date-start').focus();
+    }
+    function close() {
+      if (popover) popover.classList.remove('is-visible');
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('keydown', onDocKey);
+      window.removeEventListener('resize', position);
+      window.removeEventListener('scroll', position, true);
+    }
+    function onDocClick(e) {
+      if (popover && !popover.contains(e.target) && e.target !== btn) close();
+    }
+    function onDocKey(e) {
+      if (e.key === 'Escape') { close(); btn.focus(); }
+    }
+    function apply() {
+      var s = popover.querySelector('#claudit-date-start').value;
+      var en = popover.querySelector('#claudit-date-end').value;
+      if (s && en && s > en) {
+        alert('Start date must be on or before end date.');
+        return;
+      }
+      var p = new URLSearchParams(window.location.search);
+      if (s) p.set('since', s); else p.delete('since');
+      // Translate the user-facing inclusive End to the server's
+      // exclusive `until` by adding one day. "End = 2026-05-15"
+      // means "include everything on 2026-05-15", i.e. `until` =
+      // 2026-05-16.
+      if (en) p.set('until', addDays(en, 1)); else p.delete('until');
+      p.delete('last');       // since/until override last
+      p.set('scope', 'all');  // explicit user choice — disable server defaults
+      var qs = p.toString();
+      window.location.search = qs ? ('?' + qs) : '';
+    }
+    function clear() {
+      var p = new URLSearchParams(window.location.search);
+      p.delete('since');
+      p.delete('until');
+      p.delete('last');
+      p.set('scope', 'all');
+      var qs = p.toString();
+      window.location.search = qs ? ('?' + qs) : '';
+    }
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (popover && popover.classList.contains('is-visible')) close();
+      else open();
+    });
+  })();
+})();
+</script>
+{{end}}
 </body>
 </html>

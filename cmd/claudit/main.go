@@ -40,6 +40,8 @@ func run() error {
 			return runDiff(args[1:])
 		case "watch":
 			return runWatch(args[1:])
+		case "serve":
+			return runServe(args[1:])
 		}
 	}
 	return runReport(args)
@@ -55,6 +57,7 @@ Commands:
   report   Generate a cost/usage report (HTML by default; --json or unset --html for markdown).
   diff     Compare two date ranges and report top movers.
   watch    Tail a live session and print running cost.
+  serve    Run a local web daemon that serves a live-updating report (filters via URL query).
 
 Run "claudit <command> --help" for command-specific flags.
 `

@@ -40,6 +40,36 @@ type HTMLOptions struct {
 	// ordered prompts + per-turn summaries. Built by
 	// aggregate.BuildSessionTimelines. nil/empty hides the Sessions view.
 	SessionTimelines []aggregate.SessionTimeline
+
+	// ServeMode enables the small auto-reload script and the scope
+	// pill. One-shot HTML renders (default) leave this false and
+	// emit no extra chrome.
+	ServeMode bool
+	// Generation is the cache generation that this render reflects,
+	// echoed to the auto-reload script. Serve-only.
+	Generation int64
+	// StatusPath is the URL the auto-reload script polls. Defaults
+	// to "/_claudit/status". Serve-only.
+	StatusPath string
+	// ReloadIntervalSec is the cadence (in seconds) at which the
+	// in-page script attempts a silent reload. Defaults to 30 when
+	// ServeMode is on. Serve-only.
+	ReloadIntervalSec int
+
+	// ScopeIsDefault is true when the served view has any server-
+	// applied narrowing in effect (default time window or default
+	// sessions cap). Drives the scope pill. Serve-only.
+	ScopeIsDefault bool
+	// ScopeWindowLabel is the human label for the active default
+	// window (e.g. "7 days"). Empty when no time window is applied
+	// by server defaults. Serve-only.
+	ScopeWindowLabel string
+	// ScopeSessionsCap is the server-default sessions cap currently
+	// in effect. 0 when no cap was applied. Serve-only.
+	ScopeSessionsCap int
+	// ScopeLiftURL is the relative URL the pill's "show all" link
+	// targets. Always rooted at "/". Serve-only.
+	ScopeLiftURL string
 }
 
 // HTML writes a self-contained interactive HTML report to w. Equivalent
@@ -140,12 +170,42 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 	if err != nil {
 		return fmt.Errorf("marshal report data: %w", err)
 	}
+	statusPath := opts.StatusPath
+	if statusPath == "" {
+		statusPath = "/_claudit/status"
+	}
+	reloadSec := opts.ReloadIntervalSec
+	if reloadSec <= 0 {
+		reloadSec = 30
+	}
+	liftURL := opts.ScopeLiftURL
+	if liftURL == "" {
+		liftURL = "/?scope=all"
+	}
 	// json.Marshal already escapes <, >, & as < etc., so the bytes
 	// are safe to drop into a <script type="application/json"> island.
+	// String fields below render inside a JS-string context; html/
+	// template auto-applies JS-string escaping for them.
 	return htmlTpl.Execute(w, struct {
-		DataJSON template.JS
+		DataJSON          template.JS
+		ServeMode         bool
+		Generation        int64
+		StatusPath        string
+		ReloadIntervalSec int
+		ScopeIsDefault    bool
+		ScopeWindowLabel  string
+		ScopeSessionsCap  int
+		ScopeLiftURL      string
 	}{
-		DataJSON: template.JS(data),
+		DataJSON:          template.JS(data),
+		ServeMode:         opts.ServeMode,
+		Generation:        opts.Generation,
+		StatusPath:        statusPath,
+		ReloadIntervalSec: reloadSec,
+		ScopeIsDefault:    opts.ScopeIsDefault,
+		ScopeWindowLabel:  opts.ScopeWindowLabel,
+		ScopeSessionsCap:  opts.ScopeSessionsCap,
+		ScopeLiftURL:      liftURL,
 	})
 }
 
