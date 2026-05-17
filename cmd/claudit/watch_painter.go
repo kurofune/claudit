@@ -193,18 +193,20 @@ func (p *screenPainter) paint() {
 
 func (p *screenPainter) totalsPanel(d RollingPanelData) term.Panel {
 	return term.Panel{
-		Title: p.style.Magenta("totals"),
+		Title: p.style.Magenta("TOTALS"),
 		Body: []string{
 			rollingPanelLine(p.style, d.Today, d.Week, d.Month),
 		},
+		Pad: true,
 	}
 }
 
 func (p *screenPainter) livePanel(d LivePanelData) term.Panel {
 	panel := term.Panel{
-		Title:     p.style.Green("live"),
+		Title:     p.style.Green("LIVE"),
 		TitleHint: p.style.Dim(d.Header),
 		Body:      d.Rows,
+		Pad:       true, // content-heavy panel; totals + alerts stay flush
 	}
 	if len(panel.Body) == 0 {
 		panel.Empty = "waiting for assistant turns…"
@@ -219,14 +221,15 @@ func (p *screenPainter) alertsPanel() term.Panel {
 		age := now.Sub(a.at).Truncate(time.Second)
 		body = append(body, fmt.Sprintf("%s  %s", p.style.Dim(formatAge(age)+" ago"), a.msg))
 	}
-	title := p.style.Dim("alerts")
+	title := p.style.Dim("ALERTS")
 	if len(p.alerts) > 0 {
-		title = p.style.Red("alerts")
+		title = p.style.Red("ALERTS")
 	}
 	return term.Panel{
 		Title: title,
 		Body:  body,
 		Empty: "no alerts",
+		Pad:   true,
 	}
 }
 

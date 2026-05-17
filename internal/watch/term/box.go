@@ -24,22 +24,34 @@ type Panel struct {
 	TitleHint string  // appears after Title, dim, e.g. "$18.18 across 1 session"
 	Body      []string
 	Empty     string  // shown when Body is empty (e.g. "no alerts yet")
+	// Pad inserts a blank interior row above and below the body so the
+	// content has breathing room from the borders. Off by default —
+	// dense one-line panels (totals, alerts) read fine without it; on
+	// for content-heavy panels (live) where the spacing matters.
+	Pad bool
 }
 
-// RenderPanel emits a panel's lines (top border, body rows, bottom
-// border) at the given width. Style is used to dim the borders;
+// RenderPanel emits a panel's lines at the given width. When p.Pad is
+// set, blank interior rows sit above and below the body; otherwise
+// the body cleaves to the borders. Style is used to dim the borders;
 // callers must color the Title and Body content themselves.
 func RenderPanel(p Panel, width int, st Style) []string {
 	if width < 8 {
 		width = 8 // anything narrower mangles even one-char content
 	}
 	out := []string{topBorder(p.Title, p.TitleHint, width, st)}
+	if p.Pad {
+		out = append(out, sideRow("", width, st))
+	}
 	body := p.Body
 	if len(body) == 0 && p.Empty != "" {
 		body = []string{st.Dim(p.Empty)}
 	}
 	for _, line := range body {
 		out = append(out, sideRow(line, width, st))
+	}
+	if p.Pad {
+		out = append(out, sideRow("", width, st))
 	}
 	out = append(out, bottomBorder(width, st))
 	return out
@@ -68,10 +80,10 @@ func topBorder(title, hint string, width int, st Style) string {
 	// otherwise the dash count overshoots and the top border ends up
 	// wider than the terminal (the line then wraps, dragging the right
 	// corner onto a new visual row).
-	hLen := visibleWidth(heading)
+	hLen := VisibleWidth(heading)
 	if hLen > available {
 		heading = visibleTruncate(heading, available-1) + "…"
-		hLen = visibleWidth(heading)
+		hLen = VisibleWidth(heading)
 	}
 	dashes := strings.Repeat(hLine, available-hLen)
 
@@ -90,7 +102,7 @@ func bottomBorder(width int, st Style) string {
 // sideRow wraps a single body line with "│ content │", padding or
 // truncating content so the right border lands exactly at `width`.
 //
-// Content can include ANSI escape sequences; visibleWidth strips them
+// Content can include ANSI escape sequences; VisibleWidth strips them
 // before measuring. Truncation is best-effort — anything past the
 // budget gets cut, which can split a multi-byte rune. Callers should
 // not pass body lines wider than the terminal in the first place.
@@ -102,10 +114,10 @@ func sideRow(content string, width int, st Style) string {
 	if available < 1 {
 		return left + right
 	}
-	vw := visibleWidth(content)
+	vw := VisibleWidth(content)
 	if vw > available {
 		content = visibleTruncate(content, available-1) + "…"
-		vw = visibleWidth(content)
+		vw = VisibleWidth(content)
 	}
 	pad := available - vw
 	if pad < 0 {
@@ -114,10 +126,10 @@ func sideRow(content string, width int, st Style) string {
 	return left + content + strings.Repeat(" ", pad) + right
 }
 
-// visibleWidth returns the number of printable runes in s, skipping
+// VisibleWidth returns the number of printable runes in s, skipping
 // over CSI escape sequences (ESC `[` params final-byte). Used to size
 // padded box rows correctly when content carries ANSI color codes.
-func visibleWidth(s string) int {
+func VisibleWidth(s string) int {
 	w := 0
 	state := 0 // 0 normal, 1 just-saw-ESC, 2 in CSI params
 	for _, r := range s {
@@ -142,7 +154,7 @@ func visibleWidth(s string) int {
 	return w
 }
 
-// visibleTruncate trims s so its visibleWidth is <= n while preserving
+// visibleTruncate trims s so its VisibleWidth is <= n while preserving
 // any ANSI escape sequences encountered (so colored content doesn't
 // "bleed" past truncation by leaving a reset behind). Returns s with
 // a final reset code appended if any non-reset SGR was in effect at

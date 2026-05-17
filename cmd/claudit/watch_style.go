@@ -86,17 +86,21 @@ func rollingPanelLine(st term.Style, today, week, month float64) string {
 }
 
 // liveHeader is the title-hint string that appears in the live
-// panel's top border: "$18.18 across 2 sessions".
+// panel's top border: "$18.18 across 2 active sessions". "active" is
+// explicit because we hide idle sessions from the visible count.
 func liveHeader(st term.Style, total float64, n int) string {
-	sess := "session"
+	sess := "active session"
 	if n != 1 {
-		sess = "sessions"
+		sess = "active sessions"
 	}
 	return fmt.Sprintf("%s %s %d %s", money(st, total, 4), label(st, "across"), n, label(st, sess))
 }
 
 // singleSessionLine renders the one-row body for `claudit watch` (one
-// session). Layout: total · turns · hit% · last tool +cost.
+// session). Layout: total · turns · hit% · last turn: tool (+cost).
+// The per-turn cost is parenthesized inside the same cell as the tool
+// name so the eye reads them as a single thought — what the last turn
+// did, and what it cost.
 func singleSessionLine(st term.Style, total float64, turns int, hitRatio float64, tools []string, lastCost float64) string {
 	hit := st.Dim("—")
 	if hitRatio > 0 {
@@ -106,44 +110,58 @@ func singleSessionLine(st term.Style, total float64, turns int, hitRatio float64
 		money(st, total, 2),
 		fmt.Sprintf("%d %s", turns, label(st, "turns")),
 		fmt.Sprintf("%s %s", hit, label(st, "cache")),
-		fmt.Sprintf("%s %s  %s", label(st, "last:"), toolsLabel(st, tools), deltaMoney(st, lastCost)),
+		fmt.Sprintf("%s %s (%s)", label(st, "last turn:"), toolsLabel(st, tools), deltaMoney(st, lastCost)),
 	}, dotSep(st))
 }
 
-// multiProjectHeader returns the project-group header line for the
-// live panel under `--all`. projectCol is the visible width to pad
-// the project name to so cost columns align.
-func multiProjectHeader(st term.Style, name string, turns int, cost float64, projectCol int) string {
-	visiblePad := projectCol - len(name)
-	if visiblePad < 0 {
-		visiblePad = 0
+// projectHeading is the heading line that introduces a project group
+// under --all. When a project has multiple active sessions, the
+// heading carries the aggregate ("3 sessions · 412 turns · $66 total")
+// so the reader can compare projects without summing per-session
+// rows. With one session the heading is just the project name —
+// the detail row below has the only meaningful numbers.
+func projectHeading(st term.Style, name string, sessionCount, turns int, cost float64) string {
+	if sessionCount <= 1 {
+		return project(st, name)
 	}
-	return fmt.Sprintf("%s%s  %d %s  %s",
-		project(st, name), strings.Repeat(" ", visiblePad),
+	return fmt.Sprintf("%s%s%d %s%s%d %s%s%s %s",
+		project(st, name),
+		dotSep(st),
+		sessionCount, label(st, "sessions"),
+		dotSep(st),
 		turns, label(st, "turns"),
-		moneyByMag(st, cost, 4))
+		dotSep(st),
+		moneyByMag(st, cost, 4), label(st, "total"))
 }
 
-// multiSessionRow renders one indented session row under a project.
-func multiSessionRow(st term.Style, turns int, cost float64, tools []string, lastCost float64, projectCol int) string {
-	// The "└ " takes 2 visible columns; pad the rest of the project-name
-	// column with spaces so the turn-count cell starts at projectCol.
-	pad := projectCol - 2
-	if pad < 0 {
-		pad = 0
+// projectDetailRow is the indented one-line detail under a project
+// heading: "<n> turns   $X total   last turn: <tool> (+$Y)".
+//
+// Layout is column-aligned by visible width (turnCol/totalCol) so
+// multiple sessions / multiple projects stack cleanly. The "last turn"
+// cell is the rightmost — no trailing padding needed, the cost lives
+// inside the same parens-grouped cell.
+func projectDetailRow(st term.Style, turns int, cost float64, tools []string, lastCost float64, turnCol, totalCol int) string {
+	turnCell := fmt.Sprintf("%d %s", turns, label(st, "turns"))
+	totalCell := fmt.Sprintf("%s %s", moneyByMag(st, cost, 4), label(st, "total"))
+	lastCell := fmt.Sprintf("%s %s (%s)", label(st, "last turn:"), toolsLabel(st, tools), deltaMoney(st, lastCost))
+
+	return fmt.Sprintf("    %s%s   %s%s   %s",
+		turnCell, padTo(turnCell, turnCol),
+		totalCell, padTo(totalCell, totalCol),
+		lastCell)
+}
+
+// padTo returns a run of spaces to right-pad s to `col` visible columns.
+// Negative or zero padding becomes the empty string. Used by the
+// detail-row builder so multiple rows align even when ANSI-colored
+// content has different visible widths.
+func padTo(s string, col int) string {
+	w := term.VisibleWidth(s)
+	if w >= col {
+		return ""
 	}
-	turnCellVisible := fmt.Sprintf("%d turns", turns)
-	cellPad := pad - len(turnCellVisible)
-	if cellPad < 0 {
-		cellPad = 0
-	}
-	return fmt.Sprintf("  %s %d %s%s  %s  %s %s  %s",
-		st.Dim("└"),
-		turns, label(st, "turns"),
-		strings.Repeat(" ", cellPad),
-		moneyByMag(st, cost, 4),
-		label(st, "last:"), toolsLabel(st, tools),
-		deltaMoney(st, lastCost))
+	return strings.Repeat(" ", col-w)
 }
 
 // styleSpikeSingle is the single-session SPIKE alert.

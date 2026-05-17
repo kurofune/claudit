@@ -15,6 +15,7 @@ import (
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
 	"github.com/kurofune/claudit/internal/watch"
+	"github.com/kurofune/claudit/internal/watch/term"
 )
 
 // Tuning knobs for --all. Chosen to keep the UI calm without missing
@@ -29,7 +30,7 @@ const (
 // runWatchAll is the entry point for `claudit watch --all`. Runs the
 // discovery loop, spawns Tail goroutines per session, fans events
 // into a single render goroutine that owns all state.
-func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool) error {
+func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool, scanDays int) error {
 	fmt.Fprintf(os.Stderr, "claudit watch --all: tailing every session under %s touched in the last %s\n", root, recentWindow)
 	if budget > 0 {
 		fmt.Fprintf(os.Stderr, "claudit watch --all: budget alert at $%.2f (combined across sessions)\n", budget)
@@ -42,7 +43,7 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 	}
 	var rollingState *rollingTotals
 	if rolling {
-		rs, scanErr := newRollingTotals(root, prices, time.Now())
+		rs, scanErr := newRollingTotalsWithDays(root, prices, time.Now(), scanDays)
 		if scanErr != nil {
 			fmt.Fprintf(os.Stderr, "claudit watch --all: rolling totals disabled (%v)\n", scanErr)
 		} else {
@@ -308,39 +309,60 @@ func (h *multiHub) paint() {
 		return
 	}
 
-	projectCol := 12
-	for _, g := range groups {
-		if n := len(projectLabel(g.cwd)); n > projectCol {
-			projectCol = n
-		}
-	}
-	if projectCol > 32 {
-		projectCol = 32
-	}
+	// Pre-measure detail-row columns across every visible session so
+	// turn-count / total-cost cells align across projects. The "last
+	// turn" cell is the rightmost (no padding needed) so it's not
+	// measured.
+	turnCol, totalCol := measureDetailCols(st, groups)
 
 	rows := []string{}
 	visibleRows := 0
 	overflow := 0
-	for _, g := range groups {
+	for gi, g := range groups {
 		if visibleRows >= maxVisibleSessions {
 			overflow += len(g.sessions)
 			continue
 		}
-		rows = append(rows, multiProjectHeader(st, projectLabel(g.cwd), g.totalTurns(), g.totalCost(), projectCol))
+		// Blank line between project groups so the eye sees them as
+		// separate units. Skipped before the first group.
+		if gi > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, projectHeading(st, projectLabel(g.cwd), len(g.sessions), g.totalTurns(), g.totalCost()))
 		for _, sess := range g.sessions {
 			if visibleRows >= maxVisibleSessions {
 				overflow++
 				continue
 			}
-			rows = append(rows, multiSessionRow(st, sess.turns, sess.totalCost, sess.lastTools, sess.lastTurnCost, projectCol))
+			rows = append(rows, projectDetailRow(st, sess.turns, sess.totalCost, sess.lastTools, sess.lastTurnCost, turnCol, totalCol))
 			visibleRows++
 		}
 	}
 	if overflow > 0 {
-		rows = append(rows, st.Dim(fmt.Sprintf("  +%d more session(s) hidden", overflow)))
+		rows = append(rows, st.Dim(fmt.Sprintf("    +%d more session(s) hidden", overflow)))
 	}
 	frame.Live.Rows = rows
 	h.painter.Render(frame)
+}
+
+// measureDetailCols computes the visible-width column targets for the
+// per-session detail row across every visible session. The trailing
+// "last turn" cell is unmeasured — it's rightmost, so its width
+// doesn't affect alignment of anything else.
+func measureDetailCols(st term.Style, groups []projectGroup) (turn, total int) {
+	for _, g := range groups {
+		for _, s := range g.sessions {
+			tc := fmt.Sprintf("%d %s", s.turns, label(st, "turns"))
+			if w := term.VisibleWidth(tc); w > turn {
+				turn = w
+			}
+			tot := fmt.Sprintf("%s %s", moneyByMag(st, s.totalCost, 4), label(st, "total"))
+			if w := term.VisibleWidth(tot); w > total {
+				total = w
+			}
+		}
+	}
+	return turn, total
 }
 
 func (h *multiHub) shutdown(w *os.File) {

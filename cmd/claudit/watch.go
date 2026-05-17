@@ -30,6 +30,7 @@ func runWatch(args []string) error {
 	notifyOn := fs.Bool("notify", false, "send a desktop notification on budget cross and turn-cost spikes")
 	all := fs.Bool("all", false, "tail every recently-modified session under --root, grouped by project")
 	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals at the top of the UI")
+	scanDays := fs.Int("scan-days", defaultScanDays, "rolling-totals startup scan window in days; smaller is faster but clamps the month total to this window")
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintln(out, "claudit watch — tail a live session JSONL and print running cost.")
@@ -65,7 +66,7 @@ func runWatch(args []string) error {
 		if fs.NArg() > 0 {
 			return fmt.Errorf("--all does not take a session-id argument")
 		}
-		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *notifyOn, *rolling)
+		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *notifyOn, *rolling, *scanDays)
 	}
 
 	var path string
@@ -96,7 +97,7 @@ func runWatch(args []string) error {
 	}
 	var rollingState *rollingTotals
 	if *rolling {
-		rs, scanErr := newRollingTotals(*root, prices, time.Now())
+		rs, scanErr := newRollingTotalsWithDays(*root, prices, time.Now(), *scanDays)
 		if scanErr != nil {
 			fmt.Fprintf(os.Stderr, "claudit watch: rolling totals disabled (%v)\n", scanErr)
 		} else {

@@ -130,7 +130,10 @@ func runReport(args []string) error {
 		filter.Until = t
 	}
 
-	files, err := listJSONL(*root)
+	// mtime pre-filter: when --since (or --last) bounds the window,
+	// any file whose mtime predates the bound can't contain a turn
+	// inside the window, so skip it before opening.
+	files, err := listJSONL(*root, filter.Since)
 	if err != nil {
 		return err
 	}
@@ -274,7 +277,14 @@ func runDiffWithRanges(
 		return err
 	}
 
-	files, err := listJSONL(root)
+	// mtime pre-filter: use the earlier of the two range starts as the
+	// cutoff so we don't skip a file whose tail is in --b but whose
+	// head is in --a.
+	earliest := sinceA
+	if sinceB.Before(earliest) {
+		earliest = sinceB
+	}
+	files, err := listJSONL(root, earliest)
 	if err != nil {
 		return err
 	}
@@ -457,8 +467,14 @@ func defaultProjectsRoot() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-func listJSONL(root string) ([]string, error) {
+// listJSONL walks root for .jsonl files. When earliest is non-zero,
+// files whose mtime is before earliest are skipped — they can't
+// contain any turn newer than earliest, so opening them is wasted I/O.
+// This is a big lever on time-windowed `report --since=…` / `diff` /
+// `watch` queries against large ~/.claude/projects trees.
+func listJSONL(root string, earliest time.Time) ([]string, error) {
 	var out []string
+	filter := !earliest.IsZero()
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // tolerate transient errors during walk
@@ -466,9 +482,19 @@ func listJSONL(root string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(path, ".jsonl") {
-			out = append(out, path)
+		if !strings.HasSuffix(path, ".jsonl") {
+			return nil
 		}
+		if filter {
+			info, infoErr := d.Info()
+			if infoErr != nil {
+				return nil
+			}
+			if info.ModTime().Before(earliest) {
+				return nil
+			}
+		}
+		out = append(out, path)
 		return nil
 	})
 	if err != nil {

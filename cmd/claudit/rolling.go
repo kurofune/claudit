@@ -1,12 +1,8 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -23,7 +19,7 @@ type rollingTotals struct {
 	prices *pricing.Table
 
 	// History holds turn (timestamp, cost) pairs from the startup
-	// scan, restricted to the last 30 days. Live additions append to
+	// scan, restricted to the scan window. Live additions append to
 	// this slice. We don't try to free old entries — a month of turns
 	// at one-per-minute is ~43k records and fits comfortably in memory.
 	history []turnSample
@@ -40,64 +36,67 @@ type turnSample struct {
 	cost float64
 }
 
-// newRollingTotals scans root for every JSONL, parses it, and seeds
-// the history slice with each assistant turn's (timestamp, cost)
-// captured over the last 30 days. now is injected for test
-// determinism. Returns the populated state.
+// defaultScanDays is the rolling window when the user doesn't pass
+// --scan-days. Thirty days covers the "month" bucket exactly.
+const defaultScanDays = 30
+
+// newRollingTotals scans root for every JSONL and seeds history with
+// each assistant turn's (timestamp, cost) within the trailing 30
+// days. now is injected for test determinism.
+func newRollingTotals(root string, prices *pricing.Table, now time.Time) (*rollingTotals, error) {
+	return newRollingTotalsWithDays(root, prices, now, defaultScanDays)
+}
+
+// newRollingTotalsWithDays is the parameterized variant — exposed so
+// the watch CLI can pipe through --scan-days. scanDays <= 0 is
+// clamped to 1; very large values are accepted as-is.
+//
+// File discovery uses listJSONL's mtime filter so files whose last
+// modification predates the scan window are skipped without opening.
+// Parsing is fanned out to GOMAXPROCS workers via the shared
+// parseConcurrently helper — same primitive that report and diff use,
+// so the worker-pool design lives in one place.
 //
 // Errors are aggregated and ignored per-file — a corrupt JSONL in
 // the user's history should not prevent the live watch from starting.
 // If we can't even walk the root, we return that error.
-func newRollingTotals(root string, prices *pricing.Table, now time.Time) (*rollingTotals, error) {
-	cutoff := now.AddDate(0, 0, -30)
+func newRollingTotalsWithDays(root string, prices *pricing.Table, now time.Time, scanDays int) (*rollingTotals, error) {
+	if scanDays <= 0 {
+		scanDays = 1
+	}
+	cutoff := now.AddDate(0, 0, -scanDays)
 	hitCutoff := now.AddDate(0, 0, -7)
 
 	rt := &rollingTotals{prices: prices}
 	if root == "" {
 		return rt, nil
 	}
-	if _, err := os.Stat(root); err != nil {
-		// A missing root just means no history yet — the live tail will
-		// still work. Don't treat it as fatal.
-		if os.IsNotExist(err) {
-			return rt, nil
-		}
-		return nil, err
-	}
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
-		res, _ := parse.ParseFile(f, path)
-		for _, t := range res.Turns {
-			if t.Timestamp.Before(cutoff) {
-				continue
-			}
-			cost, _ := prices.Cost(t.Model,
-				t.Usage.InputTokens, t.Usage.OutputTokens,
-				t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-				t.Usage.CacheReadTokens)
-			rt.history = append(rt.history, turnSample{at: t.Timestamp, cost: cost})
-			if !t.Timestamp.Before(hitCutoff) {
-				rt.hitTokens += int64(t.Usage.CacheReadTokens)
-				rt.hitDenom += int64(t.Usage.CacheReadTokens) +
-					int64(t.Usage.InputTokens) +
-					int64(t.Usage.CacheCreate5mTokens) +
-					int64(t.Usage.CacheCreate1hTokens)
-			}
-		}
-		return nil
-	})
+
+	files, err := listJSONL(root, cutoff)
 	if err != nil {
 		return nil, err
+	}
+	if len(files) == 0 {
+		return rt, nil
+	}
+
+	turns, _, _, _, _ := parseConcurrently(files)
+	for _, t := range turns {
+		if t.Timestamp.Before(cutoff) {
+			continue
+		}
+		cost, _ := prices.Cost(t.Model,
+			t.Usage.InputTokens, t.Usage.OutputTokens,
+			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
+			t.Usage.CacheReadTokens)
+		rt.history = append(rt.history, turnSample{at: t.Timestamp, cost: cost})
+		if !t.Timestamp.Before(hitCutoff) {
+			rt.hitTokens += int64(t.Usage.CacheReadTokens)
+			rt.hitDenom += int64(t.Usage.CacheReadTokens) +
+				int64(t.Usage.InputTokens) +
+				int64(t.Usage.CacheCreate5mTokens) +
+				int64(t.Usage.CacheCreate1hTokens)
+		}
 	}
 	return rt, nil
 }
