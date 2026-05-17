@@ -1703,17 +1703,30 @@
           <p>This report shows where your Claude Code spend went in the selected window, and where it's likely worth attention. Each section in the left nav is one perspective on the same data:</p>
           <ul>
             <li><strong>Cost</strong> — dollars sliced by model, project, skill / slash command, and prompt</li>
+            <li><strong>Sessions</strong> — a drill-down into individual sessions, the prompts inside them, and the assistant turns each prompt produced</li>
             <li><strong>Cache efficiency</strong> — how much of your context paid full price vs the cheap cache-read price</li>
             <li><strong>Tools</strong> — which tools (Read, Bash, Edit…) drove the most spend</li>
             <li><strong>Subagents</strong> — main thread vs sidechain, and which subagent types cost most</li>
           </ul>
           <p><strong>How to use it:</strong></p>
           <ul>
-            <li>The <strong>hotspots</strong> below are the highest-leverage targets in this window. Open a card, click <strong>Copy prompt</strong>, paste into Claude (or any LLM) for tailored remediation advice.</li>
+            <li>The <strong>hotspots</strong> below are the highest-leverage targets in this window. Open a card, click <strong>Copy prompt</strong>, paste into Claude (or any LLM) for tailored remediation advice. Prompt-kind hotspots also carry a <em>view session →</em> button that jumps to the session drill-down with the originating prompt pre-expanded.</li>
+            <li>The <strong>trend chart</strong> at the bottom of this view flags anomalies inline: an enlarged coral dot with a small <code>▲ 3.4×</code> or <code>▼ −32pp</code> marker is a bucket whose cost spiked or whose cache hit ratio dropped well outside the trailing-7-bucket baseline. Hover the dot for the exact multiplier or pp-gap.</li>
             <li><strong>Hover any column header</strong> for a one-line definition of that metric.</li>
             <li>Each section opens with a callout like this one — short rules of thumb for what high values usually mean and what to try.</li>
             <li>The <strong>Filter</strong> and <strong>Min cost</strong> controls at the top apply across every section.</li>
+            <li><strong>Deep-link anchors</strong> on hotspot and session cards (the small <code>#</code> next to the cost) copy a shareable URL that opens the card and scrolls it into view.</li>
+            <li>Save as PDF (Cmd-P / Ctrl-P) to get a print-friendly single-document copy — every <code>&lt;details&gt;</code> body is force-expanded and the sidebar drops out.</li>
           </ul>
+          {{if .ServeMode}}
+          <p><strong>Running under <code>claudit serve</code>:</strong></p>
+          <ul>
+            <li>The <strong>calendar button</strong> in the sidebar (next to the claudit logo) opens a date-range picker. Apply navigates to a URL with <code>since</code>/<code>until</code> set; Clear strips the date filter and lifts server defaults. End is inclusive in the picker.</li>
+            <li>The scope note in the filter bar (e.g. <em>"Showing last 7 days · top 10 sessions · show all"</em>) appears whenever server defaults are narrowing the view. Click <strong>show all</strong> to load the full archive for this one request.</li>
+            <li><strong>The URL is the filter.</strong> Any query param the report CLI accepts works in the address bar: <code>?project=myrepo&amp;last=7d</code>, <code>?since=2026-05-01&amp;until=2026-05-15&amp;by=week</code>, <code>?hotspots=5&amp;sessions=20&amp;redact=true</code>. Bookmark a URL to bookmark a filter.</li>
+            <li><strong>Auto-reload</strong> is silent and runs every 30 s. It defers while you're reading (any <code>&lt;details&gt;</code> open, recent mouse/keyboard activity, or tab hidden) and resumes the moment the page is idle. If new data has been pending more than 5 minutes, a toast in the bottom-right offers a manual reload.</li>
+          </ul>
+          {{end}}
         </div>
       </details>
 
@@ -1736,7 +1749,7 @@
             <li><strong>By model</strong> — what fraction of spend went to each model. Opus dominating is expected for hard work; if it's also serving small or repetitive tasks, those are candidates to route to Sonnet or Haiku.</li>
             <li><strong>By project</strong> — which working directories cost the most. A surprise winner here is usually a side project quietly running up more spend than you realized.</li>
             <li><strong>By skill &amp; slash command</strong> — cost per invoked <code>/command</code> or skill. A high <em>cost-per-call</em> ratio flags candidates for tightening (smaller starting context, less tool output) or replacement.</li>
-            <li><strong>Top expensive prompts</strong> — recurring prompts that kicked off long, costly turn chains. Repeated expensive prompts often justify a custom skill or compact agent that does the same job with less context.</li>
+            <li><strong>Top expensive prompts</strong> — recurring prompts that kicked off long, costly turn chains. Repeated expensive prompts often justify a custom skill or compact agent that does the same job with less context. The <strong>Session</strong> column on each row jumps to the Sessions drill-down with the originating prompt pre-expanded (disabled when the prompt's session fell below the <code>--sessions=N</code> cap).</li>
           </ul>
         </div>
       </details>
@@ -1814,11 +1827,14 @@
       <details class="guide">
         <summary>Drilling into a session</summary>
         <div class="body">
-          <p>Each card below is one Claude Code session, ranked by total cost. Open a session to see the user prompts in order, and open a prompt to see the assistant turns it produced — with per-turn model, tokens, cost, and which tools fired.</p>
+          <p>Each card below is one Claude Code session, ranked by total cost. The card summary shows the session ID as a colored pill, the first user prompt as a one-line title, the working directory, prompt and turn counts, the total cost, and the start → end timestamps with the wall-clock span in parentheses. Open a session to see its user prompts in order, and open a prompt to see the assistant turns it produced.</p>
           <ul>
             <li><strong>Read top-down.</strong> The first session is your most expensive in this window — it's usually the most informative.</li>
             <li><strong>Look for prompt cost spikes.</strong> A single prompt that ran 30 turns and cost $5 is a prime target for tightening — fewer tool calls, narrower context, or a custom skill.</li>
-            <li><strong>Tool chips show what each turn touched</strong>, in first-occurrence order. A run of all-<code>Bash</code>-and-<code>Read</code> turns is often signal that the agent was exploring rather than converging.</li>
+            <li><strong>Each turn row</strong> packs: timestamp + the gap to the next turn within this prompt, the model, <code>in · out · cache</code> token counts (hover the italic cache total for read vs create breakdown), the dollar cost, and the tool chips that fired. Tool chips are color-coded by name — the same tool reads the same color across the whole report, so you can scan for "all the Bash pills" by hue. Bash, Read, and Grep also show an inline argument hint (e.g. <code>Bash · git status</code>) when one is available.</li>
+            <li><strong>Tool chips appear in first-occurrence order.</strong> A run of all-<code>Bash</code>-and-<code>Read</code> turns is often signal that the agent was exploring rather than converging.</li>
+            <li><strong>Sidechain turns</strong> carry a <em>sidechain</em> label — those are subagent runs nested inside the parent session.</li>
+            <li>The small <code>#</code> link in each session's summary copies a shareable URL that re-opens this exact card.</li>
           </ul>
           <p class="small" id="session-redact-notice"></p>
         </div>

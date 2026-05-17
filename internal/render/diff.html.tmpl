@@ -135,7 +135,7 @@
   /* App shell: fixed sidebar + scrolling main panel — mirrors report. */
   .app {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
     min-height: 100vh;
   }
   .nav {
@@ -947,11 +947,11 @@
   <details class="guide">
     <summary>How to read this diff</summary>
     <div class="body">
-      <p>This diff compares two date ranges of Claude Code spend — <strong>A</strong> (baseline) against <strong>B</strong> (current). Every number is <code>B − A</code>: positive means cost went <strong>up</strong> (coral), negative means it went <strong>down</strong> (teal).</p>
+      <p>This diff compares two date ranges of Claude Code spend — <strong>A</strong> (baseline) against <strong>B</strong> (current). Every number is <code>B − A</code>: positive means cost went <strong>up</strong> (coral), negative means it went <strong>down</strong> (teal). When invoked with no <code>--a</code>/<code>--b</code> arguments, A and B are the prior 7 days and the last 7 days respectively (or 30 with <code>--by=month</code>); the labels above are the raw date ranges, not "last week" — the window is a rolling slice, not a calendar week.</p>
       <ul>
-        <li>The <strong>scorecard</strong> is a diverging bar chart of per-dimension Δ. Bars extend right from the center axis when that dimension cost more in B, left when it cost less. Bar length is proportional to <code>|Δ| / max(|Δ|)</code>, so the longest bar is always the biggest mover — that's where to look first. Rows are sorted by that same |Δ| so the top of the list answers "where did the change come from?"</li>
+        <li>The <strong>scorecard</strong> is a diverging bar chart of per-dimension Δ. Bars extend right from the center axis when that dimension cost more in B, left when it cost less. Bar length is proportional to <code>|Δ| / max(|Δ|)</code>, so the longest bar is always the biggest mover — that's where to look first. Rows are sorted by that same |Δ| so the top of the list answers "where did the change come from?" Click any row to jump to that section's full movers table.</li>
         <li>The <strong>totals tiles</strong> below show the four headline numbers: total cost, sessions, turns, and overall cache hit ratio. The scorecard decomposes the cost change; the tiles show the headline outcome.</li>
-        <li>Each left-nav item opens its own view with the top movers in that dimension.</li>
+        <li>Each <strong>left-nav item</strong> opens its own view with the top movers in that dimension, and shows the section's Δ$ next to its name so you can navigate by impact without opening anything. <strong>New hotspots</strong> at the bottom of the nav (when present) lists hotspots that rank in B's top set but didn't appear in A's — fresh headline movers between the two windows.</li>
       </ul>
     </div>
   </details>
