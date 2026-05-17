@@ -2142,6 +2142,38 @@
   activate(parseHash());
   window.addEventListener('hashchange', () => activate(parseHash()));
 
+  // Clicking the `#` next to a hotspot or session card copies the full
+  // shareable URL to the clipboard. We do NOT preventDefault — the browser's
+  // default hash-link behavior is what fires hashchange and opens the card.
+  // Event-delegated because anchor links are rendered after this script runs.
+  document.addEventListener('click', async (e) => {
+    const a = e.target.closest('a.anchor-link');
+    if (!a) return;
+    const url = window.location.href.split('#')[0] + a.getAttribute('href');
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      }
+    } catch { ok = false; }
+    if (!ok) {
+      // file:// fallback — navigator.clipboard is often blocked there.
+      const tmp = document.createElement('textarea');
+      tmp.value = url;
+      tmp.setAttribute('readonly', '');
+      tmp.style.position = 'absolute';
+      tmp.style.left = '-9999px';
+      document.body.appendChild(tmp);
+      tmp.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      document.body.removeChild(tmp);
+    }
+    const old = a.textContent;
+    a.textContent = ok ? '✓' : '!';
+    setTimeout(() => { a.textContent = old; }, 1200);
+  });
+
   // ── cross-link to session drill-down ──────────────────────────────────
   // Hotspot cards (kind='prompt') and the by-prompt table both want to
   // route the user from "here's an expensive prompt" to "and here's the
