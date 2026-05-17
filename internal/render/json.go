@@ -23,6 +23,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		BySubagent       []aggregate.SubagentBucket          `json:"by_subagent"`
 		AgentInvocations []aggregate.AgentInvocation         `json:"agent_invocations"`
 		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
+		Anomalies        []aggregate.Anomaly                 `json:"anomalies"`
 		UnknownModels    []string                            `json:"unknown_models"`
 	}{
 		Totals:        a.Totals(),
@@ -36,6 +37,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		BySubagent:       a.BySubagent(),
 		AgentInvocations: a.AgentInvocations(""),
 		ByPrompt:         a.ByPrompt(),
+		Anomalies:        a.Anomalies(),
 		UnknownModels:    a.UnknownModels(),
 	}
 	enc := json.NewEncoder(w)

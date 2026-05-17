@@ -104,6 +104,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		CacheBySubagent  []aggregate.CacheRow                `json:"cache_by_subagent"`
 		CacheByInvocation []aggregate.CacheRow               `json:"cache_by_invocation"`
 		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
+		Anomalies        []aggregate.Anomaly                 `json:"anomalies"`
 		SessionTimelines []aggregate.SessionTimeline         `json:"session_timelines"`
 	}{
 		Totals:           a.Totals(),
@@ -131,6 +132,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		CacheBySubagent:   a.CacheBySubagent(),
 		CacheByInvocation: a.CacheByInvocation(),
 		ByPrompt:          a.ByPrompt(),
+		Anomalies:         a.Anomalies(),
 		SessionTimelines:  opts.SessionTimelines,
 	}
 

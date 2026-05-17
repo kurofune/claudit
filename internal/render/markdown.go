@@ -132,6 +132,7 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	if period.Valid() && len(trendTotals) > 0 {
 		renderTrendSection(w, period, trendTotals)
 	}
+	renderAnomaliesSection(w, period, a.Anomalies())
 
 	trendByModel := a.TrendByModel()
 	trendByProject := a.TrendByProject()
@@ -513,6 +514,31 @@ func renderTrendSection(w io.Writer, period aggregate.Period, points []aggregate
 	fmt.Fprintln(w)
 }
 
+// renderAnomaliesSection writes a one-bullet-per-flag callout for any
+// statistical outliers the aggregator detected. Skipped silently when
+// the list is empty — most reports won't have anything to flag.
+func renderAnomaliesSection(w io.Writer, period aggregate.Period, anomalies []aggregate.Anomaly) {
+	if len(anomalies) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "## Anomalies")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "_Buckets whose cost or cache hit-ratio diverged sharply from the trailing 7-bucket median. Useful as a \"what should I look at first\" hook._")
+	fmt.Fprintln(w)
+	for _, a := range anomalies {
+		when := formatBucket(period, a.Time)
+		switch a.Kind {
+		case aggregate.AnomalyCostSpike:
+			fmt.Fprintf(w, "- **%s** — cost spike: %s vs %s rolling median (**%.1f×**)\n",
+				when, money(a.Value), money(a.Baseline), a.Ratio)
+		case aggregate.AnomalyHitRatioDrop:
+			fmt.Fprintf(w, "- **%s** — cache hit-ratio drop: %s vs %s rolling median (**−%.1f pp**)\n",
+				when, ratioPct(a.Value), ratioPct(a.Baseline), 100*a.Ratio)
+		}
+	}
+	fmt.Fprintln(w)
+}
+
 // formatBucket prints a bucket time the way the reader expects for that
 // period: "2026-05-06" for day, "wk of 2026-05-04" for week, "2026-05"
 // for month.
@@ -545,7 +571,12 @@ func deltaPct(prev, cur float64) string {
 
 func money(v float64) string {
 	if v >= 1000 {
-		return fmt.Sprintf("$%.0f", v)
+		return "$" + num(int64(v+0.5))
+	}
+	if v <= -1000 {
+		// Format the absolute, then prepend the sign — num() doesn't
+		// take negatives.
+		return "-$" + num(int64(-v+0.5))
 	}
 	return fmt.Sprintf("$%.2f", v)
 }
