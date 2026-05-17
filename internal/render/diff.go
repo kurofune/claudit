@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
@@ -28,7 +29,92 @@ var diffTpl = template.Must(template.New("diff").Funcs(template.FuncMap{
 	"truncate":       truncate,
 	"barPct":         barPct,
 	"deltaSign":      deltaSign,
+	"signedMoney":    signedMoney,
+	"deltaSign1":     func(d float64) string { return deltaSign(0, d) },
+	"sub":            func(a, b float64) float64 { return a - b },
+	"commaInt":       func(v int) string { return num(int64(v)) },
+	"lower":          strings.ToLower,
+	"divBarPct":      divBarPct,
+	"dotPct":         dotPct,
+	"lineLeftPct":    lineLeftPct,
+	"lineWidthPct":   lineWidthPct,
 }).Parse(diffHTMLTemplate))
+
+// dotPct returns the x-axis position (0..100) of a value on a dumbbell
+// row whose right edge is max. Used to place each ●. Clamped so a value
+// that somehow exceeds max stays on the track.
+func dotPct(v, max float64) string {
+	if max <= 0 {
+		return "0"
+	}
+	p := 100 * v / max
+	if p < 0 {
+		p = 0
+	}
+	if p > 100 {
+		p = 100
+	}
+	return fmt.Sprintf("%.2f", p)
+}
+
+// lineLeftPct returns the x position of the dumbbell's connecting line —
+// the smaller of a or b, expressed as percent of max.
+func lineLeftPct(a, b, max float64) string {
+	lo := a
+	if b < lo {
+		lo = b
+	}
+	return dotPct(lo, max)
+}
+
+// lineWidthPct returns the dumbbell line's width — |a-b| as percent of
+// max. Returns "0" when the two values match (renders as no line, dots
+// collide at the same position).
+func lineWidthPct(a, b, max float64) string {
+	w := a - b
+	if w < 0 {
+		w = -w
+	}
+	return dotPct(w, max)
+}
+
+// divBarPct sizes one half of the diverging bar: |delta| / max * 50,
+// so the biggest mover fills its half (50% of the chart width) and
+// every other row shows in proportion. Returns "0" when max is zero or
+// when delta is exactly zero (no bar to draw).
+func divBarPct(delta, max float64) string {
+	if max <= 0 || delta == 0 {
+		return "0"
+	}
+	a := delta
+	if a < 0 {
+		a = -a
+	}
+	p := 50 * a / max
+	// Nonzero bars get a 0.5% floor so a tiny mover still renders a
+	// visible sliver — important when one dimension dwarfs the others.
+	if p > 0 && p < 0.5 {
+		p = 0.5
+	}
+	if p > 50 {
+		p = 50
+	}
+	return fmt.Sprintf("%.2f", p)
+}
+
+// signedMoney formats a delta dollar amount with a leading sign for use
+// in nav chips: "+$23.45", "-$0.50", "$0". Distinct from deltaMoney,
+// which takes the (a, b) pair — here the caller has already done the
+// subtraction (e.g. for the per-section TotalDelta).
+func signedMoney(d float64) string {
+	if d == 0 {
+		return "$0"
+	}
+	if d > 0 {
+		return "+" + money(d)
+	}
+	return "-" + money(-d)
+}
 
 // barPct returns the width percent (0..100) of a value relative to a
 // section's max. Returns 0 when max is zero. Bars below 1% bump to 1
@@ -62,12 +148,24 @@ func deltaSign(a, b float64) string {
 
 // diffHTMLSection bundles one movers table with its display title and the
 // per-section bar max. Computing max once on the server side beats asking
-// the browser to do it for every row.
+// the browser to do it for every row. ID is the URL-fragment anchor the
+// sidebar nav points at (e.g. "models") and the rendered <section> carries.
+// Icon is the SVG sprite ID suffix (e.g. "cost" → <use href="#icon-cost"/>).
+//
+// TotalA / TotalB / TotalDelta are aggregated over Rows and drive the
+// Overview scorecard: two stacked bars (A in cyan, B in purple) plus a
+// signed delta on the right, mirroring the per-row visualization inside
+// the section itself.
 type diffHTMLSection struct {
-	Title   string
-	Rows    []DiffMover
-	Max     float64
-	Empty   bool
+	ID         string
+	Title      string
+	Icon       string
+	Rows       []DiffMover
+	Max        float64
+	Empty      bool
+	TotalA     float64
+	TotalB     float64
+	TotalDelta float64 // Σ(CostB − CostA) over Rows; rendered as the nav metric
 }
 
 // diffHTMLData is the full payload passed to diff.html.tmpl.
@@ -77,9 +175,18 @@ type diffHTMLData struct {
 	TotalsB         aggregate.Totals
 	HitRatioA       float64
 	HitRatioB       float64
-	Sections        []diffHTMLSection
+	Sections        []diffHTMLSection // fixed order, drives the sidebar nav
 	NewHotspots     []aggregate.Hotspot
 	NewHotspotsShow bool // true when the section is enabled (Hotspots > 0)
+
+	// SectionsByImpact is Sections re-sorted by |TotalDelta| descending.
+	// Drives the Overview diverging-bar scorecard so the biggest mover
+	// is on top. Sidebar nav uses the original Sections order.
+	SectionsByImpact []diffHTMLSection
+	// MaxAbsSectionDelta is max(|TotalDelta|) across Sections. The
+	// diverging bar scales each row's half-width by |Δ| / max, so the
+	// largest mover fills its half of the chart.
+	MaxAbsSectionDelta float64
 }
 
 // DiffHTML writes a self-contained HTML diff to w. Server-side rendered;
@@ -88,9 +195,9 @@ type diffHTMLData struct {
 func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 	opt.defaults()
 
-	mkSection := func(title string, rows []DiffMover) diffHTMLSection {
+	mkSection := func(id, title, icon string, rows []DiffMover) diffHTMLSection {
 		rows = rankMovers(rows, opt.TopMovers)
-		max := 0.0
+		max, totalA, totalB := 0.0, 0.0, 0.0
 		for _, r := range rows {
 			if r.CostA > max {
 				max = r.CostA
@@ -98,12 +205,19 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 			if r.CostB > max {
 				max = r.CostB
 			}
+			totalA += r.CostA
+			totalB += r.CostB
 		}
 		return diffHTMLSection{
-			Title: title,
-			Rows:  rows,
-			Max:   max,
-			Empty: len(rows) == 0,
+			ID:         id,
+			Title:      title,
+			Icon:       icon,
+			Rows:       rows,
+			Max:        max,
+			Empty:      len(rows) == 0,
+			TotalA:     totalA,
+			TotalB:     totalB,
+			TotalDelta: totalB - totalA,
 		}
 	}
 
@@ -115,13 +229,26 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		HitRatioA: a.Totals().Tokens.HitRatio(),
 		HitRatioB: b.Totals().Tokens.HitRatio(),
 		Sections: []diffHTMLSection{
-			mkSection("By model", ModelMovers(a, b)),
-			mkSection("By project", ProjectMovers(a, b)),
-			mkSection("By tool", ToolMovers(a, b)),
-			mkSection("By skill / slash command", SkillMovers(a, b)),
-			mkSection("By subagent type", SubagentMovers(a, b)),
+			mkSection("models", "By model", "brain", ModelMovers(a, b)),
+			mkSection("projects", "By project", "folder", ProjectMovers(a, b)),
+			mkSection("tools", "By tool", "tools", ToolMovers(a, b)),
+			mkSection("skills", "By skill / slash command", "command", SkillMovers(a, b)),
+			mkSection("subagents", "By subagent type", "subagents", SubagentMovers(a, b)),
 		},
 	}
+	for _, s := range data.Sections {
+		if d := math.Abs(s.TotalDelta); d > data.MaxAbsSectionDelta {
+			data.MaxAbsSectionDelta = d
+		}
+	}
+	// Re-sort a copy by |Δ| desc — bigger impact first on the
+	// scorecard, while the sidebar keeps its stable order.
+	data.SectionsByImpact = make([]diffHTMLSection, len(data.Sections))
+	copy(data.SectionsByImpact, data.Sections)
+	sort.SliceStable(data.SectionsByImpact, func(i, j int) bool {
+		return math.Abs(data.SectionsByImpact[i].TotalDelta) >
+			math.Abs(data.SectionsByImpact[j].TotalDelta)
+	})
 	if opt.Hotspots > 0 {
 		data.NewHotspots = newHotspots(a, b, opt.Hotspots)
 		data.NewHotspotsShow = true
@@ -391,25 +518,30 @@ func newHotspots(a, b *aggregate.Aggregator, top int) []aggregate.Hotspot {
 func hotspotKey(h aggregate.Hotspot) string { return string(h.Kind) + "::" + h.Title }
 
 // deltaMoney formats a signed dollar delta. Always shows a sign so the
-// reader can scan a column of deltas without parsing each one.
+// reader can scan a column of deltas without parsing each one. money()
+// adds thousands separators for amounts ≥ $1,000.
 func deltaMoney(prev, cur float64) string {
 	d := cur - prev
 	if d == 0 {
 		return "$0.00"
 	}
 	if d > 0 {
-		return fmt.Sprintf("+$%.2f", d)
+		return "+" + money(d)
 	}
-	return fmt.Sprintf("-$%.2f", -d)
+	return "-" + money(-d)
 }
 
-// deltaInt formats a signed integer delta.
+// deltaInt formats a signed integer delta with US-style thousands
+// separators.
 func deltaInt(prev, cur int) string {
 	d := cur - prev
 	if d > 0 {
-		return fmt.Sprintf("+%d", d)
+		return "+" + num(int64(d))
 	}
-	return fmt.Sprintf("%d", d)
+	if d < 0 {
+		return "-" + num(int64(-d))
+	}
+	return "0"
 }
 
 // deltaRatio formats a hit-ratio delta as percentage points (pp). Returns

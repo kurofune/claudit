@@ -184,9 +184,12 @@ func TestDiffHTML_RendersCoreSections(t *testing.T) {
 		"prior week (2026-04-25..2026-05-02)",
 		"this week (2026-05-02..2026-05-09)",
 		"Total cost",
-		"Top movers — By model",
-		"Top movers — By project",
-		"Top movers — By tool",
+		// Section headings live in <h1> inside <header class="view-head">.
+		// Match the user-visible text; the icon SVG sits before it but
+		// doesn't break the strings.Contains check.
+		">By model<",
+		">By project<",
+		">By tool<",
 		"/p/new",
 		// Hotspot section header renders when Hotspots > 0, regardless
 		// of whether any rows ended up new — covers both code paths.

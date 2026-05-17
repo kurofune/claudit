@@ -36,6 +36,7 @@
     --accent-soft:  color-mix(in oklch, var(--accent) 14%, var(--surface));
     --hot-soft:     oklch(60% 0.20 15 / 0.22);
     --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+    --warn-soft:    color-mix(in oklch, var(--warn) 14%, var(--surface));
 
     --c-1: oklch(60% 0.16 280);
     --c-2: oklch(62% 0.13 200);
@@ -62,6 +63,16 @@
     --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
     --shadow-md: 0 1px 2px color-mix(in oklch, black 4%, transparent),
                  0 4px 12px color-mix(in oklch, black 6%, transparent);
+    --shadow-lift: 0 2px 4px color-mix(in oklch, black 6%, transparent),
+                   0 8px 24px color-mix(in oklch, black 8%, transparent);
+
+    /* Motion tokens — shared with report. Spring eases give the cascade
+       a gently-overshooting "settling" feel rather than a flat ramp. */
+    --motion-fast:   200ms;
+    --motion-med:    320ms;
+    --motion-slow:   420ms;
+    --motion-ease:   cubic-bezier(0.34, 1.2, 0.64, 1);
+    --motion-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -82,6 +93,7 @@
       --hot-soft:     oklch(70% 0.20 15 / 0.42);
       --accent-soft:  color-mix(in oklch, var(--accent) 18%, var(--surface));
       --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+      --warn-soft:    color-mix(in oklch, var(--warn) 18%, var(--surface));
       --c-1: oklch(72% 0.16 280);
       --c-2: oklch(74% 0.13 200);
       --c-3: oklch(76% 0.16 150);
@@ -90,6 +102,8 @@
       --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
       --shadow-md: 0 1px 2px color-mix(in oklch, black 25%, transparent),
                    0 4px 12px color-mix(in oklch, black 35%, transparent);
+      --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
+                     0 8px 24px color-mix(in oklch, black 40%, transparent);
     }
   }
 
@@ -102,19 +116,107 @@
     font-family: var(--font-sans);
     font-size: var(--t-3);
     line-height: 1.5;
-    padding: var(--s-7) clamp(var(--s-4), 5vw, 200px) var(--s-7);
     -webkit-font-smoothing: antialiased;
   }
-  .panel { max-width: none; }
 
-  /* ─── Header ─────────────────────────────────────────────────────── */
-  header { margin-bottom: var(--s-6); }
+  /* ─── Icons (Lucide-style, 2px stroke, currentColor) ─────────────── */
+  .icon {
+    display: inline-block;
+    width: 1em; height: 1em;
+    vertical-align: -0.15em;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* App shell: fixed sidebar + scrolling main panel — mirrors report. */
+  .app {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+  .nav {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: var(--s-5) var(--s-3) var(--s-4);
+    display: flex; flex-direction: column; gap: var(--s-5);
+  }
+  .brand { display: flex; flex-direction: column; gap: 2px;
+           padding: 0 var(--s-2); }
+  .brand-name { font-size: var(--t-5); font-weight: 700; letter-spacing: -0.01em;
+                color: var(--ink); }
+  .brand-name::after {
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    background: var(--accent); margin-left: 6px; vertical-align: 0.18em;
+    border-radius: 1px;
+  }
+  .brand-sub { font-size: var(--t-2); color: var(--muted);
+               font-variant-numeric: tabular-nums;
+               font-family: var(--font-mono); }
+  .nav-list { display: flex; flex-direction: column; gap: 2px;
+              list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    position: relative;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: var(--s-2) var(--s-3);
+    border-radius: 4px;
+    color: var(--ink-2); text-decoration: none;
+    transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item::before {
+    content: ""; position: absolute; left: -2px; top: 50%;
+    width: 2px; height: 60%; transform: translateY(-50%) scaleY(0);
+    transform-origin: center; background: var(--accent);
+    border-radius: 0 2px 2px 0;
+    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active::before { transform: translateY(-50%) scaleY(1); }
+  .nav-item:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .nav-label {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: var(--t-3); font-weight: 600; letter-spacing: -0.005em;
+  }
+  .nav-label .icon {
+    width: 15px; height: 15px;
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--motion-ease);
+  }
+  .nav-item:hover .nav-label .icon { color: var(--ink-2); }
+  .nav-item.is-active .nav-label .icon { color: var(--accent); }
+  .nav-metric { font-size: var(--t-2); color: var(--muted);
+                font-variant-numeric: tabular-nums;
+                font-family: var(--font-mono);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-item.is-active .nav-metric { color: var(--ink-2); }
+  /* Delta-colored nav metrics. The render layer assigns up/down/zero
+     classes per section so the chip echoes the section's own delta-line. */
+  .nav-metric.up   { color: var(--hot); }
+  .nav-metric.down { color: var(--accent-2); }
+  .nav-metric.zero { color: var(--muted); }
+
+  /* Main panel scrolls; cap horizontal padding the same way the report does. */
+  .panel {
+    padding: var(--s-5) clamp(var(--s-4), 5vw, 200px) var(--s-7);
+  }
+
+  /* ─── Header (sits inside .panel, above the first section) ───────── */
+  .panel-head { margin-bottom: var(--s-5); }
   h1 {
     font-family: var(--font-display);
+    font-optical-sizing: auto;
     font-size: var(--t-6);
     font-weight: 600;
     margin: 0 0 var(--s-2);
-    letter-spacing: -0.015em;
+    letter-spacing: -0.02em;
   }
   .subtitle {
     color: var(--muted);
@@ -131,16 +233,291 @@
     font-size: var(--t-2);
     margin: 0 2px;
   }
-  .subtitle .label-a { border-color: color-mix(in oklch, var(--muted) 40%, var(--border)); }
+  .subtitle .label-a { border-color: color-mix(in oklch, var(--c-2) 45%, var(--border)); }
   .subtitle .label-b { border-color: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+
+  /* View headers: large accent-colored icon paired with the h1 (mirrors
+     report). Each view's first heading uses this; mover h2s inside the
+     view stay plain. */
+  .view-head { display: flex; align-items: baseline; gap: var(--s-3);
+               margin-bottom: var(--s-3); }
+  .view-head h1 {
+    display: flex; align-items: center; gap: 12px;
+    margin: 0;
+  }
+  .view-head h1 .icon {
+    width: 28px; height: 28px;
+    color: var(--accent);
+    stroke-width: 1.75;
+    padding: 4px;
+    background: var(--accent-soft);
+    border-radius: var(--r-md);
+    box-sizing: content-box;
+  }
+  .view-head .meta { color: var(--muted); font-size: var(--t-2);
+                     font-variant-numeric: tabular-nums; }
 
   h2 {
     font-family: var(--font-display);
     font-size: var(--t-5);
     font-weight: 600;
-    margin: var(--s-6) 0 var(--s-3);
+    margin: var(--s-4) 0 var(--s-3);
     letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 10px;
   }
+  h2 .icon {
+    width: 18px; height: 18px;
+    color: var(--accent);
+    stroke-width: 2;
+  }
+
+  /* View switching — only the active section renders. Cross-fade in via
+     opacity on activation; reduced-motion users get an instant swap.
+     Mirrors the report's .view pattern. */
+  .view { display: none; opacity: 0;
+          transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .view.is-active { display: block; opacity: 1; }
+
+  /* ─── Reading guide — collapsible "how to interpret this view"
+     callout. Sits under each view-head; default open so first-time
+     readers get oriented, click on summary collapses it. Same markup
+     and tokens as the report's .guide. */
+  .guide {
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--surface));
+    border-radius: var(--r-lg);
+    margin: 0 0 var(--s-4);
+    padding: 0;
+  }
+  .guide > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-2) var(--s-3);
+    font-weight: 600;
+    color: var(--ink);
+    font-size: var(--t-3);
+    display: flex; align-items: center; gap: var(--s-2);
+  }
+  .guide > summary::-webkit-details-marker { display: none; }
+  .guide > summary::before {
+    content: "▸"; color: var(--accent);
+    transition: transform 0.15s ease;
+    display: inline-block; width: 0.8em;
+  }
+  .guide[open] > summary::before { transform: rotate(90deg); }
+  .guide .body {
+    padding: 0 var(--s-3) var(--s-3) var(--s-4);
+    font-size: var(--t-3); color: var(--ink-2); line-height: 1.55;
+    max-width: 75ch;
+  }
+  .guide .body p { margin: var(--s-2) 0; }
+  .guide .body p:first-child { margin-top: 0; }
+  .guide .body ul { margin: var(--s-2) 0; padding-left: var(--s-4); }
+  .guide .body li { margin: var(--s-1) 0; }
+  .guide .body strong { color: var(--ink); }
+  .guide .body code {
+    background: var(--surface-2);
+    padding: 1px 4px; border-radius: 3px;
+    font-size: 0.92em;
+  }
+
+  /* ─── Custom tooltip popover (mirrors report's #claudit-tooltip) ──
+     Soft, light, lifted, matching the rounded card language. Kept on a
+     real surface (not an inverted dark panel) so it feels of-a-piece
+     with the rest of the diff rather than like a heavy floating chip.
+     The accent-tinted border + lift shadow give elevation without
+     harshness. */
+  #claudit-tooltip {
+    --tip-bg:     var(--surface);
+    --tip-border: color-mix(in oklch, var(--accent) 30%, var(--border));
+    --tip-fg:     var(--ink);
+    --tip-shadow: var(--shadow-lift),
+                  inset 0 1px 0 color-mix(in oklch, white 60%, transparent);
+    position: fixed; z-index: 1000;
+    max-width: 320px;
+    padding: var(--s-2) var(--s-3);
+    background: var(--tip-bg);
+    color: var(--tip-fg);
+    border: 1px solid var(--tip-border);
+    font-size: var(--t-2); line-height: 1.45;
+    letter-spacing: 0.005em;
+    border-radius: var(--r-md);
+    box-shadow: var(--tip-shadow);
+    pointer-events: none;
+    opacity: 0; transform: translateY(2px) scale(0.98);
+    transform-origin: var(--arrow-x, 50%) bottom;
+    transition: opacity var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+    will-change: opacity, transform;
+  }
+  #claudit-tooltip.is-visible {
+    opacity: 1; transform: translateY(0) scale(1);
+  }
+  #claudit-tooltip[data-side="bottom"] {
+    transform-origin: var(--arrow-x, 50%) top;
+    transform: translateY(-2px) scale(0.98);
+  }
+  #claudit-tooltip[data-side="bottom"].is-visible {
+    transform: translateY(0) scale(1);
+  }
+  /* Arrow inherits panel bg + border so it reads as a continuous
+     extension of the popover, not a separate triangle. */
+  #claudit-tooltip::after {
+    content: ""; position: absolute;
+    width: 9px; height: 9px;
+    background: var(--tip-bg);
+    border-right: 1px solid var(--tip-border);
+    border-bottom: 1px solid var(--tip-border);
+    transform: rotate(45deg);
+    left: var(--arrow-x, 50%);
+    margin-left: -4.5px;
+  }
+  #claudit-tooltip[data-side="top"]::after    { bottom: -5px; }
+  #claudit-tooltip[data-side="bottom"]::after {
+    top: -5px;
+    border-right: 0; border-bottom: 0;
+    border-top: 1px solid var(--tip-border);
+    border-left: 1px solid var(--tip-border);
+  }
+  #claudit-tooltip code {
+    background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 0.92em;
+    border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+  }
+  #claudit-tooltip strong { color: var(--accent); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    #claudit-tooltip { transition: opacity var(--motion-fast) linear; }
+  }
+
+  /* ─── Mover sections ─────────────────────────────────────────────── */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-4) var(--s-5);
+    margin-bottom: var(--s-4);
+    box-shadow: var(--shadow-sm);
+  }
+  .section h2 { margin-top: 0; }
+  .section .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: var(--s-3) 0;
+  }
+
+  /* ─── Overview scorecard — diverging bar chart of per-dimension
+     deltas. Each row's bar centers on a vertical zero axis and extends
+     RIGHT (coral) when cost went up, LEFT (teal) when cost went down,
+     width proportional to |Δ| / max(|Δ|). Rows ranked by |Δ| desc so
+     the biggest mover sits at the top — the canonical "where should I
+     look first" idiom for period-over-period dashboards. */
+  .scorecard {
+    display: flex; flex-direction: column;
+    gap: var(--s-1);
+    margin-bottom: var(--s-5);
+  }
+  /* Tiny annotation strip above the chart so the divergence reads
+     correctly on first encounter. */
+  .scorecard-axis {
+    display: grid;
+    grid-template-columns: 18ch minmax(0, 1fr) 11ch;
+    gap: var(--s-3);
+    padding-bottom: var(--s-1);
+    font-size: var(--t-1);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .scorecard-axis .legend {
+    display: flex; justify-content: space-between;
+    align-items: center;
+  }
+  .scorecard-axis .legend .down { color: var(--accent-2); font-weight: 600; }
+  .scorecard-axis .legend .zero { color: var(--muted); }
+  .scorecard-axis .legend .up   { color: var(--hot); font-weight: 600; }
+
+  .score-row {
+    display: grid;
+    grid-template-columns: 18ch minmax(0, 1fr) 11ch;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-2) 0;
+    border-bottom: 1px solid var(--border);
+    transition: background-color var(--motion-fast) var(--motion-ease);
+  }
+  .score-row:last-child { border-bottom: none; }
+  .score-row:hover { background-color: var(--surface-2); }
+  .score-row a {
+    color: inherit; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .score-row a:hover .score-label { color: var(--ink); }
+  .score-row a .icon { width: 13px; height: 13px; color: var(--muted); }
+  .score-row a:hover .icon { color: var(--accent); }
+  .score-label {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--ink-2);
+  }
+
+  /* The diverging bar itself — a track with a centered axis. Two
+     possible fills extend from the axis outward: .up extends right
+     (positive delta = cost up), .down extends left. We only render one
+     per row; the empty side stays as the track background. */
+  .div-bar {
+    position: relative;
+    height: 16px;
+    /* Translucent track so the A/B watermark shows through. The border
+       still anchors the bar visually even when the fill is very faint. */
+    background: color-mix(in oklch, var(--surface-2) 45%, transparent);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+  }
+  .div-bar::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: -1px; bottom: -1px;
+    width: 1px;
+    background: var(--border-strong);
+    z-index: 1;
+  }
+  .div-bar .fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    transition: width var(--motion-med) var(--motion-spring);
+  }
+  .div-bar.up .fill {
+    left: 50%;
+    /* --hot-soft is already alpha-blended; keep as-is */
+    background: var(--hot-soft);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  }
+  .div-bar.down .fill {
+    right: 50%;
+    /* Soften c-3 to match the up side's translucency so neither side
+       fully blocks the watermark behind it. */
+    background: color-mix(in oklch, var(--c-3) 55%, transparent);
+    border-radius: var(--r-sm) 0 0 var(--r-sm);
+  }
+  .div-bar.zero .fill { display: none; }
+
+  .score-delta {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--t-3);
+    font-weight: 600;
+  }
+  .score-delta.up   { color: var(--hot); }
+  .score-delta.down { color: var(--accent-2); }
+  .score-delta.zero { color: var(--muted); }
+  /* Hotspots row has no Δ to chart — render a quiet placeholder so the
+     row keeps its grid alignment, and let the count chip carry meaning. */
+  .div-bar.placeholder {
+    background: transparent; border: none;
+  }
+  .div-bar.placeholder::before { display: none; }
 
   /* ─── Totals tiles ───────────────────────────────────────────────── */
   .totals {
@@ -164,18 +541,24 @@
     font-size: var(--t-1);
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.08em;
+    font-weight: 500;
   }
   .totals .ab-row {
     display: flex;
     align-items: baseline;
     gap: var(--s-2);
-    font-family: var(--font-display);
-    font-variant-numeric: tabular-nums;
   }
+  /* Display-font treatment for the headline value — Inter Display via
+     opsz axis with tight tracking + tabular figures + stylistic
+     alternates (ss01 enables the rounded tail on common digits). */
   .totals .ab-row .value-a {
     color: var(--muted);
     font-size: var(--t-4);
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum";
+    font-variant-numeric: tabular-nums lining-nums;
   }
   .totals .ab-row .arrow {
     color: var(--ink-2);
@@ -186,6 +569,11 @@
     font-size: var(--t-6);
     font-weight: 600;
     letter-spacing: -0.02em;
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum", "ss01", "cv01";
+    font-variant-numeric: tabular-nums lining-nums;
+    line-height: 1;
   }
   .totals .delta {
     font-size: var(--t-2);
@@ -205,89 +593,117 @@
   .totals .metric.neutral .delta-up,
   .totals .metric.neutral .delta-down { color: var(--ink-2); }
 
-  /* ─── Mover sections ─────────────────────────────────────────────── */
-  .section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    padding: var(--s-4) var(--s-5);
-    margin-bottom: var(--s-4);
-    box-shadow: var(--shadow-sm);
-  }
-  .section h2 { margin-top: 0; }
-  .section .empty {
-    color: var(--muted);
-    font-style: italic;
-    padding: var(--s-3) 0;
-  }
-
+  /* ─── Mover rows — dumbbell plot ─────────────────────────────────
+     Each row: [key] [dumbbell ●━━━●] [A → B values] [signed Δ + %].
+     The dumbbell uses the section's Max as its right-edge axis so dot
+     positions are absolute within the section. The line between the
+     dots IS the delta (length = magnitude, color = direction). One row
+     = one line, vs the old 4-line stacked-bar layout, so 2–3× more
+     movers fit on screen. */
   .mover {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--s-1);
-    padding: var(--s-3) 0;
+    grid-template-columns: minmax(14ch, 28ch) minmax(0, 1fr) 14ch 14ch;
+    align-items: center;
+    column-gap: var(--s-4);
+    padding: var(--s-2) 0;
     border-bottom: 1px solid var(--border);
+    transition: background-color var(--motion-fast) var(--motion-ease);
   }
   .mover:last-child { border-bottom: none; }
+  .mover:hover { background-color: var(--surface-2); }
   .mover .key {
     font-family: var(--font-mono);
     font-size: var(--t-2);
     color: var(--ink);
     word-break: break-word;
+    line-height: 1.3;
   }
 
-  /* Each bar row: [A|B] tag · bar · value */
-  .mover .bar-row {
-    display: grid;
-    grid-template-columns: 18px 1fr 9ch;
-    align-items: center;
-    gap: var(--s-2);
-    font-variant-numeric: tabular-nums;
-  }
-  .mover .bar-row .tag {
-    font-size: var(--t-1);
-    color: var(--muted);
-    font-family: var(--font-mono);
-    text-align: right;
-  }
-  .mover .bar-row .val {
-    font-size: var(--t-3);
-    color: var(--ink);
-    text-align: right;
-  }
-  .mover .bar-row.a-row .val { color: var(--ink-2); }
-
-  .bar {
+  .dumbbell {
     position: relative;
-    height: 14px;
+    height: 22px;
     background: var(--surface-2);
     border-radius: var(--r-sm);
-    overflow: hidden;
     border: 1px solid var(--border);
   }
-  .bar .fill {
+  .dumbbell .line {
     position: absolute;
-    left: 0; top: 0; bottom: 0;
-    border-radius: var(--r-sm);
+    top: 50%;
+    height: 3px;
+    transform: translateY(-50%);
+    border-radius: 1.5px;
+    transition: width var(--motion-med) var(--motion-spring),
+                left  var(--motion-med) var(--motion-spring);
   }
-  .bar.a .fill { background: color-mix(in oklch, var(--muted) 50%, var(--surface-3)); }
-  .bar.b .fill { background: var(--accent); }
-  .bar.zero { opacity: 0.5; }
+  .dumbbell.up   .line { background: var(--hot); }
+  .dumbbell.down .line { background: var(--accent-2); }
+  .dumbbell.zero .line { background: var(--border-strong); }
+  .dumbbell .dot {
+    position: absolute;
+    top: 50%;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    border: 2px solid var(--surface);
+    box-shadow: 0 1px 2px color-mix(in oklch, black 12%, transparent);
+    transition: left var(--motion-med) var(--motion-spring);
+  }
+  .dumbbell .dot.a { background: var(--c-2); }   /* cyan — A (baseline) */
+  .dumbbell .dot.b { background: var(--accent); } /* purple — B (current) */
+  /* The dot sitting on the same end as the direction arrow (B for up,
+     A for down) takes a thin outer ring so the eye reads "this is the
+     'after' position." Subtle — only visible on close inspection. */
+  .dumbbell.up   .dot.b,
+  .dumbbell.down .dot.a {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ink) 12%, transparent),
+                0 1px 2px color-mix(in oklch, black 12%, transparent);
+  }
+
+  .mover .db-values {
+    display: flex; align-items: baseline;
+    justify-content: flex-end;
+    gap: 4px;
+    font-variant-numeric: tabular-nums lining-nums;
+    font-size: var(--t-2);
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .mover .db-values .val-a { color: var(--muted); }
+  .mover .db-values .arrow { color: var(--ink-2); }
+  .mover .db-values .val-b { color: var(--ink); font-weight: 600; }
 
   .mover .delta-line {
     display: flex;
     justify-content: flex-end;
-    gap: var(--s-3);
-    margin-top: 2px;
+    align-items: baseline;
+    gap: var(--s-2);
     font-size: var(--t-2);
     font-variant-numeric: tabular-nums;
     color: var(--muted);
+    white-space: nowrap;
   }
   .mover .delta-line .delta-money { font-weight: 600; }
   .mover .delta-line .delta-pct   { color: var(--ink-2); }
   .mover .delta-line.up   .delta-money { color: var(--hot); }
   .mover .delta-line.down .delta-money { color: var(--accent-2); }
   .mover .delta-line.zero .delta-money { color: var(--muted); }
+
+  /* Narrow viewport: drop the dumbbell to a second line so the key and
+     numbers keep room to breathe. */
+  @media (max-width: 900px) {
+    .mover {
+      grid-template-columns: 1fr 14ch;
+      grid-template-areas:
+        "key   delta"
+        "db    db"
+        "vals  vals";
+      row-gap: var(--s-1);
+    }
+    .mover .key       { grid-area: key; }
+    .mover .dumbbell  { grid-area: db; }
+    .mover .db-values { grid-area: vals; justify-content: flex-start; }
+    .mover .delta-line { grid-area: delta; }
+  }
 
   /* ─── New hotspots ───────────────────────────────────────────────── */
   .hotspots {
@@ -304,12 +720,21 @@
     display: flex;
     flex-direction: column;
     gap: var(--s-1);
+    transition: box-shadow var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease),
+                border-color var(--motion-fast) var(--motion-ease);
+  }
+  .hotspot:hover {
+    box-shadow: var(--shadow-lift);
+    transform: translateY(-1px);
+    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
   }
   .hotspot .kind {
     font-size: var(--t-1);
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.08em;
+    font-weight: 500;
   }
   .hotspot .title {
     font-family: var(--font-mono);
@@ -319,7 +744,9 @@
   }
   .hotspot .meta {
     font-family: var(--font-display);
-    font-variant-numeric: tabular-nums;
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum";
+    font-variant-numeric: tabular-nums lining-nums;
     font-size: var(--t-4);
     font-weight: 600;
     color: var(--ink);
@@ -331,35 +758,177 @@
     margin-left: var(--s-2);
   }
 
-  /* ─── Footer note ────────────────────────────────────────────────── */
-  footer {
-    margin-top: var(--s-7);
-    color: var(--muted);
-    font-size: var(--t-2);
-    border-top: 1px solid var(--border);
-    padding-top: var(--s-4);
+  /* ─── Entry-cascade animation. Each element fades + translates up;
+     cumulative delay creates a "cascade" that signals the page is
+     hand-assembled rather than dumped. `backwards` fill keeps the
+     element at the start state until its delay elapses. Mirrors the
+     report's cl-fade-up keyframe. */
+  @keyframes cl-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
-  footer code {
-    font-family: var(--font-mono);
-    background: var(--surface-2);
-    padding: 1px 6px;
-    border-radius: var(--r-sm);
-    border: 1px solid var(--border);
+  .view.is-active .totals .metric,
+  .view.is-active .score-row,
+  .view.is-active .mover,
+  .view.is-active .hotspot {
+    animation: cl-fade-up var(--motion-med) var(--motion-ease) backwards;
+  }
+  .view.is-active .score-row:nth-of-type(1) { animation-delay:  40ms; }
+  .view.is-active .score-row:nth-of-type(2) { animation-delay:  90ms; }
+  .view.is-active .score-row:nth-of-type(3) { animation-delay: 140ms; }
+  .view.is-active .score-row:nth-of-type(4) { animation-delay: 190ms; }
+  .view.is-active .score-row:nth-of-type(5) { animation-delay: 240ms; }
+  .view.is-active .score-row:nth-of-type(6) { animation-delay: 290ms; }
+  .view.is-active .totals .metric:nth-of-type(1) { animation-delay: 100ms; }
+  .view.is-active .totals .metric:nth-of-type(2) { animation-delay: 160ms; }
+  .view.is-active .totals .metric:nth-of-type(3) { animation-delay: 220ms; }
+  .view.is-active .totals .metric:nth-of-type(4) { animation-delay: 280ms; }
+  .view.is-active .mover:nth-child(1)  { animation-delay:  40ms; }
+  .view.is-active .mover:nth-child(2)  { animation-delay:  80ms; }
+  .view.is-active .mover:nth-child(3)  { animation-delay: 120ms; }
+  .view.is-active .mover:nth-child(4)  { animation-delay: 160ms; }
+  .view.is-active .mover:nth-child(5)  { animation-delay: 200ms; }
+  .view.is-active .mover:nth-child(6)  { animation-delay: 240ms; }
+  .view.is-active .mover:nth-child(7)  { animation-delay: 280ms; }
+  .view.is-active .mover:nth-child(8)  { animation-delay: 320ms; }
+  .view.is-active .mover:nth-child(9)  { animation-delay: 360ms; }
+  .view.is-active .mover:nth-child(10) { animation-delay: 400ms; }
+  .view.is-active .hotspot:nth-child(1)  { animation-delay:  60ms; }
+  .view.is-active .hotspot:nth-child(2)  { animation-delay: 110ms; }
+  .view.is-active .hotspot:nth-child(3)  { animation-delay: 160ms; }
+  .view.is-active .hotspot:nth-child(4)  { animation-delay: 210ms; }
+  .view.is-active .hotspot:nth-child(5)  { animation-delay: 260ms; }
+  .view.is-active .hotspot:nth-child(6)  { animation-delay: 310ms; }
+  .view.is-active .hotspot:nth-child(7)  { animation-delay: 360ms; }
+  .view.is-active .hotspot:nth-child(8)  { animation-delay: 410ms; }
+  .view.is-active .hotspot:nth-child(9)  { animation-delay: 460ms; }
+  .view.is-active .hotspot:nth-child(10) { animation-delay: 510ms; }
+
+  /* Reduced-motion users get instant view swaps and skip the cascade. */
+  @media (prefers-reduced-motion: reduce) {
+    .view, .nav-item, .nav-item::before,
+    .nav-label .icon, .mover, .score-row, .hotspot, .bar .fill,
+    .guide > summary::before {
+      transition: none !important;
+    }
+    .view.is-active .totals .metric,
+    .view.is-active .score-row,
+    .view.is-active .mover,
+    .view.is-active .hotspot {
+      animation: none !important;
+    }
   }
 
-  /* ─── Print: drop shadows + backgrounds, keep structure ──────────── */
+  /* ─── Narrow viewport: collapse sidebar to a top rail (mirrors report) ─ */
+  @media (max-width: 800px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .nav { position: sticky; top: 0; height: auto; flex-direction: row;
+           align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3);
+           border-right: 0; border-bottom: 1px solid var(--border);
+           overflow-x: auto; }
+    .brand { flex-direction: row; align-items: baseline; gap: var(--s-2); }
+    .brand-name::after { display: none; }
+    .nav-list { flex-direction: row; gap: 2px; flex: 1; }
+    .nav-item { flex-direction: row; align-items: center; gap: var(--s-2);
+                padding: var(--s-1) var(--s-2); }
+    .nav-item::before { display: none; }
+    .nav-item.is-active { box-shadow: inset 0 -2px 0 var(--accent); }
+    .nav-metric { display: none; }
+    .panel { padding: var(--s-3); }
+  }
+
+  /* ─── Print: drop sidebar, shadows, and backgrounds ──────────────── */
   @media print {
-    body { padding: var(--s-4); background: white; color: black; }
+    .app { grid-template-columns: 1fr; }
+    .nav { display: none; }
+    .panel { padding: var(--s-4); }
+    body { background: white; color: black; }
     .totals .metric, .section, .hotspot {
       box-shadow: none;
       border-color: #ccc;
     }
+    /* Force every view to render so the printed copy is complete. */
+    .view { display: block !important; opacity: 1 !important; }
+    /* Hide any floating tooltip popovers in print. */
+    [role="tooltip"] { display: none !important; }
   }
 </style>
 </head>
 <body>
 
-<header>
+<!-- Icon sprite (Lucide-style, 2px stroke, currentColor). One <symbol>
+     per icon, referenced via <svg class="icon"><use href="#icon-…"/></svg>.
+     Hidden but accessible to <use>. Mirrors the report's sprite plus
+     two extras (icon-folder, icon-command) for the diff-only sections. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="icon-overview" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="7" height="9" rx="1"/>
+      <rect x="14" y="3" width="7" height="5" rx="1"/>
+      <rect x="14" y="12" width="7" height="9" rx="1"/>
+      <rect x="3" y="16" width="7" height="5" rx="1"/>
+    </symbol>
+    <symbol id="icon-cost" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
+      <path d="M12 18V6"/>
+    </symbol>
+    <symbol id="icon-brain" viewBox="0 0 24 24">
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+      <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+    </symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </symbol>
+    <symbol id="icon-tools" viewBox="0 0 24 24">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+    </symbol>
+    <symbol id="icon-command" viewBox="0 0 24 24">
+      <polyline points="4 17 10 11 4 5"/>
+      <line x1="12" y1="19" x2="20" y2="19"/>
+    </symbol>
+    <symbol id="icon-subagents" viewBox="0 0 24 24">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </symbol>
+    <symbol id="icon-flame" viewBox="0 0 24 24">
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+<aside class="nav" aria-label="Sections">
+  <div class="brand">
+    <span class="brand-name">claudit diff</span>
+    <span class="brand-sub">{{ .LabelA }} → {{ .LabelB }}</span>
+  </div>
+  <nav class="nav-list">
+    <a class="nav-item is-active" href="#overview" data-view="overview">
+      <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</span>
+      <span class="nav-metric {{ deltaSign .TotalsA.CostUSD .TotalsB.CostUSD }}">{{ signedMoney (sub .TotalsB.CostUSD .TotalsA.CostUSD) }}</span>
+    </a>
+    {{ range .Sections }}
+    <a class="nav-item" href="#{{ .ID }}" data-view="{{ .ID }}">
+      <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-{{ .Icon }}"/></svg>{{ .Title }}</span>
+      <span class="nav-metric {{ deltaSign1 .TotalDelta }}">{{ if .Empty }}—{{ else }}{{ signedMoney .TotalDelta }}{{ end }}</span>
+    </a>
+    {{ end }}
+    {{ if .NewHotspotsShow }}
+    <a class="nav-item" href="#new-hotspots" data-view="new-hotspots">
+      <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>New hotspots</span>
+      <span class="nav-metric">{{ len .NewHotspots }} new</span>
+    </a>
+    {{ end }}
+  </nav>
+</aside>
+
+<main class="panel">
+
+<header class="panel-head">
   <h1>claudit diff</h1>
   <p class="subtitle">
     Comparing baseline
@@ -370,8 +939,54 @@
   </p>
 </header>
 
-<section>
-  <h2>Totals</h2>
+<section class="view section is-active" id="overview" data-view="overview">
+  <header class="view-head">
+    <h1><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</h1>
+  </header>
+
+  <details class="guide">
+    <summary>How to read this diff</summary>
+    <div class="body">
+      <p>This diff compares two date ranges of Claude Code spend — <strong>A</strong> (baseline) against <strong>B</strong> (current). Every number is <code>B − A</code>: positive means cost went <strong>up</strong> (coral), negative means it went <strong>down</strong> (teal).</p>
+      <ul>
+        <li>The <strong>scorecard</strong> is a diverging bar chart of per-dimension Δ. Bars extend right from the center axis when that dimension cost more in B, left when it cost less. Bar length is proportional to <code>|Δ| / max(|Δ|)</code>, so the longest bar is always the biggest mover — that's where to look first. Rows are sorted by that same |Δ| so the top of the list answers "where did the change come from?"</li>
+        <li>The <strong>totals tiles</strong> below show the four headline numbers: total cost, sessions, turns, and overall cache hit ratio. The scorecard decomposes the cost change; the tiles show the headline outcome.</li>
+        <li>Each left-nav item opens its own view with the top movers in that dimension.</li>
+      </ul>
+    </div>
+  </details>
+
+  {{ $maxAbs := .MaxAbsSectionDelta }}
+  {{ if gt $maxAbs 0.0 }}
+  <div class="scorecard" aria-label="Per-dimension change, ranked by absolute Δ">
+    <div class="scorecard-axis" aria-hidden="true">
+      <span></span>
+      <div class="legend">
+        <span class="down">← cost down</span>
+        <span class="zero">zero</span>
+        <span class="up">cost up →</span>
+      </div>
+      <span></span>
+    </div>
+    {{ range .SectionsByImpact }}
+    <div class="score-row">
+      <a class="score-label" href="#{{ .ID }}"><svg class="icon" aria-hidden="true"><use href="#icon-{{ .Icon }}"/></svg>{{ .Title }}</a>
+      <div class="div-bar {{ deltaSign1 .TotalDelta }}" title="Δ {{ signedMoney .TotalDelta }} ({{ money .TotalA }} → {{ money .TotalB }})">
+        <div class="fill" style="width: {{ divBarPct .TotalDelta $maxAbs }}%"></div>
+      </div>
+      <span class="score-delta {{ deltaSign1 .TotalDelta }}">{{ if .Empty }}—{{ else }}{{ signedMoney .TotalDelta }}{{ end }}</span>
+    </div>
+    {{ end }}
+    {{ if .NewHotspotsShow }}
+    <div class="score-row">
+      <a class="score-label" href="#new-hotspots"><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>New hotspots</a>
+      <div class="div-bar placeholder" aria-hidden="true"></div>
+      <span class="score-delta zero">{{ len .NewHotspots }} new</span>
+    </div>
+    {{ end }}
+  </div>
+  {{ end }}
+
   <div class="totals">
     <div class="metric">
       <span class="label">Total cost</span>
@@ -389,9 +1004,9 @@
     <div class="metric neutral">
       <span class="label">Sessions</span>
       <div class="ab-row">
-        <span class="value-a">{{ .TotalsA.Sessions }}</span>
+        <span class="value-a">{{ commaInt .TotalsA.Sessions }}</span>
         <span class="arrow">→</span>
-        <span class="value-b">{{ .TotalsB.Sessions }}</span>
+        <span class="value-b">{{ commaInt .TotalsB.Sessions }}</span>
       </div>
       <div class="delta">
         {{ deltaInt .TotalsA.Sessions .TotalsB.Sessions }}
@@ -401,9 +1016,9 @@
     <div class="metric neutral">
       <span class="label">Turns</span>
       <div class="ab-row">
-        <span class="value-a">{{ .TotalsA.Turns }}</span>
+        <span class="value-a">{{ commaInt .TotalsA.Turns }}</span>
         <span class="arrow">→</span>
-        <span class="value-b">{{ .TotalsB.Turns }}</span>
+        <span class="value-b">{{ commaInt .TotalsB.Turns }}</span>
       </div>
       <div class="delta">
         {{ deltaInt .TotalsA.Turns .TotalsB.Turns }}
@@ -425,8 +1040,19 @@
 </section>
 
 {{ range .Sections }}
-<section class="section">
-  <h2>Top movers — {{ .Title }}</h2>
+<section class="view section" id="{{ .ID }}" data-view="{{ .ID }}">
+  <header class="view-head">
+    <h1><svg class="icon" aria-hidden="true"><use href="#icon-{{ .Icon }}"/></svg>{{ .Title }}</h1>
+    <span class="meta">Top {{ len .Rows }} by |B − A|</span>
+  </header>
+
+  <details class="guide">
+    <summary>Reading these movers</summary>
+    <div class="body">
+      <p>Each row is one <strong>{{ .Title | lower }}</strong> key that appears in either window, ranked by |Δ|. The dumbbell (●━━━●) is the before/after comparison: the <span style="color:var(--c-2);font-weight:600">cyan dot</span> sits at the key's cost in A and the <span style="color:var(--accent);font-weight:600">purple dot</span> at its cost in B, plotted on a 0..max axis (the section's largest single value defines the right edge). The connecting line <em>is</em> the change — length equals magnitude, color equals direction (coral = cost up, teal = cost down). The B-side dot has a faint outer ring so you can tell which end is "after" at a glance. The A → B numbers and the signed Δ on the right echo the same data in text form.</p>
+    </div>
+  </details>
+
   {{ if .Empty }}
     <div class="empty">(no rows)</div>
   {{ else }}
@@ -434,19 +1060,15 @@
     {{ range .Rows }}
     <div class="mover">
       <div class="key">{{ truncate .Key 90 }}</div>
-      <div class="bar-row a-row">
-        <span class="tag">A</span>
-        <div class="bar a{{ if eq .CostA 0.0 }} zero{{ end }}">
-          <div class="fill" style="width: {{ barPct .CostA $max }}%"></div>
-        </div>
-        <span class="val">{{ money .CostA }}</span>
+      <div class="dumbbell {{ deltaSign .CostA .CostB }}" title="A: {{ money .CostA }}  →  B: {{ money .CostB }}">
+        <div class="line" style="left: {{ lineLeftPct .CostA .CostB $max }}%; width: {{ lineWidthPct .CostA .CostB $max }}%"></div>
+        <div class="dot a" style="left: {{ dotPct .CostA $max }}%" title="A: {{ money .CostA }}"></div>
+        <div class="dot b" style="left: {{ dotPct .CostB $max }}%" title="B: {{ money .CostB }}"></div>
       </div>
-      <div class="bar-row b-row">
-        <span class="tag">B</span>
-        <div class="bar b{{ if eq .CostB 0.0 }} zero{{ end }}">
-          <div class="fill" style="width: {{ barPct .CostB $max }}%"></div>
-        </div>
-        <span class="val">{{ money .CostB }}</span>
+      <div class="db-values">
+        <span class="val-a">{{ money .CostA }}</span>
+        <span class="arrow">→</span>
+        <span class="val-b">{{ money .CostB }}</span>
       </div>
       <div class="delta-line {{ deltaSign .CostA .CostB }}">
         <span class="delta-money">{{ deltaMoney .CostA .CostB }}</span>
@@ -459,14 +1081,22 @@
 {{ end }}
 
 {{ if .NewHotspotsShow }}
-<section class="section">
-  <h2>New hotspots in B</h2>
+<section class="view section" id="new-hotspots" data-view="new-hotspots">
+  <header class="view-head">
+    <h1><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>New hotspots in B</h1>
+    <span class="meta">{{ len .NewHotspots }} new</span>
+  </header>
+
+  <details class="guide">
+    <summary>What counts as new</summary>
+    <div class="body">
+      <p>Hotspots are the highest-leverage optimization targets in a report. A hotspot is "new in B" when it ranks in B's top set <em>but not</em> in A's — meaning the underlying behavior is either fresh, or it grew enough to climb the leaderboard between the two windows.</p>
+    </div>
+  </details>
+
   {{ if not .NewHotspots }}
     <div class="empty">B&rsquo;s top hotspots all appear in A&rsquo;s top hotspots — no new headline movers.</div>
   {{ else }}
-    <p class="subtitle" style="margin-bottom: var(--s-3);">
-      Hotspots that appear in B&rsquo;s top {{ len .NewHotspots }} but not in A&rsquo;s.
-    </p>
     <div class="hotspots">
       {{ range .NewHotspots }}
       <div class="hotspot">
@@ -483,9 +1113,148 @@
 </section>
 {{ end }}
 
-<footer>
-  Generated by <code>claudit diff</code>. Self-contained — no JS runtime, all data inline.
-</footer>
+</main>
+</div>
+
+<script>
+  // View switching — only the section matching the URL hash renders.
+  // Click on a nav-item or a scorecard row → hashchange → activate().
+  // Initial paint reads the hash so deep-links open the right view.
+  // Mirrors the report's pattern (parseHash/activate).
+  (function viewRouting() {
+    function parseHash() {
+      const h = (location.hash || '').replace(/^#/, '').trim();
+      if (!h) return 'overview';
+      // Validate against an existing data-view; fall back to overview so
+      // a stale or hand-typed hash doesn't leave the page blank.
+      const known = document.querySelector(`[data-view="${cssEscape(h)}"]`);
+      return known ? h : 'overview';
+    }
+    function cssEscape(s) {
+      // Minimal CSS.escape polyfill — diff IDs are kebab-case ASCII,
+      // so escaping nothing is fine. Kept as a function so the call site
+      // reads cleanly and to make swapping in CSS.escape trivial later.
+      return s.replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
+    }
+    function activate(view) {
+      document.querySelectorAll('.view').forEach(v => {
+        v.classList.toggle('is-active', v.dataset.view === view);
+      });
+      document.querySelectorAll('.nav-item').forEach(a => {
+        a.classList.toggle('is-active', a.dataset.view === view);
+      });
+      // Snap to top on every view change — each view is its own page,
+      // so the previous view's scroll position would be misleading.
+      if (window.scrollY > 0) {
+        window.scrollTo({top: 0, behavior: 'instant'});
+      }
+    }
+    activate(parseHash());
+    window.addEventListener('hashchange', () => activate(parseHash()));
+  })();
+
+  // ── custom tooltip (ported verbatim from report.html.tmpl) ───────────
+  // Single floating element repositioned to whichever [title]/[data-tooltip]
+  // the cursor is over. We migrate `title` → `data-tooltip` on each element
+  // so the native browser tooltip stays suppressed (otherwise both render).
+  (function tooltips() {
+    if (!window.matchMedia) return;
+    // Skip on touch devices — there's no hover affordance and the popover
+    // would interfere with view-switch taps in the sidebar.
+    if (window.matchMedia('(hover: none)').matches) return;
+
+    const tip = document.createElement('div');
+    tip.id = 'claudit-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    document.body.appendChild(tip);
+
+    let showTimer = null;
+    let hideTimer = null;
+    let activeEl = null;
+
+    function captureTitles(root) {
+      // Move title="" → data-tooltip="" so the native browser tooltip is
+      // suppressed but the text remains discoverable for our handler.
+      root.querySelectorAll('[title]').forEach(el => {
+        if (!el.dataset.tooltip) el.dataset.tooltip = el.getAttribute('title');
+        el.removeAttribute('title');
+      });
+    }
+    captureTitles(document);
+
+    // Re-capture if a view-switch ever surfaces a node with a title that
+    // wasn't in the initial DOM (defensive — diff doesn't currently mutate).
+    const mo = new MutationObserver(() => captureTitles(document));
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    function position(el) {
+      const r = el.getBoundingClientRect();
+      const tipR = tip.getBoundingClientRect();
+      const margin = 10;
+      // Default above; flip below if no room.
+      let top = r.top - tipR.height - margin;
+      let side = 'top';
+      if (top < 6) {
+        top = r.bottom + margin;
+        side = 'bottom';
+      }
+      // Center horizontally on the target, clamp to viewport.
+      let left = r.left + r.width / 2 - tipR.width / 2;
+      left = Math.max(6, Math.min(left, window.innerWidth - tipR.width - 6));
+      const arrowX = (r.left + r.width / 2) - left;
+      tip.style.top  = `${Math.round(top)}px`;
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.setProperty('--arrow-x', `${Math.round(arrowX)}px`);
+      tip.dataset.side = side;
+    }
+
+    function show(el) {
+      const text = el.dataset.tooltip;
+      if (!text) return;
+      activeEl = el;
+      // Lightweight markdown: backticks → <code>. Everything else escaped.
+      const safe = text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+                       .replace(/`([^`]+)`/g, '<code>$1</code>');
+      tip.innerHTML = safe;
+      tip.classList.add('is-visible');
+      // Two-frame trick: render → measure → position → reveal.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (activeEl === el) position(el);
+      }));
+    }
+    function hide() {
+      tip.classList.remove('is-visible');
+      activeEl = null;
+    }
+
+    function onEnter(e) {
+      const el = e.target.closest('[data-tooltip]');
+      if (!el) return;
+      clearTimeout(hideTimer);
+      clearTimeout(showTimer);
+      showTimer = setTimeout(() => show(el), 220);
+    }
+    function onLeave(e) {
+      const el = e.target.closest('[data-tooltip]');
+      if (!el) return;
+      clearTimeout(showTimer);
+      hideTimer = setTimeout(hide, 80);
+    }
+    document.addEventListener('mouseover', onEnter);
+    document.addEventListener('mouseout', onLeave);
+    document.addEventListener('focusin',  e => {
+      const el = e.target.closest('[data-tooltip]');
+      if (el) show(el);
+    });
+    document.addEventListener('focusout', e => {
+      const el = e.target.closest('[data-tooltip]');
+      if (el) hide();
+    });
+    window.addEventListener('scroll',  hide, true);
+    window.addEventListener('resize',  hide);
+    window.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  })();
+</script>
 
 </body>
 </html>

@@ -55,7 +55,7 @@ Usage:
 
 Commands:
   report   Generate a cost/usage report (HTML by default; --json or unset --html for markdown).
-  diff     Compare two date ranges and report top movers.
+  diff     Compare two date ranges and report top movers (HTML by default; --json or unset --html for markdown).
   watch    Tail a live session and print running cost.
   serve    Run a local web daemon that serves a live-updating report (filters via URL query).
 
@@ -207,8 +207,8 @@ func runDiff(args []string) error {
 	rangeB := fs.String("b", "", "current range, same format as --a")
 	by := fs.String("by", "week", "default comparison window when --a/--b are absent: week (7d vs prior 7d) or month (30d vs prior 30d)")
 	project := fs.String("project", "", "case-insensitive substring match on cwd")
-	asJSON := fs.Bool("json", false, "emit JSON instead of markdown")
-	asHTML := fs.Bool("html", false, "emit a self-contained HTML diff (overrides --json if both are set)")
+	asJSON := fs.Bool("json", false, "emit JSON (overrides the HTML default)")
+	asHTML := fs.Bool("html", true, "emit a self-contained interactive HTML diff (default)")
 	pricesPath := fs.String("prices", "", "override pricing YAML path (default: ~/.config/claudit/prices.yaml)")
 	topMovers := fs.Int("top", 10, "show top-N rows per dimension in the movers tables")
 	hotspotN := fs.Int("hotspots", 10, "size of the hotspot pool used to find new-in-B hotspots (0 disables that section)")
@@ -300,14 +300,15 @@ func runDiffWithRanges(
 		TopMovers: topMovers,
 		Hotspots:  hotspotN,
 	}
-	// --html wins over --json so users can opt up from the default markdown.
+	// --json takes precedence over --html so an explicit --json wins
+	// against the html-by-default behavior. Matches `claudit report`.
 	switch {
-	case asHTML:
-		if err := render.DiffHTML(os.Stdout, aAgg, bAgg, opt); err != nil {
-			return err
-		}
 	case asJSON:
 		if err := render.DiffJSON(os.Stdout, aAgg, bAgg, opt); err != nil {
+			return err
+		}
+	case asHTML:
+		if err := render.DiffHTML(os.Stdout, aAgg, bAgg, opt); err != nil {
 			return err
 		}
 	default:
@@ -327,19 +328,17 @@ func runDiffWithRanges(
 //	by="week"  → B = [today-7d, today),  A = [today-14d, today-7d)
 //	by="month" → B = [today-30d, today), A = [today-60d, today-30d)
 //
-// Labels read "last 7 days" / "prior 7 days" (or 30) — NOT "this week" —
-// because the window is a rolling 7d slice, not a calendar Mon-Sun. Honest
-// labels matter for honest delta percentages.
+// Labels are the raw date ranges (e.g. "2026-05-09..2026-05-16") — no
+// "last 7 days" / "prior 7 days" prose. The dates carry the window
+// length on their own and avoid the calendar-week vs rolling-7d
+// ambiguity that "last week" invites.
 func defaultDiffWindows(by string, now time.Time) (time.Time, time.Time, time.Time, time.Time, string, string, error) {
 	var d time.Duration
-	var nDays int
 	switch by {
 	case "week":
 		d = 7 * 24 * time.Hour
-		nDays = 7
 	case "month":
 		d = 30 * 24 * time.Hour
-		nDays = 30
 	default:
 		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, "", "",
 			fmt.Errorf("--by: must be week or month, got %q", by)
@@ -352,9 +351,7 @@ func defaultDiffWindows(by string, now time.Time) (time.Time, time.Time, time.Ti
 	fmtRange := func(s, e time.Time) string {
 		return s.Format("2006-01-02") + ".." + e.Format("2006-01-02")
 	}
-	labelA := fmt.Sprintf("prior %d days (%s)", nDays, fmtRange(aStart, aEnd))
-	labelB := fmt.Sprintf("last %d days (%s)", nDays, fmtRange(bStart, bEnd))
-	return aStart, aEnd, bStart, bEnd, labelA, labelB, nil
+	return aStart, aEnd, bStart, bEnd, fmtRange(aStart, aEnd), fmtRange(bStart, bEnd), nil
 }
 
 // loadPrices resolves the prices file (default or override) and parses it.

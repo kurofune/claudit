@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -54,17 +53,13 @@ func TestDefaultDiffWindows_Week(t *testing.T) {
 	if !aStart.Equal(wantA[0]) || !aEnd.Equal(wantA[1]) {
 		t.Errorf("A window: got [%s, %s), want [%s, %s)", aStart, aEnd, wantA[0], wantA[1])
 	}
-	// Labels should be honest: they say "7 days", not "week", because the
-	// window is a rolling 7-day slice (not a calendar Mon-Sun).
-	for _, want := range []string{"prior 7 days", "2026-05-02", "2026-05-09"} {
-		if !strings.Contains(labelA, want) {
-			t.Errorf("labelA %q missing %q", labelA, want)
-		}
+	// Labels are bare date ranges — no "prior"/"last" prose. The dates
+	// carry the window length on their own.
+	if want := "2026-05-02..2026-05-09"; labelA != want {
+		t.Errorf("labelA %q, want %q", labelA, want)
 	}
-	for _, want := range []string{"last 7 days", "2026-05-09", "2026-05-16"} {
-		if !strings.Contains(labelB, want) {
-			t.Errorf("labelB %q missing %q", labelB, want)
-		}
+	if want := "2026-05-09..2026-05-16"; labelB != want {
+		t.Errorf("labelB %q, want %q", labelB, want)
 	}
 }
 
