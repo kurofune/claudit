@@ -4,6 +4,12 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-05-17
+
+### Fixed
+
+- **Deep-link anchor (`#`) on hotspot and session cards now copies the shareable URL to the clipboard,** as the v1.1.0 changelog and the tooltip both promised. The click handler was never wired up in v1.1.0 — clicking the `#` updated the URL hash and scrolled the card into view (via the default `<a href>` behavior) but did not copy. The new handler covers both transports: `navigator.clipboard.writeText` on `http(s)://` (e.g. via `claudit serve`) and a `<textarea>` + `execCommand('copy')` fallback on `file://` pages where the Clipboard API is blocked. The `#` briefly flips to `✓` on success.
+
 ## [1.1.0] — 2026-05-17
 
 ### Added
@@ -80,6 +86,7 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/kurofune/claudit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kurofune/claudit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kurofune/claudit/releases/tag/v1.0.0
