@@ -52,8 +52,26 @@ type TurnSummary struct {
 	Model     string
 	CostUSD   float64
 	Tokens    Tokens
-	Tools     []string // distinct tool names in first-occurrence order
-	Sidechain bool
+	// Tools is distinct tool invocations in first-occurrence order. A pair
+	// of (Name, Detail) is treated as distinct — so "Bash · git status"
+	// and "Bash · go test" both appear, but "Read · .go" repeated five
+	// times in the same turn collapses to one entry.
+	Tools []ToolInvocation
+	// DurationMs is the wall-clock gap to the next turn within the same
+	// prompt, in milliseconds. Surfaces "this turn took 11s" hotspots that
+	// pure cost doesn't expose. Zero for the last turn of a prompt (no next)
+	// or when the next turn arrived in the same millisecond.
+	DurationMs int64
+	Sidechain  bool
+}
+
+// ToolInvocation is one distinct tool call surfaced on a turn row. Detail
+// is the same per-tool sub-key the rolled-up drill-down uses (Bash command,
+// Read extension, Agent subagent type, Skill name, etc.) — empty when the
+// tool has nothing useful to qualify it.
+type ToolInvocation struct {
+	Name   string
+	Detail string
 }
 
 // SessionTimelinesOptions tunes BuildSessionTimelines. All zero values are
@@ -236,7 +254,7 @@ func BuildSessionTimelines(
 			Model:     t.Model,
 			CostUSD:   cost,
 			Tokens:    tokens,
-			Tools:     distinctToolNames(t.ToolUses),
+			Tools:     distinctToolInvocations(t.ToolUses),
 			Sidechain: t.Sidechain,
 		})
 	}
@@ -269,6 +287,15 @@ func BuildSessionTimelines(
 			sort.Slice(pa.Turns, func(i, j int) bool {
 				return pa.Turns[i].Timestamp.Before(pa.Turns[j].Timestamp)
 			})
+			// Inter-turn duration: gap from this turn's timestamp to the
+			// next within the same prompt. Last turn has no "next" — leave
+			// zero. The frontend hides zero values.
+			for i := 0; i < len(pa.Turns)-1; i++ {
+				d := pa.Turns[i+1].Timestamp.Sub(pa.Turns[i].Timestamp)
+				if d > 0 {
+					pa.Turns[i].DurationMs = d.Milliseconds()
+				}
+			}
 			// If the prompt itself has no recorded timestamp (orphan), use
 			// the first turn's so it still sorts coherently.
 			ts := pa.Timestamp
@@ -338,22 +365,43 @@ func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) 
 	return raw, false
 }
 
-// distinctToolNames returns tool names in first-occurrence order. We
-// dedupe because a turn that calls Bash three times shouldn't render
-// "Bash, Bash, Bash" — the user cares which tools fired, not the count
-// (that's already in the rolled-up Tools section).
-func distinctToolNames(uses []parse.ToolUse) []string {
+// distinctToolInvocations returns (Name, Detail) pairs in first-occurrence
+// order, deduped by (Name, Detail). A turn that runs `git status` three
+// times collapses to one pill, but `git status` then `go test` keeps both
+// — same tool, different work. Detail comes from the per-tool field that
+// best identifies the call (SubagentType for Agent, SkillName for Skill,
+// SlashCommand for SlashCommand, ToolUse.Detail for everything else).
+func distinctToolInvocations(uses []parse.ToolUse) []ToolInvocation {
 	if len(uses) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(uses))
-	out := make([]string, 0, len(uses))
+	type key struct{ name, detail string }
+	seen := make(map[key]struct{}, len(uses))
+	out := make([]ToolInvocation, 0, len(uses))
 	for _, u := range uses {
-		if _, ok := seen[u.Name]; ok {
+		d := toolDetailFor(u)
+		k := key{u.Name, d}
+		if _, ok := seen[k]; ok {
 			continue
 		}
-		seen[u.Name] = struct{}{}
-		out = append(out, u.Name)
+		seen[k] = struct{}{}
+		out = append(out, ToolInvocation{Name: u.Name, Detail: d})
 	}
 	return out
+}
+
+// toolDetailFor picks the most identifying sub-key for a tool call. The
+// special tools (Agent/Skill/SlashCommand) have their own dedicated fields
+// because Input parsing in parse.go fills those out separately; everything
+// else falls back to Detail, populated by detail.go's extractor.
+func toolDetailFor(u parse.ToolUse) string {
+	switch u.Name {
+	case "Agent":
+		return u.SubagentType
+	case "Skill":
+		return u.SkillName
+	case "SlashCommand":
+		return u.SlashCommand
+	}
+	return u.Detail
 }

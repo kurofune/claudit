@@ -151,27 +151,70 @@ func TestBuildSessionTimelines_RespectsFilterWindow(t *testing.T) {
 	}
 }
 
-func TestBuildSessionTimelines_DistinctToolNames(t *testing.T) {
+func TestBuildSessionTimelines_DistinctToolInvocations(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	users := []parse.UserMessage{chainUser("u1", "", "s1", "do work", t0)}
 	turn := chainTurn("a1", "u1", "s1", t0.Add(time.Second))
-	// Tool order in the turn is intentional: Bash, Read, Bash, Bash, Edit.
-	// Distinct, first-seen order should be: Bash, Read, Edit.
+	// Same-tool / different-detail must stay distinct; same-tool /
+	// same-detail collapses; and the special tools (Agent, Skill,
+	// SlashCommand) use their dedicated fields, not Detail.
 	turn.ToolUses = []parse.ToolUse{
-		{Name: "Bash"}, {Name: "Read"}, {Name: "Bash"}, {Name: "Bash"}, {Name: "Edit"},
+		{Name: "Bash", Detail: "git status"},
+		{Name: "Read", Detail: ".go"},
+		{Name: "Bash", Detail: "git status"}, // duplicate, drops
+		{Name: "Bash", Detail: "go test"},    // same tool, new detail — keep
+		{Name: "Read", Detail: ".go"},        // duplicate, drops
+		{Name: "Agent", SubagentType: "Explore"},
+		{Name: "Skill", SkillName: "handoff"},
+		{Name: "SlashCommand", SlashCommand: "/review"},
+		{Name: "Edit"},
 	}
 	out := BuildSessionTimelines([]parse.Turn{turn}, users, nil, prices, Filter{},
 		SessionTimelinesOptions{})
 	got := out[0].Prompts[0].Turns[0].Tools
-	want := []string{"Bash", "Read", "Edit"}
+	want := []ToolInvocation{
+		{Name: "Bash", Detail: "git status"},
+		{Name: "Read", Detail: ".go"},
+		{Name: "Bash", Detail: "go test"},
+		{Name: "Agent", Detail: "Explore"},
+		{Name: "Skill", Detail: "handoff"},
+		{Name: "SlashCommand", Detail: "/review"},
+		{Name: "Edit", Detail: ""},
+	}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("tools[%d] = %q, want %q", i, got[i], want[i])
+			t.Errorf("tools[%d] = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestBuildSessionTimelines_TurnDuration(t *testing.T) {
+	// Inter-turn duration measures the wall-clock gap from one turn to the
+	// next within the same prompt. The last turn has no successor, so its
+	// DurationMs stays zero.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{chainUser("u1", "", "s1", "p", t0)}
+	turns := []parse.Turn{
+		chainTurn("a1", "u1", "s1", t0.Add(1*time.Second)),
+		chainTurn("a2", "a1", "s1", t0.Add(12*time.Second)), // +11s
+		chainTurn("a3", "a2", "s1", t0.Add(15*time.Second)), // +3s, then last
+	}
+	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+	ts := out[0].Prompts[0].Turns
+	if ts[0].DurationMs != 11_000 {
+		t.Errorf("ts[0].DurationMs = %d, want 11000", ts[0].DurationMs)
+	}
+	if ts[1].DurationMs != 3_000 {
+		t.Errorf("ts[1].DurationMs = %d, want 3000", ts[1].DurationMs)
+	}
+	if ts[2].DurationMs != 0 {
+		t.Errorf("ts[2].DurationMs = %d, want 0 (last turn has no successor)", ts[2].DurationMs)
 	}
 }
 
