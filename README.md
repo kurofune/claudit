@@ -33,6 +33,9 @@ claudit diff --a=2026-04-01..2026-04-15 --b=2026-04-15..2026-05-01 > diff.html
 # Tail the currently-running session and watch cost accrue
 claudit watch --budget=5.00
 
+# Or tail every recently-modified session under ~/.claude/projects, grouped by project
+claudit watch --all
+
 # Run a local web daemon — auto-reloads as new turns land, filter via URL
 claudit serve                         # http://127.0.0.1:8787
 claudit serve --port=9000 --open=false
@@ -91,7 +94,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 |---|---|
 | `report` | Generate a cost/usage report. Default if no subcommand is given. |
 | `diff` | Compare two date ranges and report top movers. |
-| `watch` | Tail the active session JSONL and print running cost. |
+| `watch` | Tail the active session (or all recently-modified sessions with `--all`) and print running cost in a full-screen TUI. Rolling totals, spike detection, budget alerts. |
 | `serve` | Run a local web daemon that re-renders the report as JSONLs change. Filters via URL query. Loopback-only by default. |
 
 `claudit help` shows the subcommand list; `claudit <cmd> --help` shows per-command flags.

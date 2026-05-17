@@ -6,6 +6,13 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ### Added
 
+- **`claudit watch` upgraded to a load-bearing live monitor.** Full-screen TUI with three stacked rounded-corner panels (TOTALS / LIVE / ALERTS) on a TTY; one-line stream fallback when piped.
+  - **TOTALS panel** shows rolling today / week / month spend, pre-scanned from `~/.claude/projects/` at startup and updated incrementally as turns land.
+  - **LIVE panel** shows currently-active sessions. `--all` tails every recently-modified session (last 15 min) concurrently, grouped by project, with a two-line layout: project heading (aggregate when multiple sessions) followed by indented detail row(s). Idle sessions auto-hide.
+  - **ALERTS panel** surfaces budget crosses (`--budget`) and per-turn cost spikes (`--spike-threshold`, default 5× the rolling median of the prior 20 turns). Spike detection dedupes against the immediately-preceding turn so back-to-back identical-cost rows from Claude Code's wire pattern only fire once.
+  - **`--notify`** sends a desktop notification on budget crosses and spikes (macOS / Linux / Windows).
+  - **`--scan-days N`** (default 30) trims the rolling-totals startup scan window; smaller is faster but clamps the month total to N days. `--rolling=false` disables the startup scan entirely.
+  - **Per-panel interior padding**, uppercase panel titles (TOTALS / LIVE / ALERTS), and the last-turn cell groups the tool name and per-turn cost in one parenthesized cell: `last turn: Bash (+$0.0808)`. The cost color encodes magnitude — dim under $0.05, yellow $0.05-$0.50, red ≥ $0.50.
 - **`claudit serve` — local web daemon.** Long-running process that serves the HTML report at `http://127.0.0.1:8787/`, re-rendering against the freshest data on demand.
   - Background poller re-parses only files whose `(mtime, size)` changed since the last tick; idle daemons do no work.
   - Filters live in the URL query string (`?project=`, `?last=`, `?since=`/`?until=`, `?by=`, `?hotspots=`, `?sessions=`, `?redact=`), so a bookmarked URL is a bookmarked filter.
@@ -30,6 +37,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 - **Print stylesheet** for the HTML report. Saving as a PDF (Cmd-P) produces a usable single-document copy: every `<details>` body is force-expanded, the sidebar is hidden, the panel flows full-width, dark mode is overridden with a light palette, interactive chrome (filter inputs, tooltips, copy buttons) is hidden, and each top-level section starts on a fresh page.
 - **`claudit diff --html`** renders the comparison as a self-contained HTML document with side-by-side A/B bars, totals tiles with delta lines, and a new-hotspots grid. Uses the same design tokens as the main report.
 - **`claudit diff` with no arguments** defaults to the last 7 days vs the prior 7 days via a new `--by=week|month` flag (`--by=month` → 30d vs 30d). Equal-size rolling windows ending at midnight tonight; labels say "7 days" rather than "this week" to match the rolling math. Explicit `--a`/`--b` still wins when provided.
+
+### Changed
+
+- **Faster startup for windowed queries.** `claudit report --since=` / `--last=`, `claudit diff`, and `claudit watch`'s rolling-totals scan now mtime-skip JSONL files whose last modification predates the query window — those files can't contain a turn newer than the cutoff, so opening them is wasted I/O. On a 7700-file `~/.claude/projects` tree, `claudit report --last=1d` drops from ~7.7s to ~0.75s (~10×); `claudit diff --by=week` from ~7.7s to ~1.1s (~7×). Unbounded `claudit report` (no `--since`/`--last`) is unchanged. Watch's rolling-totals scan also gains parallel parse via the shared GOMAXPROCS worker pool that `report` and `diff` already use.
 
 ## [1.0.0] — 2026-05-16
 
