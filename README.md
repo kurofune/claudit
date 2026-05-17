@@ -6,6 +6,8 @@ claudit reads the `.jsonl` session logs that Claude Code writes under `~/.claude
 
 ![claudit report screenshot](claudit.png)
 
+![claudit diff screenshot](claudit-diff.png)
+
 ## Install
 
 ```sh
