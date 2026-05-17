@@ -3,6 +3,8 @@ package aggregate
 import (
 	"sort"
 	"time"
+
+	"github.com/kurofune/claudit/internal/stat"
 )
 
 // AnomalyKind enumerates the kinds of statistical outliers the report
@@ -69,7 +71,7 @@ func (a *Aggregator) Anomalies() []Anomaly {
 		for j := i - anomalyWindow; j < i; j++ {
 			costs = append(costs, pts[j].CostUSD)
 		}
-		medCost := median(costs)
+		medCost := stat.Median(costs)
 		v := pts[i].CostUSD
 		if medCost > 0 && v/medCost >= anomalyCostMultiplier {
 			out = append(out, Anomaly{
@@ -100,7 +102,7 @@ func (a *Aggregator) Anomalies() []Anomaly {
 			// Not enough prior cache-eligible buckets to baseline against.
 			continue
 		}
-		medRatio := median(ratios)
+		medRatio := stat.Median(ratios)
 		hr := pts[i].Tokens.HitRatio()
 		if medRatio-hr >= anomalyHitRatioDrop {
 			out = append(out, Anomaly{
@@ -123,16 +125,3 @@ func (a *Aggregator) Anomalies() []Anomaly {
 	return out
 }
 
-// median returns the sample median. Sorts in place — callers pass
-// throwaway slices so the side effect is invisible.
-func median(xs []float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	sort.Float64s(xs)
-	mid := len(xs) / 2
-	if len(xs)%2 == 1 {
-		return xs[mid]
-	}
-	return (xs[mid-1] + xs[mid]) / 2
-}
