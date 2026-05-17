@@ -536,7 +536,7 @@ func projectLabel(cwd string) string {
 		return "(unknown)"
 	}
 	b := filepath.Base(cwd)
-	if b == "." || b == "/" || b == "" {
+	if b == "." || b == "/" || b == `\` || b == "" {
 		return cwd
 	}
 	return b
