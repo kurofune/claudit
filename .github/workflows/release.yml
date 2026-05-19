@@ -51,3 +51,15 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file /tmp/release-notes.md
+
+      - name: Warm Go module proxy
+        # proxy.golang.org caches @latest answers and only learns about
+        # new tags lazily. A user running `go install …@latest` in the
+        # gap between tag-push and proxy-discovery silently gets the
+        # PREVIOUS version (this is exactly what happened with v1.2.0).
+        # Fetching the version's .info endpoint forces the proxy to
+        # discover and cache the tag immediately, so the next @latest
+        # resolution lands on the release we just published.
+        run: |
+          curl -fsS "https://proxy.golang.org/github.com/kurofune/claudit/@v/${GITHUB_REF_NAME}.info" >/dev/null || \
+            echo "::warning::Proxy warm failed — @latest installs may briefly serve the previous version until the proxy catches up."
