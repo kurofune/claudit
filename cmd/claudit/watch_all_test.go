@@ -105,6 +105,45 @@ func TestMultiState_IdleSessionsHiddenWhenOthersActive(t *testing.T) {
 	}
 }
 
+// LIVE header must report the cost of currently-visible sessions, not
+// the running combined cost across every session the watch process has
+// ever seen. Earlier behavior summed costs into combinedCost on every
+// event and showed that in the header — once a session went idle and
+// got hidden from the body, its cost stayed in the header total and
+// the math no longer added up.
+func TestMultiHub_LiveHeader_ExcludesIdleSessions(t *testing.T) {
+	var buf bytes.Buffer
+	r := newStreamPainter(&buf, term.Style{})
+	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+
+	// Active session: $0.05, just now.
+	active := h.state.session("/sess/active.jsonl", "sa", "/p/active")
+	active.totalCost = 0.05
+	active.turns = 1
+	active.lastTurnAt = time.Now().Add(-time.Minute)
+
+	// Idle session: $5.00, half an hour ago — past idleHide.
+	idle := h.state.session("/sess/idle.jsonl", "si", "/p/idle")
+	idle.totalCost = 5.00
+	idle.turns = 1
+	idle.lastTurnAt = time.Now().Add(-30 * time.Minute)
+
+	// combinedCost reflects everything we've seen; the header must not.
+	h.state.combinedCost = 5.05
+
+	h.paint()
+	out := buf.String()
+	if !strings.Contains(out, "$0.0500") {
+		t.Errorf("expected LIVE header total to be $0.0500 (active only); got %q", out)
+	}
+	if strings.Contains(out, "$5.05") || strings.Contains(out, "$5.0500") {
+		t.Errorf("LIVE header should not include idle session cost; got %q", out)
+	}
+	if !strings.Contains(out, "1 active session") {
+		t.Errorf("expected '1 active session' in header; got %q", out)
+	}
+}
+
 func TestProjectLabel(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/Users/me/claudit", "claudit"},

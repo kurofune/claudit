@@ -76,9 +76,12 @@ func project(st term.Style, name string) string {
 }
 
 // rollingPanelLine renders the totals row inside the "totals" panel.
-// today / week / month sit on one line separated by dim dots.
-func rollingPanelLine(st term.Style, today, week, month float64) string {
+// hour / today / week / month sit on one line separated by dim dots,
+// ordered shortest window first so the most-volatile number reads
+// first.
+func rollingPanelLine(st term.Style, hour, today, week, month float64) string {
 	return strings.Join([]string{
+		label(st, "hour") + " " + money(st, hour, 2),
 		label(st, "today") + " " + money(st, today, 2),
 		label(st, "week") + " " + money(st, week, 2),
 		label(st, "month") + " " + money(st, month, 2),

@@ -307,9 +307,9 @@ func (s *watchState) render() {
 		},
 	}
 	if s.rolling != nil {
-		today, week, month := s.rolling.totals(time.Now())
+		hour, today, week, month := s.rolling.totals(time.Now())
 		frame.HasRolling = true
-		frame.Rolling = RollingPanelData{Today: today, Week: week, Month: month}
+		frame.Rolling = RollingPanelData{Hour: hour, Today: today, Week: week, Month: month}
 	}
 	s.painter.Render(frame)
 }

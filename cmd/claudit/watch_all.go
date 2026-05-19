@@ -295,14 +295,19 @@ func (h *multiHub) paint() {
 	st := h.painter.Style()
 	frame := Frame{}
 	if h.rolling != nil {
-		today, week, month := h.rolling.totals(now)
+		hour, today, week, month := h.rolling.totals(now)
 		frame.HasRolling = true
-		frame.Rolling = RollingPanelData{Today: today, Week: week, Month: month}
+		frame.Rolling = RollingPanelData{Hour: hour, Today: today, Week: week, Month: month}
 	}
-	visible := h.state.visibleCount(now)
-	frame.Live.Header = liveHeader(st, h.state.combinedCost, visible)
-
 	groups := h.state.groupByProject(now)
+	var visibleTotal float64
+	var visible int
+	for _, g := range groups {
+		visibleTotal += g.totalCost()
+		visible += len(g.sessions)
+	}
+	frame.Live.Header = liveHeader(st, visibleTotal, visible)
+
 	if len(groups) == 0 {
 		frame.Live.Rows = nil
 		h.painter.Render(frame)
@@ -403,16 +408,6 @@ func (m *multiState) session(path, sessID, cwd string) *sessionAgg {
 	s := &sessionAgg{path: path, sessionID: sessID, cwd: cwd}
 	m.sessions[path] = s
 	return s
-}
-
-func (m *multiState) visibleCount(now time.Time) int {
-	n := 0
-	for _, s := range m.sessions {
-		if now.Sub(s.lastTurnAt) <= idleHide {
-			n++
-		}
-	}
-	return n
 }
 
 func (m *multiState) groupByProject(now time.Time) []projectGroup {

@@ -50,9 +50,9 @@ type Frame struct {
 	Live LivePanelData
 }
 
-// RollingPanelData is just the three numbers; the painter formats them.
+// RollingPanelData is just the four numbers; the painter formats them.
 type RollingPanelData struct {
-	Today, Week, Month float64
+	Hour, Today, Week, Month float64
 }
 
 // LivePanelData carries the live-session view: a one-line header
@@ -195,7 +195,7 @@ func (p *screenPainter) totalsPanel(d RollingPanelData) term.Panel {
 	return term.Panel{
 		Title: p.style.Magenta("TOTALS"),
 		Body: []string{
-			rollingPanelLine(p.style, d.Today, d.Week, d.Month),
+			rollingPanelLine(p.style, d.Hour, d.Today, d.Week, d.Month),
 		},
 		Pad: true,
 	}
@@ -266,7 +266,7 @@ func (p *streamPainter) Style() term.Style { return p.style }
 func (p *streamPainter) Render(frame Frame) {
 	parts := []string{}
 	if frame.HasRolling {
-		parts = append(parts, rollingPanelLine(p.style, frame.Rolling.Today, frame.Rolling.Week, frame.Rolling.Month))
+		parts = append(parts, rollingPanelLine(p.style, frame.Rolling.Hour, frame.Rolling.Today, frame.Rolling.Week, frame.Rolling.Month))
 	}
 	if frame.Live.Header != "" {
 		parts = append(parts, frame.Live.Header)

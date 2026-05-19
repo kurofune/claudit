@@ -111,12 +111,14 @@ func (rt *rollingTotals) addLive(at time.Time, cost float64, _ time.Time) {
 	rt.history = append(rt.history, turnSample{at: at, cost: cost})
 }
 
-// totals returns (today, week, month) summed against now in local time.
-// Boundaries: today = since midnight local; week = since most recent
-// Monday 00:00 local (ISO week); month = since the 1st of this month
-// 00:00 local.
-func (rt *rollingTotals) totals(now time.Time) (today, week, month float64) {
+// totals returns (hour, today, week, month) summed against now in
+// local time. Boundaries: hour = trailing 60 minutes (rolling, not
+// calendar-aligned); today = since midnight local; week = since most
+// recent Monday 00:00 local (ISO week); month = since the 1st of this
+// month 00:00 local.
+func (rt *rollingTotals) totals(now time.Time) (hour, today, week, month float64) {
 	loc := now.Location()
+	hourStart := now.Add(-time.Hour)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	// Weekday(): Sunday=0..Saturday=6. ISO week starts on Monday, so
 	// shift Sunday to "7 days back" rather than "0 days back."
@@ -140,8 +142,11 @@ func (rt *rollingTotals) totals(now time.Time) (today, week, month float64) {
 		if !s.at.Before(todayStart) {
 			today += s.cost
 		}
+		if !s.at.Before(hourStart) {
+			hour += s.cost
+		}
 	}
-	return today, week, month
+	return hour, today, week, month
 }
 
 // baselineHitRatio returns the trailing-7-day cache hit ratio (0..1),
