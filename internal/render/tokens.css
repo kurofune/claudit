@@ -1,0 +1,160 @@
+/* ─── Design tokens — SHARED by report.html.tmpl AND diff.html.tmpl.
+   Embedded as a Go string and injected into the <style> block of both
+   templates via {{ .Tokens }}. Changing a token here updates both
+   surfaces at once; do NOT inline-edit either template's <style> with
+   token overrides — that re-introduces the drift this file exists to
+   prevent. */
+:root {
+  color-scheme: light dark;
+
+  /* Single brand hue (~190, teal) tints every neutral. Teal is the
+     canonical "observability" category color — Datadog, Sentry,
+     Honeycomb, Grafana, New Relic all live around 180-200°. claudit
+     is observability for AI usage, so the signal is on-the-nose
+     without claiming an AI-product identity (the violet ~280 trap).
+     Surfaces carry only a *faint* teal cast (chroma 0.005-0.022);
+     the accents (which DO use this hue at higher chroma) are where
+     the teal actually shows up. */
+  --brand-h: 190;
+
+  /* Surfaces & ink — light. Very low chroma so the teal cast is felt,
+     not seen — surfaces read as "neutral with a slight cool character",
+     not "blue-tinted." */
+  --bg:           oklch(98.4% 0.005 var(--brand-h));
+  --surface:      oklch(100%  0     0);
+  --surface-2:    oklch(96.5% 0.008 var(--brand-h));
+  --surface-3:    oklch(94%   0.012 var(--brand-h));
+  --border:       oklch(89%   0.012 var(--brand-h));
+  --border-strong:oklch(78%   0.018 var(--brand-h));
+  --ink:          oklch(22%   0.020 var(--brand-h));
+  --ink-2:        oklch(40%   0.015 var(--brand-h));
+  --muted:        oklch(55%   0.012 var(--brand-h));
+
+  /* Accents — semantic. accent uses brand-h (teal); the rest are at
+     fixed hues so semantic meaning stays stable across theme swaps. */
+  --accent:       oklch(58% 0.14 var(--brand-h));   /* primary brand (teal) */
+  --accent-2:     oklch(62% 0.14 145);              /* good / pass-through (green) — pushed off brand teal so the two don't blur */
+  --warn:         oklch(70% 0.16 60);               /* caution (amber) */
+  --hot:          oklch(62% 0.20 15);               /* danger / cost-hot (coral) */
+
+  /* Heat-overlay color (used by td.heat). Defined as alpha-coral
+     rather than color-mix with surface — mixing in oklch interpolates
+     hues, which would pull a coral (hue ~22) toward whatever the
+     current brand-h is. Alpha overlay composites the coral directly
+     over the cell bg, so the result is unambiguously red regardless
+     of the active theme. warn-soft and accent-soft keep the mix
+     because they tint full panels (.warning-card / .guide / icon
+     chips) where hue blending with the surface IS what we want. */
+  --hot-soft:      oklch(60% 0.20 15 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  /* Five-color palette for ranked-list charts (top models, projects,
+     tools, hotspots). Spaced around the wheel for max separation,
+     deliberately skipping the violet/indigo range so the chart never
+     drifts back into "generic AI dashboard" territory.
+     NOTE: c-3 and c-4 carry semantic meaning beyond chart slots —
+     c-3 backs .tier-good (must read as green / pass) and c-4 backs
+     .tier-ok (must read as amber / caution). Don't rotate those two
+     even if the chart palette is being restyled. */
+  --c-1: oklch(60% 0.15 250);  /* blue — primary */
+  --c-2: oklch(64% 0.16 330);  /* rose / magenta — cool counterweight (NOT violet) */
+  --c-3: oklch(64% 0.16 140);  /* green — also .tier-good */
+  --c-4: oklch(70% 0.15  80);  /* amber — also .tier-ok */
+  --c-5: oklch(64% 0.20  20);  /* coral */
+
+  /* Spacing scale (4px base) */
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* Type scale (modular 1.2 from a 14px body) */
+  --t-1:  0.6875rem;  /* 11 — micro labels */
+  --t-2:  0.8125rem;  /* 13 — small captions */
+  --t-3:  0.875rem;   /* 14 — body */
+  --t-4:  1rem;       /* 16 — h3 / emphasized body */
+  --t-5:  1.25rem;    /* 20 — h2 */
+  --t-6:  1.75rem;    /* 28 — h1 */
+  --t-7:  2.5rem;     /* 40 — page headline (total cost) */
+
+  /* Typography — sans for prose, mono reserved for numerics & code,
+     display for big headline values. The display stack prefers Inter
+     (loaded via Google Fonts), then SF Pro Display on macOS/iOS, then
+     falls back to the regular sans stack if neither is available. */
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+               "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue",
+               system-ui, sans-serif;
+  --font-display: "Inter", "InterVariable",
+                  "SF Pro Display", -apple-system, BlinkMacSystemFont,
+                  "Segoe UI Variable Display", "Helvetica Neue",
+                  system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono",
+               Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Radius scale — soft corners. */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* Shadows — soft, layered. */
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 4%, transparent),
+               0 4px 12px color-mix(in oklch, black 6%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 6%, transparent),
+                 0 12px 28px color-mix(in oklch, black 8%, transparent);
+
+  /* Motion — slight-overshoot easing for the friendly feel. */
+  --motion-fast:   200ms;
+  --motion-med:    320ms;
+  --motion-slow:   420ms;
+  --motion-ease:   cubic-bezier(0.34, 1.2, 0.64, 1);    /* slight overshoot */
+  --motion-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Deep dark with a faint teal cast — sits at typical "modern
+       observability" depth (around Datadog's). Brighter than pure
+       black so prose stays comfortable to read at length, darker
+       than Nord's Polar Night so it doesn't read as "gray". */
+    --bg:           oklch(15%   0.012 var(--brand-h));
+    --surface:      oklch(19%   0.014 var(--brand-h));
+    --surface-2:    oklch(23%   0.016 var(--brand-h));
+    --surface-3:    oklch(28%   0.018 var(--brand-h));
+    --border:       oklch(32%   0.020 var(--brand-h));
+    --border-strong:oklch(45%   0.022 var(--brand-h));
+    --ink:          oklch(94%   0.010 var(--brand-h));
+    --ink-2:        oklch(78%   0.012 var(--brand-h));
+    --muted:        oklch(62%   0.015 var(--brand-h));
+
+    --accent:       oklch(74% 0.13 var(--brand-h));   /* teal lifted for dark surfaces */
+    --accent-2:     oklch(74% 0.14 145);
+    --warn:         oklch(78% 0.15 60);
+    --hot:          oklch(74% 0.18 15);
+
+    /* Same alpha-coral approach as light mode (see comment there).
+       Higher alpha so the coral reads clearly against the dark surface. */
+    --hot-soft:      oklch(70% 0.20 15 / 0.42);
+    --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+    --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+    --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+    --c-1: oklch(70% 0.14 250);  /* blue */
+    --c-2: oklch(72% 0.15 330);  /* rose / magenta */
+    --c-3: oklch(76% 0.16 140);  /* green */
+    --c-4: oklch(80% 0.15  80);  /* amber */
+    --c-5: oklch(74% 0.18  20);  /* coral */
+
+    --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
+    --shadow-md: 0 1px 2px  color-mix(in oklch, black 25%, transparent),
+                 0 4px 12px color-mix(in oklch, black 35%, transparent);
+    --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
+                   0 12px 28px color-mix(in oklch, black 40%, transparent);
+  }
+}

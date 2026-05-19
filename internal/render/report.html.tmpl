@@ -12,140 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    color-scheme: light dark;
-
-    /* Single brand hue (violet ~280) tints every neutral. Soft + warm,
-       distinct from generic dashboard blue. */
-    --brand-h: 280;
-
-    /* Surfaces & ink — light */
-    --bg:           oklch(98.4% 0.005 var(--brand-h));
-    --surface:      oklch(100%  0     0);
-    --surface-2:    oklch(96.5% 0.008 var(--brand-h));
-    --surface-3:    oklch(94%   0.012 var(--brand-h));
-    --border:       oklch(89%   0.012 var(--brand-h));
-    --border-strong:oklch(78%   0.018 var(--brand-h));
-    --ink:          oklch(22%   0.020 var(--brand-h));
-    --ink-2:        oklch(40%   0.015 var(--brand-h));
-    --muted:        oklch(55%   0.012 var(--brand-h));
-
-    /* Accents — semantic */
-    --accent:       oklch(58% 0.16 var(--brand-h));   /* primary brand (violet) */
-    --accent-2:     oklch(62% 0.14 160);              /* good / pass-through (green) */
-    --warn:         oklch(70% 0.16 60);               /* amber */
-    --hot:          oklch(62% 0.20 15);               /* danger / cost-hot (coral) */
-
-    /* Heat-overlay color (used by td.heat). Defined as alpha-coral
-       rather than color-mix with surface — mixing in oklch interpolates
-       hues, which would pull a coral (hue 15) toward the violet brand
-       hue (280) through magenta. Alpha overlay composites the coral
-       directly over the cell bg, so the result is unambiguously red.
-       warn-soft and accent-soft keep the mix because they tint full
-       panels (.warning-card / .guide / icon chips) where hue blending
-       with the surface IS what we want. */
-    --hot-soft:     oklch(60% 0.20 15 / 0.22);
-    --warn-soft:    color-mix(in oklch, var(--warn) 14%, var(--surface));
-    --accent-soft:  color-mix(in oklch, var(--accent) 14%, var(--surface));
-
-    /* Five-color palette for ranked-list charts (top models, projects,
-       tools, hotspots). Spaced around the wheel for max separation while
-       staying within a warm pastel feel. */
-    --c-1: oklch(60% 0.16 280);  /* violet — primary */
-    --c-2: oklch(62% 0.13 200);  /* cyan */
-    --c-3: oklch(64% 0.16 150);  /* green */
-    --c-4: oklch(70% 0.15  80);  /* amber */
-    --c-5: oklch(64% 0.20  20);  /* coral */
-
-    /* Spacing scale (4px base) */
-    --s-1:  4px;
-    --s-2:  8px;
-    --s-3: 12px;
-    --s-4: 16px;
-    --s-5: 24px;
-    --s-6: 32px;
-    --s-7: 48px;
-
-    /* Type scale (modular 1.2 from a 14px body) */
-    --t-1:  0.6875rem;  /* 11 — micro labels */
-    --t-2:  0.8125rem;  /* 13 — small captions */
-    --t-3:  0.875rem;   /* 14 — body */
-    --t-4:  1rem;       /* 16 — h3 / emphasized body */
-    --t-5:  1.25rem;    /* 20 — h2 */
-    --t-6:  1.75rem;    /* 28 — h1 */
-    --t-7:  2.5rem;     /* 40 — page headline (total cost) */
-
-    /* Typography — sans for prose, mono reserved for numerics & code,
-       display for big headline values. The display stack prefers Inter
-       (loaded via Google Fonts), then SF Pro Display on macOS/iOS, then
-       falls back to the regular sans stack if neither is available. */
-    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
-                 "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue",
-                 system-ui, sans-serif;
-    --font-display: "Inter", "InterVariable",
-                    "SF Pro Display", -apple-system, BlinkMacSystemFont,
-                    "Segoe UI Variable Display", "Helvetica Neue",
-                    system-ui, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono",
-                 Menlo, Consolas, "Liberation Mono", monospace;
-
-    /* Radius scale — soft corners. */
-    --r-sm: 6px;
-    --r-md: 10px;
-    --r-lg: 14px;
-    --r-pill: 999px;
-
-    /* Shadows — soft, layered. */
-    --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
-    --shadow-md: 0 1px 2px  color-mix(in oklch, black 4%, transparent),
-                 0 4px 12px color-mix(in oklch, black 6%, transparent);
-    --shadow-lift: 0 2px 4px color-mix(in oklch, black 6%, transparent),
-                   0 12px 28px color-mix(in oklch, black 8%, transparent);
-
-    /* Motion — slight-overshoot easing for the friendly feel. */
-    --motion-fast:   200ms;
-    --motion-med:    320ms;
-    --motion-slow:   420ms;
-    --motion-ease:   cubic-bezier(0.34, 1.2, 0.64, 1);    /* slight overshoot */
-    --motion-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:           oklch(15%   0.012 var(--brand-h));
-      --surface:      oklch(19%   0.014 var(--brand-h));
-      --surface-2:    oklch(23%   0.016 var(--brand-h));
-      --surface-3:    oklch(28%   0.018 var(--brand-h));
-      --border:       oklch(32%   0.020 var(--brand-h));
-      --border-strong:oklch(45%   0.022 var(--brand-h));
-      --ink:          oklch(94%   0.010 var(--brand-h));
-      --ink-2:        oklch(78%   0.012 var(--brand-h));
-      --muted:        oklch(62%   0.015 var(--brand-h));
-
-      --accent:       oklch(72% 0.15 var(--brand-h));
-      --accent-2:     oklch(74% 0.14 160);
-      --warn:         oklch(78% 0.15 60);
-      --hot:          oklch(74% 0.18 15);
-
-      /* Same alpha-coral approach as light mode (see comment there).
-         Higher alpha so the coral reads clearly against the dark surface. */
-      --hot-soft:     oklch(70% 0.20 15 / 0.42);
-      --warn-soft:    color-mix(in oklch, var(--warn) 18%, var(--surface));
-      --accent-soft:  color-mix(in oklch, var(--accent) 18%, var(--surface));
-
-      --c-1: oklch(72% 0.16 280);
-      --c-2: oklch(74% 0.13 200);
-      --c-3: oklch(76% 0.16 150);
-      --c-4: oklch(80% 0.15  80);
-      --c-5: oklch(74% 0.18  20);
-
-      --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
-      --shadow-md: 0 1px 2px  color-mix(in oklch, black 25%, transparent),
-                   0 4px 12px color-mix(in oklch, black 35%, transparent);
-      --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
-                     0 12px 28px color-mix(in oklch, black 40%, transparent);
-    }
-  }
+{{ .Tokens }}
 
   /* ─── Card surfaces — round, lifted, generous ─────────────────────────
      Most callouts and controls round at --r-lg with a soft shadow. The
@@ -161,9 +28,15 @@
     overflow: hidden;
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
+    /* Note: the table rule further down sets border-collapse: separate
+       (with border-spacing: 0). That's load-bearing for the rounded
+       outline — with border-collapse: collapse, the table's border
+       gets owned by the corner cells, doesn't follow border-radius,
+       and either renders 90° inside the rounded clip (L-sliver in
+       each corner) or is hidden by the th background across the top
+       edge. `separate` keeps the border on the table element, where
+       border-radius applies cleanly. */
   }
-  thead th:first-child { border-top-left-radius: var(--r-lg); }
-  thead th:last-child  { border-top-right-radius: var(--r-lg); }
 
   /* Totals tiles — each metric becomes a soft elevated card.
      (Layout — flex / flex-basis / wrap — lives with the other .totals
@@ -767,8 +640,6 @@
     border-color: var(--accent);
   }
 
-  /* Hotspot hover lift — base/Linear keeps it subtle (border tint).
-     Notion theme overrides above for full elevation. */
   .hotspot {
     transition: border-color var(--motion-fast) var(--motion-ease),
                 background-color var(--motion-fast) var(--motion-ease);
@@ -870,7 +741,8 @@
   }
   .controls .scope-note a:hover { text-decoration: underline; }
 
-  table { width: 100%; border-collapse: collapse; background: var(--surface);
+  table { width: 100%; border-collapse: separate; border-spacing: 0;
+          background: var(--surface);
           font-variant-numeric: tabular-nums; }
   th, td { padding: var(--s-2) var(--s-3);
            border-bottom: 1px solid var(--border);

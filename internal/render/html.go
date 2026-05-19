@@ -13,6 +13,15 @@ import (
 //go:embed report.html.tmpl
 var htmlTemplate string
 
+// tokensCSS is the shared design-token block embedded once and injected
+// into both report.html.tmpl and diff.html.tmpl via {{ .Tokens }}. The
+// :root + dark @media blocks live in tokens.css to keep the two
+// surfaces from drifting (which happened repeatedly when each template
+// carried its own copy). Treat it as trusted CSS at execute time.
+//
+//go:embed tokens.css
+var tokensCSS string
+
 var htmlTpl = template.Must(template.New("report").Parse(htmlTemplate))
 
 // hotspotForJSON is the same data as aggregate.Hotspot but with the
@@ -187,6 +196,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 	// String fields below render inside a JS-string context; html/
 	// template auto-applies JS-string escaping for them.
 	return htmlTpl.Execute(w, struct {
+		Tokens            template.CSS
 		DataJSON          template.JS
 		ServeMode         bool
 		Generation        int64
@@ -197,6 +207,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		ScopeSessionsCap  int
 		ScopeLiftURL      string
 	}{
+		Tokens:            template.CSS(tokensCSS),
 		DataJSON:          template.JS(data),
 		ServeMode:         opts.ServeMode,
 		Generation:        opts.Generation,

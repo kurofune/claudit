@@ -170,6 +170,9 @@ type diffHTMLSection struct {
 
 // diffHTMLData is the full payload passed to diff.html.tmpl.
 type diffHTMLData struct {
+	// Tokens carries the shared design-token CSS (see tokens.css). The
+	// template injects it inside <style> with {{ .Tokens }}.
+	Tokens          template.CSS
 	LabelA, LabelB  string
 	TotalsA         aggregate.Totals
 	TotalsB         aggregate.Totals
@@ -222,6 +225,7 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 	}
 
 	data := diffHTMLData{
+		Tokens:    template.CSS(tokensCSS),
 		LabelA:    opt.LabelA,
 		LabelB:    opt.LabelB,
 		TotalsA:   a.Totals(),

@@ -13,99 +13,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
 <style>
-  /* ─── Design tokens (mirrors internal/render/report.html.tmpl)
-     If you change anything here, update the report template too — the
-     two surfaces are meant to feel like one product. v2.2 (`serve`) will
-     extract these into a shared partial; until then, duplicate. */
-  :root {
-    color-scheme: light dark;
-    --brand-h: 280;
-    --bg:           oklch(98.4% 0.005 var(--brand-h));
-    --surface:      oklch(100%  0     0);
-    --surface-2:    oklch(96.5% 0.008 var(--brand-h));
-    --surface-3:    oklch(94%   0.012 var(--brand-h));
-    --border:       oklch(89%   0.012 var(--brand-h));
-    --border-strong:oklch(78%   0.018 var(--brand-h));
-    --ink:          oklch(22%   0.020 var(--brand-h));
-    --ink-2:        oklch(40%   0.015 var(--brand-h));
-    --muted:        oklch(55%   0.012 var(--brand-h));
-    --accent:       oklch(58% 0.16 var(--brand-h));
-    --accent-2:     oklch(62% 0.14 160);
-    --hot:          oklch(62% 0.20 15);
-    --warn:         oklch(70% 0.16 60);
-    --accent-soft:  color-mix(in oklch, var(--accent) 14%, var(--surface));
-    --hot-soft:     oklch(60% 0.20 15 / 0.22);
-    --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
-    --warn-soft:    color-mix(in oklch, var(--warn) 14%, var(--surface));
-
-    --c-1: oklch(60% 0.16 280);
-    --c-2: oklch(62% 0.13 200);
-    --c-3: oklch(64% 0.16 150);
-    --c-4: oklch(70% 0.15  80);
-    --c-5: oklch(64% 0.20  20);
-
-    --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px;
-    --s-5: 24px; --s-6: 32px; --s-7: 48px;
-
-    --t-1: 0.6875rem; --t-2: 0.8125rem; --t-3: 0.875rem;
-    --t-4: 1rem;      --t-5: 1.25rem;   --t-6: 1.75rem;  --t-7: 2.5rem;
-
-    --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont,
-                 "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue",
-                 system-ui, sans-serif;
-    --font-display: "Inter", "InterVariable", "SF Pro Display",
-                    -apple-system, BlinkMacSystemFont,
-                    "Segoe UI Variable Display", system-ui, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono",
-                 Menlo, Consolas, monospace;
-
-    --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-pill: 999px;
-    --shadow-sm: 0 1px 2px color-mix(in oklch, black 5%, transparent);
-    --shadow-md: 0 1px 2px color-mix(in oklch, black 4%, transparent),
-                 0 4px 12px color-mix(in oklch, black 6%, transparent);
-    --shadow-lift: 0 2px 4px color-mix(in oklch, black 6%, transparent),
-                   0 8px 24px color-mix(in oklch, black 8%, transparent);
-
-    /* Motion tokens — shared with report. Spring eases give the cascade
-       a gently-overshooting "settling" feel rather than a flat ramp. */
-    --motion-fast:   200ms;
-    --motion-med:    320ms;
-    --motion-slow:   420ms;
-    --motion-ease:   cubic-bezier(0.34, 1.2, 0.64, 1);
-    --motion-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:           oklch(15%   0.012 var(--brand-h));
-      --surface:      oklch(19%   0.014 var(--brand-h));
-      --surface-2:    oklch(23%   0.016 var(--brand-h));
-      --surface-3:    oklch(28%   0.018 var(--brand-h));
-      --border:       oklch(32%   0.020 var(--brand-h));
-      --border-strong:oklch(45%   0.022 var(--brand-h));
-      --ink:          oklch(94%   0.010 var(--brand-h));
-      --ink-2:        oklch(78%   0.012 var(--brand-h));
-      --muted:        oklch(62%   0.015 var(--brand-h));
-      --accent:       oklch(72% 0.15 var(--brand-h));
-      --accent-2:     oklch(74% 0.14 160);
-      --hot:          oklch(74% 0.18 15);
-      --warn:         oklch(78% 0.15 60);
-      --hot-soft:     oklch(70% 0.20 15 / 0.42);
-      --accent-soft:  color-mix(in oklch, var(--accent) 18%, var(--surface));
-      --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
-      --warn-soft:    color-mix(in oklch, var(--warn) 18%, var(--surface));
-      --c-1: oklch(72% 0.16 280);
-      --c-2: oklch(74% 0.13 200);
-      --c-3: oklch(76% 0.16 150);
-      --c-4: oklch(80% 0.15  80);
-      --c-5: oklch(74% 0.18  20);
-      --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
-      --shadow-md: 0 1px 2px color-mix(in oklch, black 25%, transparent),
-                   0 4px 12px color-mix(in oklch, black 35%, transparent);
-      --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
-                     0 8px 24px color-mix(in oklch, black 40%, transparent);
-    }
-  }
+{{ .Tokens }}
 
   /* ─── Page shell ─────────────────────────────────────────────────── */
   * { box-sizing: border-box; }
@@ -409,10 +317,11 @@
 
   /* ─── Overview scorecard — diverging bar chart of per-dimension
      deltas. Each row's bar centers on a vertical zero axis and extends
-     RIGHT (coral) when cost went up, LEFT (teal) when cost went down,
-     width proportional to |Δ| / max(|Δ|). Rows ranked by |Δ| desc so
-     the biggest mover sits at the top — the canonical "where should I
-     look first" idiom for period-over-period dashboards. */
+     RIGHT (coral, --hot) when cost went up, LEFT (green, --accent-2)
+     when cost went down, width proportional to |Δ| / max(|Δ|). Rows
+     ranked by |Δ| desc so the biggest mover sits at the top — the
+     canonical "where should I look first" idiom for period-over-period
+     dashboards. */
   .scorecard {
     display: flex; flex-direction: column;
     gap: var(--s-1);
@@ -648,8 +557,8 @@
     box-shadow: 0 1px 2px color-mix(in oklch, black 12%, transparent);
     transition: left var(--motion-med) var(--motion-spring);
   }
-  .dumbbell .dot.a { background: var(--c-2); }   /* cyan — A (baseline) */
-  .dumbbell .dot.b { background: var(--accent); } /* purple — B (current) */
+  .dumbbell .dot.a { background: var(--c-2); }   /* A (baseline). Hue follows --c-2 in the active theme; help-dropdown prose refers to it by role ("A-dot") and shows a live ● swatch, so no copy edit needed on theme swaps. */
+  .dumbbell .dot.b { background: var(--accent); } /* B (current). Hue follows --accent (the brand color). Same theme-agnostic prose convention as .dot.a. */
   /* The dot sitting on the same end as the direction arrow (B for up,
      A for down) takes a thin outer ring so the eye reads "this is the
      'after' position." Subtle — only visible on close inspection. */
@@ -947,7 +856,7 @@
   <details class="guide">
     <summary>How to read this diff</summary>
     <div class="body">
-      <p>This diff compares two date ranges of Claude Code spend — <strong>A</strong> (baseline) against <strong>B</strong> (current). Every number is <code>B − A</code>: positive means cost went <strong>up</strong> (coral), negative means it went <strong>down</strong> (teal). When invoked with no <code>--a</code>/<code>--b</code> arguments, A and B are the prior 7 days and the last 7 days respectively (or 30 with <code>--by=month</code>); the labels above are the raw date ranges, not "last week" — the window is a rolling slice, not a calendar week.</p>
+      <p>This diff compares two date ranges of Claude Code spend — <strong>A</strong> (baseline) against <strong>B</strong> (current). Every number is <code>B − A</code>: positive means cost went <strong style="color:var(--hot)">up</strong>, negative means it went <strong style="color:var(--accent-2)">down</strong>. When invoked with no <code>--a</code>/<code>--b</code> arguments, A and B are the prior 7 days and the last 7 days respectively (or 30 with <code>--by=month</code>); the labels above are the raw date ranges, not "last week" — the window is a rolling slice, not a calendar week.</p>
       <ul>
         <li>The <strong>scorecard</strong> is a diverging bar chart of per-dimension Δ. Bars extend right from the center axis when that dimension cost more in B, left when it cost less. Bar length is proportional to <code>|Δ| / max(|Δ|)</code>, so the longest bar is always the biggest mover — that's where to look first. Rows are sorted by that same |Δ| so the top of the list answers "where did the change come from?" Click any row to jump to that section's full movers table.</li>
         <li>The <strong>totals tiles</strong> below show the four headline numbers: total cost, sessions, turns, and overall cache hit ratio. The scorecard decomposes the cost change; the tiles show the headline outcome.</li>
@@ -1049,7 +958,7 @@
   <details class="guide">
     <summary>Reading these movers</summary>
     <div class="body">
-      <p>Each row is one <strong>{{ .Title | lower }}</strong> key that appears in either window, ranked by |Δ|. The dumbbell (●━━━●) is the before/after comparison: the <span style="color:var(--c-2);font-weight:600">cyan dot</span> sits at the key's cost in A and the <span style="color:var(--accent);font-weight:600">purple dot</span> at its cost in B, plotted on a 0..max axis (the section's largest single value defines the right edge). The connecting line <em>is</em> the change — length equals magnitude, color equals direction (coral = cost up, teal = cost down). The B-side dot has a faint outer ring so you can tell which end is "after" at a glance. The A → B numbers and the signed Δ on the right echo the same data in text form.</p>
+      <p>Each row is one <strong>{{ .Title | lower }}</strong> key that appears in either window, ranked by |Δ|. The dumbbell (●━━━●) is the before/after comparison: the <span style="color:var(--c-2);font-weight:600">● A-dot</span> sits at the key's cost in A and the <span style="color:var(--accent);font-weight:600">● B-dot</span> at its cost in B, plotted on a 0..max axis (the section's largest single value defines the right edge). The connecting line <em>is</em> the change — length equals magnitude, color tracks direction: <strong style="color:var(--hot)">up</strong> means cost rose, <strong style="color:var(--accent-2)">down</strong> means it fell. The B-side dot has a faint outer ring so you can tell which end is "after" at a glance. The A → B numbers and the signed Δ on the right echo the same data in text form.</p>
     </div>
   </details>
 
