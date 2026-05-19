@@ -104,8 +104,15 @@ func (s *Server) routes() {
 // Handler exposes the http.Handler. Useful for httptest in tests.
 func (s *Server) Handler() http.Handler { return s.mux }
 
-// Start launches the cache poller on the given context.
+// Start primes the cache with one synchronous refresh and then launches
+// the background poller. Blocking on the first refresh is intentional:
+// without it, the listener (and an --open browser) can race ahead of
+// data and serve the empty initial snapshot — the page loads blank and
+// the user has to reload to see anything.
 func (s *Server) Start(ctx context.Context) {
+	if _, err := s.cache.Refresh(); err != nil {
+		s.opts.Logger.Printf("serve: initial refresh error: %v", err)
+	}
 	go s.cache.RunPoller(ctx, s.opts.PollInterval, func(err error) {
 		s.opts.Logger.Printf("serve: refresh error: %v", err)
 	})

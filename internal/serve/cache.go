@@ -69,8 +69,10 @@ type Cache struct {
 }
 
 // NewCache returns an empty cache rooted at the given projects root.
-// Call Refresh once before serving traffic so the first request has
-// real data — RunPoller will do this for you.
+// Call Refresh once synchronously before serving traffic so the first
+// request has real data. RunPoller does call Refresh on entry, but it
+// must be launched in a goroutine, which means the listener can race
+// ahead of the first refresh — Server.Start handles the sync prime.
 func NewCache(root string) *Cache {
 	c := &Cache{
 		root:  root,
