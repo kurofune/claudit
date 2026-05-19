@@ -4,6 +4,21 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-05-19
+
+### Added
+
+- **`claudit watch` rolling totals now include an Hour tier** alongside Today / Week / Month, so a long debug session can see per-hour burn rate at a glance without doing the arithmetic.
+
+### Changed
+
+- **Default report theme is now teal** (Datadog / Sentry / Honeycomb / Grafana observability-category color) instead of violet. Surfaces carry only a faint teal cast; the brand color shows up in accents — primary affordances, focus rings, the totals headline. The chart palette has been redistributed to avoid violet entirely (blue / rose / green / amber / coral); green and amber slots are preserved because `.tier-good` and `.tier-ok` rely on them semantically. The token block is now a single shared `internal/render/tokens.css` injected into both `report` and `diff` templates, so future theme swaps touch one file instead of two.
+
+### Fixed
+
+- **`claudit serve` no longer renders a blank page on first request.** The cache poller was launching in a goroutine and returning before its first scan completed, so the listener (and any `--open` browser tab) could race the scan and hit the empty initial snapshot. `Server.Start` now primes the cache synchronously before returning, so the listener never accepts before real data is available.
+- **Rounded report tables no longer show a 1px L-sliver in the top corners of header cells.** `border-collapse: collapse` + `border-radius` is a known CSS footgun — the collapsed border becomes owned by the corner cells, which don't follow border-radius. Switched to `border-collapse: separate; border-spacing: 0` so the table's border stays on the table element where border-radius applies cleanly. Side effect: the rounded outline now wraps continuously across the top of header rows (it was previously hidden by the `th` background).
+
 ## [1.1.1] — 2026-05-17
 
 ### Fixed
@@ -86,7 +101,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/kurofune/claudit/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/kurofune/claudit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kurofune/claudit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kurofune/claudit/releases/tag/v1.0.0
