@@ -91,15 +91,37 @@ func isTTY(f *os.File) bool {
 // dominate the screen.
 const alertCapacity = 5
 
+// screenPainter is the alt-buffer painter for TTY mode.
+//
+// Threading model: callers (Render / Alert / handleResize / pollResize)
+// mutate state under p.mu, then signal a dedicated paint goroutine via
+// wake(). The paint goroutine composes a ScreenFrame under p.mu and
+// then performs the (potentially blocking) terminal write WITHOUT the
+// lock held. This is the load-bearing invariant: io.WriteString on a
+// pty whose terminal isn't draining (Ghostty in a fully-obscured
+// window, macOS post-sleep) can park indefinitely. Painting on the
+// event-loop goroutine would jam the entire watch pipeline — bounded
+// channel sends from Tail goroutines would block, polling would stop,
+// the UI would freeze. Painting off the event loop keeps Render and
+// Alert non-blocking so the event loop keeps draining.
+//
+// Frames are coalesced: wakeCh has capacity 1 and dirty is a flag, so
+// many fast Render calls during a slow paint collapse to a single
+// next-paint of the latest state.
 type screenPainter struct {
-	scr     *term.Screen
-	style   term.Style
+	scr   *term.Screen
+	style term.Style
+
+	mu      sync.Mutex
 	alerts  []alertEntry
 	last    Frame
 	hasLast bool
-	mu      sync.Mutex
-	stopCh  chan struct{}
+	dirty   bool // a paint is wanted but not yet performed
 	closed  bool
+
+	wakeCh chan struct{} // cap 1; non-blocking signal to paintLoop
+	stopCh chan struct{} // closed on Close() to terminate paintLoop and resize handler
+	doneCh chan struct{} // closed by paintLoop on exit
 }
 
 type alertEntry struct {
@@ -111,8 +133,11 @@ func newScreenPainter(out *os.File, style term.Style) *screenPainter {
 	p := &screenPainter{
 		scr:    term.NewScreen(out),
 		style:  style,
+		wakeCh: make(chan struct{}, 1),
 		stopCh: make(chan struct{}),
+		doneCh: make(chan struct{}),
 	}
+	go p.paintLoop()
 	p.startResizeHandler()
 	return p
 }
@@ -128,7 +153,7 @@ func (p *screenPainter) handleResize() {
 	}
 	p.scr.Refresh()
 	if p.hasLast {
-		p.paint()
+		p.wake()
 	}
 }
 
@@ -142,7 +167,7 @@ func (p *screenPainter) pollResize() {
 		return
 	}
 	if p.scr.Refresh() && p.hasLast {
-		p.paint()
+		p.wake()
 	}
 }
 
@@ -153,7 +178,7 @@ func (p *screenPainter) Render(frame Frame) {
 	defer p.mu.Unlock()
 	p.last = frame
 	p.hasLast = true
-	p.paint()
+	p.wake()
 }
 
 func (p *screenPainter) Alert(msg string) {
@@ -164,31 +189,80 @@ func (p *screenPainter) Alert(msg string) {
 		p.alerts = p.alerts[len(p.alerts)-alertCapacity:]
 	}
 	if p.hasLast {
-		p.paint()
+		p.wake()
 	}
 }
 
+// Close tears down the painter. It signals the paint goroutine to
+// exit and waits for it. If the paint goroutine is currently blocked
+// inside scr.Paint on a stalled terminal, Close will block until the
+// terminal drains — same shutdown path the user takes by killing the
+// process. The subsequent scr.Close() write (cursor-show + leave-alt)
+// can also block for the same reason; acceptable, single shot at exit.
 func (p *screenPainter) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed {
+		p.mu.Unlock()
 		return
 	}
 	p.closed = true
 	close(p.stopCh)
+	p.mu.Unlock()
+	<-p.doneCh
 	p.scr.Close()
 }
 
-// paint assembles the three-panel ScreenFrame and sends it. Caller
-// must hold p.mu.
-func (p *screenPainter) paint() {
+// wake signals paintLoop that there's something new to draw. Caller
+// must hold p.mu. Non-blocking: if a wake is already queued, the new
+// state will be picked up by the in-flight paint via the dirty flag.
+func (p *screenPainter) wake() {
+	p.dirty = true
+	select {
+	case p.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// paintLoop is the dedicated paint goroutine. It composes frames under
+// p.mu and writes them to the terminal WITHOUT the lock held — so a
+// stalled pty parks only this goroutine, not the event loop. Exits
+// when stopCh closes.
+func (p *screenPainter) paintLoop() {
+	defer close(p.doneCh)
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-p.wakeCh:
+			p.mu.Lock()
+			if p.closed {
+				p.mu.Unlock()
+				return
+			}
+			if !p.dirty || !p.hasLast {
+				p.mu.Unlock()
+				continue
+			}
+			p.dirty = false
+			frame := p.composeFrame()
+			p.mu.Unlock()
+			p.scr.Paint(frame) // may block on a stalled pty; safe — off the event loop
+		}
+	}
+}
+
+// composeFrame assembles the three-panel ScreenFrame from the current
+// state. Caller must hold p.mu. The returned ScreenFrame contains
+// freshly-built slices of immutable strings, safe to read after the
+// lock is released.
+func (p *screenPainter) composeFrame() term.ScreenFrame {
 	panels := []term.Panel{}
 	if p.last.HasRolling {
 		panels = append(panels, p.totalsPanel(p.last.Rolling))
 	}
 	panels = append(panels, p.livePanel(p.last.Live))
 	panels = append(panels, p.alertsPanel())
-	p.scr.Paint(term.ScreenFrame{Panels: panels})
+	return term.ScreenFrame{Panels: panels}
 }
 
 func (p *screenPainter) totalsPanel(d RollingPanelData) term.Panel {

@@ -8,6 +8,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 - **`claudit version` / `claudit --version`** prints the installed binary's module version and git commit. For `go install` builds the output is `claudit vX.Y.Z (commit abc1234)`; for local `go build` builds it's `claudit (devel) (commit abc1234, dirty)`. Built on `runtime/debug.ReadBuildInfo`, so no version constant to forget to bump. Closes the diagnostic gap where a stale `go install ...@latest` (served by a Go module proxy that hadn't yet indexed the new tag) silently returned the previous version with no way to tell.
 
+### Fixed
+
+- **`claudit watch` no longer freezes when the terminal stops draining its pty** (Ghostty in a fully-obscured window, macOS post-sleep, etc.). The screen painter wrote frames synchronously on the event-loop goroutine, so a parked `io.WriteString` to the TTY blocked the loop, which stopped draining the bounded event channels, which blocked the per-session Tail goroutines, which stopped polling JSONLs. Diagnostic fingerprint: opening a second `claudit watch` would un-freeze the first one, because bringing the terminal to the foreground let its pty drain again. Painting now runs on a dedicated goroutine with latest-frame coalescing (a `dirty` flag plus a cap-1 wake channel), so `Render` and `Alert` are non-blocking and the event loop keeps draining no matter how slow the terminal is.
+
 ## [1.2.0] — 2026-05-19
 
 ### Added
