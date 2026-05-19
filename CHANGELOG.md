@@ -4,6 +4,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **`claudit version` / `claudit --version`** prints the installed binary's module version and git commit. For `go install` builds the output is `claudit vX.Y.Z (commit abc1234)`; for local `go build` builds it's `claudit (devel) (commit abc1234, dirty)`. Built on `runtime/debug.ReadBuildInfo`, so no version constant to forget to bump. Closes the diagnostic gap where a stale `go install ...@latest` (served by a Go module proxy that hadn't yet indexed the new tag) silently returned the previous version with no way to tell.
+
 ## [1.2.0] — 2026-05-19
 
 ### Added

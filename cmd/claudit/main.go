@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +35,9 @@ func run() error {
 		case "help", "-h", "--help":
 			fmt.Fprint(os.Stdout, topLevelUsage)
 			return nil
+		case "version", "--version":
+			fmt.Println(versionString())
+			return nil
 		case "report":
 			return runReport(args[1:])
 		case "diff":
@@ -58,9 +62,46 @@ Commands:
   diff     Compare two date ranges and report top movers (HTML by default; --json or unset --html for markdown).
   watch    Tail a live session and print running cost.
   serve    Run a local web daemon that serves a live-updating report (filters via URL query).
+  version  Print the installed claudit version and exit (also: --version).
 
 Run "claudit <command> --help" for command-specific flags.
 `
+
+// versionString returns "claudit vX.Y.Z (commit abc1234)" for go-install
+// builds and "claudit (devel) (commit abc1234, dirty)" for local builds.
+// Both forms answer the same diagnostic question — "is the binary on my
+// PATH actually built from the source/tag I expect" — which is exactly
+// the trap we hit when a stale go-module-proxy cache served v1.1.1 in
+// response to @latest after v1.2.0 was already tagged.
+func versionString() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "claudit (unknown)"
+	}
+	version := info.Main.Version
+	if version == "" {
+		version = "(devel)"
+	}
+	var rev, dirty string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if len(s.Value) >= 7 {
+				rev = s.Value[:7]
+			} else {
+				rev = s.Value
+			}
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = ", dirty"
+			}
+		}
+	}
+	if rev != "" {
+		return fmt.Sprintf("claudit %s (commit %s%s)", version, rev, dirty)
+	}
+	return fmt.Sprintf("claudit %s", version)
+}
 
 func runReport(args []string) error {
 	fs := flag.NewFlagSet("claudit report", flag.ExitOnError)
