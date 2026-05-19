@@ -1,0 +1,53 @@
+name: release
+
+# Publishes a GitHub Release whenever a v* tag is pushed. Pairs with the
+# existing manual release ritual:
+#
+#   1. Add a new "## [X.Y.Z] — YYYY-MM-DD" section to CHANGELOG.md.
+#   2. Commit as "chore(release): cut vX.Y.Z" and push to main.
+#   3. Tag the commit with vX.Y.Z and push the tag.
+#
+# This workflow runs on step 3, reads the matching changelog section, and
+# creates the Release using that section as the body. If the changelog
+# section is missing, it fails loudly so an empty Release never ships.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # required for gh release create
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract changelog section for tag
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # awk extracts everything between "## [X.Y.Z]" and the next
+          # "## [" line. index()-based prefix matching avoids the regex-
+          # escaping headache of literal [ and ] inside a dynamic pattern.
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { capture = 1; next }
+            capture && index($0, "## [") == 1 { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::No '## [${version}]' section in CHANGELOG.md. Add a versioned entry before tagging." >&2
+            exit 1
+          fi
+          echo "::group::Release notes for ${GITHUB_REF_NAME}"
+          cat /tmp/release-notes.md
+          echo "::endgroup::"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file /tmp/release-notes.md
