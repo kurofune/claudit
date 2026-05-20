@@ -241,10 +241,8 @@ func (s *watchState) checkBudget() {
 	if s.totalCost >= s.budget {
 		s.painter.Alert(styleBudgetSingle(s.painter.Style(), s.totalCost, s.budget))
 		s.budgetAlerted = true
-		if s.notifier != nil {
-			_ = s.notifier.Send("claudit: budget crossed",
-				fmt.Sprintf("Running cost $%.2f crossed budget $%.2f", s.totalCost, s.budget))
-		}
+		s.notifyAsync("claudit: budget crossed",
+			fmt.Sprintf("Running cost $%.2f crossed budget $%.2f", s.totalCost, s.budget))
 	}
 }
 
@@ -276,10 +274,20 @@ func (s *watchState) checkSpike(cost float64) {
 		tools = "no-tool"
 	}
 	s.painter.Alert(styleSpikeSingle(s.painter.Style(), s.turns, cost, ratio, s.tcCount, med, tools))
-	if s.notifier != nil {
-		_ = s.notifier.Send("claudit: cost spike",
-			fmt.Sprintf("Turn %d cost $%.4f (%.1fx median)", s.turns, cost, ratio))
+	s.notifyAsync("claudit: cost spike",
+		fmt.Sprintf("Turn %d cost $%.4f (%.1fx median)", s.turns, cost, ratio))
+}
+
+// notifyAsync fires a desktop notification on a fresh goroutine so a
+// slow or hung backend (osascript / notify-send shells out and waits
+// for the subprocess) cannot stall the polling goroutine — which
+// would otherwise miss ctx cancellation and wedge shutdown.
+func (s *watchState) notifyAsync(title, body string) {
+	if s.notifier == nil {
+		return
 	}
+	n := s.notifier
+	go func() { _ = n.Send(title, body) }()
 }
 
 func (s *watchState) snapshotTurnCosts() []float64 {

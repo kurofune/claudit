@@ -250,21 +250,34 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 			}
 			msg := styleSpikeMulti(h.painter.Style(), projectLabel(s.cwd), s.turns, cost, med, tools)
 			h.painter.Alert(msg)
-			if h.notifier != nil {
-				_ = h.notifier.Send("claudit: cost spike",
-					fmt.Sprintf("%s turn %d cost $%.4f (%.1fx median)", projectLabel(s.cwd), s.turns, cost, cost/med))
-			}
+			// Run notifier off the hub goroutine: osascript / notify-send
+			// can hang, and we cannot let that wedge shutdown.
+			h.notifyAsync("claudit: cost spike",
+				fmt.Sprintf("%s turn %d cost $%.4f (%.1fx median)", projectLabel(s.cwd), s.turns, cost, cost/med))
 		}
 	}
 	if te.ev.Live && h.budget > 0 && !h.state.budgetAlerted && h.state.combinedCost >= h.budget {
 		h.painter.Alert(styleBudgetMulti(h.painter.Style(), h.state.combinedCost, h.budget))
 		h.state.budgetAlerted = true
-		if h.notifier != nil {
-			_ = h.notifier.Send("claudit: budget crossed",
-				fmt.Sprintf("Combined cost $%.2f crossed budget $%.2f", h.state.combinedCost, h.budget))
-		}
+		h.notifyAsync("claudit: budget crossed",
+			fmt.Sprintf("Combined cost $%.2f crossed budget $%.2f", h.state.combinedCost, h.budget))
 	}
 	h.paint()
+}
+
+// notifyAsync fires a desktop notification on a fresh goroutine so a
+// slow or hung backend (osascript / notify-send shells out and waits
+// for the subprocess) cannot block the hub goroutine — which must
+// keep reading eventCh and stay responsive to stop on shutdown. The
+// Notifier interface documents non-blocking Send, but the exec-based
+// implementations can stall; this helper makes the call site honor
+// the contract regardless of the backend.
+func (h *multiHub) notifyAsync(title, body string) {
+	if h.notifier == nil {
+		return
+	}
+	n := h.notifier
+	go func() { _ = n.Send(title, body) }()
 }
 
 func (h *multiHub) handleNotice(tn taggedNotice) {
