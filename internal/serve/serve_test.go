@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -240,6 +241,46 @@ func TestServer_HardenedTimeouts(t *testing.T) {
 	}
 	if hs.IdleTimeout <= 0 {
 		t.Errorf("IdleTimeout = %v, want > 0", hs.IdleTimeout)
+	}
+}
+
+// TestWithBodyLimit_EnforcesCap verifies the body-size middleware caps
+// reads from r.Body so a malicious or buggy client can't pin memory by
+// streaming a large body. Builds a tiny test handler that drains
+// r.Body, wraps it through the same middleware the server uses, and
+// asserts that an over-cap body surfaces *http.MaxBytesError and an
+// at-cap body reads fine.
+func TestWithBodyLimit_EnforcesCap(t *testing.T) {
+	var readErr error
+	var readBytes int
+	h := withBodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		readErr = err
+		readBytes = len(b)
+	}))
+
+	// Over-cap: one byte past the limit must produce MaxBytesError.
+	over := strings.Repeat("x", maxRequestBytes+1)
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(over))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	var mbErr *http.MaxBytesError
+	if !errors.As(readErr, &mbErr) {
+		t.Fatalf("over-cap read err = %v (%T), want *http.MaxBytesError", readErr, readErr)
+	}
+
+	// At-cap: exactly maxRequestBytes must read cleanly.
+	readErr = nil
+	readBytes = 0
+	atCap := strings.Repeat("y", maxRequestBytes)
+	r = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(atCap))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if readErr != nil {
+		t.Fatalf("at-cap read err = %v, want nil", readErr)
+	}
+	if readBytes != maxRequestBytes {
+		t.Errorf("at-cap read %d bytes, want %d", readBytes, maxRequestBytes)
 	}
 }
 

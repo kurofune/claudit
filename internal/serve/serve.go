@@ -108,7 +108,25 @@ func (s *Server) routes() {
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler { return withBodyLimit(s.mux) }
+
+// maxRequestBytes caps the bytes any handler can read from r.Body.
+// Defense-in-depth: today's handlers don't read bodies at all (GET/HEAD
+// only), but a future handler shouldn't have to remember to bound its
+// own reads. 1 MiB is generous for any plausible legitimate request and
+// small enough that a hostile client can't pin memory at scale.
+const maxRequestBytes = 1 << 20
+
+// withBodyLimit wraps next so every request's body is capped at
+// maxRequestBytes. http.MaxBytesReader installs the limit on r.Body;
+// over-cap reads surface as *http.MaxBytesError, which downstream
+// handlers can treat the same as any read failure.
+func withBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
+		next.ServeHTTP(w, r)
+	})
+}
 
 // Start primes the cache with one synchronous refresh and then launches
 // the background poller. Blocking on the first refresh is intentional:
@@ -147,7 +165,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // keep-alive reuse for the auto-reload poller.
 func (s *Server) buildHTTPServer() *http.Server {
 	return &http.Server{
-		Handler:           s.mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
