@@ -133,11 +133,24 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return s.serve(ctx, ln)
 }
 
-func (s *Server) serve(ctx context.Context, ln net.Listener) error {
-	srv := &http.Server{
+// buildHTTPServer constructs the *http.Server with hardening timeouts
+// applied. Slow-loris and stalled-client protection: every kind of
+// indefinite hold (headers, body, response write, idle keep-alive)
+// gets a bound. Values are conservative defaults — claudit renders
+// can be heavy so WriteTimeout is generous, and IdleTimeout permits
+// keep-alive reuse for the auto-reload poller.
+func (s *Server) buildHTTPServer() *http.Server {
+	return &http.Server{
 		Handler:           s.mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+}
+
+func (s *Server) serve(ctx context.Context, ln net.Listener) error {
+	srv := s.buildHTTPServer()
 	errCh := make(chan error, 1)
 	go func() {
 		err := srv.Serve(ln)
