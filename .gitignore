@@ -2,6 +2,7 @@
 cost.md
 report.html
 *.html
+todo.md
 
 # Build artifacts
 /claudit
