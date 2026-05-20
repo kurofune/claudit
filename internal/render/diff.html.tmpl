@@ -66,6 +66,14 @@
   .brand-sub { font-size: var(--t-2); color: var(--muted);
                font-variant-numeric: tabular-nums;
                font-family: var(--font-mono); }
+  /* Build label pinned to the bottom of the sidebar — mirrors
+     .nav-footer in the report template. */
+  .nav-footer { margin-top: auto;
+                padding: var(--s-3) var(--s-2) 0;
+                border-top: 1px solid var(--border);
+                font-size: var(--t-1); color: var(--muted);
+                font-family: var(--font-mono); opacity: 0.7;
+                letter-spacing: 0.01em; }
   .nav-list { display: flex; flex-direction: column; gap: 2px;
               list-style: none; margin: 0; padding: 0; }
   .nav-item {
@@ -833,6 +841,7 @@
     </a>
     {{ end }}
   </nav>
+  {{ if .Version }}<footer class="nav-footer">{{ .Version }}</footer>{{ end }}
 </aside>
 
 <main class="panel">

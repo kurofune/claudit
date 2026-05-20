@@ -91,6 +91,7 @@ func runServe(args []string) error {
 		DefaultRedact:      *redact,
 		ReloadIntervalSec:  *reloadSec,
 		MaxCachedRenders:   *cacheSize,
+		Version:            versionShort(),
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

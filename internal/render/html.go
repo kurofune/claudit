@@ -79,6 +79,12 @@ type HTMLOptions struct {
 	// ScopeLiftURL is the relative URL the pill's "show all" link
 	// targets. Always rooted at "/". Serve-only.
 	ScopeLiftURL string
+
+	// Version is the compact build label rendered under the brand
+	// in the sidebar (e.g. "v1.2.0" or "(devel) abc1234"). Empty
+	// strings render no chip — keeps test goldens happy and is the
+	// right behavior for `go run` invocations without build info.
+	Version string
 }
 
 // HTML writes a self-contained interactive HTML report to w. Equivalent
@@ -206,6 +212,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		ScopeWindowLabel  string
 		ScopeSessionsCap  int
 		ScopeLiftURL      string
+		Version           string
 	}{
 		Tokens:            template.CSS(tokensCSS),
 		DataJSON:          template.JS(data),
@@ -217,6 +224,7 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		ScopeWindowLabel:  opts.ScopeWindowLabel,
 		ScopeSessionsCap:  opts.ScopeSessionsCap,
 		ScopeLiftURL:      liftURL,
+		Version:           opts.Version,
 	})
 }
 

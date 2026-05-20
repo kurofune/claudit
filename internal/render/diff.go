@@ -173,6 +173,7 @@ type diffHTMLData struct {
 	// Tokens carries the shared design-token CSS (see tokens.css). The
 	// template injects it inside <style> with {{ .Tokens }}.
 	Tokens          template.CSS
+	Version         string
 	LabelA, LabelB  string
 	TotalsA         aggregate.Totals
 	TotalsB         aggregate.Totals
@@ -226,6 +227,7 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 
 	data := diffHTMLData{
 		Tokens:    template.CSS(tokensCSS),
+		Version:   opt.Version,
 		LabelA:    opt.LabelA,
 		LabelB:    opt.LabelB,
 		TotalsA:   a.Totals(),
@@ -273,6 +275,11 @@ type DiffOptions struct {
 	// Hotspots is the size of the hotspot pool used to derive the
 	// "new in B" section. Default 10. Zero disables that section.
 	Hotspots int
+
+	// Version is the compact build label rendered under the brand
+	// in the sidebar. Empty strings render no chip — keeps tests
+	// and headless `go run` paths quiet.
+	Version string
 }
 
 func (o *DiffOptions) defaults() {

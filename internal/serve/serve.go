@@ -49,6 +49,12 @@ type Options struct {
 	// 0 disables caching; 16 is plenty for a single-user tool.
 	MaxCachedRenders int
 
+	// Version is the short build label rendered in the report's
+	// sidebar chrome. Set by cmd/claudit/serve.go from versionShort();
+	// internal/serve stays free of debug.ReadBuildInfo so the package
+	// remains import-cycle-free and unit-testable.
+	Version string
+
 	// Logger is used for the access log and refresh-error reports.
 	// nil → log.Default().
 	Logger *log.Logger
@@ -279,6 +285,7 @@ func (s *Server) renderHTML(snap *Snapshot, q Query, scope ScopeInfo) ([]byte, e
 		ScopeWindowLabel:  scope.WindowLabel,
 		ScopeSessionsCap:  scope.SessionsCap,
 		ScopeLiftURL:      scope.LiftURL,
+		Version:           s.opts.Version,
 	})
 	if err != nil {
 		return nil, err
