@@ -1,0 +1,23 @@
+{
+  "skill_name": "tdd",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Let's TDD a cart total calculator in TypeScript. It should handle adding items with prices and quantities, and return the total. Use vitest.",
+      "expected_output": "Should produce a test list with behavioral scenarios, then walk through Red-Green-Refactor for each one — writing one test, running it to see it fail, writing minimum code, running to see it pass, optionally refactoring, then repeating.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "TDD a password strength validator in Python. It should check length >= 8, at least one uppercase, one lowercase, one digit, and one special character. Use pytest.",
+      "expected_output": "Should produce a test list covering each rule plus edge cases, then drive implementation one test at a time through Red-Green-Refactor cycles.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Write tests for this existing function that calculates fibonacci numbers. Make sure it's well covered.",
+      "expected_output": "Should NOT trigger the TDD skill — this is a test-after request, not TDD. Claude should write tests normally without the Canon TDD ceremony.",
+      "files": []
+    }
+  ]
+}

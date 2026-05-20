@@ -1,7 +1,7 @@
 ### Writing Code — Testing Requirements
 
 #### Backend (TDD Required)
-All backend code — handlers, services, models, data logic — MUST use Kent Beck's TDD (Red-Green-Refactor). Run a sub-agent to do the full red-green-refactor cycle.
+All backend code — handlers, services, models, data logic — MUST use Kent Beck's TDD (Red-Green-Refactor). Run /tdd in a sub-agent to do the full red-green-refactor cycle.
 
 This is NOT optional. Do NOT write backend implementation code without a failing test first.
 
