@@ -1,8 +1,6 @@
 package term
 
 import (
-	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -37,7 +35,7 @@ type ScreenFrame struct {
 // internal locking — but if you ever fan rendering out to multiple
 // goroutines, wrap calls in a mutex.
 type Screen struct {
-	w       io.Writer
+	ew      errWriter
 	f       *os.File
 	style   Style
 	closeMu sync.Mutex
@@ -51,12 +49,12 @@ type Screen struct {
 // should branch on TTY detection before constructing a Screen.
 func NewScreen(f *os.File) *Screen {
 	s := &Screen{
-		w:     f,
+		ew:    errWriter{w: f},
 		f:     f,
 		style: NewStyle(f),
 	}
 	s.cols, s.rows = TerminalSize(f)
-	io.WriteString(f, altEnter+curHide+clearAll+curHome)
+	s.ew.WriteString(altEnter + curHide + clearAll + curHome)
 	return s
 }
 
@@ -68,9 +66,13 @@ func (s *Screen) Close() {
 	if s.closed {
 		return
 	}
-	io.WriteString(s.w, curShow+altLeave)
+	s.ew.WriteString(curShow + altLeave)
 	s.closed = true
 }
+
+// Err returns the first write error encountered by any Paint / Println /
+// Close call, or nil. Optional inspection point for callers.
+func (s *Screen) Err() error { return s.ew.err }
 
 // Style returns the colorizer Screen was constructed with — callers
 // pass this through to their panel-builder helpers so a single
@@ -132,12 +134,12 @@ func (s *Screen) Paint(frame ScreenFrame) {
 	// shorter). Erase-to-end-of-screen at the very start already
 	// handles this for the redraw case, but we still want the cursor
 	// parked somewhere sensible.
-	io.WriteString(s.w, b.String())
+	s.ew.WriteString(b.String())
 }
 
 // Println writes a one-shot line to the alt screen. Rarely useful in
 // alt-screen mode (the line will be overwritten by the next Paint)
 // but kept for symmetry with the non-TTY Renderer.
 func (s *Screen) Println(msg string) {
-	fmt.Fprintln(s.w, msg)
+	s.ew.Println(msg)
 }

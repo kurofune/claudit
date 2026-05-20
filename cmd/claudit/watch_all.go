@@ -372,13 +372,14 @@ func measureDetailCols(st term.Style, groups []projectGroup) (turn, total int) {
 
 func (h *multiHub) shutdown(w *os.File) {
 	h.painter.Close()
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "=== claudit watch --all summary ===")
-	fmt.Fprintf(w, "combined cost: $%.4f\n", h.state.combinedCost)
-	fmt.Fprintf(w, "sessions seen: %d\n", len(h.state.sessions))
+	ew := &errWriter{w: w}
+	ew.Println()
+	ew.Println("=== claudit watch --all summary ===")
+	ew.Printf("combined cost: $%.4f\n", h.state.combinedCost)
+	ew.Printf("sessions seen: %d\n", len(h.state.sessions))
 	groups := h.state.groupByProject(time.Now())
 	for _, g := range groups {
-		fmt.Fprintf(w, "  %s: $%.4f across %d session(s), %d turn(s)\n",
+		ew.Printf("  %s: $%.4f across %d session(s), %d turn(s)\n",
 			projectLabel(g.cwd), g.totalCost(), len(g.sessions), g.totalTurns())
 	}
 }

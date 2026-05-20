@@ -40,16 +40,10 @@ type turnSample struct {
 // --scan-days. Thirty days covers the "month" bucket exactly.
 const defaultScanDays = 30
 
-// newRollingTotals scans root for every JSONL and seeds history with
-// each assistant turn's (timestamp, cost) within the trailing 30
-// days. now is injected for test determinism.
-func newRollingTotals(root string, prices *pricing.Table, now time.Time) (*rollingTotals, error) {
-	return newRollingTotalsWithDays(root, prices, now, defaultScanDays)
-}
-
-// newRollingTotalsWithDays is the parameterized variant — exposed so
-// the watch CLI can pipe through --scan-days. scanDays <= 0 is
-// clamped to 1; very large values are accepted as-is.
+// newRollingTotalsWithDays scans root for every JSONL and seeds
+// history with each assistant turn's (timestamp, cost) within the
+// trailing scanDays days. now is injected for test determinism.
+// scanDays <= 0 is clamped to 1; very large values are accepted as-is.
 //
 // File discovery uses listJSONL's mtime filter so files whose last
 // modification predates the scan window are skipped without opening.

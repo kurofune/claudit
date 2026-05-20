@@ -157,20 +157,6 @@ func (p *screenPainter) handleResize() {
 	}
 }
 
-// pollResize is the Windows-side variant. Only repaints when Refresh
-// reports an actual dimension change — repainting unconditionally
-// every poll tick would churn the screen for no benefit.
-func (p *screenPainter) pollResize() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return
-	}
-	if p.scr.Refresh() && p.hasLast {
-		p.wake()
-	}
-}
-
 func (p *screenPainter) Style() term.Style { return p.style }
 
 func (p *screenPainter) Render(frame Frame) {
@@ -327,8 +313,9 @@ func formatAge(d time.Duration) string {
 // --- stream painter -------------------------------------------------
 
 type streamPainter struct {
-	w     io.Writer
-	style term.Style
+	w       io.Writer
+	style   term.Style
+	lastErr error
 }
 
 func newStreamPainter(w io.Writer, style term.Style) *streamPainter {
@@ -347,12 +334,16 @@ func (p *streamPainter) Render(frame Frame) {
 	}
 	parts = append(parts, frame.Live.Rows...)
 	if len(parts) > 0 {
-		fmt.Fprintln(p.w, strings.Join(parts, " · "))
+		if _, err := fmt.Fprintln(p.w, strings.Join(parts, " · ")); err != nil {
+			p.lastErr = err
+		}
 	}
 }
 
 func (p *streamPainter) Alert(msg string) {
-	fmt.Fprintln(p.w, msg)
+	if _, err := fmt.Fprintln(p.w, msg); err != nil {
+		p.lastErr = err
+	}
 }
 
 func (p *streamPainter) Close() {}

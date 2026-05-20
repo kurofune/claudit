@@ -88,22 +88,22 @@ func (a *Aggregator) Anomalies() []Anomaly {
 		// on both sides. A bucket with no cache-eligible traffic has no
 		// meaningful hit ratio, and including its synthetic 0 would
 		// pull the median down and flag everything afterwards.
-		if pts[i].Tokens.CacheableTokens() == 0 {
+		if pts[i].CacheableTokens() == 0 {
 			continue
 		}
 		ratios := make([]float64, 0, anomalyWindow)
 		for j := i - anomalyWindow; j < i; j++ {
-			if pts[j].Tokens.CacheableTokens() == 0 {
+			if pts[j].CacheableTokens() == 0 {
 				continue
 			}
-			ratios = append(ratios, pts[j].Tokens.HitRatio())
+			ratios = append(ratios, pts[j].HitRatio())
 		}
 		if len(ratios) < anomalyWindow/2 {
 			// Not enough prior cache-eligible buckets to baseline against.
 			continue
 		}
 		medRatio := stat.Median(ratios)
-		hr := pts[i].Tokens.HitRatio()
+		hr := pts[i].HitRatio()
 		if medRatio-hr >= anomalyHitRatioDrop {
 			out = append(out, Anomaly{
 				Time:     pts[i].Time,

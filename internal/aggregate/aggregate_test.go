@@ -32,9 +32,8 @@ func TestAggregate_Basic(t *testing.T) {
 	agg.Add(turn("claude-haiku-4-5-20251001", 100, 200, true, "/p/bar", t0))
 
 	tot := agg.Totals()
-	if tot.Sessions == 0 {
-		// We don't track sessions without a sessionId on the turn, so this is OK.
-	}
+	// Note: tot.Sessions may be 0 here because the turn helper doesn't
+	// set SessionID, and we only count sessions with an ID.
 	if tot.InputTokens != 1_000_100 {
 		t.Errorf("input total: %d", tot.InputTokens)
 	}

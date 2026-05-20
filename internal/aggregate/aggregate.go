@@ -266,7 +266,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		}
 	}
 
-	a.totals.Tokens.addUsage(t.Usage)
+	a.totals.addUsage(t.Usage)
 	a.totals.CostUSD += cost
 	a.totals.Turns++
 	if a.totals.First.IsZero() || t.Timestamp.Before(a.totals.First) {
@@ -292,7 +292,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		mb = &ModelBucket{Model: t.Model}
 		a.byModel[t.Model] = mb
 	}
-	mb.Tokens.addUsage(t.Usage)
+	mb.addUsage(t.Usage)
 	mb.CostUSD += cost
 	mb.Turns++
 
@@ -317,7 +317,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		a.projectModelTurns[proj] = map[string]int{}
 		a.projectSession[proj] = map[string]struct{}{}
 	}
-	pb.Tokens.addUsage(t.Usage)
+	pb.addUsage(t.Usage)
 	pb.CostUSD += cost
 	pb.Turns++
 	a.projectModelTurns[proj][t.Model]++
@@ -345,7 +345,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			sb = &SessionBucket{SessionID: t.SessionID, Project: proj}
 			a.bySession[t.SessionID] = sb
 		}
-		sb.Tokens.addUsage(t.Usage)
+		sb.addUsage(t.Usage)
 		sb.CostUSD += cost
 		sb.Turns++
 
@@ -388,7 +388,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		if pb.Sample == "" && entry.Sample != "" {
 			pb.Sample = entry.Sample
 		}
-		pb.Tokens.addUsage(t.Usage)
+		pb.addUsage(t.Usage)
 		pb.CostUSD += cost
 		pb.TurnCount++
 		if entry.UserUUID != "" {
@@ -404,7 +404,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	if t.Sidechain {
 		tgt = &a.side.Sidechain
 	}
-	tgt.Tokens.addUsage(t.Usage)
+	tgt.addUsage(t.Usage)
 	tgt.CostUSD += cost
 	tgt.Turns++
 
@@ -423,7 +423,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			sb = &SubagentBucket{Type: bucketKey}
 			a.bySub[bucketKey] = sb
 		}
-		sb.Tokens.addUsage(t.Usage)
+		sb.addUsage(t.Usage)
 		sb.CostUSD += cost
 		sb.Turns++
 
@@ -450,7 +450,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 				}
 				a.byInvocation[t.SourceFile] = inv
 			}
-			inv.Tokens.addUsage(t.Usage)
+			inv.addUsage(t.Usage)
 			inv.CostUSD += cost
 			inv.Turns++
 			if !t.Timestamp.IsZero() && (inv.First.IsZero() || t.Timestamp.Before(inv.First)) {

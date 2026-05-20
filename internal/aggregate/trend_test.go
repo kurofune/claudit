@@ -98,10 +98,10 @@ func TestTrend_HitRatioPerBucket(t *testing.T) {
 	if len(pts) != 2 {
 		t.Fatalf("want 2 buckets, got %d", len(pts))
 	}
-	if got := pts[0].Tokens.HitRatio(); got != 0 {
+	if got := pts[0].HitRatio(); got != 0 {
 		t.Errorf("d1 hit ratio: %v, want 0", got)
 	}
-	if got := pts[1].Tokens.HitRatio(); got != 0.9 {
+	if got := pts[1].HitRatio(); got != 0.9 {
 		t.Errorf("d2 hit ratio: %v, want 0.9", got)
 	}
 }

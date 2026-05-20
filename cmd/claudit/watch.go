@@ -32,20 +32,20 @@ func runWatch(args []string) error {
 	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals at the top of the UI")
 	scanDays := fs.Int("scan-days", defaultScanDays, "rolling-totals startup scan window in days; smaller is faster but clamps the month total to this window")
 	fs.Usage = func() {
-		out := fs.Output()
-		fmt.Fprintln(out, "claudit watch — tail a live session JSONL and print running cost.")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Usage:")
-		fmt.Fprintln(out, "  claudit watch [flags] [session-id]")
-		fmt.Fprintln(out, "  claudit watch --all [flags]")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "If session-id is omitted, the most recently modified session is tailed.")
-		fmt.Fprintln(out, "--all ignores any positional argument and tails every recently-modified session.")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "On a TTY, watch takes over the screen (alt buffer) and restores it on Ctrl-C.")
-		fmt.Fprintln(out, "Piped output falls back to one line per status update.")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Flags:")
+		ew := &errWriter{w: fs.Output()}
+		ew.Println("claudit watch — tail a live session JSONL and print running cost.")
+		ew.Println()
+		ew.Println("Usage:")
+		ew.Println("  claudit watch [flags] [session-id]")
+		ew.Println("  claudit watch --all [flags]")
+		ew.Println()
+		ew.Println("If session-id is omitted, the most recently modified session is tailed.")
+		ew.Println("--all ignores any positional argument and tails every recently-modified session.")
+		ew.Println()
+		ew.Println("On a TTY, watch takes over the screen (alt buffer) and restores it on Ctrl-C.")
+		ew.Println("Piped output falls back to one line per status update.")
+		ew.Println()
+		ew.Println("Flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -320,38 +320,39 @@ func (s *watchState) shutdown(w io.Writer) {
 }
 
 func (s *watchState) printSummary(w io.Writer) {
-	fmt.Fprintln(w)
+	ew := &errWriter{w: w}
+	ew.Println()
 	dur := time.Since(s.started).Truncate(time.Second)
-	fmt.Fprintln(w, "=== claudit watch summary ===")
-	fmt.Fprintf(w, "session:     %s\n", firstNonEmpty(s.sessionID, "(none seen)"))
-	fmt.Fprintf(w, "cwd:         %s\n", firstNonEmpty(s.cwd, "(none seen)"))
-	fmt.Fprintf(w, "duration:    %s\n", dur)
-	fmt.Fprintf(w, "turns:       %d\n", s.turns)
-	fmt.Fprintf(w, "cost:        $%.4f\n", s.totalCost)
+	ew.Println("=== claudit watch summary ===")
+	ew.Printf("session:     %s\n", firstNonEmpty(s.sessionID, "(none seen)"))
+	ew.Printf("cwd:         %s\n", firstNonEmpty(s.cwd, "(none seen)"))
+	ew.Printf("duration:    %s\n", dur)
+	ew.Printf("turns:       %d\n", s.turns)
+	ew.Printf("cost:        $%.4f\n", s.totalCost)
 	r := s.tokens.hitRatio()
 	if r > 0 {
-		fmt.Fprintf(w, "hit ratio:   %.1f%%\n", 100*r)
+		ew.Printf("hit ratio:   %.1f%%\n", 100*r)
 	} else {
-		fmt.Fprintf(w, "hit ratio:   —\n")
+		ew.Printf("hit ratio:   —\n")
 	}
 	if s.turns >= 3 && s.maxTurnCost > 0 {
 		med := stat.Median(s.snapshotTurnCosts())
 		if med > 0 {
-			fmt.Fprintf(w, "max turn:    $%.4f at turn %d (%.1fx session median)\n",
+			ew.Printf("max turn:    $%.4f at turn %d (%.1fx session median)\n",
 				s.maxTurnCost, s.maxTurnIndex, s.maxTurnCost/med)
 		} else {
-			fmt.Fprintf(w, "max turn:    $%.4f at turn %d\n", s.maxTurnCost, s.maxTurnIndex)
+			ew.Printf("max turn:    $%.4f at turn %d\n", s.maxTurnCost, s.maxTurnIndex)
 		}
 	}
 	if s.rolling != nil {
 		if base := s.rolling.baselineHitRatio(); base > 0 && r > 0 {
 			delta := 100 * (r - base)
-			fmt.Fprintf(w, "vs 7d avg:   hit ratio %+.1f pp (this session %.1f%%, 7-day %.1f%%)\n",
+			ew.Printf("vs 7d avg:   hit ratio %+.1f pp (this session %.1f%%, 7-day %.1f%%)\n",
 				delta, 100*r, 100*base)
 		}
 	}
 	if len(s.toolCost) > 0 {
-		fmt.Fprintln(w, "top tools:")
+		ew.Println("top tools:")
 		type kv struct {
 			name string
 			cost float64
@@ -366,7 +367,7 @@ func (s *watchState) printSummary(w io.Writer) {
 			limit = len(pairs)
 		}
 		for _, p := range pairs[:limit] {
-			fmt.Fprintf(w, "  - %s: $%.4f\n", p.name, p.cost)
+			ew.Printf("  - %s: $%.4f\n", p.name, p.cost)
 		}
 	}
 }

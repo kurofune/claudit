@@ -188,7 +188,11 @@ func TestServer_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("healthz GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close body: %v", err)
+		}
+	}()
 	if resp.StatusCode != 200 {
 		t.Errorf("healthz status = %d, want 200", resp.StatusCode)
 	}
@@ -211,6 +215,32 @@ func TestServer_EndToEnd(t *testing.T) {
 func httpGetWithTimeout(url string, d time.Duration) (*http.Response, error) {
 	c := &http.Client{Timeout: d}
 	return c.Get(url)
+}
+
+// TestServer_HardenedTimeouts asserts the http.Server is built with
+// non-zero ReadTimeout, WriteTimeout, and IdleTimeout (in addition to
+// ReadHeaderTimeout). A stalled or slow client should not be able to
+// pin a connection open indefinitely; bare net/http defaults are all
+// zero, so the only way these get set is if serve() wires them.
+//
+// Structural rather than behavioral because the production timeouts
+// are large (30s/60s/120s) and a low-value behavioral test would
+// require leaking the values into Options just to override them.
+func TestServer_HardenedTimeouts(t *testing.T) {
+	srv := newTestServer(t, t.TempDir())
+	hs := srv.buildHTTPServer()
+	if hs.ReadHeaderTimeout <= 0 {
+		t.Errorf("ReadHeaderTimeout = %v, want > 0", hs.ReadHeaderTimeout)
+	}
+	if hs.ReadTimeout <= 0 {
+		t.Errorf("ReadTimeout = %v, want > 0", hs.ReadTimeout)
+	}
+	if hs.WriteTimeout <= 0 {
+		t.Errorf("WriteTimeout = %v, want > 0", hs.WriteTimeout)
+	}
+	if hs.IdleTimeout <= 0 {
+		t.Errorf("IdleTimeout = %v, want > 0", hs.IdleTimeout)
+	}
 }
 
 func min(a, b int) int {

@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -214,13 +213,20 @@ func (c *Cache) RunPoller(ctx context.Context, interval time.Duration, onErr fun
 }
 
 // parseOne opens path and runs the standard parser. Returns the entry
-// (with malformed count from the parse) plus any open error.
-func parseOne(path string) (fileEntry, error) {
+// (with malformed count from the parse) plus any open error. The
+// close error is surfaced as the function's error iff parsing
+// succeeded — a parse error takes precedence since it tells the
+// caller more about the file.
+func parseOne(path string) (_ fileEntry, retErr error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return fileEntry{}, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close %s: %w", path, cerr)
+		}
+	}()
 	r, err := parse.ParseFile(f, path)
 	entry := fileEntry{
 		turns:     r.Turns,
@@ -255,19 +261,6 @@ func walkJSONL(root string, fn func(path string, mod time.Time, size int64)) err
 		fn(path, info.ModTime(), info.Size())
 		return nil
 	})
-}
-
-// sortedFiles returns the file paths currently held in the cache,
-// alphabetically. Exposed for tests; the snapshot doesn't carry paths.
-func (c *Cache) sortedFiles() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]string, 0, len(c.files))
-	for p := range c.files {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // hostInfo returns a small struct of cache vitals for diagnostic

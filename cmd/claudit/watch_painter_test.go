@@ -27,8 +27,16 @@ func TestScreenPainterRenderDoesNotBlockOnSlowWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			t.Errorf("close r: %v", err)
+		}
+	}()
+	defer func() {
+		if err := w.Close(); err != nil {
+			t.Errorf("close w: %v", err)
+		}
+	}()
 
 	// term.NewStyle on a pipe returns a colorless style — that's fine.
 	// We're not asserting on output content, only on call latency.

@@ -12,7 +12,11 @@ func TestParseFile_MainSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 
 	res, err := ParseFile(f, "testdata/main_session.jsonl")
 	if err != nil {
@@ -75,7 +79,11 @@ func TestParseFile_Sidechain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 	res, err := ParseFile(f, "testdata/sidechain_session.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +106,11 @@ func TestParseFile_Malformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 	res, err := ParseFile(f, "testdata/malformed.jsonl")
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +147,9 @@ func TestSubagentMeta(t *testing.T) {
 	}
 
 	noMeta := dir + "/abc/subagents/agent-zzz.jsonl"
-	os.WriteFile(noMeta, []byte("{}\n"), 0o644)
+	if err := os.WriteFile(noMeta, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if SubagentTypeFor(noMeta) != "" {
 		t.Errorf("expected empty for missing meta")
 	}
@@ -181,7 +195,11 @@ func TestParseFile_UserMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 	res, err := ParseFile(f, "testdata/user_messages.jsonl")
 	if err != nil {
 		t.Fatal(err)

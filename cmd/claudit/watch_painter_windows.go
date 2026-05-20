@@ -27,3 +27,17 @@ func (p *screenPainter) startResizeHandler() {
 		}
 	}()
 }
+
+// pollResize is the Windows-side variant. Only repaints when Refresh
+// reports an actual dimension change — repainting unconditionally
+// every poll tick would churn the screen for no benefit.
+func (p *screenPainter) pollResize() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	if p.scr.Refresh() && p.hasLast {
+		p.wake()
+	}
+}

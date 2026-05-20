@@ -47,7 +47,11 @@ func TestTerminalSize_DevNullFallsBack(t *testing.T) {
 	if err != nil {
 		t.Skip(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 	cols, _ := TerminalSize(f)
 	if cols != 100 {
 		t.Errorf("non-tty file should fall through, got %d", cols)

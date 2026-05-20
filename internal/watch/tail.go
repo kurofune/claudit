@@ -52,6 +52,7 @@ const (
 	NoticeRotated                   // inode changed mid-stream
 	NoticeTruncated                 // size shrank (treated like rotation)
 	NoticeMalformed                 // a line failed to decode
+	NoticeError                     // non-fatal I/O error worth surfacing (e.g. close failed)
 )
 
 // TailOptions tweaks the polling loop. Zero-valued opts are valid.
@@ -83,7 +84,11 @@ func Tail(ctx context.Context, path string, opts TailOptions, onEvent func(Event
 	}
 
 	t := &tailer{path: path, onEvent: onEvent, onNotice: onNotice, opts: opts}
-	defer t.close()
+	defer func() {
+		if err := t.close(); err != nil {
+			t.onNotice(Notice{Kind: NoticeError, Message: "close: " + err.Error()})
+		}
+	}()
 
 	if err := t.openWhenReady(ctx); err != nil {
 		return err
@@ -131,11 +136,13 @@ type tailer struct {
 	live bool
 }
 
-func (t *tailer) close() {
-	if t.f != nil {
-		t.f.Close()
-		t.f = nil
+func (t *tailer) close() error {
+	if t.f == nil {
+		return nil
 	}
+	err := t.f.Close()
+	t.f = nil
+	return err
 }
 
 // openWhenReady blocks until path exists and is openable, or ctx ends.
@@ -148,7 +155,9 @@ func (t *tailer) openWhenReady(ctx context.Context) error {
 		if err == nil {
 			st, statErr := f.Stat()
 			if statErr != nil {
-				f.Close()
+				if cerr := f.Close(); cerr != nil {
+					t.onNotice(Notice{Kind: NoticeError, Message: "close: " + cerr.Error()})
+				}
 				return statErr
 			}
 			t.f = f
@@ -184,7 +193,9 @@ func (t *tailer) poll() error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File vanished. Reopen when it returns.
-			t.close()
+			if err := t.close(); err != nil {
+				t.onNotice(Notice{Kind: NoticeError, Message: "close: " + err.Error()})
+			}
 			t.partial = nil
 			t.onNotice(Notice{Kind: NoticeRotated, Message: "file disappeared, waiting for re-create"})
 			return t.reopenWhenReady()
@@ -193,7 +204,9 @@ func (t *tailer) poll() error {
 	}
 	if t.f == nil || t.prev == nil || !os.SameFile(t.prev, st) {
 		t.onNotice(Notice{Kind: NoticeRotated, Message: "file changed, reopening"})
-		t.close()
+		if err := t.close(); err != nil {
+			t.onNotice(Notice{Kind: NoticeError, Message: "close: " + err.Error()})
+		}
 		t.partial = nil
 		if err := t.reopenWhenReady(); err != nil {
 			return err
@@ -202,7 +215,9 @@ func (t *tailer) poll() error {
 	}
 	if st.Size() < t.offset {
 		t.onNotice(Notice{Kind: NoticeTruncated, Message: "file shrank, reopening"})
-		t.close()
+		if err := t.close(); err != nil {
+			t.onNotice(Notice{Kind: NoticeError, Message: "close: " + err.Error()})
+		}
 		t.partial = nil
 		if err := t.reopenWhenReady(); err != nil {
 			return err
@@ -221,7 +236,9 @@ func (t *tailer) reopenWhenReady() error {
 	}
 	st, err := f.Stat()
 	if err != nil {
-		f.Close()
+		if cerr := f.Close(); cerr != nil {
+			t.onNotice(Notice{Kind: NoticeError, Message: "close: " + cerr.Error()})
+		}
 		return err
 	}
 	t.f = f

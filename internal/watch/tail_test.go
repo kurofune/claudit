@@ -96,7 +96,9 @@ func TestTail_ReadsExistingAndAppended(t *testing.T) {
 	if _, err := f.WriteString(appended); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	waitForCount(t, c, 4, 2*time.Second)
 
@@ -151,7 +153,9 @@ func TestTail_PartialLineBuffersAcrossReads(t *testing.T) {
 	if _, err := f.WriteString(full[len(full)/2:] + "\n"); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	waitForCount(t, c, 1, 2*time.Second)
 	cancel()
@@ -276,14 +280,24 @@ func TestMostRecentJSONL_PicksLatest(t *testing.T) {
 	old := filepath.Join(dir, "a.jsonl")
 	mid := filepath.Join(dir, "b.jsonl")
 	new := filepath.Join(dir, "sub", "c.jsonl")
-	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range []string{old, mid, new} {
-		os.WriteFile(p, nil, 0o644)
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	now := time.Now()
-	os.Chtimes(old, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
-	os.Chtimes(mid, now.Add(-time.Hour), now.Add(-time.Hour))
-	os.Chtimes(new, now, now)
+	if err := os.Chtimes(old, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(mid, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(new, now, now); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := MostRecentJSONL(dir)
 	if err != nil {
@@ -329,7 +343,9 @@ func TestTail_LiveFlag_FalseDuringInitialDrain(t *testing.T) {
 	if _, err := f.WriteString(mkAssistantLine("a1", "h2", t0.Add(2*time.Second)) + "\n"); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	waitForCount(t, c, 3, 2*time.Second)
 	final := c.Snapshot()
@@ -344,11 +360,17 @@ func TestTail_LiveFlag_FalseDuringInitialDrain(t *testing.T) {
 func TestFindBySessionID_PrefixMatch(t *testing.T) {
 	dir := t.TempDir()
 	// Real session.
-	os.WriteFile(filepath.Join(dir, "207f394c-cf10-4341-8c0c-f17617b5ae36.jsonl"), nil, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "207f394c-cf10-4341-8c0c-f17617b5ae36.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// Subagent under same session — must be ignored.
 	subDir := filepath.Join(dir, "207f394c-cf10-4341-8c0c-f17617b5ae36", "subagents")
-	os.MkdirAll(subDir, 0o755)
-	os.WriteFile(filepath.Join(subDir, "agent-abc.jsonl"), nil, 0o644)
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "agent-abc.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := FindBySessionID(dir, "207f394c")
 	if err != nil {

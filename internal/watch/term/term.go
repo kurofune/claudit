@@ -9,7 +9,6 @@
 package term
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -29,10 +28,9 @@ type Frame struct {
 // Renderer paints Frames into an io.Writer. Safe for the single-writer
 // pattern used by `claudit watch`; do not call Render concurrently.
 type Renderer struct {
-	w       io.Writer
-	tty     bool
-	drawn   int // lines currently occupied by the live region
-	lastTop string
+	ew    errWriter
+	tty   bool
+	drawn int // lines currently occupied by the live region
 }
 
 // New returns a Renderer that paints to w. If w is os.Stdout/Stderr
@@ -41,7 +39,7 @@ type Renderer struct {
 // behavior — one Println per Frame collapsing Header+Body into one
 // trailing line — so piped output stays readable.
 func New(w io.Writer) *Renderer {
-	r := &Renderer{w: w}
+	r := &Renderer{ew: errWriter{w: w}}
 	if f, ok := w.(*os.File); ok {
 		fi, err := f.Stat()
 		if err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
@@ -55,6 +53,12 @@ func New(w io.Writer) *Renderer {
 // to decide whether to enable multi-line UI elements at all.
 func (r *Renderer) IsTTY() bool { return r.tty }
 
+// Err returns the first write error encountered by any Render / Println /
+// Clear call, or nil. Inspecting this is optional — a broken terminal
+// stream has nothing meaningful to recover to, but callers that want
+// to drop the live region on error can check this between paints.
+func (r *Renderer) Err() error { return r.ew.err }
+
 // Render paints frame. On a TTY: clears the previously-drawn region
 // (drawn lines worth of cursor-up + clear-line), prints any new
 // Callouts (which scroll naturally), then prints Header+Body and
@@ -65,14 +69,14 @@ func (r *Renderer) IsTTY() bool { return r.tty }
 func (r *Renderer) Render(frame Frame) {
 	if !r.tty {
 		for _, c := range frame.Callouts {
-			fmt.Fprintln(r.w, c)
+			r.ew.Println(c)
 		}
 		// Off-TTY status: skip if nothing to show. Combining Header+Body
 		// keeps a piped log scannable instead of one entry per sub-line.
 		combined := append([]string{}, frame.Header...)
 		combined = append(combined, frame.Body...)
 		if len(combined) > 0 {
-			fmt.Fprintln(r.w, strings.Join(combined, " · "))
+			r.ew.Println(strings.Join(combined, " · "))
 		}
 		return
 	}
@@ -80,7 +84,7 @@ func (r *Renderer) Render(frame Frame) {
 	for _, c := range frame.Callouts {
 		// \033[2K clears any leftover characters on the line in case the
 		// callout is shorter than whatever previously occupied this row.
-		fmt.Fprintf(r.w, "\r\033[2K%s\n", c)
+		r.ew.Printf("\r\033[2K%s\n", c)
 	}
 	lines := append([]string{}, frame.Header...)
 	lines = append(lines, frame.Body...)
@@ -88,9 +92,9 @@ func (r *Renderer) Render(frame Frame) {
 		if i == len(lines)-1 {
 			// Last line: no trailing newline. Keeps the cursor on this row
 			// so a subsequent Render can move back up without skipping past it.
-			fmt.Fprintf(r.w, "\r\033[2K%s", line)
+			r.ew.Printf("\r\033[2K%s", line)
 		} else {
-			fmt.Fprintf(r.w, "\r\033[2K%s\n", line)
+			r.ew.Printf("\r\033[2K%s\n", line)
 		}
 	}
 	r.drawn = len(lines)
@@ -102,11 +106,11 @@ func (r *Renderer) Render(frame Frame) {
 // empty — the next Render fully repaints.
 func (r *Renderer) Println(msg string) {
 	if !r.tty {
-		fmt.Fprintln(r.w, msg)
+		r.ew.Println(msg)
 		return
 	}
 	r.clearRegion()
-	fmt.Fprintf(r.w, "\r\033[2K%s\n", msg)
+	r.ew.Printf("\r\033[2K%s\n", msg)
 }
 
 // Clear wipes the live region and resets internal state. Use before
@@ -127,8 +131,8 @@ func (r *Renderer) clearRegion() {
 	// cursor there). Move up (drawn-1) lines, clearing each as we go,
 	// then clear the line we land on.
 	for i := 0; i < r.drawn-1; i++ {
-		fmt.Fprint(r.w, "\r\033[2K\033[1A")
+		r.ew.Print("\r\033[2K\033[1A")
 	}
-	fmt.Fprint(r.w, "\r\033[2K")
+	r.ew.Print("\r\033[2K")
 	r.drawn = 0
 }

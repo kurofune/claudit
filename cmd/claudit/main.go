@@ -33,7 +33,9 @@ func run() error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "help", "-h", "--help":
-			fmt.Fprint(os.Stdout, topLevelUsage)
+			if _, err := fmt.Fprint(os.Stdout, topLevelUsage); err != nil {
+				return err
+			}
 			return nil
 		case "version", "--version":
 			fmt.Println(versionString())
@@ -125,13 +127,13 @@ func runReport(args []string) error {
 	sessionsTop := fs.Int("sessions", 50, "show top-N most expensive sessions in the drill-down view (0 disables the Sessions section; HTML only)")
 	redact := fs.Bool("redact", false, "replace prompt text in the Sessions view with '[redacted N chars]' (HTML only)")
 	fs.Usage = func() {
-		out := fs.Output()
-		fmt.Fprintln(out, "claudit report — generate a cost/usage report from session JSONL files.")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Usage:")
-		fmt.Fprintln(out, "  claudit report [flags]")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Flags:")
+		ew := &errWriter{w: fs.Output()}
+		ew.Println("claudit report — generate a cost/usage report from session JSONL files.")
+		ew.Println()
+		ew.Println("Usage:")
+		ew.Println("  claudit report [flags]")
+		ew.Println()
+		ew.Println("Flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -257,15 +259,15 @@ func runDiff(args []string) error {
 	topMovers := fs.Int("top", 10, "show top-N rows per dimension in the movers tables")
 	hotspotN := fs.Int("hotspots", 10, "size of the hotspot pool used to find new-in-B hotspots (0 disables that section)")
 	fs.Usage = func() {
-		out := fs.Output()
-		fmt.Fprintln(out, "claudit diff — compare two date ranges and report top movers.")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Usage:")
-		fmt.Fprintln(out, "  claudit diff [flags]                       (defaults to last 7 days vs prior 7 days)")
-		fmt.Fprintln(out, "  claudit diff --by=month                    (last 30 days vs prior 30 days)")
-		fmt.Fprintln(out, "  claudit diff --a=YYYY-MM-DD..YYYY-MM-DD --b=YYYY-MM-DD..YYYY-MM-DD")
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Flags:")
+		ew := &errWriter{w: fs.Output()}
+		ew.Println("claudit diff — compare two date ranges and report top movers.")
+		ew.Println()
+		ew.Println("Usage:")
+		ew.Println("  claudit diff [flags]                       (defaults to last 7 days vs prior 7 days)")
+		ew.Println("  claudit diff --by=month                    (last 30 days vs prior 30 days)")
+		ew.Println("  claudit diff --a=YYYY-MM-DD..YYYY-MM-DD --b=YYYY-MM-DD..YYYY-MM-DD")
+		ew.Println()
+		ew.Println("Flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -574,7 +576,9 @@ func parseConcurrently(files []string) ([]parse.Turn, []parse.UserMessage, []par
 					continue
 				}
 				r, err := parse.ParseFile(f, path)
-				f.Close()
+				if cerr := f.Close(); cerr != nil && err == nil {
+					err = cerr
+				}
 				if err != nil {
 					results <- result{err: fmt.Errorf("parse %s: %w", path, err), malformed: r.Malformed, turns: r.Turns, users: r.UserMessages, links: r.ParentLinks}
 					continue

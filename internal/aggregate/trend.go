@@ -83,7 +83,7 @@ func addTrend(m map[time.Time]*TrendPoint, bucket time.Time, cost float64, u par
 	}
 	tp.CostUSD += cost
 	tp.Turns++
-	tp.Tokens.addUsage(u)
+	tp.addUsage(u)
 }
 
 // gapFill returns the points sorted ascending, with zero-cost cells

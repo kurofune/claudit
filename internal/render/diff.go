@@ -230,8 +230,8 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		LabelB:    opt.LabelB,
 		TotalsA:   a.Totals(),
 		TotalsB:   b.Totals(),
-		HitRatioA: a.Totals().Tokens.HitRatio(),
-		HitRatioB: b.Totals().Tokens.HitRatio(),
+		HitRatioA: a.Totals().HitRatio(),
+		HitRatioB: b.Totals().HitRatio(),
 		Sections: []diffHTMLSection{
 			mkSection("models", "By model", "brain", ModelMovers(a, b)),
 			mkSection("projects", "By project", "folder", ProjectMovers(a, b)),
@@ -295,54 +295,55 @@ func (d DiffMover) AbsDelta() float64 { return math.Abs(d.CostB - d.CostA) }
 // aggregators (A = baseline, B = current).
 func DiffMarkdown(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 	opt.defaults()
+	ew := &errWriter{w: w}
 	totA := a.Totals()
 	totB := b.Totals()
 
-	fmt.Fprintln(w, "# claudit diff")
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "_Comparing baseline **A** (`%s`) against current **B** (`%s`). Δ$ is B − A; Δ%% uses A as the denominator._\n\n", opt.LabelA, opt.LabelB)
+	ew.Println("# claudit diff")
+	ew.Println()
+	ew.Printf("_Comparing baseline **A** (`%s`) against current **B** (`%s`). Δ$ is B − A; Δ%% uses A as the denominator._\n\n", opt.LabelA, opt.LabelB)
 
 	// Totals row.
-	fmt.Fprintln(w, "## Totals")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Metric | A | B | Δ |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|")
-	fmt.Fprintf(w, "| Total cost | %s | %s | %s (%s) |\n",
+	ew.Println("## Totals")
+	ew.Println()
+	ew.Println("| Metric | A | B | Δ |")
+	ew.Println("|---|---:|---:|---:|")
+	ew.Printf("| Total cost | %s | %s | %s (%s) |\n",
 		money(totA.CostUSD), money(totB.CostUSD),
 		deltaMoney(totA.CostUSD, totB.CostUSD), deltaPct(totA.CostUSD, totB.CostUSD))
-	fmt.Fprintf(w, "| Sessions | %d | %d | %s |\n", totA.Sessions, totB.Sessions, deltaInt(totA.Sessions, totB.Sessions))
-	fmt.Fprintf(w, "| Turns | %d | %d | %s |\n", totA.Turns, totB.Turns, deltaInt(totA.Turns, totB.Turns))
-	fmt.Fprintf(w, "| Overall hit ratio | %s | %s | %s |\n",
-		ratioPctOrDash(totA.Tokens.HitRatio()), ratioPctOrDash(totB.Tokens.HitRatio()),
-		deltaRatio(totA.Tokens.HitRatio(), totB.Tokens.HitRatio()))
-	fmt.Fprintln(w)
+	ew.Printf("| Sessions | %d | %d | %s |\n", totA.Sessions, totB.Sessions, deltaInt(totA.Sessions, totB.Sessions))
+	ew.Printf("| Turns | %d | %d | %s |\n", totA.Turns, totB.Turns, deltaInt(totA.Turns, totB.Turns))
+	ew.Printf("| Overall hit ratio | %s | %s | %s |\n",
+		ratioPctOrDash(totA.HitRatio()), ratioPctOrDash(totB.HitRatio()),
+		deltaRatio(totA.HitRatio(), totB.HitRatio()))
+	ew.Println()
 
-	writeMoversTable(w, "By model", ModelMovers(a, b), opt.TopMovers)
-	writeMoversTable(w, "By project", ProjectMovers(a, b), opt.TopMovers)
-	writeMoversTable(w, "By tool", ToolMovers(a, b), opt.TopMovers)
-	writeMoversTable(w, "By skill / slash command", SkillMovers(a, b), opt.TopMovers)
-	writeMoversTable(w, "By subagent type", SubagentMovers(a, b), opt.TopMovers)
+	writeMoversTable(ew, "By model", ModelMovers(a, b), opt.TopMovers)
+	writeMoversTable(ew, "By project", ProjectMovers(a, b), opt.TopMovers)
+	writeMoversTable(ew, "By tool", ToolMovers(a, b), opt.TopMovers)
+	writeMoversTable(ew, "By skill / slash command", SkillMovers(a, b), opt.TopMovers)
+	writeMoversTable(ew, "By subagent type", SubagentMovers(a, b), opt.TopMovers)
 
 	// New hotspots in B.
 	if opt.Hotspots > 0 {
 		newH := newHotspots(a, b, opt.Hotspots)
-		fmt.Fprintln(w, "## New hotspots in B")
-		fmt.Fprintln(w)
+		ew.Println("## New hotspots in B")
+		ew.Println()
 		if len(newH) == 0 {
-			fmt.Fprintln(w, "_(B's top hotspots all appear in A's top hotspots — no new headline movers.)_")
-			fmt.Fprintln(w)
+			ew.Println("_(B's top hotspots all appear in A's top hotspots — no new headline movers.)_")
+			ew.Println()
 		} else {
-			fmt.Fprintf(w, "_Hotspots that appear in B's top %d but not in A's top %d._\n\n", opt.Hotspots, opt.Hotspots)
-			fmt.Fprintln(w, "| Hotspot | Cost in B | % of B total |")
-			fmt.Fprintln(w, "|---|---:|---:|")
+			ew.Printf("_Hotspots that appear in B's top %d but not in A's top %d._\n\n", opt.Hotspots, opt.Hotspots)
+			ew.Println("| Hotspot | Cost in B | % of B total |")
+			ew.Println("|---|---:|---:|")
 			for _, h := range newH {
-				fmt.Fprintf(w, "| %s | %s | %s |\n", h.Title, money(h.CostUSD), pctOf(h.PctOfTotal))
+				ew.Printf("| %s | %s | %s |\n", h.Title, money(h.CostUSD), pctOf(h.PctOfTotal))
 			}
-			fmt.Fprintln(w)
+			ew.Println()
 		}
 	}
 
-	return nil
+	return ew.err
 }
 
 // DiffJSON writes the diff payload as JSON. Mirrors the markdown
@@ -367,8 +368,8 @@ func DiffJSON(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		LabelB:         opt.LabelB,
 		TotalsA:        a.Totals(),
 		TotalsB:        b.Totals(),
-		HitRatioA:      a.Totals().Tokens.HitRatio(),
-		HitRatioB:      b.Totals().Tokens.HitRatio(),
+		HitRatioA:      a.Totals().HitRatio(),
+		HitRatioB:      b.Totals().HitRatio(),
 		ModelMovers:    rankMovers(ModelMovers(a, b), opt.TopMovers),
 		ProjectMovers:  rankMovers(ProjectMovers(a, b), opt.TopMovers),
 		ToolMovers:     rankMovers(ToolMovers(a, b), opt.TopMovers),
@@ -381,22 +382,22 @@ func DiffJSON(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 	return enc.Encode(out)
 }
 
-func writeMoversTable(w io.Writer, title string, rows []DiffMover, top int) {
-	fmt.Fprintf(w, "## Top movers — %s\n\n", title)
+func writeMoversTable(ew *errWriter, title string, rows []DiffMover, top int) {
+	ew.Printf("## Top movers — %s\n\n", title)
 	rows = rankMovers(rows, top)
 	if len(rows) == 0 {
-		fmt.Fprintln(w, "_(no rows)_")
-		fmt.Fprintln(w)
+		ew.Println("_(no rows)_")
+		ew.Println()
 		return
 	}
-	fmt.Fprintln(w, "| Key | A | B | Δ$ | Δ% |")
-	fmt.Fprintln(w, "|---|---:|---:|---:|---:|")
+	ew.Println("| Key | A | B | Δ$ | Δ% |")
+	ew.Println("|---|---:|---:|---:|---:|")
 	for _, r := range rows {
-		fmt.Fprintf(w, "| %s | %s | %s | %s | %s |\n",
+		ew.Printf("| %s | %s | %s | %s | %s |\n",
 			truncate(r.Key, 60), money(r.CostA), money(r.CostB),
 			deltaMoney(r.CostA, r.CostB), deltaPct(r.CostA, r.CostB))
 	}
-	fmt.Fprintln(w)
+	ew.Println()
 }
 
 // rankMovers sorts by absolute delta descending and trims to top.

@@ -82,8 +82,8 @@ func (a *Aggregator) CacheByProject() []CacheRow {
 			Tokens:   p.Tokens,
 			CostUSD:  p.CostUSD,
 			Turns:    p.Turns,
-			HitRatio: p.Tokens.HitRatio(),
-			Miss:     p.Tokens.MissTokens(),
+			HitRatio: p.HitRatio(),
+			Miss:     p.MissTokens(),
 		})
 	}
 	rankCacheRows(out)
@@ -105,8 +105,8 @@ func (a *Aggregator) CacheBySession() []CacheRow {
 			Tokens:   s.Tokens,
 			CostUSD:  s.CostUSD,
 			Turns:    s.Turns,
-			HitRatio: s.Tokens.HitRatio(),
-			Miss:     s.Tokens.MissTokens(),
+			HitRatio: s.HitRatio(),
+			Miss:     s.MissTokens(),
 		})
 	}
 	rankCacheRows(out)
@@ -128,8 +128,8 @@ func (a *Aggregator) CacheBySubagent() []CacheRow {
 			Tokens:   s.Tokens,
 			CostUSD:  s.CostUSD,
 			Turns:    s.Turns,
-			HitRatio: s.Tokens.HitRatio(),
-			Miss:     s.Tokens.MissTokens(),
+			HitRatio: s.HitRatio(),
+			Miss:     s.MissTokens(),
 		})
 	}
 	rankCacheRows(out)
@@ -155,8 +155,8 @@ func (a *Aggregator) CacheByInvocation() []CacheRow {
 			Tokens:   inv.Tokens,
 			CostUSD:  inv.CostUSD,
 			Turns:    inv.Turns,
-			HitRatio: inv.Tokens.HitRatio(),
-			Miss:     inv.Tokens.MissTokens(),
+			HitRatio: inv.HitRatio(),
+			Miss:     inv.MissTokens(),
 		})
 	}
 	rankCacheRows(out)
@@ -166,5 +166,5 @@ func (a *Aggregator) CacheByInvocation() []CacheRow {
 // OverallHitRatio is the report-wide cache hit ratio — the headline
 // number for the cache-efficiency section.
 func (a *Aggregator) OverallHitRatio() float64 {
-	return a.totals.Tokens.HitRatio()
+	return a.totals.HitRatio()
 }

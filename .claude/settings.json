@@ -1,5 +1,20 @@
 {
   "enabledPlugins": {
     "impeccable@impeccable": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/golangci-lint.sh",
+            "timeout": 60,
+            "statusMessage": "Running golangci-lint…"
+          }
+        ]
+      }
+    ]
   }
 }
