@@ -2,7 +2,6 @@
 cost.md
 report.html
 *.html
-todo.md
 
 # Build artifacts
 /claudit
@@ -14,3 +13,7 @@ HANDOFF.md
 
 # Local planning notes (not versioned)
 roadmap_v2.md
+todo.md
+
+# Misc
+.DS_Store
