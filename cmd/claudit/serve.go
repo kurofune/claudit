@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -104,7 +105,7 @@ func runServe(args []string) error {
 	addr := srv.Addr()
 	fmt.Fprintf(os.Stderr, "claudit serve: watching %s\n", *root)
 	fmt.Fprintf(os.Stderr, "claudit serve: listening on %s (Ctrl-C to stop)\n", addr)
-	if strings.HasPrefix(*bind, "0.") || *bind == "" {
+	if isNonLoopbackBind(*bind) {
 		fmt.Fprintln(os.Stderr, "claudit serve: WARNING — bound to a non-loopback address; this exposes prompt text on your network.")
 	}
 
@@ -121,6 +122,27 @@ func runServe(args []string) error {
 	}
 
 	return srv.ListenAndServe(ctx)
+}
+
+// isNonLoopbackBind reports whether bind addresses something other
+// than the loopback interface — the trigger for the LAN-exposure
+// warning printed at startup.
+func isNonLoopbackBind(bind string) bool {
+	if bind == "" {
+		return true
+	}
+	host := strings.TrimSuffix(strings.TrimPrefix(bind, "["), "]")
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		// Unknown hostname — be conservative and warn. Hostnames that
+		// actually resolve to loopback are rare; LAN-routable names are
+		// the common case.
+		return true
+	}
+	return !ip.IsLoopback()
 }
 
 // serveParseLastDuration parses "Nd" or "Nw" — same shape as the
