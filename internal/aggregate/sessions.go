@@ -16,13 +16,13 @@ import (
 // each one produced. The renderer pages this into the "Sessions" view of
 // the HTML report.
 type SessionTimeline struct {
-	SessionID string
-	CWD       string
-	StartedAt time.Time
-	EndedAt   time.Time
-	CostUSD   float64
-	Turns     int
-	Prompts   []PromptTimeline
+	SessionID string           `json:"session_id"`
+	CWD       string           `json:"cwd"`
+	StartedAt time.Time        `json:"started_at"`
+	EndedAt   time.Time        `json:"ended_at"`
+	CostUSD   float64          `json:"cost_usd"`
+	Turns     int              `json:"turns"`
+	Prompts   []PromptTimeline `json:"prompts"`
 }
 
 // PromptTimeline is one user prompt within a session along with the
@@ -30,18 +30,18 @@ type SessionTimeline struct {
 // costs — saved here too so the renderer doesn't have to re-sum at render
 // time.
 type PromptTimeline struct {
-	UUID string
+	UUID string `json:"uuid"`
 	// Key is the same normalized bucket key used by PromptBucket and the
 	// prompt-kind hotspots, computed from the RAW prompt text before any
 	// redaction. The frontend uses it to cross-link a hotspot or
 	// per-prompt row back to this session's drill-down. Empty for orphan
 	// prompts.
-	Key       string
-	Text      string // may be truncated, or "[redacted N chars]" when Redact is set
-	Truncated bool   // true when Text was shortened from the original
-	Timestamp time.Time
-	CostUSD   float64
-	Turns     []TurnSummary
+	Key       string        `json:"key"`
+	Text      string        `json:"text"`      // may be truncated, or "[redacted N chars]" when Redact is set
+	Truncated bool          `json:"truncated"` // true when Text was shortened from the original
+	Timestamp time.Time     `json:"timestamp"`
+	CostUSD   float64       `json:"cost_usd"`
+	Turns     []TurnSummary `json:"turns"`
 }
 
 // TurnSummary is one assistant turn rendered in the drill-down. Carries
@@ -49,21 +49,21 @@ type PromptTimeline struct {
 // answered, what it cost, which tools fired — without the full tool I/O
 // (that's deferred to v2.0.x).
 type TurnSummary struct {
-	Timestamp time.Time
-	Model     string
-	CostUSD   float64
-	Tokens    Tokens
+	Timestamp time.Time `json:"timestamp"`
+	Model     string    `json:"model"`
+	CostUSD   float64   `json:"cost_usd"`
+	Tokens    Tokens    `json:"tokens"`
 	// Tools is distinct tool invocations in first-occurrence order. A pair
 	// of (Name, Detail) is treated as distinct — so "Bash · git status"
 	// and "Bash · go test" both appear, but "Read · .go" repeated five
 	// times in the same turn collapses to one entry.
-	Tools []ToolInvocation
+	Tools []ToolInvocation `json:"tools"`
 	// DurationMs is the wall-clock gap to the next turn within the same
 	// prompt, in milliseconds. Surfaces "this turn took 11s" hotspots that
 	// pure cost doesn't expose. Zero for the last turn of a prompt (no next)
 	// or when the next turn arrived in the same millisecond.
-	DurationMs int64
-	Sidechain  bool
+	DurationMs int64 `json:"duration_ms"`
+	Sidechain  bool  `json:"sidechain"`
 }
 
 // ToolInvocation is one distinct tool call surfaced on a turn row. Detail
@@ -71,8 +71,8 @@ type TurnSummary struct {
 // Read extension, Agent subagent type, Skill name, etc.) — empty when the
 // tool has nothing useful to qualify it.
 type ToolInvocation struct {
-	Name   string
-	Detail string
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
 }
 
 // SessionTimelinesOptions tunes BuildSessionTimelines. All zero values are
@@ -343,6 +343,57 @@ func BuildSessionTimelines(
 		out = out[:opts.TopN]
 	}
 	return out, nil
+}
+
+// BuildSessionTimeline is the single-session entry point used by
+// /_claudit/api/sessions/{id}/timeline. Filters turns down to the
+// requested SessionID up front so the chain-walker only does work
+// for one session — turning the multi-session O(N) into O(turns in
+// session), the perf win that makes per-session-on-click lazy
+// loading affordable.
+//
+// Returns nil (no error) when no turns belong to the requested
+// session in the (filtered) corpus — the handler can surface that
+// as 404.
+func BuildSessionTimeline(
+	ctx context.Context,
+	sessionID string,
+	turns []parse.Turn,
+	msgs []parse.UserMessage,
+	parentLinks []parse.ParentLink,
+	prices *pricing.Table,
+	filter Filter,
+	opts SessionTimelinesOptions,
+) (*SessionTimeline, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	// Narrow the turn slice to just this session before the heavy
+	// timeline walk runs. The user-messages slice can stay as-is —
+	// resolveUserUUID is cached and irrelevant entries cost nothing
+	// past the initial map allocation.
+	filtered := make([]parse.Turn, 0, 64)
+	for _, t := range turns {
+		if t.SessionID == sessionID {
+			filtered = append(filtered, t)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+	// TopN is meaningless for a single-session view — force off so a
+	// caller that forwards the same options struct can't accidentally
+	// cap it to zero rows.
+	opts.TopN = 0
+	tls, err := BuildSessionTimelines(ctx, filtered, msgs, parentLinks, prices, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(tls) == 0 {
+		return nil, nil
+	}
+	// At most one entry — filtered turns share a sessionID.
+	return &tls[0], nil
 }
 
 // matchesFilter is the same logic as Aggregator.match — duplicated here

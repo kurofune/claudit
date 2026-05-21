@@ -156,6 +156,24 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
 	s.mux.HandleFunc(dataPath, s.handleData)
 	s.mux.HandleFunc("/events", s.handleEvents)
+
+	// Phase 3: thin API. /_claudit/api/snapshot is no-store; the
+	// rest are ETag-cached so the SPA can short-circuit revisits.
+	// Per-session timeline lives under the /sessions/ tree which a
+	// path-routed dispatcher handles, since net/http.ServeMux
+	// doesn't pattern-match path segments.
+	s.mux.HandleFunc(apiPathSnapshot, s.handleAPISnapshot)
+	s.mux.HandleFunc(apiPathOverview, s.handleAPIOverview)
+	s.mux.HandleFunc(apiPathCost, s.handleAPICost)
+	s.mux.HandleFunc(apiPathCache, s.handleAPICache)
+	s.mux.HandleFunc(apiPathTools, s.handleAPITools)
+	s.mux.HandleFunc(apiPathSubagents, s.handleAPISubagents)
+	s.mux.HandleFunc(apiPathTrends, s.handleAPITrends)
+	s.mux.HandleFunc(apiPathAnomalies, s.handleAPIAnomalies)
+	// /_claudit/api/sessions and /_claudit/api/sessions/{id}/timeline
+	// share a dispatcher because ServeMux can't pattern-match {id}.
+	s.mux.HandleFunc(apiPathSessions, s.handleAPISessions)
+	s.mux.HandleFunc(apiPathSessions+"/", s.handleAPISessionsTree)
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.

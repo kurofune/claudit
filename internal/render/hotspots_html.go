@@ -22,7 +22,7 @@ import (
 // timelines. Used to decide whether prompt_pattern hotspots get a
 // clickable "view session" button or the disabled "(unavailable)"
 // hint.
-func renderHotspotsHTML(hotspots []hotspotForJSON, promptKeySet map[string]struct{}) template.HTML {
+func renderHotspotsHTML(hotspots []HotspotForJSON, promptKeySet map[string]struct{}) template.HTML {
 	if len(hotspots) == 0 {
 		return template.HTML(`<p class="small empty-state">No hotspots in this window. Try widening the time range with <code>--since</code>, or lowering <code>-hotspots</code>.</p>`)
 	}
@@ -36,7 +36,7 @@ func renderHotspotsHTML(hotspots []hotspotForJSON, promptKeySet map[string]struc
 // writeHotspotCard emits one <details class="hotspot"> for a single
 // hotspot. Mirrors the inner template literal of the JS hotspots()
 // IIFE (report.html.tmpl, around line 2649).
-func writeHotspotCard(b *strings.Builder, idx int, h hotspotForJSON, promptKeySet map[string]struct{}) {
+func writeHotspotCard(b *strings.Builder, idx int, h HotspotForJSON, promptKeySet map[string]struct{}) {
 	rank := idx + 1
 	anchorID := `hotspot-` + itoa(rank)
 	titleEsc := html.EscapeString(h.Title)
@@ -88,7 +88,7 @@ func writeHotspotCard(b *strings.Builder, idx int, h hotspotForJSON, promptKeySe
 //   - non-prompt hotspot: nothing
 //   - prompt_pattern with key in set: enabled "view session →" button
 //   - prompt_pattern with key NOT in set: disabled "(unavailable)" span
-func writeViewSessionAction(b *strings.Builder, h hotspotForJSON, promptKeySet map[string]struct{}) {
+func writeViewSessionAction(b *strings.Builder, h HotspotForJSON, promptKeySet map[string]struct{}) {
 	if h.Kind != aggregate.HotspotPromptPattern || h.PromptKey == "" {
 		return
 	}

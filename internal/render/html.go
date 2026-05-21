@@ -24,10 +24,13 @@ var tokensCSS string
 
 var htmlTpl = template.Must(template.New("report").Parse(htmlTemplate))
 
-// hotspotForJSON is the same data as aggregate.Hotspot but with the
+// HotspotForJSON is the same data as aggregate.Hotspot but with the
 // pre-rendered LLM prompt baked in, so the front-end can copy it to the
-// clipboard without re-rendering the template in JS.
-type hotspotForJSON struct {
+// clipboard without re-rendering the template in JS. Exported so it can
+// appear in the OverviewPayload that /_claudit/api/overview returns
+// (Phase 3 of the serve-API plan) — the inner blob the static report
+// SSRs lives in the same shape.
+type HotspotForJSON struct {
 	Kind       aggregate.HotspotKind `json:"kind"`
 	Title      string                `json:"title"`
 	CostUSD    float64               `json:"cost_usd"`

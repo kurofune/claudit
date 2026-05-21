@@ -8,8 +8,8 @@ import (
 )
 
 // oneHotspot builds a single non-prompt hotspot for fixture use.
-func oneHotspot() hotspotForJSON {
-	return hotspotForJSON{
+func oneHotspot() HotspotForJSON {
+	return HotspotForJSON{
 		Kind:       aggregate.HotspotBashPattern,
 		Title:      "Bash pattern: `grep`",
 		CostUSD:    3.00,
@@ -22,7 +22,7 @@ func oneHotspot() hotspotForJSON {
 // renders a <details class="hotspot" id="hotspot-1"> with the
 // rank, formatted kind, title, money and percent in its summary.
 func TestRenderHotspotsHTML_OneHotspotEmitsDetails(t *testing.T) {
-	got := string(renderHotspotsHTML([]hotspotForJSON{oneHotspot()}, nil))
+	got := string(renderHotspotsHTML([]HotspotForJSON{oneHotspot()}, nil))
 	if !strings.Contains(got, `<details class="hotspot" id="hotspot-1">`) {
 		t.Errorf("expected <details class=\"hotspot\" id=\"hotspot-1\">; got: %s", got)
 	}
@@ -52,7 +52,7 @@ func TestRenderHotspotsHTML_OneHotspotEmitsDetails(t *testing.T) {
 // hotspot whose prompt_key is in the timelines set gets a clickable
 // view-session button.
 func TestRenderHotspotsHTML_PromptPattern_KeyAvailable(t *testing.T) {
-	h := hotspotForJSON{
+	h := HotspotForJSON{
 		Kind:       aggregate.HotspotPromptPattern,
 		Title:      "Prompt: refactor X",
 		CostUSD:    1.00,
@@ -61,7 +61,7 @@ func TestRenderHotspotsHTML_PromptPattern_KeyAvailable(t *testing.T) {
 		PromptKey:  "key-1",
 	}
 	set := map[string]struct{}{"key-1": {}}
-	got := string(renderHotspotsHTML([]hotspotForJSON{h}, set))
+	got := string(renderHotspotsHTML([]HotspotForJSON{h}, set))
 	if !strings.Contains(got, `<button class="view-session" data-key="key-1"`) {
 		t.Errorf("expected enabled view-session button; got: %s", got)
 	}
@@ -74,7 +74,7 @@ func TestRenderHotspotsHTML_PromptPattern_KeyAvailable(t *testing.T) {
 // prompt_pattern hotspot whose prompt_key is NOT in the set gets
 // the disabled "(unavailable)" hint instead of a broken link.
 func TestRenderHotspotsHTML_PromptPattern_KeyUnavailable(t *testing.T) {
-	h := hotspotForJSON{
+	h := HotspotForJSON{
 		Kind:       aggregate.HotspotPromptPattern,
 		Title:      "Prompt: foo",
 		Prompt:     "foo",
@@ -82,7 +82,7 @@ func TestRenderHotspotsHTML_PromptPattern_KeyUnavailable(t *testing.T) {
 		CostUSD:    1.0,
 		PctOfTotal: 1.0,
 	}
-	got := string(renderHotspotsHTML([]hotspotForJSON{h}, map[string]struct{}{}))
+	got := string(renderHotspotsHTML([]HotspotForJSON{h}, map[string]struct{}{}))
 	if !strings.Contains(got, `class="view-session is-disabled"`) {
 		t.Errorf("expected disabled view-session span; got: %s", got)
 	}
@@ -97,7 +97,7 @@ func TestRenderHotspotsHTML_PromptPattern_KeyUnavailable(t *testing.T) {
 // TestRenderHotspotsHTML_NonPromptHotspot_NoViewSession: a non-
 // prompt-pattern hotspot doesn't render any view-session control.
 func TestRenderHotspotsHTML_NonPromptHotspot_NoViewSession(t *testing.T) {
-	got := string(renderHotspotsHTML([]hotspotForJSON{oneHotspot()}, map[string]struct{}{"unused": {}}))
+	got := string(renderHotspotsHTML([]HotspotForJSON{oneHotspot()}, map[string]struct{}{"unused": {}}))
 	if strings.Contains(got, `view-session`) {
 		t.Errorf("non-prompt hotspot should NOT render view-session; got: %s", got)
 	}
@@ -109,7 +109,7 @@ func TestRenderHotspotsHTML_NonPromptHotspot_NoViewSession(t *testing.T) {
 func TestRenderHotspotsHTML_EscapesHostileTitle(t *testing.T) {
 	h := oneHotspot()
 	h.Title = `<script>alert("x")</script>`
-	got := string(renderHotspotsHTML([]hotspotForJSON{h}, nil))
+	got := string(renderHotspotsHTML([]HotspotForJSON{h}, nil))
 	if strings.Contains(got, `<script>`) {
 		t.Errorf("title with <script> should be escaped; got: %s", got)
 	}
