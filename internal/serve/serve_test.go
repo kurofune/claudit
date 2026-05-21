@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -171,7 +170,7 @@ func (e *errResponseWriter) Write(p []byte) (int, error) {
 func TestServer_Healthz_LogsWriteError(t *testing.T) {
 	var buf bytes.Buffer
 	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.opts.Logger = newSlogToBuf(&buf)
 
 	r := httptest.NewRequest(http.MethodGet, "/_claudit/healthz", nil)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
@@ -192,7 +191,7 @@ func TestServer_Healthz_LogsWriteError(t *testing.T) {
 func TestServer_Status_LogsWriteError(t *testing.T) {
 	var buf bytes.Buffer
 	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.opts.Logger = newSlogToBuf(&buf)
 
 	r := httptest.NewRequest(http.MethodGet, "/_claudit/status", nil)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
@@ -214,7 +213,7 @@ func TestServer_Status_LogsWriteError(t *testing.T) {
 func TestServer_Report_LogsWriteError(t *testing.T) {
 	var buf bytes.Buffer
 	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.opts.Logger = newSlogToBuf(&buf)
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
@@ -255,7 +254,7 @@ func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
 	// Second request with a write-erroring response writer — exercises
 	// the cached branch (lookup succeeds, writeCached fails).
 	var buf bytes.Buffer
-	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.opts.Logger = newSlogToBuf(&buf)
 	r2 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
 	w2 := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w2, r2)
@@ -456,7 +455,7 @@ func min(a, b int) int {
 func TestServer_ShutdownErrorIsLogged(t *testing.T) {
 	var buf bytes.Buffer
 	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.opts.Logger = newSlogToBuf(&buf)
 	srv.shutdownTimeout = 50 * time.Millisecond
 
 	started := make(chan struct{})

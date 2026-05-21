@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,8 +58,10 @@ type Options struct {
 	Version string
 
 	// Logger is used for the access log and refresh-error reports.
-	// nil → log.Default().
-	Logger *log.Logger
+	// nil → slog.Default(). Request-scoped log records carry a
+	// request_id attribute so a single failed render can be
+	// correlated across the events it produced.
+	Logger *slog.Logger
 }
 
 // Server is the long-lived HTTP daemon. Build with NewServer, then
@@ -76,13 +80,17 @@ type Server struct {
 	// on (canonical-query, generation). Bounded; older entries are
 	// evicted on insert. nil when MaxCachedRenders == 0.
 	renderCache *renderLRU
+
+	// shutdownTimeout caps the graceful-drain wait in serve(). Defaults
+	// to 3s; tests override it to force the deadline-exceeded path.
+	shutdownTimeout time.Duration
 }
 
 // NewServer wires the cache, the default options, and the routes.
 // Does not start the poller — call Start to begin background refresh.
 func NewServer(cache *Cache, opts Options) *Server {
 	if opts.Logger == nil {
-		opts.Logger = log.Default()
+		opts.Logger = slog.Default()
 	}
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 2 * time.Second
@@ -93,7 +101,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 	if opts.ReloadIntervalSec <= 0 {
 		opts.ReloadIntervalSec = 30
 	}
-	s := &Server{cache: cache, opts: opts, mux: http.NewServeMux()}
+	s := &Server{cache: cache, opts: opts, mux: http.NewServeMux(), shutdownTimeout: 3 * time.Second}
 	if opts.MaxCachedRenders > 0 {
 		s.renderCache = newRenderLRU(opts.MaxCachedRenders)
 	}
@@ -108,7 +116,10 @@ func (s *Server) routes() {
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.
-func (s *Server) Handler() http.Handler { return withBodyLimit(s.mux) }
+// withRequestID is the outermost wrap so every downstream layer
+// (including withBodyLimit's error paths) sees a non-empty
+// request_id on the context.
+func (s *Server) Handler() http.Handler { return withRequestID(withBodyLimit(s.mux)) }
 
 // maxRequestBytes caps the bytes any handler can read from r.Body.
 // Defense-in-depth: today's handlers don't read bodies at all (GET/HEAD
@@ -128,6 +139,83 @@ func withBodyLimit(next http.Handler) http.Handler {
 	})
 }
 
+// requestIDCtxKey is the unexported type used to store the request_id
+// on a context. Unexported so external packages can't collide.
+type requestIDCtxKey struct{}
+
+// maxInboundRequestIDLen bounds X-Request-ID echoes. Long enough for
+// realistic UUIDs and trace IDs, short enough that an abusive client
+// can't bloat log lines or response headers.
+const maxInboundRequestIDLen = 128
+
+// withRequestID installs a request_id on the context and echoes it
+// back in the X-Request-ID response header. Honors an inbound
+// X-Request-ID if it looks safe (printable ASCII, ≤128 chars, no
+// whitespace or control characters); otherwise generates a fresh
+// 16-hex-char value from crypto/rand. The strictness on inbound IDs is
+// belt-and-suspenders against log injection — slog quotes values that
+// contain whitespace, but rejecting them outright keeps the header and
+// the log line in lockstep.
+func withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := sanitizeInboundRequestID(r.Header.Get("X-Request-ID"))
+		if id == "" {
+			id = newRequestID()
+		}
+		w.Header().Set("X-Request-ID", id)
+		ctx := context.WithValue(r.Context(), requestIDCtxKey{}, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// sanitizeInboundRequestID returns the inbound ID if it's safe to echo
+// (non-empty, printable ASCII, no spaces, ≤maxInboundRequestIDLen)
+// and "" otherwise so the middleware can generate a fresh one.
+func sanitizeInboundRequestID(in string) string {
+	if in == "" || len(in) > maxInboundRequestIDLen {
+		return ""
+	}
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		if c <= 0x20 || c >= 0x7f {
+			return ""
+		}
+	}
+	return in
+}
+
+// newRequestID returns 16 hex chars of random data. crypto/rand.Read
+// only fails when the kernel RNG is misconfigured; we fall back to a
+// time-based ID so a degraded entropy source can't take the server
+// down. The ID is not security-sensitive — it's a correlation token.
+func newRequestID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("t%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// requestIDFromContext returns the request_id stored by withRequestID,
+// or "" if the context did not pass through the middleware (e.g., a
+// test that calls a handler directly on s.mux).
+func requestIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(requestIDCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// reqLogger returns the server's base logger with the request_id
+// attached if one is on the context. Handler logging should always
+// go through this so log records carry the correlation token.
+func (s *Server) reqLogger(ctx context.Context) *slog.Logger {
+	if id := requestIDFromContext(ctx); id != "" {
+		return s.opts.Logger.With("request_id", id)
+	}
+	return s.opts.Logger
+}
+
 // Start primes the cache with one synchronous refresh and then launches
 // the background poller. Blocking on the first refresh is intentional:
 // without it, the listener (and an --open browser) can race ahead of
@@ -135,10 +223,10 @@ func withBodyLimit(next http.Handler) http.Handler {
 // the user has to reload to see anything.
 func (s *Server) Start(ctx context.Context) {
 	if _, err := s.cache.Refresh(); err != nil {
-		s.opts.Logger.Printf("serve: initial refresh error: %v", err)
+		s.opts.Logger.LogAttrs(ctx, slog.LevelError, "serve: initial refresh failed", slog.Any("err", err))
 	}
 	go s.cache.RunPoller(ctx, s.opts.PollInterval, func(err error) {
-		s.opts.Logger.Printf("serve: refresh error: %v", err)
+		s.opts.Logger.LogAttrs(ctx, slog.LevelError, "serve: refresh failed", slog.Any("err", err))
 	})
 }
 
@@ -186,9 +274,11 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	}()
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			s.opts.Logger.LogAttrs(ctx, slog.LevelError, "serve: shutdown failed", slog.Any("err", err))
+		}
 		return nil
 	case err := <-errCh:
 		return err
@@ -248,13 +338,20 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	// often land back on the same URL within a generation, so this
 	// is the highest-leverage perf win.
 	if body, ok := s.lookupCached(q, snap.Generation, wantGzip); ok {
-		writeCached(w, body, wantGzip)
+		if err := writeCached(w, body, wantGzip); err != nil {
+			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write report response failed",
+				slog.Any("err", err),
+				slog.String("path", "/"),
+				slog.Bool("cached", true))
+		}
 		return
 	}
 
-	html, err := s.renderHTML(snap, q, scope)
+	html, err := s.renderHTML(r.Context(), snap, q, scope)
 	if err != nil {
-		s.opts.Logger.Printf("serve: render error: %v", err)
+		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: render failed",
+			slog.Any("err", err),
+			slog.String("path", "/"))
 		http.Error(w, "render failed", http.StatusInternalServerError)
 		return
 	}
@@ -267,33 +364,42 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 
 	s.storeCached(q, snap.Generation, plain, gz)
 
+	body := plain
 	if wantGzip {
-		writeCached(w, gz, true)
-	} else {
-		writeCached(w, plain, false)
+		body = gz
+	}
+	if err := writeCached(w, body, wantGzip); err != nil {
+		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write report response failed",
+			slog.Any("err", err),
+			slog.String("path", "/"),
+			slog.Bool("cached", false))
 	}
 }
 
 // renderHTML runs the standard aggregation pipeline and renders the
 // HTML report into a single byte slice. The bytes go into the render
 // cache as-is; serve-time gzip wraps them.
-func (s *Server) renderHTML(snap *Snapshot, q Query, scope ScopeInfo) ([]byte, error) {
+func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope ScopeInfo) ([]byte, error) {
 	agg := s.buildAggregator(snap, q)
 
 	var timelines []aggregate.SessionTimeline
 	if q.SessionsTop > 0 {
-		timelines = aggregate.BuildSessionTimelines(
-			snap.Turns, snap.Users, snap.Links, s.opts.Prices, q.Filter,
+		var err error
+		timelines, err = aggregate.BuildSessionTimelines(
+			ctx, snap.Turns, snap.Users, snap.Links, s.opts.Prices, q.Filter,
 			aggregate.SessionTimelinesOptions{
 				TopN:           q.SessionsTop,
 				Redact:         q.Redact,
 				MaxPromptChars: 2000,
 			},
 		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var buf bytes.Buffer
-	err := render.HTMLWithOptions(&buf, agg, render.HTMLOptions{
+	err := render.HTMLWithOptions(ctx, &buf, agg, render.HTMLOptions{
 		SessionTimelines:  timelines,
 		ServeMode:         true,
 		Generation:        snap.Generation,
@@ -470,14 +576,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = writeJSON(w, body)
+	if err := writeJSON(w, body); err != nil {
+		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write status response failed",
+			slog.Any("err", err),
+			slog.String("path", "/_claudit/status"))
+	}
 }
 
 // handleHealthz is the cheapest possible liveness probe.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, "ok\n")
+	if _, err := io.WriteString(w, "ok\n"); err != nil {
+		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write healthz response failed",
+			slog.Any("err", err),
+			slog.String("path", "/_claudit/healthz"))
+	}
 }
 
 func writeJSON(w io.Writer, v any) error {
@@ -517,10 +631,13 @@ func gzipBytes(b []byte) []byte {
 
 // writeCached writes the appropriate Content-Encoding/Length headers
 // and the body. Body must already be compressed when gz is true.
-func writeCached(w http.ResponseWriter, body []byte, gz bool) {
+// Returns the write error so the caller can log truncated transfers
+// (client disconnects mid-response).
+func writeCached(w http.ResponseWriter, body []byte, gz bool) error {
 	if gz {
 		w.Header().Set("Content-Encoding", "gzip")
 	}
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
-	_, _ = w.Write(body)
+	_, err := w.Write(body)
+	return err
 }
