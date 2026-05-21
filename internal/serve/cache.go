@@ -65,6 +65,14 @@ type Cache struct {
 	// corpus (file added/modified/removed). Used by /status so the
 	// browser-side poller can detect "something changed."
 	generation int64
+
+	// subsMu guards subs and nextSubID. Separate from mu so a slow
+	// subscriber can never stall a Refresh waiting on the files-map
+	// lock — publishSnapshot grabs subsMu only after it has finished
+	// mutating files under mu.
+	subsMu    sync.Mutex
+	subs      map[uint64]chan int64
+	nextSubID uint64
 }
 
 // NewCache returns an empty cache rooted at the given projects root.
@@ -183,6 +191,75 @@ func (c *Cache) publishSnapshot() {
 		snap.Links = append(snap.Links, e.links...)
 	}
 	c.snapshot.Store(snap)
+	c.notifySubscribers(snap.Generation)
+}
+
+// SubscribeGeneration registers a buffered channel that receives every
+// new snapshot generation published by publishSnapshot, plus an
+// unsubscribe func the caller MUST invoke (typically via defer) so the
+// subscriber slot is released. The channel is closed on unsubscribe;
+// callers should not close it themselves.
+//
+// Pressure-release contract: notifySubscribers does a non-blocking
+// send. A subscriber that falls behind will see its channel coalesce
+// to the most recent generation rather than block the publisher — see
+// notifySubscribers for the drain-then-resend dance. The buffer is
+// kept small (size 1) because the only thing a subscriber cares about
+// is "is there a generation newer than the one I last rendered?" —
+// missing intermediate values is fine.
+func (c *Cache) SubscribeGeneration() (<-chan int64, func()) {
+	c.subsMu.Lock()
+	if c.subs == nil {
+		c.subs = map[uint64]chan int64{}
+	}
+	id := c.nextSubID
+	c.nextSubID++
+	ch := make(chan int64, 1)
+	c.subs[id] = ch
+	c.subsMu.Unlock()
+
+	var once sync.Once
+	unsub := func() {
+		once.Do(func() {
+			c.subsMu.Lock()
+			if _, ok := c.subs[id]; ok {
+				delete(c.subs, id)
+				close(ch)
+			}
+			c.subsMu.Unlock()
+		})
+	}
+	return ch, unsub
+}
+
+// notifySubscribers fans the new generation out to every registered
+// subscriber. Non-blocking: a full channel triggers a drain-then-resend
+// so the latest generation always lands in the buffer once the
+// consumer next reads. publishSnapshot holds c.mu when this is called;
+// using a separate subsMu keeps the contention surfaces disjoint.
+func (c *Cache) notifySubscribers(gen int64) {
+	c.subsMu.Lock()
+	defer c.subsMu.Unlock()
+	for _, ch := range c.subs {
+		select {
+		case ch <- gen:
+		default:
+			// Buffer full: drain the stale value and try once more
+			// so the subscriber's next read returns gen rather than
+			// an older one. If the drain races with a parallel
+			// consumer (it shouldn't — subsMu serializes us), the
+			// second send still goes through default and we drop
+			// rather than block.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- gen:
+			default:
+			}
+		}
+	}
 }
 
 // RunPoller refreshes the cache once immediately, then every interval

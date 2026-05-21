@@ -107,6 +107,14 @@ type Server struct {
 	// shutdownTimeout caps the graceful-drain wait in serve(). Defaults
 	// to 3s; tests override it to force the deadline-exceeded path.
 	shutdownTimeout time.Duration
+
+	// shutdownCh is closed at the start of serve()'s shutdown path so
+	// long-lived handlers (SSE in particular) can wake from their
+	// select loop and return promptly. Without it, http.Server.Shutdown
+	// would pin on in-flight SSE connections until shutdownTimeout
+	// fires. Closed exactly once via shutdownOnce.
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
 }
 
 // NewServer wires the cache, the default options, and the routes.
@@ -124,7 +132,13 @@ func NewServer(cache *Cache, opts Options) *Server {
 	if opts.ReloadIntervalSec <= 0 {
 		opts.ReloadIntervalSec = 30
 	}
-	s := &Server{cache: cache, opts: opts, mux: http.NewServeMux(), shutdownTimeout: 3 * time.Second}
+	s := &Server{
+		cache:           cache,
+		opts:            opts,
+		mux:             http.NewServeMux(),
+		shutdownTimeout: 3 * time.Second,
+		shutdownCh:      make(chan struct{}),
+	}
 	if opts.MaxCachedRenders > 0 {
 		// One LRU holds entries for every section (html, data, and
 		// future per-API-tab keys). Cap is doubled vs. the pre-Phase-1
@@ -141,6 +155,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/_claudit/status", s.handleStatus)
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
 	s.mux.HandleFunc(dataPath, s.handleData)
+	s.mux.HandleFunc("/events", s.handleEvents)
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.
@@ -302,6 +317,9 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	}()
 	select {
 	case <-ctx.Done():
+		// Wake long-lived handlers (SSE) first so they return promptly
+		// instead of pinning Shutdown until shutdownTimeout fires.
+		s.signalShutdown()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -311,6 +329,13 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// signalShutdown closes s.shutdownCh exactly once so every selector
+// blocked on it wakes. Idempotent; called only by serve() today, but a
+// future test could call it directly to exercise the drain path.
+func (s *Server) signalShutdown() {
+	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
 }
 
 // Addr returns the bind address as a printable URL for the startup
