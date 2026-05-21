@@ -2831,9 +2831,8 @@
       host.innerHTML = '<p class="small empty-state">No priced model data. Add prices for any unknown models in <code>~/.config/claudit/prices.yaml</code>.</p>';
       return;
     }
-    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
     host.innerHTML = rows.map(r => {
-      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
       return `<div class="hbar">
         <div class="fill" style="width:${w}%"></div>
         <div class="lbl" title="${escHtml(r.Model)}">${escHtml(r.Model)}</div>
@@ -2855,9 +2854,8 @@
   // Horizontal bar list — top 20 projects
   (function projectBars() {
     const rows = (D.by_project || []).slice(0, 20);
-    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
     document.getElementById('bars-project').innerHTML = rows.map(r => {
-      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
       return `<div class="hbar">
         <div class="fill" style="width:${w}%"></div>
         <div class="lbl" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 70))}</div>
@@ -2934,9 +2932,8 @@
   // Tool bars
   (function toolBars() {
     const rows = D.by_tool || [];
-    const maxCost = Math.max(0, ...rows.map(r => r.CostUSD));
     document.getElementById('bars-tool').innerHTML = rows.map(r => {
-      const w = maxCost > 0 ? (100 * r.CostUSD / maxCost).toFixed(1) : 0;
+      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
       return `<div class="hbar">
         <div class="fill" style="width:${w}%"></div>
         <div class="lbl">${escHtml(r.Name)}</div>
