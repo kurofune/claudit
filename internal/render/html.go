@@ -51,41 +51,53 @@ type HTMLOptions struct {
 	// aggregate.BuildSessionTimelines. nil/empty hides the Sessions view.
 	SessionTimelines []aggregate.SessionTimeline
 
-	// ServeMode enables the small auto-reload script and the scope
-	// pill. One-shot HTML renders (default) leave this false and
-	// emit no extra chrome.
-	ServeMode bool
-	// Generation is the cache generation that this render reflects,
-	// echoed to the auto-reload script. Serve-only.
-	Generation int64
-	// StatusPath is the URL the auto-reload script polls. Defaults
-	// to "/_claudit/status". Serve-only.
-	StatusPath string
-	// ReloadIntervalSec is the cadence (in seconds) at which the
-	// in-page script attempts a silent reload. Defaults to 30 when
-	// ServeMode is on. Serve-only.
-	ReloadIntervalSec int
-
-	// ScopeIsDefault is true when the served view has any server-
-	// applied narrowing in effect (default time window or default
-	// sessions cap). Drives the scope pill. Serve-only.
-	ScopeIsDefault bool
-	// ScopeWindowLabel is the human label for the active default
-	// window (e.g. "7 days"). Empty when no time window is applied
-	// by server defaults. Serve-only.
-	ScopeWindowLabel string
-	// ScopeSessionsCap is the server-default sessions cap currently
-	// in effect. 0 when no cap was applied. Serve-only.
-	ScopeSessionsCap int
-	// ScopeLiftURL is the relative URL the pill's "show all" link
-	// targets. Always rooted at "/". Serve-only.
-	ScopeLiftURL string
-
 	// Version is the compact build label rendered under the brand
 	// in the sidebar (e.g. "v1.2.0" or "(devel) abc1234"). Empty
 	// strings render no chip — keeps test goldens happy and is the
 	// right behavior for `go run` invocations without build info.
 	Version string
+
+	// Serve bundles the serve-only chrome (auto-reload toast, scope
+	// pill, date-range picker button). Zero value leaves all chrome
+	// off — the right default for one-shot `claudit report --html`
+	// invocations.
+	Serve ServeOptions
+}
+
+// ServeOptions configures the serve-only chrome that the template
+// injects when claudit is running as an HTTP server. Lives in the
+// render package because the template owns the chrome's markup, but
+// the fields are meaningful only when wired up by internal/serve.
+type ServeOptions struct {
+	// Enabled turns on the auto-reload script, the scope pill, and
+	// the date-range picker button. When false, all other fields
+	// are ignored.
+	Enabled bool
+	// Generation is the cache generation that this render reflects,
+	// echoed to the auto-reload script.
+	Generation int64
+	// StatusPath is the URL the auto-reload script polls. Defaults
+	// to "/_claudit/status".
+	StatusPath string
+	// ReloadIntervalSec is the cadence (in seconds) at which the
+	// in-page script attempts a silent reload. Defaults to 30 when
+	// Enabled is true.
+	ReloadIntervalSec int
+
+	// ScopeIsDefault is true when the served view has any server-
+	// applied narrowing in effect (default time window or default
+	// sessions cap). Drives the scope pill.
+	ScopeIsDefault bool
+	// ScopeWindowLabel is the human label for the active default
+	// window (e.g. "7 days"). Empty when no time window is applied
+	// by server defaults.
+	ScopeWindowLabel string
+	// ScopeSessionsCap is the server-default sessions cap currently
+	// in effect. 0 when no cap was applied.
+	ScopeSessionsCap int
+	// ScopeLiftURL is the relative URL the pill's "show all" link
+	// targets. Always rooted at "/".
+	ScopeLiftURL string
 }
 
 // HTML writes a self-contained interactive HTML report to w. Equivalent
@@ -191,15 +203,15 @@ func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, 
 	if err != nil {
 		return fmt.Errorf("marshal report data: %w", err)
 	}
-	statusPath := opts.StatusPath
+	statusPath := opts.Serve.StatusPath
 	if statusPath == "" {
 		statusPath = "/_claudit/status"
 	}
-	reloadSec := opts.ReloadIntervalSec
+	reloadSec := opts.Serve.ReloadIntervalSec
 	if reloadSec <= 0 {
 		reloadSec = 30
 	}
-	liftURL := opts.ScopeLiftURL
+	liftURL := opts.Serve.ScopeLiftURL
 	if liftURL == "" {
 		liftURL = "/?scope=all"
 	}
@@ -225,13 +237,13 @@ func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, 
 	}{
 		Tokens:            template.CSS(tokensCSS),
 		DataJSON:          template.JS(data),
-		ServeMode:         opts.ServeMode,
-		Generation:        opts.Generation,
+		ServeMode:         opts.Serve.Enabled,
+		Generation:        opts.Serve.Generation,
 		StatusPath:        statusPath,
 		ReloadIntervalSec: reloadSec,
-		ScopeIsDefault:    opts.ScopeIsDefault,
-		ScopeWindowLabel:  opts.ScopeWindowLabel,
-		ScopeSessionsCap:  opts.ScopeSessionsCap,
+		ScopeIsDefault:    opts.Serve.ScopeIsDefault,
+		ScopeWindowLabel:  opts.Serve.ScopeWindowLabel,
+		ScopeSessionsCap:  opts.Serve.ScopeSessionsCap,
 		ScopeLiftURL:      liftURL,
 		Version:           opts.Version,
 	})

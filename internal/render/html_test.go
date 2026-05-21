@@ -52,9 +52,11 @@ func TestHTML_ServeModeInjectsReload(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
 	err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
-		ServeMode:  true,
-		Generation: 42,
-		StatusPath: "/custom/status",
+		Serve: ServeOptions{
+			Enabled:    true,
+			Generation: 42,
+			StatusPath: "/custom/status",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +82,7 @@ func TestHTML_ServeModeInjectsReload(t *testing.T) {
 func TestHTML_ServeModeAddsDateRangeButton(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{ServeMode: true}); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{Serve: ServeOptions{Enabled: true}}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -121,7 +123,7 @@ func TestHTML_OneShotKeepsPlainDateRangeDiv(t *testing.T) {
 func TestHTML_ServeModeDefaultStatusPath(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{ServeMode: true})
+	err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{Serve: ServeOptions{Enabled: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

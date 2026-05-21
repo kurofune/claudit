@@ -400,16 +400,18 @@ func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope 
 
 	var buf bytes.Buffer
 	err := render.HTMLWithOptions(ctx, &buf, agg, render.HTMLOptions{
-		SessionTimelines:  timelines,
-		ServeMode:         true,
-		Generation:        snap.Generation,
-		StatusPath:        "/_claudit/status",
-		ReloadIntervalSec: s.opts.ReloadIntervalSec,
-		ScopeIsDefault:    scope.IsDefault,
-		ScopeWindowLabel:  scope.WindowLabel,
-		ScopeSessionsCap:  scope.SessionsCap,
-		ScopeLiftURL:      scope.LiftURL,
-		Version:           s.opts.Version,
+		SessionTimelines: timelines,
+		Version:          s.opts.Version,
+		Serve: render.ServeOptions{
+			Enabled:           true,
+			Generation:        snap.Generation,
+			StatusPath:        "/_claudit/status",
+			ReloadIntervalSec: s.opts.ReloadIntervalSec,
+			ScopeIsDefault:    scope.IsDefault,
+			ScopeWindowLabel:  scope.WindowLabel,
+			ScopeSessionsCap:  scope.SessionsCap,
+			ScopeLiftURL:      scope.LiftURL,
+		},
 	})
 	if err != nil {
 		return nil, err
