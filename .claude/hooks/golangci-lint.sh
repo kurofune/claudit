@@ -16,6 +16,14 @@ esac
 
 [ -f "$file" ] || exit 0
 
+# Auto-format the edited file. gofmt is bundled with the Go toolchain, so this
+# is the editor-on-save equivalent for an agent-only workflow. Silent on
+# success; if gofmt itself errors (e.g., unparseable Go), let golangci-lint
+# below produce the user-facing message.
+if command -v gofmt >/dev/null 2>&1; then
+  gofmt -w "$file" >/dev/null 2>&1 || true
+fi
+
 dir=$(dirname "$file")
 
 if ! command -v golangci-lint >/dev/null 2>&1; then

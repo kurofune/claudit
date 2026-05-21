@@ -6,6 +6,22 @@ on:
   pull_request:
 
 jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          drift=$(gofmt -l .)
+          if [ -n "$drift" ]; then
+            echo "gofmt drift detected in:"
+            echo "$drift"
+            echo "Run 'gofmt -w .' locally to fix."
+            exit 1
+          fi
   test:
     strategy:
       fail-fast: false
