@@ -2,6 +2,8 @@ package render
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -34,7 +36,7 @@ func htmlSetup(t *testing.T) *aggregate.Aggregator {
 func TestHTML_OneShotOmitsServeOnlyChrome(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(&buf, a); err != nil {
+	if err := HTML(context.Background(), &buf, a); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -49,7 +51,7 @@ func TestHTML_OneShotOmitsServeOnlyChrome(t *testing.T) {
 func TestHTML_ServeModeInjectsReload(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	err := HTMLWithOptions(&buf, a, HTMLOptions{
+	err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		ServeMode:  true,
 		Generation: 42,
 		StatusPath: "/custom/status",
@@ -78,7 +80,7 @@ func TestHTML_ServeModeInjectsReload(t *testing.T) {
 func TestHTML_ServeModeAddsDateRangeButton(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTMLWithOptions(&buf, a, HTMLOptions{ServeMode: true}); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{ServeMode: true}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -102,7 +104,7 @@ func TestHTML_ServeModeAddsDateRangeButton(t *testing.T) {
 func TestHTML_OneShotKeepsPlainDateRangeDiv(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(&buf, a); err != nil {
+	if err := HTML(context.Background(), &buf, a); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -119,12 +121,31 @@ func TestHTML_OneShotKeepsPlainDateRangeDiv(t *testing.T) {
 func TestHTML_ServeModeDefaultStatusPath(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	err := HTMLWithOptions(&buf, a, HTMLOptions{ServeMode: true})
+	err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{ServeMode: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Same JS-escape note as above.
 	if !strings.Contains(buf.String(), `"\/_claudit\/status"`) {
 		t.Errorf("default status path missing (looked for JS-escaped form)")
+	}
+}
+
+// TestHTMLWithOptions_CanceledContextReturnsError ensures a disconnected
+// HTTP client can short-circuit the render path before the JSON marshal
+// + template execute do real work. We assert ctx.Err() is returned and
+// nothing meaningful was written to the buffer.
+func TestHTMLWithOptions_CanceledContextReturnsError(t *testing.T) {
+	a := htmlSetup(t)
+	var buf bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := HTMLWithOptions(ctx, &buf, a, HTMLOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("want empty buffer on cancellation, got %d bytes", buf.Len())
 	}
 }

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -90,13 +91,15 @@ type HTMLOptions struct {
 // HTML writes a self-contained interactive HTML report to w. Equivalent
 // to HTMLWithOptions with a zero-value HTMLOptions — kept as a thin alias
 // for callers that don't need the drill-down extras.
-func HTML(w io.Writer, a *aggregate.Aggregator) error {
-	return HTMLWithOptions(w, a, HTMLOptions{})
+func HTML(ctx context.Context, w io.Writer, a *aggregate.Aggregator) error {
+	return HTMLWithOptions(ctx, w, a, HTMLOptions{})
 }
 
 // HTMLWithOptions writes the HTML report and includes any optional
-// sections supplied via opts (currently: SessionTimelines).
-func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
+// sections supplied via opts (currently: SessionTimelines). Returns
+// ctx.Err() early if the caller (typically a disconnected HTTP client)
+// cancels before the JSON marshal or template execute steps.
+func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
 	mainTok, mainCost, mainTurns := a.MainTotals()
 	sideTok, sideCost, sideTurns := a.SidechainTotals()
 
@@ -124,54 +127,54 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 	}
 
 	payload := struct {
-		Totals           aggregate.Totals                    `json:"totals"`
-		Hotspots         []hotspotForJSON                    `json:"hotspots"`
-		ByModel          []aggregate.ModelBucket             `json:"by_model"`
-		ByProject        []aggregate.ProjectBucket           `json:"by_project"`
-		ByTool           []aggregate.ToolBucket              `json:"by_tool"`
-		ByToolDetail     map[string][]aggregate.DetailBucket `json:"by_tool_detail"`
-		BySkill          []aggregate.SkillBucket             `json:"by_skill"`
-		Main             sidePart                            `json:"main"`
-		Sidechain        sidePart                            `json:"sidechain"`
-		BySubagent       []aggregate.SubagentBucket          `json:"by_subagent"`
-		AgentInvocations []aggregate.AgentInvocation         `json:"agent_invocations"`
-		UnknownModels    []string                            `json:"unknown_models"`
-		Period           aggregate.Period                    `json:"period"`
-		TrendTotals      []aggregate.TrendPoint              `json:"trend_totals"`
-		TrendByModel     map[string][]aggregate.TrendPoint   `json:"trend_by_model"`
-		TrendByProject   map[string][]aggregate.TrendPoint   `json:"trend_by_project"`
-		TrendByTool      map[string][]aggregate.TrendPoint   `json:"trend_by_tool"`
-		TrendBySession   map[string][]aggregate.TrendPoint   `json:"trend_by_session"`
-		TrendBySubagent  map[string][]aggregate.TrendPoint   `json:"trend_by_subagent"`
-		OverallHitRatio  float64                             `json:"overall_hit_ratio"`
-		CacheByProject   []aggregate.CacheRow                `json:"cache_by_project"`
-		CacheBySession   []aggregate.CacheRow                `json:"cache_by_session"`
-		CacheBySubagent  []aggregate.CacheRow                `json:"cache_by_subagent"`
-		CacheByInvocation []aggregate.CacheRow               `json:"cache_by_invocation"`
-		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
-		Anomalies        []aggregate.Anomaly                 `json:"anomalies"`
-		SessionTimelines []aggregate.SessionTimeline         `json:"session_timelines"`
+		Totals            aggregate.Totals                    `json:"totals"`
+		Hotspots          []hotspotForJSON                    `json:"hotspots"`
+		ByModel           []aggregate.ModelBucket             `json:"by_model"`
+		ByProject         []aggregate.ProjectBucket           `json:"by_project"`
+		ByTool            []aggregate.ToolBucket              `json:"by_tool"`
+		ByToolDetail      map[string][]aggregate.DetailBucket `json:"by_tool_detail"`
+		BySkill           []aggregate.SkillBucket             `json:"by_skill"`
+		Main              sidePart                            `json:"main"`
+		Sidechain         sidePart                            `json:"sidechain"`
+		BySubagent        []aggregate.SubagentBucket          `json:"by_subagent"`
+		AgentInvocations  []aggregate.AgentInvocation         `json:"agent_invocations"`
+		UnknownModels     []string                            `json:"unknown_models"`
+		Period            aggregate.Period                    `json:"period"`
+		TrendTotals       []aggregate.TrendPoint              `json:"trend_totals"`
+		TrendByModel      map[string][]aggregate.TrendPoint   `json:"trend_by_model"`
+		TrendByProject    map[string][]aggregate.TrendPoint   `json:"trend_by_project"`
+		TrendByTool       map[string][]aggregate.TrendPoint   `json:"trend_by_tool"`
+		TrendBySession    map[string][]aggregate.TrendPoint   `json:"trend_by_session"`
+		TrendBySubagent   map[string][]aggregate.TrendPoint   `json:"trend_by_subagent"`
+		OverallHitRatio   float64                             `json:"overall_hit_ratio"`
+		CacheByProject    []aggregate.CacheRow                `json:"cache_by_project"`
+		CacheBySession    []aggregate.CacheRow                `json:"cache_by_session"`
+		CacheBySubagent   []aggregate.CacheRow                `json:"cache_by_subagent"`
+		CacheByInvocation []aggregate.CacheRow                `json:"cache_by_invocation"`
+		ByPrompt          []aggregate.PromptBucket            `json:"by_prompt"`
+		Anomalies         []aggregate.Anomaly                 `json:"anomalies"`
+		SessionTimelines  []aggregate.SessionTimeline         `json:"session_timelines"`
 	}{
-		Totals:           a.Totals(),
-		Hotspots:         hotspots,
-		ByModel:          a.ByModel(),
-		ByProject:        a.ByProject(),
-		ByTool:           a.ByTool(),
-		ByToolDetail:     a.ByToolDetail(),
-		BySkill:          a.BySkill(),
-		Main:             sidePart{Cost: mainCost, Turns: mainTurns, Tokens: mainTok},
-		Sidechain:        sidePart{Cost: sideCost, Turns: sideTurns, Tokens: sideTok},
-		BySubagent:       a.BySubagent(),
-		AgentInvocations: a.AgentInvocations(""),
-		UnknownModels:    a.UnknownModels(),
-		Period:           a.Period(),
-		TrendTotals:      a.TrendTotals(),
-		TrendByModel:     a.TrendByModel(),
-		TrendByProject:   a.TrendByProject(),
-		TrendByTool:      a.TrendByTool(),
-		TrendBySession:   a.TrendBySession(),
-		TrendBySubagent:  a.TrendBySubagent(),
-		OverallHitRatio:  a.OverallHitRatio(),
+		Totals:            a.Totals(),
+		Hotspots:          hotspots,
+		ByModel:           a.ByModel(),
+		ByProject:         a.ByProject(),
+		ByTool:            a.ByTool(),
+		ByToolDetail:      a.ByToolDetail(),
+		BySkill:           a.BySkill(),
+		Main:              sidePart{Cost: mainCost, Turns: mainTurns, Tokens: mainTok},
+		Sidechain:         sidePart{Cost: sideCost, Turns: sideTurns, Tokens: sideTok},
+		BySubagent:        a.BySubagent(),
+		AgentInvocations:  a.AgentInvocations(""),
+		UnknownModels:     a.UnknownModels(),
+		Period:            a.Period(),
+		TrendTotals:       a.TrendTotals(),
+		TrendByModel:      a.TrendByModel(),
+		TrendByProject:    a.TrendByProject(),
+		TrendByTool:       a.TrendByTool(),
+		TrendBySession:    a.TrendBySession(),
+		TrendBySubagent:   a.TrendBySubagent(),
+		OverallHitRatio:   a.OverallHitRatio(),
 		CacheByProject:    a.CacheByProject(),
 		CacheBySession:    a.CacheBySession(),
 		CacheBySubagent:   a.CacheBySubagent(),
@@ -181,6 +184,9 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 		SessionTimelines:  opts.SessionTimelines,
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal report data: %w", err)
@@ -196,6 +202,9 @@ func HTMLWithOptions(w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) err
 	liftURL := opts.ScopeLiftURL
 	if liftURL == "" {
 		liftURL = "/?scope=all"
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	// json.Marshal already escapes <, >, & as < etc., so the bytes
 	// are safe to drop into a <script type="application/json"> island.

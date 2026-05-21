@@ -1,6 +1,7 @@
 package aggregate
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -110,15 +111,16 @@ type SessionTimelinesOptions struct {
 // opts.TopN if set. Synthetic / zero-cost turns are still included — they
 // contribute to the turn list but not to ranking.
 func BuildSessionTimelines(
+	ctx context.Context,
 	turns []parse.Turn,
 	msgs []parse.UserMessage,
 	parentLinks []parse.ParentLink,
 	prices *pricing.Table,
 	filter Filter,
 	opts SessionTimelinesOptions,
-) []SessionTimeline {
+) ([]SessionTimeline, error) {
 	if len(turns) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build the same parent + userText maps BuildPromptIndex uses. Kept
@@ -204,7 +206,18 @@ func BuildSessionTimelines(
 
 	sessions := map[string]*sessionAccum{}
 
-	for _, t := range turns {
+	// Cancellation: a disconnected HTTP client triggers this. Check at
+	// entry and every 1024 turns — frequent enough to short-circuit a
+	// large corpus quickly, cheap enough not to dominate the hot loop.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for i, t := range turns {
+		if i&1023 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if !matchesFilter(t, filter) {
 			continue
 		}
@@ -329,7 +342,7 @@ func BuildSessionTimelines(
 	if opts.TopN > 0 && len(out) > opts.TopN {
 		out = out[:opts.TopN]
 	}
-	return out
+	return out, nil
 }
 
 // matchesFilter is the same logic as Aggregator.match — duplicated here

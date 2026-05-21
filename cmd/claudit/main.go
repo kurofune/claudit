@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -279,14 +280,18 @@ func runReport(args []string) error {
 	// non-HTML — keeps the markdown/JSON paths unchanged.
 	var sessionTimelines []aggregate.SessionTimeline
 	if *asHTML && !*asJSON && *sessionsTop > 0 {
-		sessionTimelines = aggregate.BuildSessionTimelines(
-			turns, userMsgs, parentLinks, prices, filter,
+		var err error
+		sessionTimelines, err = aggregate.BuildSessionTimelines(
+			context.Background(), turns, userMsgs, parentLinks, prices, filter,
 			aggregate.SessionTimelinesOptions{
 				TopN:           *sessionsTop,
 				Redact:         *redact,
 				MaxPromptChars: 2000,
 			},
 		)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Render. --json takes precedence over --html so an explicit --json
@@ -296,7 +301,7 @@ func runReport(args []string) error {
 			return err
 		}
 	} else if *asHTML {
-		if err := render.HTMLWithOptions(os.Stdout, agg, render.HTMLOptions{
+		if err := render.HTMLWithOptions(context.Background(), os.Stdout, agg, render.HTMLOptions{
 			SessionTimelines: sessionTimelines,
 			Version:          versionShort(),
 		}); err != nil {

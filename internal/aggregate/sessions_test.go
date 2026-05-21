@@ -1,6 +1,8 @@
 package aggregate
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +32,10 @@ func TestBuildSessionTimelines_GroupsPromptsAndOrdersChronologically(t *testing.
 		turns[i].CWD = "/p/x"
 	}
 
-	out := BuildSessionTimelines(turns, users, nil, prices, Filter{}, SessionTimelinesOptions{})
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{}, SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 {
 		t.Fatalf("want 1 session, got %d", len(out))
 	}
@@ -77,12 +82,16 @@ func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
 	uMid, tMid := mkSession("s_mid", 10)
 	uExp, tExp := mkSession("s_expensive", 100)
 
-	out := BuildSessionTimelines(
+	out, err := BuildSessionTimelines(
+		context.Background(),
 		[]parse.Turn{tCh, tMid, tExp},
 		[]parse.UserMessage{uCh, uMid, uExp},
 		nil, prices, Filter{},
 		SessionTimelinesOptions{TopN: 2},
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 2 {
 		t.Fatalf("TopN=2 should cap to 2, got %d", len(out))
 	}
@@ -100,8 +109,11 @@ func TestBuildSessionTimelines_Redacts(t *testing.T) {
 	users := []parse.UserMessage{chainUser("u1", "", "s1", "sensitive content here", t0)}
 	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
 
-	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{Redact: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 || len(out[0].Prompts) != 1 {
 		t.Fatalf("unexpected shape: %+v", out)
 	}
@@ -121,8 +133,11 @@ func TestBuildSessionTimelines_TruncatesLongPrompts(t *testing.T) {
 	users := []parse.UserMessage{chainUser("u1", "", "s1", long, t0)}
 	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
 
-	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{MaxPromptChars: 2000})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	p := out[0].Prompts[0]
 	if !p.Truncated {
 		t.Errorf("Truncated flag should be true for 5000-char prompt with 2000 cap")
@@ -143,9 +158,12 @@ func TestBuildSessionTimelines_RespectsFilterWindow(t *testing.T) {
 		chainTurn("a1", "u1", "s1", t0.Add(time.Second)),
 		chainTurn("a2", "u2", "s2", t0.Add(48*time.Hour+time.Second)),
 	}
-	out := BuildSessionTimelines(turns, users, nil, prices,
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices,
 		Filter{Since: t0.Add(24 * time.Hour)},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 || out[0].SessionID != "s2" {
 		t.Errorf("filter should drop early session: %+v", out)
 	}
@@ -170,8 +188,11 @@ func TestBuildSessionTimelines_DistinctToolInvocations(t *testing.T) {
 		{Name: "SlashCommand", SlashCommand: "/review"},
 		{Name: "Edit"},
 	}
-	out := BuildSessionTimelines([]parse.Turn{turn}, users, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), []parse.Turn{turn}, users, nil, prices, Filter{},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	got := out[0].Prompts[0].Turns[0].Tools
 	want := []ToolInvocation{
 		{Name: "Bash", Detail: "git status"},
@@ -204,8 +225,11 @@ func TestBuildSessionTimelines_TurnDuration(t *testing.T) {
 		chainTurn("a2", "a1", "s1", t0.Add(12*time.Second)), // +11s
 		chainTurn("a3", "a2", "s1", t0.Add(15*time.Second)), // +3s, then last
 	}
-	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	ts := out[0].Prompts[0].Turns
 	if ts[0].DurationMs != 11_000 {
 		t.Errorf("ts[0].DurationMs = %d, want 11000", ts[0].DurationMs)
@@ -230,8 +254,11 @@ func TestBuildSessionTimelines_KeyMatchesPromptBucket(t *testing.T) {
 	}
 	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
 
-	out := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	got := out[0].Prompts[0].Key
 	want := normalizePromptKey("Refactor the auth Middleware\n  for IDOR")
 	if got != want {
@@ -248,10 +275,16 @@ func TestBuildSessionTimelines_KeyIgnoresRedaction(t *testing.T) {
 	users := []parse.UserMessage{chainUser("u1", "", "s1", "investigate flaky test", t0)}
 	turns := []parse.Turn{chainTurn("a1", "u1", "s1", t0.Add(time.Second))}
 
-	withRedact := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	withRedact, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{Redact: true})
-	withoutRedact := BuildSessionTimelines(turns, users, nil, prices, Filter{},
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	withoutRedact, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if withRedact[0].Prompts[0].Key != withoutRedact[0].Prompts[0].Key {
 		t.Errorf("Key changed under redaction: %q vs %q",
@@ -262,6 +295,33 @@ func TestBuildSessionTimelines_KeyIgnoresRedaction(t *testing.T) {
 	}
 }
 
+func TestBuildSessionTimelines_CanceledContextReturnsError(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	// A non-trivial corpus so cancellation has something to short-circuit.
+	users := []parse.UserMessage{
+		chainUser("p1", "", "s1", "prompt", t0),
+	}
+	turns := []parse.Turn{
+		chainTurn("a1", "p1", "s1", t0.Add(1*time.Minute)),
+		chainTurn("a2", "a1", "s1", t0.Add(2*time.Minute)),
+		chainTurn("a3", "a2", "s1", t0.Add(3*time.Minute)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	out, err := BuildSessionTimelines(ctx, turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if out != nil {
+		t.Errorf("want nil timelines on cancellation, got %d", len(out))
+	}
+}
+
 func TestBuildSessionTimelines_OrphanTurnFallsIntoNoPromptBucket(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
@@ -269,8 +329,11 @@ func TestBuildSessionTimelines_OrphanTurnFallsIntoNoPromptBucket(t *testing.T) {
 	// terminates without finding a prompt UUID. Should still appear in
 	// the timeline under the "" prompt key.
 	turn := chainTurn("a1", "", "s1", t0)
-	out := BuildSessionTimelines([]parse.Turn{turn}, nil, nil, prices, Filter{},
+	out, err := BuildSessionTimelines(context.Background(), []parse.Turn{turn}, nil, nil, prices, Filter{},
 		SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 || len(out[0].Prompts) != 1 {
 		t.Fatalf("unexpected shape: %+v", out)
 	}
