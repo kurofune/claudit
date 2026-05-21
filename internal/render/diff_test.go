@@ -54,10 +54,10 @@ func TestModelMovers_KeysOnEitherSide(t *testing.T) {
 
 func TestRankMovers_ByAbsoluteDelta(t *testing.T) {
 	rows := []DiffMover{
-		{Key: "a", CostA: 10, CostB: 12},  // delta +2
-		{Key: "b", CostA: 100, CostB: 0},  // delta -100  (largest)
-		{Key: "c", CostA: 5, CostB: 80},   // delta +75
-		{Key: "d", CostA: 50, CostB: 50},  // delta 0
+		{Key: "a", CostA: 10, CostB: 12}, // delta +2
+		{Key: "b", CostA: 100, CostB: 0}, // delta -100  (largest)
+		{Key: "c", CostA: 5, CostB: 80},  // delta +75
+		{Key: "d", CostA: 50, CostB: 50}, // delta 0
 	}
 	ranked := rankMovers(rows, 0)
 	wantOrder := []string{"b", "c", "a", "d"}
@@ -167,10 +167,10 @@ func TestDiffHTML_RendersCoreSections(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := DiffHTML(&buf, a, b, DiffOptions{
-		LabelA: "prior week (2026-04-25..2026-05-02)",
-		LabelB: "this week (2026-05-02..2026-05-09)",
+		LabelA:    "prior week (2026-04-25..2026-05-02)",
+		LabelB:    "this week (2026-05-02..2026-05-09)",
 		TopMovers: 5,
-		Hotspots: 5,
+		Hotspots:  5,
 	})
 	if err != nil {
 		t.Fatalf("DiffHTML returned error: %v", err)

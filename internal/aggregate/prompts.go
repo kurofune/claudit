@@ -18,10 +18,10 @@ const promptKeyMaxRunes = 120
 // distinguish a prompt that was issued once across many sessions from
 // one issued many times in a single session.
 type promptBucketInternal struct {
-	Key      string
-	Sample   string
-	InvocSet map[string]struct{} // user-message UUIDs
-	SessSet  map[string]struct{}
+	Key       string
+	Sample    string
+	InvocSet  map[string]struct{} // user-message UUIDs
+	SessSet   map[string]struct{}
 	TurnCount int
 	Tokens
 	CostUSD float64

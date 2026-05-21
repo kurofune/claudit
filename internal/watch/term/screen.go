@@ -9,13 +9,13 @@ import (
 // ANSI control sequences used by Screen. Kept in one block so anyone
 // scanning for terminal-control concerns finds them together.
 const (
-	altEnter  = "\033[?1049h" // switch to alternate screen buffer
-	altLeave  = "\033[?1049l" // switch back to main buffer
-	curHide   = "\033[?25l"   // hide cursor
-	curShow   = "\033[?25h"   // show cursor
-	curHome   = "\033[H"      // move cursor to row 1 column 1
-	clearAll  = "\033[2J"     // erase entire screen
-	clearBelow = "\033[J"     // erase cursor → end of screen (used after home for redraws)
+	altEnter   = "\033[?1049h" // switch to alternate screen buffer
+	altLeave   = "\033[?1049l" // switch back to main buffer
+	curHide    = "\033[?25l"   // hide cursor
+	curShow    = "\033[?25h"   // show cursor
+	curHome    = "\033[H"      // move cursor to row 1 column 1
+	clearAll   = "\033[2J"     // erase entire screen
+	clearBelow = "\033[J"      // erase cursor → end of screen (used after home for redraws)
 )
 
 // ScreenFrame is the structured payload Screen.Paint consumes. The

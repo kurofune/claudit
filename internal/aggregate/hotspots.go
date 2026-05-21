@@ -12,23 +12,23 @@ type HotspotKind string
 
 const (
 	HotspotBashPattern   HotspotKind = "bash_pattern"
-	HotspotFileExt       HotspotKind = "file_ext"     // Read/Edit/Write/NotebookEdit by extension
-	HotspotGrepGlob      HotspotKind = "grep_glob"    // Grep/Glob patterns
+	HotspotFileExt       HotspotKind = "file_ext"  // Read/Edit/Write/NotebookEdit by extension
+	HotspotGrepGlob      HotspotKind = "grep_glob" // Grep/Glob patterns
 	HotspotWebHost       HotspotKind = "web_host"
 	HotspotProject       HotspotKind = "project"
 	HotspotSubagentType  HotspotKind = "subagent_type"
-	HotspotInvocation    HotspotKind = "invocation"   // a single subagent run
-	HotspotSkill         HotspotKind = "skill"        // a Skill or SlashCommand
-	HotspotCacheMiss     HotspotKind = "cache_miss"   // low cache hit rate at a project
+	HotspotInvocation    HotspotKind = "invocation"     // a single subagent run
+	HotspotSkill         HotspotKind = "skill"          // a Skill or SlashCommand
+	HotspotCacheMiss     HotspotKind = "cache_miss"     // low cache hit rate at a project
 	HotspotPromptPattern HotspotKind = "prompt_pattern" // an expensive habitual user prompt
 )
 
 // Hotspot is one ranked optimization target. Title is what the renderer
 // shows; Context is the substitution data for the LLM-prompt template.
 type Hotspot struct {
-	Kind    HotspotKind
-	Title   string  // human-readable, e.g. "Bash: `bd show`"
-	CostUSD float64
+	Kind       HotspotKind
+	Title      string // human-readable, e.g. "Bash: `bd show`"
+	CostUSD    float64
 	PctOfTotal float64
 
 	// Context carries everything the prompt template needs, populated per kind.

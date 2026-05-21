@@ -47,12 +47,12 @@ type Notice struct {
 type NoticeKind int
 
 const (
-	NoticeWaiting NoticeKind = iota // file not found yet
-	NoticeOpened                    // first successful open
-	NoticeRotated                   // inode changed mid-stream
-	NoticeTruncated                 // size shrank (treated like rotation)
-	NoticeMalformed                 // a line failed to decode
-	NoticeError                     // non-fatal I/O error worth surfacing (e.g. close failed)
+	NoticeWaiting   NoticeKind = iota // file not found yet
+	NoticeOpened                      // first successful open
+	NoticeRotated                     // inode changed mid-stream
+	NoticeTruncated                   // size shrank (treated like rotation)
+	NoticeMalformed                   // a line failed to decode
+	NoticeError                       // non-fatal I/O error worth surfacing (e.g. close failed)
 )
 
 // TailOptions tweaks the polling loop. Zero-valued opts are valid.
@@ -341,4 +341,3 @@ func FindBySessionID(root, idPrefix string) (string, error) {
 	}
 	return match, nil
 }
-

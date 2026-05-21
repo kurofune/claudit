@@ -88,4 +88,3 @@ func TestDefaultDiffWindows_RejectsUnknownUnit(t *testing.T) {
 		t.Errorf("expected error for unknown --by value")
 	}
 }
-

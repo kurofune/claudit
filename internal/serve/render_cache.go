@@ -15,10 +15,10 @@ import (
 // aggregate+render path on repeat requests — a few hundred ns of
 // lock contention is in the noise.
 type renderLRU struct {
-	mu   sync.Mutex
-	cap  int
-	ll   *list.List
-	m    map[renderKey]*list.Element
+	mu  sync.Mutex
+	cap int
+	ll  *list.List
+	m   map[renderKey]*list.Element
 }
 
 type renderKey struct {

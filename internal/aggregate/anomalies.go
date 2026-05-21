@@ -124,4 +124,3 @@ func (a *Aggregator) Anomalies() []Anomaly {
 	})
 	return out
 }
-

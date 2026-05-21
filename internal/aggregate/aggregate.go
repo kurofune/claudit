@@ -20,11 +20,11 @@ type Filter struct {
 
 // Tokens is the canonical token-count tuple we render in every section.
 type Tokens struct {
-	InputTokens          int64
-	OutputTokens         int64
-	CacheCreate5mTokens  int64
-	CacheCreate1hTokens  int64
-	CacheReadTokens      int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreate5mTokens int64
+	CacheCreate1hTokens int64
+	CacheReadTokens     int64
 }
 
 func (a *Tokens) addUsage(u parse.Usage) {
@@ -55,7 +55,7 @@ type ModelBucket struct {
 
 // ProjectBucket is one row in the by-project section.
 type ProjectBucket struct {
-	Project       string // best-effort decoded path
+	Project string // best-effort decoded path
 	Tokens
 	CostUSD       float64
 	Sessions      int
@@ -131,15 +131,15 @@ type Aggregator struct {
 	prices *pricing.Table
 	filter Filter
 
-	totals    Totals
-	byModel   map[string]*ModelBucket
-	byProject map[string]*ProjectBucket
+	totals       Totals
+	byModel      map[string]*ModelBucket
+	byProject    map[string]*ProjectBucket
 	byTool       map[string]*ToolBucket
 	byToolDetail map[string]map[string]*DetailBucket // tool -> detail -> bucket
 	bySkill      map[string]*SkillBucket
-	side          SidechainSplit
-	bySub         map[string]*SubagentBucket
-	byInvocation  map[string]*AgentInvocation // keyed by SourceFile
+	side         SidechainSplit
+	bySub        map[string]*SubagentBucket
+	byInvocation map[string]*AgentInvocation // keyed by SourceFile
 
 	// Used to compute "dominant model" per project.
 	projectModelTurns map[string]map[string]int

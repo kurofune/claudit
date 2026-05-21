@@ -43,7 +43,7 @@ type painter interface {
 type Frame struct {
 	// Rolling: today / week / month totals. May be empty when rolling
 	// is disabled, in which case the totals panel is omitted.
-	Rolling RollingPanelData
+	Rolling    RollingPanelData
 	HasRolling bool
 	// Live: cross-session totals header + per-session rows. Live.Rows
 	// may be empty before the first event arrives.

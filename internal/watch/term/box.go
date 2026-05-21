@@ -20,10 +20,10 @@ const (
 // (callers add their own colors before passing in). Style controls
 // whether borders are colorized (dim) and what color the title uses.
 type Panel struct {
-	Title     string  // appears in the top border; may include ANSI
-	TitleHint string  // appears after Title, dim, e.g. "$18.18 across 1 session"
+	Title     string // appears in the top border; may include ANSI
+	TitleHint string // appears after Title, dim, e.g. "$18.18 across 1 session"
 	Body      []string
-	Empty     string  // shown when Body is empty (e.g. "no alerts yet")
+	Empty     string // shown when Body is empty (e.g. "no alerts yet")
 	// Pad inserts a blank interior row above and below the body so the
 	// content has breathing room from the borders. Off by default —
 	// dense one-line panels (totals, alerts) read fine without it; on

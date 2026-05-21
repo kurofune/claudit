@@ -358,18 +358,18 @@ func DiffMarkdown(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) erro
 func DiffJSON(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 	opt.defaults()
 	out := struct {
-		LabelA          string             `json:"label_a"`
-		LabelB          string             `json:"label_b"`
-		TotalsA         aggregate.Totals   `json:"totals_a"`
-		TotalsB         aggregate.Totals   `json:"totals_b"`
-		HitRatioA       float64            `json:"hit_ratio_a"`
-		HitRatioB       float64            `json:"hit_ratio_b"`
-		ModelMovers     []DiffMover        `json:"model_movers"`
-		ProjectMovers   []DiffMover        `json:"project_movers"`
-		ToolMovers      []DiffMover        `json:"tool_movers"`
-		SkillMovers     []DiffMover        `json:"skill_movers"`
-		SubagentMovers  []DiffMover        `json:"subagent_movers"`
-		NewHotspotsInB  []aggregate.Hotspot `json:"new_hotspots_in_b"`
+		LabelA         string              `json:"label_a"`
+		LabelB         string              `json:"label_b"`
+		TotalsA        aggregate.Totals    `json:"totals_a"`
+		TotalsB        aggregate.Totals    `json:"totals_b"`
+		HitRatioA      float64             `json:"hit_ratio_a"`
+		HitRatioB      float64             `json:"hit_ratio_b"`
+		ModelMovers    []DiffMover         `json:"model_movers"`
+		ProjectMovers  []DiffMover         `json:"project_movers"`
+		ToolMovers     []DiffMover         `json:"tool_movers"`
+		SkillMovers    []DiffMover         `json:"skill_movers"`
+		SubagentMovers []DiffMover         `json:"subagent_movers"`
+		NewHotspotsInB []aggregate.Hotspot `json:"new_hotspots_in_b"`
 	}{
 		LabelA:         opt.LabelA,
 		LabelB:         opt.LabelB,
