@@ -1,10 +1,12 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +151,124 @@ func TestServer_Healthz(t *testing.T) {
 	}
 }
 
+// errResponseWriter wraps an http.ResponseWriter but fails every
+// Write with the configured error. Used to exercise handler paths
+// that should log when the response body can't be written (typically
+// because the client disconnected mid-response).
+type errResponseWriter struct {
+	http.ResponseWriter
+	writeErr error
+}
+
+func (e *errResponseWriter) Write(p []byte) (int, error) {
+	return 0, e.writeErr
+}
+
+// TestServer_Healthz_LogsWriteError asserts that when the response
+// writer errors out, the handler does not silently swallow it. The
+// existing handleHealthz used `_, _ = io.WriteString(...)`; that hid
+// truncated writes from operators.
+func TestServer_Healthz_LogsWriteError(t *testing.T) {
+	var buf bytes.Buffer
+	srv := newTestServer(t, t.TempDir())
+	srv.opts.Logger = log.New(&buf, "", 0)
+
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/healthz", nil)
+	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
+	srv.Handler().ServeHTTP(w, r)
+
+	out := buf.String()
+	if !strings.Contains(out, "healthz") {
+		t.Errorf("log = %q, want to contain %q", out, "healthz")
+	}
+	if !strings.Contains(out, "conn reset") {
+		t.Errorf("log = %q, want to contain %q", out, "conn reset")
+	}
+}
+
+// TestServer_Status_LogsWriteError asserts handleStatus logs when
+// json encoding fails to drain to the response writer (typically
+// client disconnect mid-write).
+func TestServer_Status_LogsWriteError(t *testing.T) {
+	var buf bytes.Buffer
+	srv := newTestServer(t, t.TempDir())
+	srv.opts.Logger = log.New(&buf, "", 0)
+
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/status", nil)
+	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
+	srv.Handler().ServeHTTP(w, r)
+
+	out := buf.String()
+	if !strings.Contains(out, "status") {
+		t.Errorf("log = %q, want to contain %q", out, "status")
+	}
+	if !strings.Contains(out, "conn reset") {
+		t.Errorf("log = %q, want to contain %q", out, "conn reset")
+	}
+}
+
+// TestServer_Report_LogsWriteError asserts handleReport logs when
+// writeCached can't drain the response body. The cached and
+// freshly-rendered paths both go through writeCached; this test
+// exercises the freshly-rendered branch (no prior cache entry).
+func TestServer_Report_LogsWriteError(t *testing.T) {
+	var buf bytes.Buffer
+	srv := newTestServer(t, t.TempDir())
+	srv.opts.Logger = log.New(&buf, "", 0)
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
+	srv.Handler().ServeHTTP(w, r)
+
+	out := buf.String()
+	if !strings.Contains(out, "report") {
+		t.Errorf("log = %q, want to contain %q", out, "report")
+	}
+	if !strings.Contains(out, "conn reset") {
+		t.Errorf("log = %q, want to contain %q", out, "conn reset")
+	}
+}
+
+// TestServer_Report_LogsWriteError_CachedBranch covers the
+// render-cache-hit branch of handleReport (the sibling of the test
+// above). Prewarms the cache with a successful request, then issues
+// a second request whose ResponseWriter rejects writes — the cached
+// bytes are looked up successfully but writeCached errors on the way
+// to the client, and the failure must be logged.
+func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
+	srv := newTestServerWithCache(t, dir, 4)
+
+	// Warm-up request — populates the render cache.
+	r1 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	w1 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w1, r1)
+	if w1.Code != 200 {
+		t.Fatalf("warmup status = %d", w1.Code)
+	}
+	if srv.cacheLen() != 1 {
+		t.Fatalf("cache not warmed: cacheLen = %d", srv.cacheLen())
+	}
+
+	// Second request with a write-erroring response writer — exercises
+	// the cached branch (lookup succeeds, writeCached fails).
+	var buf bytes.Buffer
+	srv.opts.Logger = log.New(&buf, "", 0)
+	r2 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	w2 := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
+	srv.Handler().ServeHTTP(w2, r2)
+
+	out := buf.String()
+	if !strings.Contains(out, "report") {
+		t.Errorf("log = %q, want to contain %q", out, "report")
+	}
+	if !strings.Contains(out, "conn reset") {
+		t.Errorf("log = %q, want to contain %q", out, "conn reset")
+	}
+}
+
 func TestServer_RootMethodNotAllowed(t *testing.T) {
 	srv := newTestServer(t, t.TempDir())
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
@@ -156,6 +276,40 @@ func TestServer_RootMethodNotAllowed(t *testing.T) {
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST / = %d, want 405", w.Code)
+	}
+	allow := w.Header().Get("Allow")
+	if !strings.Contains(allow, "GET") || !strings.Contains(allow, "HEAD") {
+		t.Errorf("Allow = %q, want it to advertise GET and HEAD", allow)
+	}
+}
+
+// TestServer_ReportHEAD covers the HEAD branch of handleReport: status
+// 200, correct response headers, but no body. Browsers and probes use
+// HEAD to check freshness without paying for a render.
+func TestServer_ReportHEAD(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
+	srv := newTestServer(t, dir)
+
+	r := httptest.NewRequest(http.MethodHead, "/", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html...", ct)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
+	if v := w.Header().Get("Vary"); !strings.Contains(v, "Accept-Encoding") {
+		t.Errorf("Vary = %q, want Accept-Encoding present", v)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("body len = %d, want 0 for HEAD response", w.Body.Len())
 	}
 }
 
@@ -289,4 +443,67 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// TestServer_ShutdownErrorIsLogged forces srv.Shutdown to return
+// context.DeadlineExceeded by registering a hanging handler, putting
+// it in-flight, then setting the server's drain timeout to a value
+// shorter than the request will release in. Checks that the resulting
+// error is written via s.opts.Logger. Without this, a stuck listener
+// (e.g., the 3s drain timeout firing in production) would silently
+// swallow the error and the next restart would have no diagnostic
+// trail.
+func TestServer_ShutdownErrorIsLogged(t *testing.T) {
+	var buf bytes.Buffer
+	srv := newTestServer(t, t.TempDir())
+	srv.opts.Logger = log.New(&buf, "", 0)
+	srv.shutdownTimeout = 50 * time.Millisecond
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	srv.mux.HandleFunc("/hang", func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, ln) }()
+
+	addr := "http://" + ln.Addr().String()
+	reqDone := make(chan struct{})
+	go func() {
+		defer close(reqDone)
+		c := &http.Client{Timeout: 5 * time.Second}
+		resp, err := c.Get(addr + "/hang")
+		if err == nil {
+			if cerr := resp.Body.Close(); cerr != nil {
+				t.Errorf("close body: %v", cerr)
+			}
+		}
+	}()
+
+	<-started
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("serve did not return")
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "shutdown") {
+		t.Errorf("log = %q, want to contain %q", out, "shutdown")
+	}
+	if !strings.Contains(out, "deadline exceeded") {
+		t.Errorf("log = %q, want to contain %q", out, "deadline exceeded")
+	}
+
+	close(release)
+	<-reqDone
 }
