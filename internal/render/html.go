@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
@@ -166,6 +167,7 @@ func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, 
 		ByPrompt          []aggregate.PromptBucket            `json:"by_prompt"`
 		Anomalies         []aggregate.Anomaly                 `json:"anomalies"`
 		SessionTimelines  []aggregate.SessionTimeline         `json:"session_timelines"`
+		Forecast          aggregate.Forecast                  `json:"forecast"`
 	}{
 		Totals:            a.Totals(),
 		Hotspots:          hotspots,
@@ -194,6 +196,7 @@ func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, 
 		ByPrompt:          a.ByPrompt(),
 		Anomalies:         a.Anomalies(),
 		SessionTimelines:  opts.SessionTimelines,
+		Forecast:          a.MonthEndForecast(time.Now()),
 	}
 
 	if err := ctx.Err(); err != nil {

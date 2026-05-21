@@ -3,6 +3,7 @@ package render
 import (
 	"encoding/json"
 	"io"
+	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
@@ -25,6 +26,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
 		Anomalies        []aggregate.Anomaly                 `json:"anomalies"`
 		UnknownModels    []string                            `json:"unknown_models"`
+		Forecast         aggregate.Forecast                  `json:"forecast"`
 	}{
 		Totals:           a.Totals(),
 		ByModel:          a.ByModel(),
@@ -39,6 +41,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		ByPrompt:         a.ByPrompt(),
 		Anomalies:        a.Anomalies(),
 		UnknownModels:    a.UnknownModels(),
+		Forecast:         a.MonthEndForecast(time.Now()),
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

@@ -110,6 +110,10 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 		ew.Printf("- **Cache hit ratio:** %s _(read / (read + input + cache_create))_\n",
 			ratioPct(tot.HitRatio()))
 	}
+	if f := a.MonthEndForecast(time.Now()); f.ProjectedMonthEnd > 0 {
+		ew.Printf("- **Month-end forecast:** %s projected (at %s/day MTD pace)\n",
+			money(f.ProjectedMonthEnd), money(f.DailyRateUSD))
+	}
 	ew.Println()
 	ew.Println("| Bucket | Tokens |")
 	ew.Println("|---|---:|")

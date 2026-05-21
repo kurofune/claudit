@@ -947,6 +947,7 @@
      end-to-end with no preserveAspectRatio padding. */
   .chart-host[data-chart-type="cost"] svg     { display: block; width: 100%; height: 320px; }
   .chart-host[data-chart-type="hitratio"] svg { display: block; width: 100%; height: 110px; }
+  .chart-host[data-chart-type="forecast"] svg { display: block; width: 100%; height: 320px; }
   .trend-axis { stroke: var(--border); stroke-width: 1; }
   /* Line path. Stroke-linecap/linejoin round to match the soft corner
      language; the bezier-smoothed path benefits from rounded joins. */
@@ -959,6 +960,31 @@
   .trend-subtitle { color: var(--ink-2); font-weight: 600;
                     font-size: var(--t-2); margin-top: var(--s-3); }
   .trend-area { stroke: none; }
+  /* Month-end forecast extension on the daily cost chart: a horizontal
+     dashed line at the MTD daily rate, stretched from the last actual
+     bucket to month-end. The label sits just above its right end. */
+  .trend-forecast {
+    stroke: var(--ink-2); stroke-width: 2.25;
+    stroke-linecap: round; opacity: 0.7;
+  }
+  .trend-forecast-label {
+    fill: var(--ink); font-family: var(--font-mono);
+    font-size: var(--t-4); font-weight: 700;
+  }
+  .trend-pt-forecast {
+    fill: var(--ink-2); stroke: var(--surface); stroke-width: 2;
+  }
+  .chart-host[data-chart-type="forecast"] .crosshair-dot {
+    fill: var(--ink-2);
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--ink-2) 40%, transparent));
+  }
+  .chart-host[data-chart-type="forecast"] .chart-tooltip {
+    border-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+  }
+  .chart-host[data-chart-type="forecast"] .chart-tooltip::after {
+    border-right-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+    border-bottom-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+  }
   /* Gradient stops referenced from inline <linearGradient>s. Defined as
      CSS classes so the gradient inherits the live --accent / --accent-2,
      which would not happen with hardcoded SVG attributes. */
@@ -1996,7 +2022,7 @@
     // If the active view has subtabs, default to the first when none specified.
     const activeView = document.querySelector(`.view[data-view="${view}"]`);
     if (activeView) {
-      const subtabs = activeView.querySelectorAll('.subtab');
+      const subtabs = activeView.querySelectorAll('.subtab[data-subtab]');
       if (subtabs.length) {
         const wanted = subtab && activeView.querySelector(`.subtab[data-subtab="${subtab}"]`)
           ? subtab
@@ -2381,6 +2407,128 @@
       </div>`;
   }
 
+  // Cumulative cost burn-up with a dashed projection to month-end. The X
+  // axis spans [window_start, month_end), where window_start is clamped to
+  // the active filter on the backend — so changing ?since= moves the
+  // chart's left edge in lockstep with the daily-cost chart. Distinct
+  // from trendLineChart — Y axis is cumulative $.
+  function forecastChart(forecast, points) {
+    if (!forecast || (forecast.projected_month_end_usd || 0) <= 0) {
+      return '<div class="small empty-state">Forecast unavailable — needs at least two days of cost in the current calendar month and daily bucketing.</div>';
+    }
+    const ws = new Date(forecast.window_start).getTime();
+    const me = new Date(forecast.month_end).getTime(); // exclusive
+    const projected = forecast.projected_month_end_usd;
+    const N = Math.round((me - ws) / 86400000);
+    if (N < 1) {
+      return '<div class="small empty-state">Forecast window is empty.</div>';
+    }
+
+    // cum[d] = cumulative cost through end of day d (relative to windowStart).
+    // Days between data days forward-fill the last running total; days past
+    // the last data day are linearly interpolated toward the projected total.
+    const cum = new Array(N).fill(null);
+    let running = 0, lastDay = -1;
+    const inWindow = (points || [])
+      .filter(p => { const t = new Date(p.time).getTime(); return t >= ws && t < me; })
+      .sort((a, b) => new Date(a.time) - new Date(b.time));
+    for (const p of inWindow) {
+      const d = Math.floor((new Date(p.time).getTime() - ws) / 86400000);
+      if (d < 0 || d >= N) continue;
+      running += p.cost_usd || 0;
+      cum[d] = running;
+      if (d > lastDay) lastDay = d;
+    }
+    if (lastDay < 0) {
+      return '<div class="small empty-state">No data in the forecast window.</div>';
+    }
+    let prev = 0;
+    for (let i = 0; i <= lastDay; i++) {
+      if (cum[i] === null) cum[i] = prev; else prev = cum[i];
+    }
+    if (lastDay < N - 1) {
+      const startCum = cum[lastDay];
+      const span = N - 1 - lastDay;
+      for (let i = lastDay + 1; i < N; i++) {
+        cum[i] = startCum + ((i - lastDay) / span) * (projected - startCum);
+      }
+    }
+
+    const w = chartViewboxWidth(), h = 320;
+    const pad = { l: 70, r: 24, t: 28, b: 32 };
+    const innerW = w - pad.l - pad.r;
+    const innerH = h - pad.t - pad.b;
+    const ymax = Math.max(projected, cum[lastDay]) * 1.05 || 1;
+    const xAt = i => pad.l + (i / Math.max(1, N - 1)) * innerW;
+    const yAt = v => pad.t + innerH - (v / ymax) * innerH;
+
+    let solid = '';
+    for (let i = 0; i <= lastDay; i++) {
+      solid += `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(2)} ${yAt(cum[i]).toFixed(2)} `;
+    }
+    const lastX = xAt(lastDay), lastY = yAt(cum[lastDay]);
+    const endX = xAt(N - 1), endY = yAt(projected);
+
+    let yAxis = '';
+    for (const v of [0, projected / 2, projected]) {
+      yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(v).toFixed(2)}" y2="${yAt(v).toFixed(2)}" stroke-dasharray="2,3"/>`;
+      yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(v) + 4).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(v))}</text>`;
+    }
+
+    const tickDays = N >= 3 ? [0, Math.floor((N - 1) / 2), N - 1] : [0, N - 1];
+    let xTicks = '';
+    for (const d of tickDays) {
+      const dt = new Date(ws + d * 86400000);
+      xTicks += `<text class="trend-tick" x="${xAt(d).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${(dt.getUTCMonth() + 1)}/${dt.getUTCDate()}</text>`;
+    }
+
+    const todayLabel = `<text class="trend-tick" x="${lastX.toFixed(2)}" y="${(pad.t - 8).toFixed(2)}" text-anchor="middle">today</text>`;
+    const projLabel = `<text class="trend-forecast-label" x="${endX.toFixed(2)}" y="${(endY - 12).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(projected))}</text>`;
+
+    const lastDt = new Date(me - 86400000);
+    const lastDateStr = `${lastDt.getUTCFullYear()}-${String(lastDt.getUTCMonth() + 1).padStart(2,'0')}-${String(lastDt.getUTCDate()).padStart(2,'0')}`;
+
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const data = [];
+    for (let i = 0; i < N; i++) {
+      const dt = new Date(ws + i * 86400000);
+      data.push({
+        label: `${monthNames[dt.getUTCMonth()]} ${dt.getUTCDate()}`,
+        cum: cum[i],
+        projected: i > lastDay,
+      });
+    }
+
+    return `
+      <div class="chart-host" data-chart-type="forecast"
+           data-chart-points='${encodeChartData(data)}'
+           data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+           data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+           data-vb-w="${w}" data-vb-h="${h}"
+           data-y-max="${ymax}">
+        <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+          ${yAxis}
+          <path class="trend-line" d="${solid}" fill="none"/>
+          <line class="trend-forecast" x1="${lastX.toFixed(2)}" y1="${lastY.toFixed(2)}" x2="${endX.toFixed(2)}" y2="${endY.toFixed(2)}" stroke-dasharray="5,4"/>
+          <circle class="trend-pt" cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="4"/>
+          <circle class="trend-pt-forecast" cx="${endX.toFixed(2)}" cy="${endY.toFixed(2)}" r="4"/>
+          ${todayLabel}
+          ${projLabel}
+          ${xTicks}
+          <g class="crosshair" style="opacity:0">
+            <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+            <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+          </g>
+        </svg>
+        <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+      </div>
+      <div class="trend-summary">
+        <span>Spent in window: <strong>${escHtml(fmtMoney(forecast.mtd_cost_usd))}</strong> over <strong>${forecast.days_elapsed.toFixed(1)}</strong> days</span>
+        <span>Daily rate: <strong>${escHtml(fmtMoney(forecast.daily_rate_usd))}</strong></span>
+        <span>Projected by ${escHtml(lastDateStr)}: <strong>${escHtml(fmtMoney(projected))}</strong></span>
+      </div>`;
+  }
+
   // ── header & warnings ──────────────────────────────────────────────────
   const T = D.totals || {};
   const totalCost = T.CostUSD || 0;
@@ -2572,10 +2720,11 @@
     // Latest-bucket hit ratio for the summary line.
     const latestHit = pointHitRatio(points[points.length - 1]);
 
-    host.innerHTML = `
-      <h2>Cost by ${escHtml(PERIOD)}</h2>
-      <div class="small">Spend bucketed by ${escHtml(PERIOD)}. Per-row trend columns below use the same buckets, downsampled to ~30 cells when wider.</div>
-      <div class="trend-chart">
+    const forecast = D.forecast || null;
+    const showForecastTab = !!forecast && (forecast.projected_month_end_usd || 0) > 0 && PERIOD === 'day';
+
+    const costPanel = `
+      <div class="trend-chart" data-trend-panel="cost">
         ${trendLineChart(points, PERIOD, D.anomalies)}
         ${hitRatioChart(points, PERIOD, D.anomalies)}
         <div class="trend-summary">
@@ -2585,8 +2734,43 @@
           <span>Latest hit ratio: <strong>${(latestHit*100).toFixed(1)}%</strong></span>
           ${deltaHtml}
         </div>
+      </div>`;
+
+    if (!showForecastTab) {
+      host.innerHTML = `
+        <h2>Cost by ${escHtml(PERIOD)}</h2>
+        <div class="small">Spend bucketed by ${escHtml(PERIOD)}. Per-row trend columns below use the same buckets, downsampled to ~30 cells when wider.</div>
+        ${costPanel}
+      `;
+      return;
+    }
+
+    host.innerHTML = `
+      <h2>Spend over time</h2>
+      <div class="small">Spend bucketed by day, with a linear month-end projection.</div>
+      <nav class="subtabs" aria-label="Trend views">
+        <a class="subtab is-active" href="#" data-trend-tab="cost">Cost by day</a>
+        <a class="subtab" href="#" data-trend-tab="forecast">Forecast</a>
+      </nav>
+      ${costPanel}
+      <div class="trend-chart" data-trend-panel="forecast" hidden>
+        ${forecastChart(forecast, points)}
       </div>
     `;
+
+    // Local-only toggle — uses its own data-attributes so the view-level
+    // hash-routed subtab handler doesn't try to manage these panels.
+    host.querySelectorAll('.subtab[data-trend-tab]').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.preventDefault();
+        const wanted = tab.dataset.trendTab;
+        host.querySelectorAll('.subtab[data-trend-tab]').forEach(t =>
+          t.classList.toggle('is-active', t.dataset.trendTab === wanted));
+        host.querySelectorAll('[data-trend-panel]').forEach(p => {
+          p.hidden = (p.dataset.trendPanel !== wanted);
+        });
+      });
+    });
   })();
 
   // Inject Trend column header into by-model / by-project / by-tool when
@@ -3569,13 +3753,18 @@
       const xAt = i => padL + (i / (n - 1)) * innerW;
       const type = host.dataset.chartType;
 
-      // Pre-compute Y for each point (cost: scale by max; hitratio: 0..1).
+      // Pre-compute Y for each point. Cost scales by max in the data;
+      // forecast scales by data-y-max (so the dashed projection line
+      // matches the rendered ymax exactly); hitratio is 0..1.
       let yAt;
       if (type === 'cost') {
         let max = 0;
         for (const p of pts) { if ((p.cost || 0) > max) max = p.cost; }
         if (max <= 0) max = 1;
         yAt = i => padT + innerH - ((pts[i].cost || 0) / max) * innerH;
+      } else if (type === 'forecast') {
+        const yMax = parseFloat(host.dataset.yMax) || 1;
+        yAt = i => padT + innerH - ((pts[i].cum || 0) / yMax) * innerH;
       } else {
         yAt = i => padT + innerH - (pts[i].ratio || 0) * innerH;
       }
@@ -3601,6 +3790,11 @@
                   <div class="ct-primary">${fmtCostLocal(p.cost)}</div>
                   <div class="ct-meta">${Number(p.turns).toLocaleString()} turns</div>
                   ${anomalyLine(p.anomaly)}`;
+        }
+        if (type === 'forecast') {
+          return `<div class="ct-label">${escHtml(p.label)}</div>
+                  <div class="ct-primary">${fmtCostLocal(p.cum || 0)}</div>
+                  <div class="ct-meta">${p.projected ? 'projected cumulative' : 'cumulative MTD'}</div>`;
         }
         return `<div class="ct-label">${escHtml(p.label)}</div>
                 <div class="ct-primary">${(p.ratio * 100).toFixed(1)}% hit</div>
