@@ -1638,13 +1638,13 @@
         </div>
       </details>
 
-      <div class="totals" id="totals"></div>
+      <div class="totals" id="totals">{{.TotalsHTML}}</div>
       <div id="warnings"></div>
       <div id="trend-section"></div>
 
       <h2><svg class="icon" aria-hidden="true"><use href="#icon-flame"/></svg>Top cost hotspots</h2>
       <div class="small">Each card opens to reveal a tailored prompt — click <strong>Copy prompt</strong> and paste into Claude (or any LLM) for specific advice on tools, MCPs, CLIs, and workflow patterns. The prompts forbid the trivial "use a cheaper model" answer.</div>
-      <div class="hotspots" id="hotspots"></div>
+      <div class="hotspots" id="hotspots">{{.HotspotsHTML}}</div>
     </section>
 
     <section class="view" id="view-cost" data-view="cost">
@@ -1670,7 +1670,7 @@
       </nav>
 
       <div class="subview is-active" data-subview="model">
-        <div class="hbar-list" id="bars-model"></div>
+        <div class="hbar-list" id="bars-model">{{.ModelBarsHTML}}</div>
         <table data-table="model">
           <thead><tr>
             <th data-key="Model" title="Claude model ID, e.g. claude-sonnet-4-6.">Model</th>
@@ -1685,7 +1685,7 @@
       </div>
 
       <div class="subview" data-subview="project">
-        <div class="hbar-list" id="bars-project"></div>
+        <div class="hbar-list" id="bars-project">{{.ProjectBarsHTML}}</div>
         <table data-table="project">
           <thead><tr>
             <th data-key="Project" title="Working directory the session ran in (its CWD when Claude Code was launched).">Project</th>
@@ -1744,12 +1744,12 @@
             <li><strong>Sidechain turns</strong> carry a <em>sidechain</em> label — those are subagent runs nested inside the parent session.</li>
             <li>The small <code>#</code> link in each session's summary copies a shareable URL that re-opens this exact card.</li>
           </ul>
-          <p class="small" id="session-redact-notice"></p>
+          <p class="small" id="session-redact-notice">{{.RedactNotice}}</p>
         </div>
       </details>
 
-      <div id="session-list" class="session-list"></div>
-      <div id="session-empty" class="empty-note" hidden>No sessions in this window. Try widening <code>--since</code>/<code>--until</code>, or check that <code>--sessions</code> is non-zero.</div>
+      <div id="session-list" class="session-list">{{.SessionsHTML}}</div>
+      <div id="session-empty" class="empty-note"{{if .HasSessions}} hidden{{end}}>No sessions in this window. Try widening <code>--since</code>/<code>--until</code>, or check that <code>--sessions</code> is non-zero.</div>
     </section>
 
     <section class="view" id="view-cache" data-view="cache">
@@ -1862,7 +1862,7 @@
       </nav>
 
       <div class="subview is-active" data-subview="by-tool">
-        <div class="hbar-list" id="bars-tool"></div>
+        <div class="hbar-list" id="bars-tool">{{.ToolBarsHTML}}</div>
         <table data-table="tool">
           <thead><tr>
             <th data-key="Name" title="Tool name (Read, Bash, Edit, Grep, Agent, …).">Tool</th>
@@ -1950,10 +1950,30 @@
   </main>
 </div>
 
-<script id="claudit-data" type="application/json">{{.DataJSON}}</script>
+{{if .DeferData}}
 <script>
-(function() {
-  const D = JSON.parse(document.getElementById('claudit-data').textContent);
+// Append location.search so the data fetch shares a cache key with
+// the HTML render — without it, /?since=X reaches handleReport but
+// /_claudit/data.json arrives with no params, missing the pre-warm.
+window.__claudit_data = fetch("{{.DataPath}}" + window.location.search, { headers: { 'Accept': 'application/json' } })
+  .then(function (r) {
+    if (!r.ok) throw new Error('claudit: data fetch failed: ' + r.status);
+    return r.json();
+  });
+window.__claudit_data.catch(function (e) {
+  // Surface fetch failures so the page doesn't sit silently broken.
+  // Console-only is fine for a single-user local tool; the auto-reload
+  // loop will retry on the next snapshot.
+  if (window.console && console.error) console.error(e);
+});
+</script>
+{{else}}
+<script id="claudit-data" type="application/json">{{.DataJSON}}</script>
+<script>window.__claudit_data = Promise.resolve(JSON.parse(document.getElementById('claudit-data').textContent));</script>
+{{end}}
+<script>
+(async function() {
+  const D = await window.__claudit_data;
 
   // ── formatting helpers ─────────────────────────────────────────────────
   const fmtMoney = v => {
@@ -2085,15 +2105,15 @@
   // ── cross-link to session drill-down ──────────────────────────────────
   // Hotspot cards (kind='prompt') and the by-prompt table both want to
   // route the user from "here's an expensive prompt" to "and here's the
-  // session it ran in." Pre-build a key → location map from the timeline
-  // payload so callers can check availability in O(1) and avoid offering
-  // a dead link.
+  // session it ran in." Pre-build the key set from the slim
+  // D.prompt_keys array (populated server-side from the same
+  // PromptTimeline.Key values that drive the SSR'd #session-list)
+  // so callers can check availability in O(1) and avoid offering a
+  // dead link.
   const promptKeyAvailable = (function buildPromptKeySet() {
     const set = new Set();
-    for (const s of (D.session_timelines || [])) {
-      for (const p of (s.Prompts || [])) {
-        if (p.Key) set.add(p.Key);
-      }
+    for (const k of (D.prompt_keys || [])) {
+      if (k) set.add(k);
     }
     return set;
   })();
@@ -2174,7 +2194,8 @@
   }
 
   // Cache hit ratio per trend point. Returns 0 when no cacheable
-  // traffic, mirroring the Go-side Tokens.HitRatio().
+  // traffic, mirroring the Go-side Tokens.HitRatio(). Still used by
+  // trendSparkHit() in the per-row Trend column.
   function pointHitRatio(p) {
     const cr = p.CacheReadTokens || 0;
     const inp = p.InputTokens || 0;
@@ -2529,6 +2550,7 @@
       </div>`;
   }
 
+
   // ── header & warnings ──────────────────────────────────────────────────
   const T = D.totals || {};
   const totalCost = T.CostUSD || 0;
@@ -2550,106 +2572,22 @@
     const cls = `tier tier-${tier}` + (extraClass ? ' ' + extraClass : '');
     return `<span class="${cls}">${fmtPct1(v)}</span>`;
   }
-  // Helper to render a Lucide-style icon by sprite ID. Used for the
-  // small label glyphs on totals tiles.
-  const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
-
-  // Period-over-period delta block. Compares the most recent trend
-  // bucket to the one before it (e.g. this week vs last week when the
-  // report ran with --by week). Returns '' when there's no comparison
-  // available — single bucket, no --by, or zero prior value.
-  //
-  //   semantics: 'bad'  → upward direction is bad  (e.g. cost)
-  //              'good' → upward direction is good (e.g. hit ratio)
-  //              'neutral' → directional, but not value-laden (e.g. turns)
-  //   asPP:     when true, value is interpreted as percentage POINTS
-  //             instead of relative %. Used for ratios like hit ratio
-  //             where "50% → 55%" reads more clearly as "+5pp" than "+10%".
-  function deltaBlock(latest, prior, semantics, asPP) {
-    if (latest == null || prior == null || !isFinite(latest) || !isFinite(prior)) return '';
-    if (!asPP && (prior === 0 || !isFinite(latest / prior))) return '';
-    const v = asPP ? (latest - prior) * 100 : (latest - prior) / prior * 100;
-    if (!isFinite(v)) return '';
-    const period = PERIOD ? `vs prior ${escHtml(PERIOD)}` : 'vs prior';
-    const tail = `<span class="delta-tail">${period}</span>`;
-    const eps = asPP ? 0.5 : 0.1;
-    if (Math.abs(v) < eps) {
-      return `<div class="delta delta-flat">flat <span class="delta-tail">${period}</span></div>`;
-    }
-    const isUp = v > 0;
-    let cls = 'delta-neutral';
-    if (semantics === 'bad')  cls = isUp ? 'delta-bad'  : 'delta-good';
-    if (semantics === 'good') cls = isUp ? 'delta-good' : 'delta-bad';
-    const iconId = isUp ? 'chevron-up' : 'chevron-down';
-    const arrow = `<svg class="icon" aria-hidden="true"><use href="#icon-${iconId}"/></svg>`;
-    const unit = asPP ? 'pp' : '%';
-    return `<div class="delta ${cls}">${arrow}${Math.abs(v).toFixed(1)}${unit} ${tail}</div>`;
-  }
-
-  // Compute the deltas if we have at least two trend buckets.
-  const _haveTrend = PERIOD && D.trend_totals && D.trend_totals.length >= 2;
-  const _latest = _haveTrend ? D.trend_totals[D.trend_totals.length - 1] : null;
-  const _prior  = _haveTrend ? D.trend_totals[D.trend_totals.length - 2] : null;
-
-  const _costDelta     = _haveTrend ? deltaBlock(_latest.cost_usd || 0, _prior.cost_usd || 0, 'bad', false) : '';
-  const _sessionsDelta = _haveTrend ? deltaBlock(_latest.sessions || 0, _prior.sessions || 0, 'neutral', false) : '';
-  const _turnsDelta    = _haveTrend ? deltaBlock(_latest.turns || 0, _prior.turns || 0, 'neutral', false) : '';
-  const _hitDelta      = _haveTrend ? deltaBlock(pointHitRatio(_latest), pointHitRatio(_prior), 'good', true) : '';
-
-  document.getElementById('totals').innerHTML = `
-    <div class="headline">
-      <div class="label">${labelIcon('cost')}Total cost</div>
-      <div class="value">${fmtMoney(totalCost)}</div>
-      ${_costDelta}
-    </div>
-    <div class="metric"><div class="label">${labelIcon('sessions')}Sessions</div><div class="value">${fmtNum(T.Sessions)}</div>${_sessionsDelta}</div>
-    <div class="metric"><div class="label">${labelIcon('turns')}Assistant turns</div><div class="value">${fmtNum(T.Turns)}</div>${_turnsDelta}</div>
-    <div class="metric"><div class="label">${labelIcon('gauge')}Cache hit ratio</div><div class="value">${hitRatioPill(D.overall_hit_ratio)}</div>${_hitDelta}</div>
-  `;
+  // Totals card (#totals) is now server-rendered — see
+  // renderTotalsHTML in internal/render/totals_html.go. The headline
+  // cost + Sessions/Assistant turns/Cache hit ratio tiles paint on
+  // first byte.
 
   // ── hotspots ──────────────────────────────────────────────────────────
-  (function hotspots() {
+  // #hotspots is server-rendered — see renderHotspotsHTML in
+  // internal/render/hotspots_html.go. The card stack, kind chips,
+  // titles, costs, and copy buttons all paint on first byte. The
+  // remaining JS attaches behavior to the SSR'd controls.
+  (function wireHotspots() {
     const container = document.getElementById('hotspots');
-    const list = D.hotspots || [];
-    if (list.length === 0) {
-      container.innerHTML = '<p class="small empty-state">No hotspots in this window. Try widening the time range with <code>--since</code>, or lowering <code>-hotspots</code>.</p>';
-      return;
-    }
-    container.innerHTML = list.map((h, i) => {
-      // Prompt hotspots get a "view session" affordance when their
-      // originating prompt is in the timeline (i.e. inside --sessions=N).
-      // Out-of-cap prompts get a disabled-styled hint instead of a broken
-      // link.
-      let sessionAction = '';
-      if (h.kind === 'prompt_pattern' && h.prompt_key) {
-        if (promptKeyAvailable.has(h.prompt_key)) {
-          sessionAction = `<button class="view-session" data-key="${escHtml(h.prompt_key)}" title="Open the session this prompt ran in">view session →</button>`;
-        } else {
-          sessionAction = `<span class="view-session is-disabled" title="This prompt's session is below the --sessions=${(D.session_timelines || []).length || 'N'} cap. Re-run with a higher --sessions to include it.">view session (unavailable)</span>`;
-        }
-      }
-      const anchorId = `hotspot-${i+1}`;
-      return `<details class="hotspot" id="${anchorId}">
-      <summary>
-        <span class="rank">#${i+1}</span>
-        <span class="hotspot-kind">${escHtml(h.kind.replace(/_/g, ' '))}</span>
-        <span class="h-title" title="${escHtml(h.title)}">${escHtml(h.title)}</span>
-        <span class="h-cost">${fmtMoney(h.cost_usd)}</span>
-        <span class="h-pct">(${h.pct_of_total.toFixed(1)}%)</span>
-        <a class="anchor-link" href="#overview/${anchorId}" title="Copy link to this hotspot" aria-label="Copy link to hotspot ${i+1}">#</a>
-      </summary>
-      <div class="body">
-        <div class="actions">
-          <button class="copy" data-hotspot="${i}">Copy prompt</button>
-          ${sessionAction}
-          <span class="small">Paste this into Claude or another LLM for specific advice.</span>
-        </div>
-        <pre>${escHtml(h.prompt)}</pre>
-      </div>
-    </details>`;
-    }).join('');
+    if (!container) return;
 
-    // Wire up cross-link buttons on prompt hotspots.
+    // View-session cross-link buttons jump to the originating
+    // prompt in the Sessions drill-down.
     container.querySelectorAll('button.view-session').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -2657,13 +2595,15 @@
       });
     });
 
-    // Wire up copy buttons. Falls back to the older execCommand path on
+    // Copy buttons read the prompt text from the SSR'd <pre> on
+    // the same card — no JS-side list lookup needed since the
+    // markup carries the text. Falls back to selection + Cmd-C on
     // file:// pages where navigator.clipboard is unavailable.
     container.querySelectorAll('button.copy').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.preventDefault();
-        const idx = parseInt(btn.dataset.hotspot, 10);
-        const text = list[idx].prompt;
+        const pre = btn.closest('.body').querySelector('pre');
+        const text = pre ? pre.textContent : '';
         let ok = false;
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2671,9 +2611,8 @@
             ok = true;
           }
         } catch (err) { ok = false; }
-        if (!ok) {
-          // Fallback: select the <pre> and let the user Cmd-C
-          const pre = btn.closest('.body').querySelector('pre');
+        if (!ok && pre) {
+          // Fallback: select the <pre> and let the user Cmd-C.
           const range = document.createRange();
           range.selectNodeContents(pre);
           const sel = window.getSelection();
@@ -3006,24 +2945,8 @@
     [fmtNum(r.CacheReadTokens), true],
   ], 4, (D.trend_by_model || {})[r.Model]));
 
-  // Horizontal bar list for by-model. Same pattern as by-project / by-tool —
-  // one share-viz vocabulary across the page.
-  (function modelBars() {
-    const host = document.getElementById('bars-model');
-    const rows = (D.by_model || []).filter(r => r.CostUSD > 0);
-    if (rows.length === 0) {
-      host.innerHTML = '<p class="small empty-state">No priced model data. Add prices for any unknown models in <code>~/.config/claudit/prices.yaml</code>.</p>';
-      return;
-    }
-    host.innerHTML = rows.map(r => {
-      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
-      return `<div class="hbar">
-        <div class="fill" style="width:${w}%"></div>
-        <div class="lbl" title="${escHtml(r.Model)}">${escHtml(r.Model)}</div>
-        <div class="val">${fmtMoney(r.CostUSD)} (${fmtPct(r.CostUSD, totalCost)})</div>
-      </div>`;
-    }).join('');
-  })();
+  // #bars-model is server-rendered — see renderModelBarsHTML in
+  // internal/render/bars_html.go.
 
   // By project
   buildRows(document.querySelector('[data-table="project"]'), D.by_project || [], r => withTrend([
@@ -3035,18 +2958,7 @@
     [escHtml(r.DominantModel), false],
   ], 5, (D.trend_by_project || {})[r.Project]));
 
-  // Horizontal bar list — top 20 projects
-  (function projectBars() {
-    const rows = (D.by_project || []).slice(0, 20);
-    document.getElementById('bars-project').innerHTML = rows.map(r => {
-      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
-      return `<div class="hbar">
-        <div class="fill" style="width:${w}%"></div>
-        <div class="lbl" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 70))}</div>
-        <div class="val">${fmtMoney(r.CostUSD)} (${fmtPct(r.CostUSD, totalCost)})</div>
-      </div>`;
-    }).join('');
-  })();
+  // #bars-project is server-rendered — see renderProjectBarsHTML.
 
   // Cache efficiency: project + session worst-offender tables. Sorted
   // server-side by miss tokens desc; we just render.
@@ -3113,18 +3025,7 @@
     [fmtNum(r.OutputTokens), true],
   ], 5, (D.trend_by_tool || {})[r.Name]));
 
-  // Tool bars
-  (function toolBars() {
-    const rows = D.by_tool || [];
-    document.getElementById('bars-tool').innerHTML = rows.map(r => {
-      const w = totalCost > 0 ? (100 * r.CostUSD / totalCost).toFixed(1) : 0;
-      return `<div class="hbar">
-        <div class="fill" style="width:${w}%"></div>
-        <div class="lbl">${escHtml(r.Name)}</div>
-        <div class="val">${fmtMoney(r.CostUSD)} · ${fmtNum(r.Count)} calls</div>
-      </div>`;
-    }).join('');
-  })();
+  // #bars-tool is server-rendered — see renderToolBarsHTML.
 
   // Drill-down per tool
   (function drill() {
@@ -3287,232 +3188,6 @@
   document.getElementById('filter').addEventListener('input', applyFilters);
   document.getElementById('mincost').addEventListener('input', applyFilters);
 
-  // ── sessions drill-down ───────────────────────────────────────────────
-  // Each session in D.session_timelines becomes a nested <details>: outer
-  // = session card (collapsed), inner = prompt (collapsed), revealing a
-  // per-turn list. Costs/tokens are pre-aggregated by the backend so the
-  // renderer is mostly string-shaping.
-  (function renderSessions() {
-    const host = document.getElementById('session-list');
-    const empty = document.getElementById('session-empty');
-    if (!host) return;
-    const data = D.session_timelines || [];
-    if (data.length === 0) {
-      empty && (empty.hidden = false);
-      return;
-    }
-
-    // Surface --redact state in the guide so users know prompt text was
-    // intentionally hidden — otherwise "[redacted N chars]" reads as a bug.
-    const anyRedacted = data.some(s =>
-      (s.Prompts || []).some(p => typeof p.Text === 'string' && p.Text.startsWith('[redacted ')));
-    if (anyRedacted) {
-      const notice = document.getElementById('session-redact-notice');
-      if (notice) notice.textContent =
-        'Prompts in this report were redacted at generation time (--redact). Costs and tokens are unaffected.';
-    }
-
-    const fmtTime = ts => {
-      if (!ts) return '';
-      const d = new Date(ts);
-      if (isNaN(d.getTime())) return '';
-      // Local time. YYYY-MM-DD HH:MM is enough resolution for drill-down.
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    const fmtHMS = ts => {
-      if (!ts) return '';
-      const d = new Date(ts);
-      if (isNaN(d.getTime())) return '';
-      const pad = n => String(n).padStart(2, '0');
-      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    };
-    // Natural-language span between two timestamps. Default unit is
-    // minutes; <60s renders as seconds; ≥1h escalates to h+m+s; ≥1d adds
-    // days. Returns empty string for invalid or zero-length spans.
-    const fmtSpan = (start, end) => {
-      if (!start || !end) return '';
-      const a = new Date(start), b = new Date(end);
-      if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
-      let s = Math.max(0, Math.round((b.getTime() - a.getTime()) / 1000));
-      if (s === 0) return '';
-      if (s < 60) return `${s}s`;
-      const d = Math.floor(s / 86400); s -= d * 86400;
-      const h = Math.floor(s / 3600);  s -= h * 3600;
-      const m = Math.floor(s / 60);    s -= m * 60;
-      const parts = [];
-      if (d > 0) parts.push(`${d}d`);
-      if (h > 0) parts.push(`${h}h`);
-      if (h > 0 || m > 0) parts.push(`${m}m`);
-      if (h > 0 && s > 0) parts.push(`${s}s`); // only surface seconds when h is present
-      return parts.join(' ');
-    };
-    const sumTokens = tk => (
-      (tk.InputTokens || 0) + (tk.OutputTokens || 0) +
-      (tk.CacheCreate5mTokens || 0) + (tk.CacheCreate1hTokens || 0) +
-      (tk.CacheReadTokens || 0)
-    );
-    const fmtCount = n => n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n);
-    const fmtTokens = tk => {
-      const inT = tk.InputTokens || 0;
-      const outT = tk.OutputTokens || 0;
-      return `${fmtCount(inT)} in · ${fmtCount(outT)} out`;
-    };
-    // Cache total = read + 5m create + 1h create. The single number is
-    // what makes "3 in · 1 out · $0.07" intelligible — the cost came from
-    // a big cache read, not the visible input. Tooltip splits read vs create
-    // so the user can see whether they're paying for a hit or a miss.
-    const fmtCache = tk => {
-      const r = tk.CacheReadTokens || 0;
-      const c5 = tk.CacheCreate5mTokens || 0;
-      const c1 = tk.CacheCreate1hTokens || 0;
-      const total = r + c5 + c1;
-      if (total === 0) return '';
-      const parts = [];
-      if (r > 0) parts.push(`${fmtCount(r)} read`);
-      if (c5 > 0) parts.push(`${fmtCount(c5)} create 5m`);
-      if (c1 > 0) parts.push(`${fmtCount(c1)} create 1h`);
-      return `<span class="t-cache" title="${escHtml(parts.join(', '))}">${fmtCount(total)} cache</span>`;
-    };
-    // Deterministic color slot 1-5 for a tool name (Notion-style tag
-     // coloring). Same name → same color across the whole report, so the
-     // user can scan for "all the Bash pills" by hue alone. Uses a small
-     // FNV-1a hash so trivial name swaps don't all land on the same slot.
-    const toolColorSlot = name => {
-      if (!name) return 0;
-      let h = 0x811c9dc5;
-      for (let i = 0; i < name.length; i++) {
-        h ^= name.charCodeAt(i);
-        h = Math.imul(h, 0x01000193) >>> 0;
-      }
-      return (h % 5) + 1;
-    };
-    // Duration formatter — backend gives ms. Show ms under 1s, then s, then
-    // m+s. We never show "0" — zero means "no successor turn" (last in
-    // prompt) and the caller suppresses the slot entirely.
-    const fmtDuration = ms => {
-      if (!ms || ms <= 0) return '';
-      if (ms < 1000) return `${ms}ms`;
-      const sec = ms / 1000;
-      if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)}s`;
-      const m = Math.floor(sec / 60);
-      const s = Math.round(sec - m * 60);
-      return s === 0 ? `${m}m` : `${m}m${s}s`;
-    };
-
-    // First non-orphan prompt's text, single-lined and truncated to 80
-    // chars. Serves as a human-readable "title" for the session card —
-    // far more useful at a glance than the opaque UUID. Returns null when
-    // no usable prompt exists (orphans only, or redacted bodies).
-    const firstPromptPreview = s => {
-      for (const p of (s.Prompts || [])) {
-        if (!p.UUID) continue;
-        const raw = (p.Text || '').replace(/\s+/g, ' ').trim();
-        if (!raw) continue;
-        if (raw.startsWith('[redacted ')) return raw;
-        return raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
-      }
-      return null;
-    };
-
-    const html = [];
-    data.forEach((s, idx) => {
-      const sid = s.SessionID || '(unknown)';
-      const promptCount = (s.Prompts || []).length;
-      const span = fmtSpan(s.StartedAt, s.EndedAt);
-      const timeRange = span
-        ? `${fmtTime(s.StartedAt)} → ${fmtTime(s.EndedAt)} (${span})`
-        : `${fmtTime(s.StartedAt)} → ${fmtTime(s.EndedAt)}`;
-      // Rotate through the 5-color palette per session card. Index-based
-      // (not hashed) so adjacent cards always differ — the user asked
-      // explicitly for "alternating," and round-robin is the cleanest
-      // realization of that.
-      const sidSlot = (idx % 5) + 1;
-      const preview = firstPromptPreview(s);
-
-      const anchorId = `session-${sid}`;
-      html.push(`<details class="session-card" id="${escHtml(anchorId)}" data-session="${escHtml(sid)}">`);
-      html.push(`<summary>`);
-      html.push(`<span class="s-id" data-c="${sidSlot}" title="${escHtml(sid)}">${escHtml(sid)}</span>`);
-      html.push(`<span class="s-cwd" title="${escHtml(s.CWD || '')}">${escHtml(s.CWD || '—')}</span>`);
-      html.push(`<span class="s-stats">`);
-      html.push(`<span>${promptCount} prompt${promptCount===1?'':'s'}</span>`);
-      html.push(`<span>${s.Turns || 0} turn${s.Turns===1?'':'s'}</span>`);
-      html.push(`<span class="s-cost">${escHtml(fmtMoney(s.CostUSD || 0))}</span>`);
-      html.push(`<a class="anchor-link" href="#sessions/${escHtml(anchorId)}" title="Copy link to this session" aria-label="Copy link to session">#</a>`);
-      html.push(`</span>`);
-      if (preview) {
-        html.push(`<span class="s-preview" title="${escHtml(preview)}">${escHtml(preview)}</span>`);
-      } else {
-        html.push(`<span class="s-preview is-empty">(no recognizable user prompts)</span>`);
-      }
-      html.push(`<span class="s-time">${escHtml(timeRange)}</span>`);
-      html.push(`</summary>`);
-      html.push(`<div class="session-body">`);
-
-      for (const p of (s.Prompts || [])) {
-        const text = p.Text || '';
-        const isRedacted = text.startsWith('[redacted ');
-        const isOrphan = !p.UUID;
-        const promptCost = p.CostUSD || 0;
-        const turnN = (p.Turns || []).length;
-        const keyAttr = p.Key ? ` data-prompt-key="${escHtml(p.Key)}"` : '';
-
-        html.push(`<details class="prompt-block"${isOrphan ? ' data-orphan="1"' : ''}${keyAttr}>`);
-        html.push(`<summary>`);
-        if (isOrphan) {
-          html.push(`<span class="p-text p-redacted">(orphan turns — no recognized originating prompt)</span>`);
-        } else if (isRedacted) {
-          html.push(`<span class="p-text p-redacted">${escHtml(text)}</span>`);
-        } else {
-          html.push(`<span class="p-text">${escHtml(text)}</span>`);
-        }
-        html.push(`<span class="p-stats">`);
-        html.push(`<span>${turnN} turn${turnN===1?'':'s'}</span>`);
-        html.push(`<span class="p-cost">${escHtml(fmtMoney(promptCost))}</span>`);
-        html.push(`</span>`);
-        html.push(`</summary>`);
-
-        if (p.Truncated) {
-          html.push(`<div class="p-truncated">(prompt truncated — re-run with a higher --sessions cap or check the raw JSONL for the full text)</div>`);
-        }
-
-        html.push(`<ul class="turn-list">`);
-        for (const t of (p.Turns || [])) {
-          html.push(`<li class="turn-row">`);
-          const dur = fmtDuration(t.DurationMs || 0);
-          const durHtml = dur
-            ? ` <span class="t-dur" title="Time to next turn within this prompt">${escHtml(dur)}</span>`
-            : '';
-          html.push(`<span class="t-time">${escHtml(fmtHMS(t.Timestamp))}${durHtml}</span>`);
-          html.push(`<span class="t-model" title="${escHtml(t.Model || '')}">${escHtml(t.Model || '—')}</span>`);
-          const cache = fmtCache(t.Tokens || {});
-          html.push(`<span class="t-tokens">${escHtml(fmtTokens(t.Tokens || {}))}${cache ? ' · ' + cache : ''}</span>`);
-          html.push(`<span class="t-cost">${escHtml(fmtMoney(t.CostUSD || 0))}</span>`);
-          html.push(`<span class="t-tools">`);
-          for (const tool of (t.Tools || [])) {
-            const name = tool.Name || '';
-            const detail = tool.Detail || '';
-            const label = detail
-              ? `${escHtml(name)} · <span class="t-tool-detail">${escHtml(detail)}</span>`
-              : escHtml(name);
-            const titleAttr = detail ? ` title="${escHtml(name + ' · ' + detail)}"` : '';
-            const slot = toolColorSlot(name);
-            html.push(`<span class="t-tool" data-c="${slot}"${titleAttr}>${label}</span>`);
-          }
-          if (t.Sidechain) html.push(`<span class="t-side">sidechain</span>`);
-          html.push(`</span>`);
-          html.push(`</li>`);
-        }
-        html.push(`</ul>`);
-        html.push(`</details>`);
-      }
-      html.push(`</div>`);
-      html.push(`</details>`);
-    });
-    host.innerHTML = html.join('');
-  })();
-
   // ── sidebar metrics ───────────────────────────────────────────────────
   // The sidebar carries each section's headline number so the nav itself
   // works as a glanceable summary, not just a list of words.
@@ -3532,11 +3207,16 @@
       : '—');
 
     // Sessions — count shown + cost of the top session, so the user knows
-    // at a glance how rich the drill-down is.
-    const sessions = D.session_timelines || [];
-    if (sessions.length > 0) {
-      const top = sessions[0];
-      set('nav-metric-sessions', `${sessions.length} · top ${fmtMoney(top.CostUSD || 0)}`);
+    // at a glance how rich the drill-down is. Reads from the SSR'd
+    // #session-list markup since the full timelines payload no longer
+    // ships in D (it's been server-rendered into the card stack).
+    const cards = document.querySelectorAll('#session-list .session-card');
+    if (cards.length > 0) {
+      const topCostEl = cards[0].querySelector('.s-cost');
+      const topCost = topCostEl ? topCostEl.textContent.trim() : '';
+      set('nav-metric-sessions', topCost
+        ? `${cards.length} · top ${topCost}`
+        : `${cards.length}`);
     } else {
       set('nav-metric-sessions', '—');
     }
@@ -3667,32 +3347,47 @@
   // ── motion polish ──────────────────────────────────────────────────────
   // Number count-up on the totals headline + chart line draw-on. Both
   // respect prefers-reduced-motion (CSS guards animation; JS bails early).
+  // Initial-paint animations are also skipped on the silent auto-reload:
+  // that 30s background reload is meant to be invisible, and replaying
+  // entrance motion every cycle defeats that intent. Manual refreshes
+  // (Cmd-R / F5) and first visits DO animate — distinguished via a
+  // sessionStorage flag the auto-reload sets before window.location.reload().
+  // Nav-click replays still fire regardless. Key cleared on read so a
+  // later manual refresh isn't accidentally silenced.
   (function motion() {
     const reduce = window.matchMedia &&
                    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce) return;
 
+    let isAutoReload = false;
+    try {
+      isAutoReload = sessionStorage.getItem('claudit:silent-reload') === '1';
+      sessionStorage.removeItem('claudit:silent-reload');
+    } catch (_) { /* sessionStorage unavailable — treat as manual refresh */ }
+
     // Headline cost count-up. Reads target from textContent and replays
     // it from a low fraction up to full value over ~700ms.
-    const headline = document.querySelector('.totals .headline .value');
-    if (headline) {
-      const finalText = headline.textContent;
-      const target = totalCost;
-      if (target > 0) {
-        headline.classList.add('cl-counting');
-        const start = performance.now();
-        const dur = 700;
-        function tick(now) {
-          const t = Math.min(1, (now - start) / dur);
-          const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
-          const v = target * eased;
-          headline.textContent = v >= 1000
-            ? '$' + Math.round(v).toLocaleString()
-            : '$' + v.toFixed(2);
-          if (t < 1) requestAnimationFrame(tick);
-          else { headline.textContent = finalText; headline.classList.remove('cl-counting'); }
+    if (!isAutoReload) {
+      const headline = document.querySelector('.totals .headline .value');
+      if (headline) {
+        const finalText = headline.textContent;
+        const target = totalCost;
+        if (target > 0) {
+          headline.classList.add('cl-counting');
+          const start = performance.now();
+          const dur = 700;
+          function tick(now) {
+            const t = Math.min(1, (now - start) / dur);
+            const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+            const v = target * eased;
+            headline.textContent = v >= 1000
+              ? '$' + Math.round(v).toLocaleString()
+              : '$' + v.toFixed(2);
+            if (t < 1) requestAnimationFrame(tick);
+            else { headline.textContent = finalText; headline.classList.remove('cl-counting'); }
+          }
+          requestAnimationFrame(tick);
         }
-        requestAnimationFrame(tick);
       }
     }
 
@@ -3708,8 +3403,11 @@
         } catch {}
       });
     }
-    // Run once after initial render, then on every view activation.
-    requestAnimationFrame(() => animateLines(document));
+    // Run once after initial render (skipped on auto-reload), then on
+    // every view activation regardless of nav type.
+    if (!isAutoReload) {
+      requestAnimationFrame(() => animateLines(document));
+    }
     document.querySelectorAll('.nav-item').forEach(a => {
       a.addEventListener('click', () => {
         // Strip the class so re-entry replays the animation.
@@ -3950,11 +3648,17 @@
       window.addEventListener(ev, markActivity, { passive: true, capture: true });
     });
 
+  // silentReload triggers a page reload that the motion IIFE recognizes
+  // as auto-reload and skips entrance animations for. Manual Cmd-R / F5
+  // bypass this path entirely (no flag set → animations play).
+  function silentReload() {
+    try { sessionStorage.setItem('claudit:silent-reload', '1'); } catch (_) {}
+    window.location.reload();
+  }
+
   var toast = document.getElementById('claudit-reload-toast');
   if (toast) {
-    toast.querySelector('[data-action="reload"]').addEventListener('click', function () {
-      window.location.reload();
-    });
+    toast.querySelector('[data-action="reload"]').addEventListener('click', silentReload);
     toast.querySelector('[data-action="dismiss"]').addEventListener('click', function () {
       toast.classList.remove('is-visible');
       dismissed = true;
@@ -3979,7 +3683,7 @@
       return;
     }
     if (canReload()) {
-      window.location.reload();
+      silentReload();
       return;
     }
     if (firstDeferralAt === 0) firstDeferralAt = Date.now();
@@ -4008,7 +3712,7 @@
   // already pending — the user wasn't watching anyway.
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden && currentGen > INITIAL_GEN && canReload()) {
-      window.location.reload();
+      silentReload();
     }
   });
 

@@ -49,10 +49,59 @@ func newRenderLRU(cap int) *renderLRU {
 // blowing the cache-key contract for size); the caller is responsible
 // for compressing-on-miss and re-storing via storeCached.
 func (s *Server) lookupCached(q Query, gen int64, wantGzip bool) ([]byte, bool) {
+	return lookupFromLRU(s.renderCache, q, gen, wantGzip)
+}
+
+// storeCached inserts plain (and optionally gzip-encoded) bytes for
+// the (q, gen) key. Evicts the least-recently-used entry once the
+// cap is exceeded. Also prunes any entries with smaller generation —
+// snapshot generations only ever increase, so older entries are
+// guaranteed garbage.
+func (s *Server) storeCached(q Query, gen int64, plain, gz []byte) {
+	storeToLRU(s.renderCache, q, gen, plain, gz)
+}
+
+// cacheLen reports the current count; exposed for tests.
+func (s *Server) cacheLen() int {
 	if s.renderCache == nil {
+		return 0
+	}
+	s.renderCache.mu.Lock()
+	defer s.renderCache.mu.Unlock()
+	return s.renderCache.ll.Len()
+}
+
+// lookupCachedJSON is the data-endpoint twin of lookupCached. Same
+// (query, generation) key shape — separate LRU so the HTML and JSON
+// halves of a single pageload don't evict each other.
+func (s *Server) lookupCachedJSON(q Query, gen int64, wantGzip bool) ([]byte, bool) {
+	return lookupFromLRU(s.dataCache, q, gen, wantGzip)
+}
+
+// storeCachedJSON is the data-endpoint twin of storeCached.
+func (s *Server) storeCachedJSON(q Query, gen int64, plain, gz []byte) {
+	storeToLRU(s.dataCache, q, gen, plain, gz)
+}
+
+// dataCacheLen reports the count of cached JSON payloads; exposed for tests.
+func (s *Server) dataCacheLen() int {
+	if s.dataCache == nil {
+		return 0
+	}
+	s.dataCache.mu.Lock()
+	defer s.dataCache.mu.Unlock()
+	return s.dataCache.ll.Len()
+}
+
+// lookupFromLRU and storeToLRU factor the per-LRU lock/list/map
+// bookkeeping out of the (q, gen) cache lookups so the HTML and JSON
+// caches share one implementation. The original method-based form
+// inlined the lookup; moving it to a function lets the JSON twin reuse
+// it without code duplication.
+func lookupFromLRU(c *renderLRU, q Query, gen int64, wantGzip bool) ([]byte, bool) {
+	if c == nil {
 		return nil, false
 	}
-	c := s.renderCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	k := renderKey{query: q.rawQuery, generation: gen}
@@ -71,20 +120,13 @@ func (s *Server) lookupCached(q Query, gen int64, wantGzip bool) ([]byte, bool) 
 	return e.plain, true
 }
 
-// storeCached inserts plain (and optionally gzip-encoded) bytes for
-// the (q, gen) key. Evicts the least-recently-used entry once the
-// cap is exceeded. Also prunes any entries with smaller generation —
-// snapshot generations only ever increase, so older entries are
-// guaranteed garbage.
-func (s *Server) storeCached(q Query, gen int64, plain, gz []byte) {
-	if s.renderCache == nil {
+func storeToLRU(c *renderLRU, q Query, gen int64, plain, gz []byte) {
+	if c == nil {
 		return
 	}
-	c := s.renderCache
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Prune older generations. Cheap: we expect cap ≈ 16.
 	for el := c.ll.Back(); el != nil; {
 		prev := el.Prev()
 		e := el.Value.(*renderEntry)
@@ -97,8 +139,6 @@ func (s *Server) storeCached(q Query, gen int64, plain, gz []byte) {
 
 	k := renderKey{query: q.rawQuery, generation: gen}
 	if el, ok := c.m[k]; ok {
-		// Same key already present; update bytes (the gzip variant
-		// may have been added after the plain).
 		e := el.Value.(*renderEntry)
 		e.plain = plain
 		if gz != nil {
@@ -117,14 +157,4 @@ func (s *Server) storeCached(q Query, gen int64, plain, gz []byte) {
 		c.ll.Remove(oldest)
 		delete(c.m, oldest.Value.(*renderEntry).key)
 	}
-}
-
-// cacheLen reports the current count; exposed for tests.
-func (s *Server) cacheLen() int {
-	if s.renderCache == nil {
-		return 0
-	}
-	s.renderCache.mu.Lock()
-	defer s.renderCache.mu.Unlock()
-	return s.renderCache.ll.Len()
 }

@@ -81,6 +81,12 @@ type Server struct {
 	// evicted on insert. nil when MaxCachedRenders == 0.
 	renderCache *renderLRU
 
+	// dataCache stores the JSON payload served at /_claudit/data.json,
+	// keyed the same way as renderCache. Separate LRU so HTML and JSON
+	// don't churn each other's entries — the served-mode page hits both
+	// per pageload and we want both warm. nil when MaxCachedRenders == 0.
+	dataCache *renderLRU
+
 	// shutdownTimeout caps the graceful-drain wait in serve(). Defaults
 	// to 3s; tests override it to force the deadline-exceeded path.
 	shutdownTimeout time.Duration
@@ -104,6 +110,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 	s := &Server{cache: cache, opts: opts, mux: http.NewServeMux(), shutdownTimeout: 3 * time.Second}
 	if opts.MaxCachedRenders > 0 {
 		s.renderCache = newRenderLRU(opts.MaxCachedRenders)
+		s.dataCache = newRenderLRU(opts.MaxCachedRenders)
 	}
 	s.routes()
 	return s
@@ -113,6 +120,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleReport)
 	s.mux.HandleFunc("/_claudit/status", s.handleStatus)
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
+	s.mux.HandleFunc(dataPath, s.handleData)
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.
@@ -347,7 +355,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html, err := s.renderHTML(r.Context(), snap, q, scope)
+	html, payload, err := s.renderHTML(r.Context(), snap, q, scope)
 	if err != nil {
 		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: render failed",
 			slog.Any("err", err),
@@ -363,6 +371,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.storeCached(q, snap.Generation, plain, gz)
+	// Pre-warm the JSON cache so the page's imminent fetch of
+	// /_claudit/data.json is a cache hit, not a second aggregation
+	// pass. On a real corpus this cuts cold-refresh server work
+	// roughly in half (~1.9s × 2 → ~1.9s).
+	s.storeCachedJSON(q, snap.Generation, payload, gzipBytes(payload))
 
 	body := plain
 	if wantGzip {
@@ -376,30 +389,30 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// renderHTML runs the standard aggregation pipeline and renders the
-// HTML report into a single byte slice. The bytes go into the render
-// cache as-is; serve-time gzip wraps them.
-func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope ScopeInfo) ([]byte, error) {
+// renderHTML runs the standard aggregation pipeline and returns both the
+// rendered HTML and the JSON payload the page will fetch asynchronously.
+// Building the payload here is near-free — we already have the
+// aggregator and session timelines in hand — and pre-warming the JSON
+// cache from the caller eliminates the doubled aggregation work that a
+// cold Cmd-R would otherwise pay (HTML handler computes, then data
+// handler computes the same thing again ~1.9s later).
+func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope ScopeInfo) (html, payload []byte, err error) {
 	agg := s.buildAggregator(snap, q)
 
-	var timelines []aggregate.SessionTimeline
-	if q.SessionsTop > 0 {
-		var err error
-		timelines, err = aggregate.BuildSessionTimelines(
-			ctx, snap.Turns, snap.Users, snap.Links, s.opts.Prices, q.Filter,
-			aggregate.SessionTimelinesOptions{
-				TopN:           q.SessionsTop,
-				Redact:         q.Redact,
-				MaxPromptChars: 2000,
-			},
-		)
-		if err != nil {
-			return nil, err
-		}
+	timelines, err := s.buildTimelines(ctx, snap, q)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	payload, err = render.BuildPayload(ctx, agg, render.HTMLOptions{
+		SessionTimelines: timelines,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var buf bytes.Buffer
-	err := render.HTMLWithOptions(ctx, &buf, agg, render.HTMLOptions{
+	err = render.HTMLWithOptions(ctx, &buf, agg, render.HTMLOptions{
 		SessionTimelines: timelines,
 		Version:          s.opts.Version,
 		Serve: render.ServeOptions{
@@ -411,12 +424,17 @@ func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope 
 			ScopeWindowLabel:  scope.WindowLabel,
 			ScopeSessionsCap:  scope.SessionsCap,
 			ScopeLiftURL:      scope.LiftURL,
+			// Phase 4: the JSON payload is served at dataPath and
+			// fetched asynchronously by the page so initial paint
+			// doesn't block on the ~1 MB inline blob.
+			DeferData: true,
+			DataPath:  dataPath,
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return buf.Bytes(), nil
+	return buf.Bytes(), payload, nil
 }
 
 // ScopeInfo is the "what's been pruned" summary the scope pill renders.
