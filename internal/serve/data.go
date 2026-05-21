@@ -73,11 +73,11 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Render-cache lookup: same canonical query + same generation
-	// → return the bytes computed last time. The JSON cache shares
-	// the (q.rawQuery, gen) key shape with the HTML cache but lives
-	// in its own LRU so HTML evictions don't churn it (and vice
-	// versa).
-	if body, ok := s.lookupCachedJSON(q, snap.Generation, wantGzip); ok {
+	// → return the bytes computed last time. The HTML and JSON
+	// sections share one LRU; section in the cache key keeps them
+	// from churning each other (replacing the pre-Phase-1 dual-LRU
+	// split).
+	if body, ok := s.lookupCached(q, sectionData, snap.Generation, wantGzip); ok {
 		if err := writeCached(w, body, wantGzip); err != nil {
 			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write data response failed",
 				slog.Any("err", err),
@@ -87,8 +87,7 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agg := s.buildAggregator(snap, q)
-	timelines, err := s.buildTimelines(r.Context(), snap, q)
+	agg, timelines, err := s.sharedAggregateData(r.Context(), snap, q)
 	if err != nil {
 		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: build timelines failed",
 			slog.Any("err", err),
@@ -111,7 +110,7 @@ func (s *Server) handleData(w http.ResponseWriter, r *http.Request) {
 	if wantGzip {
 		gz = gzipBytes(plain)
 	}
-	s.storeCachedJSON(q, snap.Generation, plain, gz)
+	s.storeCached(q, sectionData, snap.Generation, plain, gz)
 
 	body := plain
 	if wantGzip {

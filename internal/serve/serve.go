@@ -16,7 +16,10 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/parse"
@@ -76,16 +79,30 @@ type Server struct {
 	// stable session doesn't re-stat the same sibling on every render.
 	subagentCache sync.Map
 
-	// renderCache stores gzip-encoded and plain HTML responses keyed
-	// on (canonical-query, generation). Bounded; older entries are
-	// evicted on insert. nil when MaxCachedRenders == 0.
+	// renderCache stores gzip-encoded and plain response bodies keyed
+	// on (canonical-query, section, generation) for every served-mode
+	// endpoint — "html" for the rendered report, "data" for the JSON
+	// payload, with room for one-per-API-tab section labels in later
+	// phases. Section in the key means HTML and JSON halves of one
+	// pageload coexist without churning each other (replacing the
+	// pre-Phase-1 dual-LRU split). Bounded; LRU-evicted on insert.
+	// nil when MaxCachedRenders == 0.
 	renderCache *renderLRU
 
-	// dataCache stores the JSON payload served at /_claudit/data.json,
-	// keyed the same way as renderCache. Separate LRU so HTML and JSON
-	// don't churn each other's entries — the served-mode page hits both
-	// per pageload and we want both warm. nil when MaxCachedRenders == 0.
-	dataCache *renderLRU
+	// aggregateSF collapses concurrent in-flight aggregate+timeline
+	// builds for the same (snapshot generation, canonical query).
+	// Without it, N parallel cold first-paint fetches (one per browser
+	// tab, or the canonical "open /; page fetches /_claudit/data.json
+	// in parallel" pageload) each ran the full multi-second
+	// aggregation independently. With singleflight, one runs and the
+	// rest share the result.
+	aggregateSF singleflight.Group
+
+	// aggregateBuildN counts the number of aggregate+timeline builds
+	// actually executed (i.e. once per singleflight.Do callback
+	// invocation). Test-only hook for asserting the collapse — see
+	// TestServer_Singleflight_CollapsesConcurrentBuilds.
+	aggregateBuildN atomic.Int64
 
 	// shutdownTimeout caps the graceful-drain wait in serve(). Defaults
 	// to 3s; tests override it to force the deadline-exceeded path.
@@ -109,8 +126,11 @@ func NewServer(cache *Cache, opts Options) *Server {
 	}
 	s := &Server{cache: cache, opts: opts, mux: http.NewServeMux(), shutdownTimeout: 3 * time.Second}
 	if opts.MaxCachedRenders > 0 {
-		s.renderCache = newRenderLRU(opts.MaxCachedRenders)
-		s.dataCache = newRenderLRU(opts.MaxCachedRenders)
+		// One LRU holds entries for every section (html, data, and
+		// future per-API-tab keys). Cap is doubled vs. the pre-Phase-1
+		// per-LRU cap so that pre-warming the JSON cache from a /
+		// render doesn't halve the effective per-section capacity.
+		s.renderCache = newRenderLRU(opts.MaxCachedRenders * 2)
 	}
 	s.routes()
 	return s
@@ -345,7 +365,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	// → reuse the bytes we computed last time. Auto-reload polls
 	// often land back on the same URL within a generation, so this
 	// is the highest-leverage perf win.
-	if body, ok := s.lookupCached(q, snap.Generation, wantGzip); ok {
+	if body, ok := s.lookupCached(q, sectionHTML, snap.Generation, wantGzip); ok {
 		if err := writeCached(w, body, wantGzip); err != nil {
 			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write report response failed",
 				slog.Any("err", err),
@@ -370,12 +390,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		gz = gzipBytes(html)
 	}
 
-	s.storeCached(q, snap.Generation, plain, gz)
+	s.storeCached(q, sectionHTML, snap.Generation, plain, gz)
 	// Pre-warm the JSON cache so the page's imminent fetch of
 	// /_claudit/data.json is a cache hit, not a second aggregation
 	// pass. On a real corpus this cuts cold-refresh server work
 	// roughly in half (~1.9s × 2 → ~1.9s).
-	s.storeCachedJSON(q, snap.Generation, payload, gzipBytes(payload))
+	s.storeCached(q, sectionData, snap.Generation, payload, gzipBytes(payload))
 
 	body := plain
 	if wantGzip {
@@ -397,9 +417,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 // cold Cmd-R would otherwise pay (HTML handler computes, then data
 // handler computes the same thing again ~1.9s later).
 func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope ScopeInfo) (html, payload []byte, err error) {
-	agg := s.buildAggregator(snap, q)
-
-	timelines, err := s.buildTimelines(ctx, snap, q)
+	agg, timelines, err := s.sharedAggregateData(ctx, snap, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -535,6 +553,48 @@ func humanDuration(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%d days", days)
 	}
+}
+
+// sharedAggregateData runs buildAggregator + buildTimelines for
+// (snap.Generation, q.rawQuery), collapsing concurrent in-flight
+// computations into one via singleflight. The pageload pattern that
+// motivated this is the cold open: the browser fetches / and then,
+// once the HTML lands, fetches /_claudit/data.json — but those two
+// hits can also arrive in parallel (Cmd-R + the page's own preload),
+// and so can N tabs of the same URL. Without the collapse each one
+// independently re-ran the multi-second build; with it, exactly one
+// build is in flight at a time per (rawQuery, generation).
+//
+// The build counter is incremented inside the singleflight callback,
+// so it's incremented exactly once per actual build — not per caller.
+// Test-only accessor: aggregateBuildCount().
+type aggregateData struct {
+	agg       *aggregate.Aggregator
+	timelines []aggregate.SessionTimeline
+}
+
+func (s *Server) sharedAggregateData(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, []aggregate.SessionTimeline, error) {
+	key := fmt.Sprintf("%d|%s", snap.Generation, q.rawQuery)
+	v, err, _ := s.aggregateSF.Do(key, func() (any, error) {
+		s.aggregateBuildN.Add(1)
+		agg := s.buildAggregator(snap, q)
+		timelines, terr := s.buildTimelines(ctx, snap, q)
+		if terr != nil {
+			return nil, terr
+		}
+		return aggregateData{agg: agg, timelines: timelines}, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	d := v.(aggregateData)
+	return d.agg, d.timelines, nil
+}
+
+// aggregateBuildCount returns the number of aggregate+timeline builds
+// executed since the server started. Test-only accessor.
+func (s *Server) aggregateBuildCount() int64 {
+	return s.aggregateBuildN.Load()
 }
 
 // buildAggregator runs the standard aggregation pipeline against the

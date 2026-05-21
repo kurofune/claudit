@@ -247,8 +247,11 @@ func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
 	if w1.Code != 200 {
 		t.Fatalf("warmup status = %d", w1.Code)
 	}
-	if srv.cacheLen() != 1 {
-		t.Fatalf("cache not warmed: cacheLen = %d", srv.cacheLen())
+	// Warm-up populates two cache entries: the rendered HTML for the
+	// requested query, plus the pre-warmed JSON section (so the page's
+	// imminent fetch of /_claudit/data.json is a hit).
+	if srv.cacheLen() != 2 {
+		t.Fatalf("cache not warmed: cacheLen = %d, want 2 (html + prewarmed data)", srv.cacheLen())
 	}
 
 	// Second request with a write-erroring response writer — exercises

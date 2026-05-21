@@ -282,12 +282,12 @@ func TestServer_DataEndpoint_RepeatRequestReusesCache(t *testing.T) {
 	}
 
 	b1 := doReq()
-	if got := srv.dataCacheLen(); got != 1 {
-		t.Errorf("after first request: dataCacheLen = %d, want 1", got)
+	if got := srv.sectionCacheLen(sectionData); got != 1 {
+		t.Errorf("after first request: data section entries = %d, want 1", got)
 	}
 	b2 := doReq()
-	if got := srv.dataCacheLen(); got != 1 {
-		t.Errorf("after second request: dataCacheLen = %d, want 1 (hit, not miss)", got)
+	if got := srv.sectionCacheLen(sectionData); got != 1 {
+		t.Errorf("after second request: data section entries = %d, want 1 (hit, not miss)", got)
 	}
 	if b1 != b2 {
 		t.Errorf("cached JSON response differs from miss response (bytes diverged)")
@@ -309,8 +309,8 @@ func TestServer_HTMLReport_PrewarmsJSONCache(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	if got := srv.dataCacheLen(); got != 0 {
-		t.Fatalf("baseline: dataCacheLen = %d, want 0 (no requests yet)", got)
+	if got := srv.sectionCacheLen(sectionData); got != 0 {
+		t.Fatalf("baseline: data section entries = %d, want 0 (no requests yet)", got)
 	}
 
 	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
@@ -320,8 +320,8 @@ func TestServer_HTMLReport_PrewarmsJSONCache(t *testing.T) {
 		t.Fatalf("HTML status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 
-	if got := srv.dataCacheLen(); got != 1 {
-		t.Errorf("after GET /: dataCacheLen = %d, want 1 (HTML render must pre-warm JSON cache)", got)
+	if got := srv.sectionCacheLen(sectionData); got != 1 {
+		t.Errorf("after GET /: data section entries = %d, want 1 (HTML render must pre-warm JSON cache)", got)
 	}
 }
 
