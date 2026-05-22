@@ -115,6 +115,13 @@ type Server struct {
 	// fires. Closed exactly once via shutdownOnce.
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
+
+	// assets is the rewrite-once-at-startup manifest of the SPA's
+	// /web/ source tree. Built by buildAssetManifest during NewServer
+	// and served by handleApp + handleWebAsset. nil if the embed walk
+	// ever fails — handlers fall through to 500 or 404 in that case
+	// rather than crashing the whole daemon.
+	assets *assetManifest
 }
 
 // NewServer wires the cache, the default options, and the routes.
@@ -146,6 +153,17 @@ func NewServer(cache *Cache, opts Options) *Server {
 		// render doesn't halve the effective per-section capacity.
 		s.renderCache = newRenderLRU(opts.MaxCachedRenders * 2)
 	}
+	// Build the SPA asset manifest at startup. A failure here means
+	// the embedded web/ tree is broken — the rest of the daemon can
+	// still serve / and the API, but /app and /_claudit/web/* will
+	// 500/404. Log loudly so a developer notices.
+	manifest, aerr := buildAssetManifest(webFS, webRoot)
+	if aerr != nil {
+		opts.Logger.LogAttrs(context.Background(), slog.LevelError, "serve: build asset manifest failed",
+			slog.Any("err", aerr))
+	} else {
+		s.assets = manifest
+	}
 	s.routes()
 	return s
 }
@@ -174,6 +192,12 @@ func (s *Server) routes() {
 	// share a dispatcher because ServeMux can't pattern-match {id}.
 	s.mux.HandleFunc(apiPathSessions, s.handleAPISessions)
 	s.mux.HandleFunc(apiPathSessions+"/", s.handleAPISessionsTree)
+
+	// Phase 5: SPA shell at /app + hashed asset URLs at
+	// /_claudit/web/<base>.<hash>.<ext>. The legacy fat-HTML route at
+	// "/" stays as-is until the Phase 8 cutover so users can A/B.
+	s.mux.HandleFunc(appPath, s.handleApp)
+	s.mux.HandleFunc(webAssetURLPrefix, s.handleWebAsset)
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.

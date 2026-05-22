@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>claudit</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{asset "tokens.css"}}">
+  <link rel="stylesheet" href="{{asset "app.css"}}">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="icon-overview" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="7" height="9" rx="1"/>
+      <rect x="14" y="3" width="7" height="5" rx="1"/>
+      <rect x="14" y="12" width="7" height="9" rx="1"/>
+      <rect x="3" y="16" width="7" height="5" rx="1"/>
+    </symbol>
+    <symbol id="icon-cost" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
+      <path d="M12 18V6"/>
+    </symbol>
+    <symbol id="icon-cache" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+      <path d="M3 5v14a9 3 0 0 0 18 0V5"/>
+      <path d="M3 12a9 3 0 0 0 18 0"/>
+    </symbol>
+    <symbol id="icon-tools" viewBox="0 0 24 24">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+    </symbol>
+    <symbol id="icon-subagents" viewBox="0 0 24 24">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </symbol>
+    <symbol id="icon-sessions" viewBox="0 0 24 24">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+    </symbol>
+    <symbol id="icon-turns" viewBox="0 0 24 24">
+      <path d="m17 2 4 4-4 4"/>
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14"/>
+      <path d="m7 22-4-4 4-4"/>
+      <path d="M21 13v1a4 4 0 0 1-4 4H3"/>
+    </symbol>
+    <symbol id="icon-gauge" viewBox="0 0 24 24">
+      <path d="m12 14 4-4"/>
+      <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+    </symbol>
+    <symbol id="icon-flame" viewBox="0 0 24 24">
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+    </symbol>
+    <symbol id="icon-chevron-up" viewBox="0 0 24 24">
+      <polyline points="18 15 12 9 6 15"/>
+    </symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24">
+      <polyline points="6 9 12 15 18 9"/>
+    </symbol>
+    <symbol id="icon-calendar" viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <path d="M16 2v4"/>
+      <path d="M8 2v4"/>
+      <path d="M3 10h18"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <aside class="nav" aria-label="Sections">
+    <div class="brand">
+      <div class="brand-name">claudit</div>
+      <div class="brand-sub" id="date-range">—</div>
+    </div>
+    <nav class="nav-list">
+      <a class="nav-item is-active" href="#overview" data-view="overview">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</span>
+        <span class="nav-metric" id="nav-metric-overview">—</span>
+      </a>
+      <a class="nav-item" href="#cost" data-view="cost">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</span>
+        <span class="nav-metric" id="nav-metric-cost">—</span>
+      </a>
+      <a class="nav-item" href="#sessions" data-view="sessions">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-sessions"/></svg>Sessions</span>
+        <span class="nav-metric" id="nav-metric-sessions">—</span>
+      </a>
+      <a class="nav-item" href="#cache" data-view="cache">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache</span>
+        <span class="nav-metric" id="nav-metric-cache">—</span>
+      </a>
+      <a class="nav-item" href="#tools" data-view="tools">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tools"/></svg>Tools</span>
+        <span class="nav-metric" id="nav-metric-tools">—</span>
+      </a>
+      <a class="nav-item" href="#subagents" data-view="subagents">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-subagents"/></svg>Subagents</span>
+        <span class="nav-metric" id="nav-metric-subagents">—</span>
+      </a>
+    </nav>
+  </aside>
+
+  <main class="panel" id="panel">
+    <div class="controls" role="search">
+      <label>Filter rows: <input id="filter" type="search" placeholder="model, path, command, agent…"></label>
+      <label>Min cost: <input id="mincost" type="number" value="0" step="0.01" min="0"></label>
+      <span class="hint">Filter and min-cost apply across every section.</span>
+    </div>
+
+    <section class="view is-active" id="view-overview" data-view="overview">
+      <!-- Filled at runtime by web/views/overview.js -->
+    </section>
+
+    <section class="view" id="view-cost" data-view="cost">
+      <div class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</h1></div>
+      <div class="small empty-state">Coming next phase — visit <a href="/">the legacy report</a> for now.</div>
+    </section>
+    <section class="view" id="view-sessions" data-view="sessions">
+      <div class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-sessions"/></svg>Sessions</h1></div>
+      <div class="small empty-state">Coming next phase — visit <a href="/">the legacy report</a> for now.</div>
+    </section>
+    <section class="view" id="view-cache" data-view="cache">
+      <div class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache</h1></div>
+      <div class="small empty-state">Coming next phase — visit <a href="/">the legacy report</a> for now.</div>
+    </section>
+    <section class="view" id="view-tools" data-view="tools">
+      <div class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-tools"/></svg>Tools</h1></div>
+      <div class="small empty-state">Coming next phase — visit <a href="/">the legacy report</a> for now.</div>
+    </section>
+    <section class="view" id="view-subagents" data-view="subagents">
+      <div class="view-head"><h1><svg class="icon" aria-hidden="true"><use href="#icon-subagents"/></svg>Subagents</h1></div>
+      <div class="small empty-state">Coming next phase — visit <a href="/">the legacy report</a> for now.</div>
+    </section>
+  </main>
+</div>
+
+<div class="claudit-reload-toast" id="reload-toast" hidden role="status">
+  <span class="claudit-reload-toast-msg">New data available.</span>
+  <button type="button" id="reload-toast-btn">Reload</button>
+</div>
+
+<script type="module" src="{{asset "app.js"}}"></script>
+</body>
+</html>

@@ -1,0 +1,334 @@
+// SVG chart builders ported from the inline JS in
+// internal/render/report.html.tmpl (lines 2150-2550). Kept as plain
+// template-string emitters so the rendered SVG is byte-for-byte
+// equivalent to the legacy surface — the static report can swap
+// between SSR-only and SPA-hosted chrome without users seeing a
+// rendering shift.
+
+import { fmtMoney, escHtml, bucketLabel, pointHitRatio } from './format.js';
+
+// anomalyIndex narrows D.anomalies to a single kind, indexed by
+// bucket timestamp string. The string comes from json.Marshal of
+// time.Time so it matches TrendPoint.time bytes-for-bytes.
+export function anomalyIndex(anomalies, kind) {
+  const out = new Map();
+  if (!anomalies) return out;
+  for (const a of anomalies) {
+    if (a.kind === kind) out.set(a.time, a);
+  }
+  return out;
+}
+
+// Catmull-Rom → cubic-bezier path. Tension 0.5 (the standard).
+export function smoothPath(pts) {
+  if (!pts || pts.length === 0) return '';
+  if (pts.length === 1) return `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+  let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
+  }
+  return d;
+}
+
+// HTML-attribute-safe JSON encoder for embedding chart points in
+// data-chart-points. Escapes the five characters that matter inside a
+// single-quoted attribute (& ' " < >).
+export function encodeChartData(arr) {
+  return JSON.stringify(arr).replace(/[&'"<>]/g, c => `&#${c.charCodeAt(0)};`);
+}
+
+// chartViewboxWidth reads the panel's interior width once at chart-
+// render time so the viewBox matches the rendered SVG. Falls back to
+// 1100 if the panel isn't measurable yet.
+export function chartViewboxWidth() {
+  const p = document.querySelector('.panel');
+  if (!p) return 1100;
+  const r = p.getBoundingClientRect();
+  const cs = window.getComputedStyle(p);
+  const inner = r.width - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  return Math.max(800, Math.round(inner - 24));
+}
+
+// hitRatioChart — mini line chart for hit ratio over time. Y axis
+// fixed 0..100% so chart shape is comparable across reports.
+export function hitRatioChart(points, period, anomalies) {
+  if (!points || points.length < 2) return '';
+  const w = chartViewboxWidth(), h = 110;
+  const pad = { l: 60, r: 16, t: 8, b: 22 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  const n = points.length;
+  const xAt = i => pad.l + (i / (n - 1)) * innerW;
+  const yAt = r => pad.t + innerH - r * innerH;
+  const anomIdx = anomalyIndex(anomalies, 'hitratio_drop');
+
+  const coords = points.map((p, i) => [xAt(i), yAt(pointHitRatio(p))]);
+  const linePath = smoothPath(coords);
+  const areaPath = linePath +
+    ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)}` +
+    ` L ${xAt(0).toFixed(2)} ${(pad.t + innerH).toFixed(2)} Z`;
+
+  let yAxis = '';
+  for (const r of [0, 0.5, 1.0]) {
+    yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(r).toFixed(2)}" y2="${yAt(r).toFixed(2)}" stroke-dasharray="2,3"/>`;
+    yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(r) + 4).toFixed(2)}" text-anchor="end">${(r*100).toFixed(0)}%</text>`;
+  }
+  let dots = '', markers = '';
+  for (let i = 0; i < n; i++) {
+    const r = pointHitRatio(points[i]);
+    const a = anomIdx.get(points[i].time);
+    const cls = a ? 'trend-pt trend-pt-anomaly' : 'trend-pt';
+    const rad = a ? 5 : 3;
+    dots += `<circle class="${cls}" cx="${xAt(i).toFixed(2)}" cy="${yAt(r).toFixed(2)}" r="${rad}" data-i="${i}"/>`;
+    if (a) {
+      const ppGap = (a.ratio * 100).toFixed(0);
+      markers += `<text class="trend-anomaly-marker" x="${xAt(i).toFixed(2)}" y="${(yAt(r) + 16).toFixed(2)}" text-anchor="middle">▼ −${ppGap}pp</text>`;
+    }
+  }
+
+  const data = points.map(p => ({
+    label: bucketLabel(p.time, period),
+    ratio: pointHitRatio(p),
+    anomaly: anomIdx.get(p.time) || null,
+  }));
+
+  return `<div class="trend-subtitle">Cache hit ratio over ${escHtml(period)}</div>
+    <div class="chart-host" data-chart-type="hitratio"
+         data-chart-points='${encodeChartData(data)}'
+         data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+         data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+         data-vb-w="${w}" data-vb-h="${h}">
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" class="trend-hitratio">
+        <defs>
+          <linearGradient id="grad-hit" x1="0" x2="0" y1="0" y2="1">
+            <stop class="grad-stop-hit-top" offset="0%"/>
+            <stop class="grad-stop-hit-bot" offset="100%"/>
+          </linearGradient>
+        </defs>
+        ${yAxis}
+        <path class="trend-area" d="${areaPath}" fill="url(#grad-hit)"/>
+        <path class="trend-line trend-line-2" d="${linePath}"/>
+        ${dots}
+        ${markers}
+        <g class="crosshair" style="opacity:0">
+          <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+          <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+        </g>
+      </svg>
+      <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+    </div>`;
+}
+
+// trendLineChart — headline cost trend: line + gradient area, hover
+// crosshair, smooth bezier interpolation. Placeholder for <2 points.
+export function trendLineChart(points, period, anomalies) {
+  if (!points || points.length === 0) return '<div class="small">(no trend data)</div>';
+  if (points.length === 1) {
+    return `<div class="small">Only one ${escHtml(period)} of data — chart hidden.</div>`;
+  }
+  const w = chartViewboxWidth(), h = 320;
+  const pad = { l: 60, r: 16, t: 12, b: 32 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  let max = 0;
+  for (const p of points) { if ((p.cost_usd || 0) > max) max = p.cost_usd; }
+  if (max <= 0) max = 1;
+  const n = points.length;
+  const xAt = i => pad.l + (i / (n - 1)) * innerW;
+  const yAt = v => pad.t + innerH - (v / max) * innerH;
+
+  const coords = points.map((p, i) => [xAt(i), yAt(p.cost_usd || 0)]);
+  const linePath = smoothPath(coords);
+  const areaPath = linePath +
+    ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)}` +
+    ` L ${xAt(0).toFixed(2)} ${(pad.t + innerH).toFixed(2)} Z`;
+
+  let yAxis = '';
+  for (const v of [0, max / 2, max]) {
+    yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(v).toFixed(2)}" y2="${yAt(v).toFixed(2)}" stroke-dasharray="2,3"/>`;
+    yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(v) + 4).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(v))}</text>`;
+  }
+
+  const tickCount = Math.min(n, 8);
+  const tickIdx = [];
+  {
+    const seen = new Set();
+    for (let k = 0; k < tickCount; k++) {
+      const i = tickCount === 1 ? 0 : Math.round(k * (n - 1) / (tickCount - 1));
+      if (!seen.has(i)) { seen.add(i); tickIdx.push(i); }
+    }
+  }
+  let xTicks = '';
+  for (const i of tickIdx) {
+    xTicks += `<text class="trend-tick" x="${xAt(i).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${escHtml(bucketLabel(points[i].time, period))}</text>`;
+  }
+
+  const anomIdx = anomalyIndex(anomalies, 'cost_spike');
+  let dots = '', markers = '';
+  for (let i = 0; i < n; i++) {
+    const v = points[i].cost_usd || 0;
+    const a = anomIdx.get(points[i].time);
+    const cls = a ? 'trend-pt trend-pt-anomaly' : 'trend-pt';
+    const rad = a ? 5 : 3;
+    dots += `<circle class="${cls}" cx="${xAt(i).toFixed(2)}" cy="${yAt(v).toFixed(2)}" r="${rad}" data-i="${i}"/>`;
+    if (a) {
+      const above = yAt(v) - 10;
+      const y = above < pad.t + 4 ? yAt(v) + 16 : above;
+      markers += `<text class="trend-anomaly-marker" x="${xAt(i).toFixed(2)}" y="${y.toFixed(2)}" text-anchor="middle">▲ ${a.ratio.toFixed(1)}×</text>`;
+    }
+  }
+
+  const data = points.map(p => ({
+    label: bucketLabel(p.time, period),
+    cost: p.cost_usd || 0,
+    turns: p.turns || 0,
+    anomaly: anomIdx.get(p.time) || null,
+  }));
+
+  return `
+    <div class="chart-host" data-chart-type="cost"
+         data-chart-points='${encodeChartData(data)}'
+         data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+         data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+         data-vb-w="${w}" data-vb-h="${h}">
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="grad-cost" x1="0" x2="0" y1="0" y2="1">
+            <stop class="grad-stop-cost-top" offset="0%"/>
+            <stop class="grad-stop-cost-mid" offset="60%"/>
+            <stop class="grad-stop-cost-bot" offset="100%"/>
+          </linearGradient>
+        </defs>
+        ${yAxis}
+        <path class="trend-area" d="${areaPath}" fill="url(#grad-cost)"/>
+        <path class="trend-line" d="${linePath}"/>
+        ${dots}
+        ${markers}
+        ${xTicks}
+        <g class="crosshair" style="opacity:0">
+          <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+          <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+        </g>
+      </svg>
+      <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+    </div>`;
+}
+
+// forecastChart — cumulative cost burn-up with a dashed projection to
+// month-end. X spans [window_start, month_end), Y is cumulative $.
+export function forecastChart(forecast, points) {
+  if (!forecast || (forecast.projected_month_end_usd || 0) <= 0) {
+    return '<div class="small empty-state">Forecast unavailable — needs at least two days of cost in the current calendar month and daily bucketing.</div>';
+  }
+  const ws = new Date(forecast.window_start).getTime();
+  const me = new Date(forecast.month_end).getTime();
+  const projected = forecast.projected_month_end_usd;
+  const N = Math.round((me - ws) / 86400000);
+  if (N < 1) {
+    return '<div class="small empty-state">Forecast window is empty.</div>';
+  }
+
+  const cum = new Array(N).fill(null);
+  let running = 0, lastDay = -1;
+  const inWindow = (points || [])
+    .filter(p => { const t = new Date(p.time).getTime(); return t >= ws && t < me; })
+    .sort((a, b) => new Date(a.time) - new Date(b.time));
+  for (const p of inWindow) {
+    const d = Math.floor((new Date(p.time).getTime() - ws) / 86400000);
+    if (d < 0 || d >= N) continue;
+    running += p.cost_usd || 0;
+    cum[d] = running;
+    if (d > lastDay) lastDay = d;
+  }
+  if (lastDay < 0) {
+    return '<div class="small empty-state">No data in the forecast window.</div>';
+  }
+  let prev = 0;
+  for (let i = 0; i <= lastDay; i++) {
+    if (cum[i] === null) cum[i] = prev; else prev = cum[i];
+  }
+  if (lastDay < N - 1) {
+    const startCum = cum[lastDay];
+    const span = N - 1 - lastDay;
+    for (let i = lastDay + 1; i < N; i++) {
+      cum[i] = startCum + ((i - lastDay) / span) * (projected - startCum);
+    }
+  }
+
+  const w = chartViewboxWidth(), h = 320;
+  const pad = { l: 70, r: 24, t: 28, b: 32 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  const ymax = Math.max(projected, cum[lastDay]) * 1.05 || 1;
+  const xAt = i => pad.l + (i / Math.max(1, N - 1)) * innerW;
+  const yAt = v => pad.t + innerH - (v / ymax) * innerH;
+
+  let solid = '';
+  for (let i = 0; i <= lastDay; i++) {
+    solid += `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(2)} ${yAt(cum[i]).toFixed(2)} `;
+  }
+  const lastX = xAt(lastDay), lastY = yAt(cum[lastDay]);
+  const endX = xAt(N - 1), endY = yAt(projected);
+
+  let yAxis = '';
+  for (const v of [0, projected / 2, projected]) {
+    yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(v).toFixed(2)}" y2="${yAt(v).toFixed(2)}" stroke-dasharray="2,3"/>`;
+    yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(v) + 4).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(v))}</text>`;
+  }
+
+  const tickDays = N >= 3 ? [0, Math.floor((N - 1) / 2), N - 1] : [0, N - 1];
+  let xTicks = '';
+  for (const d of tickDays) {
+    const dt = new Date(ws + d * 86400000);
+    xTicks += `<text class="trend-tick" x="${xAt(d).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${(dt.getUTCMonth() + 1)}/${dt.getUTCDate()}</text>`;
+  }
+
+  const todayLabel = `<text class="trend-tick" x="${lastX.toFixed(2)}" y="${(pad.t - 8).toFixed(2)}" text-anchor="middle">today</text>`;
+  const projLabel = `<text class="trend-forecast-label" x="${endX.toFixed(2)}" y="${(endY - 12).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(projected))}</text>`;
+
+  const lastDt = new Date(me - 86400000);
+  const lastDateStr = `${lastDt.getUTCFullYear()}-${String(lastDt.getUTCMonth() + 1).padStart(2,'0')}-${String(lastDt.getUTCDate()).padStart(2,'0')}`;
+
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const data = [];
+  for (let i = 0; i < N; i++) {
+    const dt = new Date(ws + i * 86400000);
+    data.push({
+      label: `${monthNames[dt.getUTCMonth()]} ${dt.getUTCDate()}`,
+      cum: cum[i],
+      projected: i > lastDay,
+    });
+  }
+
+  return `
+    <div class="chart-host" data-chart-type="forecast"
+         data-chart-points='${encodeChartData(data)}'
+         data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+         data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+         data-vb-w="${w}" data-vb-h="${h}"
+         data-y-max="${ymax}">
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        ${yAxis}
+        <path class="trend-line" d="${solid}" fill="none"/>
+        <line class="trend-forecast" x1="${lastX.toFixed(2)}" y1="${lastY.toFixed(2)}" x2="${endX.toFixed(2)}" y2="${endY.toFixed(2)}" stroke-dasharray="5,4"/>
+        <circle class="trend-pt" cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="4"/>
+        <circle class="trend-pt-forecast" cx="${endX.toFixed(2)}" cy="${endY.toFixed(2)}" r="4"/>
+        ${todayLabel}
+        ${projLabel}
+        ${xTicks}
+      </svg>
+    </div>
+    <div class="trend-summary">
+      <span>Spent in window: <strong>${escHtml(fmtMoney(forecast.mtd_cost_usd))}</strong> over <strong>${(forecast.days_elapsed || 0).toFixed(1)}</strong> days</span>
+      <span>Daily rate: <strong>${escHtml(fmtMoney(forecast.daily_rate_usd))}</strong></span>
+      <span>Projected by ${escHtml(lastDateStr)}: <strong>${escHtml(fmtMoney(projected))}</strong></span>
+    </div>`;
+}

@@ -2,6 +2,10 @@
 cost.md
 report.html
 *.html
+# Source HTML under web/ (the SPA shell) is intentionally tracked —
+# the *.html rule above exists to keep generated `report.html` out
+# of the repo, not to ignore source.
+!web/*.html
 
 # Build artifacts
 /claudit

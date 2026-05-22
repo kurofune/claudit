@@ -1,0 +1,1525 @@
+
+  /* ─── Card surfaces — round, lifted, generous ─────────────────────────
+     Most callouts and controls round at --r-lg with a soft shadow. The
+     guide and warning callouts skip the shadow because they live inline
+     and read more like "labeled regions" than free-floating tiles. */
+  .controls,
+  .hotspot,
+  details:not(.guide):not(.hotspot) {
+    box-shadow: var(--shadow-sm);
+  }
+  table {
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    /* Note: the table rule further down sets border-collapse: separate
+       (with border-spacing: 0). That's load-bearing for the rounded
+       outline — with border-collapse: collapse, the table's border
+       gets owned by the corner cells, doesn't follow border-radius,
+       and either renders 90° inside the rounded clip (L-sliver in
+       each corner) or is hidden by the th background across the top
+       edge. `separate` keeps the border on the table element, where
+       border-radius applies cleanly. */
+  }
+
+  /* Totals tiles — each metric becomes a soft elevated card.
+     (Layout — flex / flex-basis / wrap — lives with the other .totals
+     rules further down in the file.) */
+  .totals .headline,
+  .totals .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-3) var(--s-4);
+    box-shadow: var(--shadow-sm);
+    margin-right: 0;
+  }
+
+  /* Hover lift on hotspots — soft elevation reflects the rounded language. */
+  .hotspot {
+    transition: box-shadow var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+  }
+  .hotspot:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  /* Ranked-list color rotation — hbar fills, per-row sparklines, and
+     hotspot rank chips all pull from the 5-color palette so adjacent
+     items are visually distinct. */
+  .hbar-list .hbar:nth-child(5n+1) > .fill { background: var(--c-1); }
+  .hbar-list .hbar:nth-child(5n+2) > .fill { background: var(--c-2); }
+  .hbar-list .hbar:nth-child(5n+3) > .fill { background: var(--c-3); }
+  .hbar-list .hbar:nth-child(5n+4) > .fill { background: var(--c-4); }
+  .hbar-list .hbar:nth-child(5n+5) > .fill { background: var(--c-5); }
+
+  tbody tr:nth-child(5n+1) .trend-spark rect { fill: var(--c-1); }
+  tbody tr:nth-child(5n+2) .trend-spark rect { fill: var(--c-2); }
+  tbody tr:nth-child(5n+3) .trend-spark rect { fill: var(--c-3); }
+  tbody tr:nth-child(5n+4) .trend-spark rect { fill: var(--c-4); }
+  tbody tr:nth-child(5n+5) .trend-spark rect { fill: var(--c-5); }
+
+  .stacked .bucket-main { background: var(--c-1); }
+  .stacked .bucket-side { background: var(--c-3); }
+
+  /* Inline icons — Lucide-style, sized to 1em by default, currentColor
+     stroke so they pick up the surrounding text color. Per-context size
+     overrides live with the components that use them. */
+  .icon {
+    display: inline-block;
+    width: 1em; height: 1em;
+    vertical-align: -0.15em;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* Sidebar nav: small muted glyph that brightens to accent when active. */
+  .nav-label {
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .nav-label .icon {
+    width: 15px; height: 15px;
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--motion-ease);
+  }
+  .nav-item:hover .nav-label .icon { color: var(--ink-2); }
+  .nav-item.is-active .nav-label .icon { color: var(--accent); }
+
+  /* View headers: larger, accent-colored icon paired with the h1. */
+  .view-head h1 {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .view-head h1 .icon {
+    width: 28px; height: 28px;
+    color: var(--accent);
+    stroke-width: 1.75;
+    padding: 4px;
+    background: var(--accent-soft);
+    border-radius: var(--r-md);
+    box-sizing: content-box;
+  }
+
+  /* Totals tile labels: tiny inline icon, sits flush before the label text. */
+  .totals .label .icon, .totals .headline .label .icon {
+    width: 12px; height: 12px;
+    margin-right: 5px;
+    vertical-align: -0.1em;
+    color: var(--muted);
+    stroke-width: 2.25;
+  }
+
+  /* Period-over-period delta indicator under each totals value.
+     Semantic colors: -good = green (the desirable direction happened),
+     -bad = red (undesirable direction), -neutral/-flat = quiet. */
+  .totals .delta {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--t-1);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    margin-top: var(--s-1);
+    line-height: 1;
+  }
+  .totals .delta .icon {
+    width: 12px; height: 12px;
+    stroke-width: 2.5;
+    color: currentColor;
+  }
+  .totals .delta-tail {
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+  /* Pure semantic colors — no mixing with --ink, since OKLCH hue
+     interpolation between green/coral and the violet ink hue desaturates
+     the result through cyan/magenta. The base accent-2 / hot tokens are
+     already tuned for readable contrast in both modes. */
+  .totals .delta-good    { color: var(--accent-2); }
+  .totals .delta-bad     { color: var(--hot); }
+  .totals .delta-neutral { color: var(--ink-2); }
+  .totals .delta-flat    { color: var(--muted); }
+
+  /* Section h2s gain a small accent-colored icon prefix when they
+     opt-in by including <svg class="icon"> as a child. */
+  h2 {
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .icon {
+    width: 18px; height: 18px;
+    color: var(--accent);
+    stroke-width: 2;
+  }
+
+  /* Semantic tier pill — used for hit-ratio cells where the value sits
+     on a known scale. Tinted background + colored numeric. The ranges:
+       good ≥ 70%   strong cache reuse, low waste
+       ok   40-70%  typical for mixed workloads
+       bad  < 40%   most context paid full price; biggest cost lever  */
+  .tier {
+    display: inline-block;
+    padding: 2px var(--s-2);
+    border-radius: var(--r-pill);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: var(--t-2);
+    letter-spacing: 0.005em;
+    line-height: 1.2;
+  }
+  .tier-good {
+    background: color-mix(in oklch, var(--c-3) 14%, var(--surface));
+    color: color-mix(in oklch, var(--c-3) 80%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--c-3) 28%, transparent);
+  }
+  .tier-ok {
+    background: color-mix(in oklch, var(--c-4) 14%, var(--surface));
+    color: color-mix(in oklch, var(--c-4) 60%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--c-4) 28%, transparent);
+  }
+  .tier-bad {
+    background: color-mix(in oklch, var(--hot) 14%, var(--surface));
+    color: color-mix(in oklch, var(--hot) 80%, var(--ink));
+    border: 1px solid color-mix(in oklch, var(--hot) 32%, transparent);
+  }
+  /* Compact variant for the tight totals tile and nav metrics. */
+  .tier-sm {
+    padding: 1px var(--s-1);
+    font-size: var(--t-1);
+    font-weight: 600;
+  }
+
+  .hotspot:nth-child(5n+1) .hotspot-kind { background: color-mix(in oklch, var(--c-1) 18%, var(--surface)); color: var(--c-1); }
+  .hotspot:nth-child(5n+2) .hotspot-kind { background: color-mix(in oklch, var(--c-2) 18%, var(--surface)); color: var(--c-2); }
+  .hotspot:nth-child(5n+3) .hotspot-kind { background: color-mix(in oklch, var(--c-3) 18%, var(--surface)); color: var(--c-3); }
+  .hotspot:nth-child(5n+4) .hotspot-kind { background: color-mix(in oklch, var(--c-4) 18%, var(--surface)); color: var(--c-4); }
+  .hotspot:nth-child(5n+5) .hotspot-kind { background: color-mix(in oklch, var(--c-5) 18%, var(--surface)); color: var(--c-5); }
+
+  .hotspot:nth-child(5n+1) .rank { color: var(--c-1); }
+  .hotspot:nth-child(5n+2) .rank { color: var(--c-2); }
+  .hotspot:nth-child(5n+3) .rank { color: var(--c-3); }
+  .hotspot:nth-child(5n+4) .rank { color: var(--c-4); }
+  .hotspot:nth-child(5n+5) .rank { color: var(--c-5); }
+
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--font-sans);
+    margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-size: var(--t-3); line-height: 1.5;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  }
+  code, pre, .mono { font-family: var(--font-mono); }
+  /* App shell: fixed sidebar + scrolling main panel.
+     Sidebar is 260px — wide enough to hold the calendar icon + a
+     "YYYY-MM-DD → YYYY-MM-DD" date range button on one line in the
+     mono font, with room for the nav-item metric column. */
+  .app {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+  .nav {
+    position: sticky; top: 0; align-self: start;
+    height: 100vh; overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: var(--s-5) var(--s-3) var(--s-4);
+    display: flex; flex-direction: column; gap: var(--s-5);
+  }
+  .brand { display: flex; flex-direction: column; gap: 2px;
+           padding: 0 var(--s-2); }
+  .brand-name { font-size: var(--t-5); font-weight: 700; letter-spacing: -0.01em;
+                color: var(--ink); }
+  .brand-name::after {
+    /* a tiny brand mark — a 6px square in accent — gives the wordmark
+       a piece of identity without leaning on a logo */
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    background: var(--accent); margin-left: 6px; vertical-align: 0.18em;
+    border-radius: 1px;
+  }
+  .brand-sub { font-size: var(--t-2); color: var(--muted);
+               font-variant-numeric: tabular-nums;
+               font-family: var(--font-mono); }
+  /* Build label pinned to the bottom of the sidebar. margin-top: auto
+     uses the .nav flex column to push the footer down; border-top is a
+     hair lighter than --border so it reads as a divider, not a row. */
+  .nav-footer { margin-top: auto;
+                padding: var(--s-3) var(--s-2) 0;
+                border-top: 1px solid var(--border);
+                font-size: var(--t-1); color: var(--muted);
+                font-family: var(--font-mono); opacity: 0.7;
+                letter-spacing: 0.01em; }
+  /* Serve-mode variant: same look as .brand-sub but clickable. Hosts
+     the calendar icon + dates and opens the date-range popover. */
+  .brand-sub-button {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px; margin: 2px 0 0 -8px;
+    background: transparent; color: var(--muted);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    font-family: var(--font-mono); font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+    cursor: pointer; text-align: left;
+    /* Date string is fixed-width — never let it wrap mid-range. The
+       sidebar width above is sized to fit; nowrap is the safety net
+       if a future locale or font change makes the string a hair
+       wider than expected. */
+    white-space: nowrap;
+    transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .brand-sub-button:hover {
+    background: var(--surface-2); border-color: var(--border);
+    color: var(--ink-2);
+  }
+  .brand-sub-button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .brand-sub-button[aria-expanded="true"] {
+    background: var(--surface-2); border-color: var(--border-strong);
+    color: var(--ink);
+  }
+  .brand-sub-button .icon {
+    width: 13px; height: 13px; opacity: 0.85;
+  }
+  .nav-list { display: flex; flex-direction: column; gap: 2px;
+              list-style: none; margin: 0; padding: 0; }
+  .nav-item {
+    position: relative;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: var(--s-2) var(--s-3);
+    border-radius: 4px;
+    color: var(--ink-2); text-decoration: none;
+    transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item::before {
+    /* accent stripe on left edge — animates in via scaleY */
+    content: ""; position: absolute; left: -2px; top: 50%;
+    width: 2px; height: 60%; transform: translateY(-50%) scaleY(0);
+    transform-origin: center; background: var(--accent);
+    border-radius: 0 2px 2px 0;
+    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active { background: var(--surface-2); color: var(--ink); }
+  .nav-item.is-active::before { transform: translateY(-50%) scaleY(1); }
+  .nav-item:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .nav-label { font-size: var(--t-3); font-weight: 600; letter-spacing: -0.005em; }
+  .nav-metric { font-size: var(--t-2); color: var(--muted);
+                font-variant-numeric: tabular-nums;
+                font-family: var(--font-mono);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav-item.is-active .nav-metric { color: var(--ink-2); }
+
+  /* Main panel scrolls; max width caps so very-wide displays stay readable. */
+  .panel {
+    /* Adaptive width with ~10% horizontal breathing room. Side padding
+       grows with viewport (5vw on each side ≈ 10% total) and caps at
+       200px so 8K+ monitors don't waste absurd margins. On narrow
+       viewports the floor of var(--s-4) keeps content from kissing the
+       edge. Prose readability is preserved by .guide .body
+       { max-width: 75ch }; tables/charts/hbars fill the panel. */
+    padding: var(--s-5) clamp(var(--s-4), 5vw, 200px);
+  }
+
+  /* View system — only the active view is shown. Cross-fade in via opacity
+     on activation; reduced-motion users get an instant swap. */
+  .view { display: none; opacity: 0;
+          transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .view.is-active { display: block; opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .view, .nav-item, .nav-item::before { transition: none; }
+  }
+
+  /* View header — view-level h1 with a thin meta line. The view's first
+     h2 sits below this, no chapter-rule (the view-head already separates). */
+  .view-head { display: flex; align-items: baseline; gap: var(--s-3);
+               margin-bottom: var(--s-3); }
+  .view-head h1 { margin: 0; }
+  .view-head .meta { color: var(--muted); font-size: var(--t-2);
+                     font-variant-numeric: tabular-nums; }
+
+  /* Sub-tabs within a view (Cost/Cache/Tools/Subagents). One row of
+     anchor-tabs with an underline on the active item. Hash route is
+     `#view/subview`. */
+  .subtabs {
+    display: flex; flex-wrap: wrap; gap: 0;
+    margin: 0 0 var(--s-4);
+    border-bottom: 1px solid var(--border);
+  }
+  .subtab {
+    position: relative;
+    padding: var(--s-2) var(--s-3);
+    font: inherit; font-size: var(--t-3); font-weight: 500;
+    color: var(--muted); text-decoration: none;
+    background: transparent; border: 0; cursor: pointer;
+    margin-bottom: -1px;  /* overlap parent border */
+    border-bottom: 2px solid transparent;
+    transition: color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .subtab:hover { color: var(--ink); }
+  .subtab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+  .subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+                          border-radius: 2px; }
+
+  /* Sub-views — only the active one renders. */
+  .subview { display: none; }
+  .subview.is-active { display: block; }
+  @media (prefers-reduced-motion: reduce) {
+    .subtab { transition: none; }
+  }
+
+  /* The subview's first h2/h3 sits right under the tab strip — pull it
+     in tight, no chapter rule. */
+  .subview > h2:first-child,
+  .subview > h3:first-child {
+    border-top: 0; padding-top: 0; margin-top: 0;
+  }
+
+  /* Pager — one per paged table, hidden when total rows fit on a page. */
+  .pager {
+    display: flex; align-items: center; gap: var(--s-3);
+    padding: var(--s-2) 0; margin: var(--s-1) 0 var(--s-3);
+    font-size: var(--t-2); color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pager-btn {
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface); color: var(--ink-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .pager-btn:hover:not(:disabled) {
+    background: var(--surface-2); color: var(--ink);
+    border-color: var(--border-strong);
+  }
+  .pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pager-btn:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .pager-info { display: flex; gap: var(--s-3); align-items: baseline; }
+  .pager-page strong { color: var(--ink); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    .pager-btn { transition: none; }
+  }
+
+  h1 { font-family: var(--font-display);
+       font-optical-sizing: auto;
+       font-size: var(--t-6); font-weight: 600; letter-spacing: -0.02em;
+       margin: 0 0 var(--s-1); }
+  h2 { font-size: var(--t-5); font-weight: 600; letter-spacing: -0.005em;
+       margin: var(--s-6) 0 var(--s-2); padding-top: var(--s-3);
+       border-top: 1px solid var(--border); }
+  /* First h2 in a view sits right under the view-head — no chapter rule needed. */
+  .view > h2:first-of-type { border-top: 0; padding-top: 0;
+                              margin-top: var(--s-3); }
+  h3 { font-size: var(--t-4); font-weight: 600; margin: var(--s-4) 0 var(--s-2);
+       color: var(--ink-2); }
+  .subtitle { color: var(--muted); margin-bottom: var(--s-5);
+              font-variant-numeric: tabular-nums; }
+
+  /* Narrow viewport: collapse sidebar to a top horizontal rail. */
+  @media (max-width: 800px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .nav { position: sticky; top: 0; height: auto; flex-direction: row;
+           align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3);
+           border-right: 0; border-bottom: 1px solid var(--border);
+           overflow-x: auto; }
+    .brand { flex-direction: row; align-items: baseline; gap: var(--s-2); }
+    .brand-name::after { display: none; }
+    .nav-list { flex-direction: row; gap: 2px; flex: 1; }
+    .nav-item { flex-direction: row; align-items: center; gap: var(--s-2);
+                padding: var(--s-1) var(--s-2); }
+    .nav-item::before { display: none; }
+    .nav-item.is-active { box-shadow: inset 0 -2px 0 var(--accent); }
+    .nav-metric { display: none; }
+    .panel { padding: var(--s-3); }
+  }
+
+  /* Totals tiles laid out as equal-width, equal-height cards. flex:1
+     spreads them across the row; align-items: stretch (the flex default)
+     equalizes height so a tile with no delta still matches a tile that
+     has one. flex-basis 220px sets the wrap threshold for narrow viewports.
+     border-bottom + padding-bottom are unset because each tile already
+     has its own border + shadow card treatment (above). */
+  .totals {
+    display: flex; flex-wrap: wrap;
+    gap: var(--s-3);
+    margin-bottom: var(--s-5);
+  }
+  .totals .headline,
+  .totals .metric {
+    flex: 1 1 220px;
+  }
+  .totals .headline { display: flex; flex-direction: column; gap: 2px; }
+  .totals .headline .label { font-size: var(--t-1); color: var(--muted);
+                             text-transform: uppercase; letter-spacing: 0.08em;
+                             font-weight: 500; }
+  /* Display-font treatment for the headline cost. Inter Display via
+     opsz axis with tight tracking + tabular figures + stylistic
+     alternates (ss01 enables the rounded tail on common digits). */
+  .totals .headline .value {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum", "ss01", "cv01";
+    font-size: var(--t-7); font-weight: 700;
+    line-height: 1; letter-spacing: -0.035em;
+    font-variant-numeric: tabular-nums lining-nums;
+    color: var(--ink);
+  }
+  .totals .metric { display: flex; flex-direction: column; gap: 1px; }
+  .totals .metric .label { font-size: var(--t-1); color: var(--muted);
+                           text-transform: uppercase; letter-spacing: 0.08em;
+                           font-weight: 500; }
+  /* Same display treatment for tile values, scaled down. */
+  .totals .metric .value {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum";
+    font-size: var(--t-4); font-weight: 600;
+    letter-spacing: -0.015em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* Warning callout — soft warn surface, accent-colored rule. */
+  .warning-card {
+    background: var(--warn-soft);
+    padding: var(--s-3) var(--s-4);
+    border: 1px solid var(--warn);
+    border-radius: var(--r-lg);
+    margin-bottom: var(--s-3);
+  }
+
+  /* Reading guide — collapsible "how to interpret this section" callout.
+     Sits under each view-head; default open so first-time readers get
+     oriented, but a click on the summary hides it for subsequent visits. */
+  .guide {
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--surface));
+    border-radius: var(--r-lg);
+    margin: var(--s-3) 0 var(--s-4);
+    padding: 0;
+  }
+  .guide > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-2) var(--s-3);
+    font-weight: 600;
+    color: var(--ink);
+    font-size: var(--t-3);
+    display: flex; align-items: center; gap: var(--s-2);
+  }
+  .guide > summary::-webkit-details-marker { display: none; }
+  .guide > summary::before {
+    content: "▸"; color: var(--accent);
+    transition: transform 0.15s ease;
+    display: inline-block; width: 0.8em;
+  }
+  .guide[open] > summary::before { transform: rotate(90deg); }
+  .guide .body {
+    padding: 0 var(--s-3) var(--s-3) var(--s-4);
+    font-size: var(--t-3); color: var(--ink-2); line-height: 1.55;
+    /* Cap prose line length so reading stays comfortable even when the
+       panel is wide. Cards/tables fill the panel; only the body text
+       wraps tighter. */
+    max-width: 75ch;
+  }
+  .guide .body p { margin: var(--s-2) 0; }
+  .guide .body p:first-child { margin-top: 0; }
+  .guide .body ul { margin: var(--s-2) 0; padding-left: var(--s-4); }
+  .guide .body li { margin: var(--s-1) 0; }
+  .guide .body strong { color: var(--ink); }
+  .guide .body code {
+    background: var(--surface-2);
+    padding: 1px 4px; border-radius: 3px;
+    font-size: 0.92em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .guide > summary::before { transition: none; }
+  }
+  /* Column-header tooltip affordance — subtle dotted underline signals
+     "more info on hover" without conflicting with the sort-direction
+     glyph rendered after. The actual tooltip is a custom popover (see
+     #claudit-tooltip below), not the native `title=`. */
+  th[title], th[data-tooltip] {
+    text-decoration: underline dotted var(--border-strong);
+    text-underline-offset: 3px;
+  }
+
+  /* Custom tooltip popover — soft, light, lifted, matching the rounded
+     card language. Kept on a real surface (not an inverted dark panel)
+     so it feels of-a-piece with the rest of the report rather than like
+     a heavy floating chip. The accent-tinted border + lift shadow give
+     it elevation without harshness. */
+  #claudit-tooltip {
+    --tip-bg:     var(--surface);
+    --tip-border: color-mix(in oklch, var(--accent) 30%, var(--border));
+    --tip-fg:     var(--ink);
+    --tip-shadow: var(--shadow-lift),
+                  inset 0 1px 0 color-mix(in oklch, white 60%, transparent);
+    position: fixed; z-index: 1000;
+    max-width: 320px;
+    padding: var(--s-2) var(--s-3);
+    background: var(--tip-bg);
+    color: var(--tip-fg);
+    border: 1px solid var(--tip-border);
+    font-size: var(--t-2); line-height: 1.45;
+    letter-spacing: 0.005em;
+    border-radius: var(--r-md);
+    box-shadow: var(--tip-shadow);
+    pointer-events: none;
+    opacity: 0; transform: translateY(2px) scale(0.98);
+    transform-origin: var(--arrow-x, 50%) bottom;
+    transition: opacity var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease);
+    will-change: opacity, transform;
+  }
+  #claudit-tooltip.is-visible {
+    opacity: 1; transform: translateY(0) scale(1);
+  }
+  #claudit-tooltip[data-side="bottom"] {
+    transform-origin: var(--arrow-x, 50%) top;
+    transform: translateY(-2px) scale(0.98);
+  }
+  #claudit-tooltip[data-side="bottom"].is-visible {
+    transform: translateY(0) scale(1);
+  }
+  /* Arrow inherits panel bg + border so it reads as a continuous
+     extension of the popover, not a separate triangle. */
+  #claudit-tooltip::after {
+    content: ""; position: absolute;
+    width: 9px; height: 9px;
+    background: var(--tip-bg);
+    border-right: 1px solid var(--tip-border);
+    border-bottom: 1px solid var(--tip-border);
+    transform: rotate(45deg);
+    left: var(--arrow-x, 50%);
+    margin-left: -4.5px;
+  }
+  #claudit-tooltip[data-side="top"]::after    { bottom: -5px; }
+  #claudit-tooltip[data-side="bottom"]::after {
+    top: -5px;
+    border-right: 0; border-bottom: 0;
+    border-top: 1px solid var(--tip-border);
+    border-left: 1px solid var(--tip-border);
+  }
+  #claudit-tooltip code {
+    background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 0.92em;
+    border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+  }
+  #claudit-tooltip strong { color: var(--accent); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    #claudit-tooltip { transition: opacity var(--motion-fast) linear; }
+  }
+
+  /* Generic <select> styling for any future controls (safe to leave even
+     after removing the theme picker). */
+  .controls select {
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  .controls select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
+  }
+
+  .hotspot {
+    transition: border-color var(--motion-fast) var(--motion-ease),
+                background-color var(--motion-fast) var(--motion-ease);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hotspot { transition: none; }
+  }
+
+  /* Chart line-draw entrance. JS triggers by toggling a class. */
+  .trend-line.draw-in {
+    stroke-dasharray: var(--len, 1000);
+    stroke-dashoffset: var(--len, 1000);
+    animation: cl-draw var(--motion-slow) var(--motion-ease) forwards;
+  }
+  @keyframes cl-draw {
+    to { stroke-dashoffset: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trend-line.draw-in { animation: none; stroke-dashoffset: 0; }
+  }
+
+  /* Number count-up — applied to .totals .value during initial paint.
+     Uses content visibility transition so the number lands smoothly. */
+  .totals .value.cl-counting { color: color-mix(in oklch, var(--ink) 70%, var(--accent)); }
+  @media (prefers-reduced-motion: reduce) {
+    .totals .value.cl-counting { color: var(--ink); }
+  }
+
+  /* Animate-in stagger on initial paint. Each element fades + translates
+     up; cumulative delay creates a "cascade" that signals the page is
+     hand-assembled rather than dumped. `backwards` fill keeps the element
+     at the start state until its delay elapses (otherwise it flashes
+     visible at full opacity before animating down and back). */
+  @keyframes cl-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .totals .headline,
+  .totals .metric,
+  .hotspot {
+    animation: cl-fade-up var(--motion-med) var(--motion-ease) backwards;
+  }
+  .totals .headline    { animation-delay:  40ms; }
+  .totals .metric:nth-of-type(1) { animation-delay: 100ms; }
+  .totals .metric:nth-of-type(2) { animation-delay: 160ms; }
+  .totals .metric:nth-of-type(3) { animation-delay: 220ms; }
+  .totals .metric:nth-of-type(4) { animation-delay: 280ms; }
+  /* Hotspots cascade after the totals settle. */
+  .hotspot:nth-child(1)  { animation-delay: 360ms; }
+  .hotspot:nth-child(2)  { animation-delay: 410ms; }
+  .hotspot:nth-child(3)  { animation-delay: 460ms; }
+  .hotspot:nth-child(4)  { animation-delay: 510ms; }
+  .hotspot:nth-child(5)  { animation-delay: 560ms; }
+  .hotspot:nth-child(6)  { animation-delay: 610ms; }
+  .hotspot:nth-child(7)  { animation-delay: 660ms; }
+  .hotspot:nth-child(8)  { animation-delay: 700ms; }
+  .hotspot:nth-child(9)  { animation-delay: 740ms; }
+  .hotspot:nth-child(10) { animation-delay: 780ms; }
+  /* Reduced-motion users skip the staggered cascade entirely. */
+  @media (prefers-reduced-motion: reduce) {
+    .totals .headline,
+    .totals .metric,
+    .hotspot { animation: none; }
+  }
+  .controls {
+    display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap;
+    background: var(--surface);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    margin: var(--s-4) 0;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .controls label { display: flex; align-items: center; gap: var(--s-1); }
+  .controls input {
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--ink);
+  }
+  .controls input:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  .controls input[type="search"] { width: 280px; }
+  .controls input[type="number"] { width: 80px; }
+  .hint { color: var(--muted); font-size: var(--t-2); }
+  /* Scope note: served reports inject this into the filter bar when
+     server defaults narrow the view (last=7d / top-N sessions). Right-
+     aligned via margin-left:auto so the filter inputs stay left-anchored
+     and the scope info reads as a status, not a control. */
+  .controls .scope-note {
+    margin-left: auto;
+    color: var(--muted); font-size: var(--t-2);
+    display: inline-flex; align-items: baseline; gap: var(--s-1);
+  }
+  .controls .scope-note .sep { color: var(--border-strong); }
+  .controls .scope-note a {
+    color: var(--accent); text-decoration: none; font-weight: 600;
+  }
+  .controls .scope-note a:hover { text-decoration: underline; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0;
+          background: var(--surface);
+          font-variant-numeric: tabular-nums; }
+  th, td { padding: var(--s-2) var(--s-3);
+           border-bottom: 1px solid var(--border);
+           text-align: left; vertical-align: top; }
+  th { background: var(--surface-2); cursor: pointer; user-select: none;
+       font-weight: 600; white-space: nowrap; color: var(--ink-2);
+       font-size: var(--t-2); letter-spacing: 0.01em; }
+  th:hover { background: var(--surface-3); color: var(--ink); }
+  /* Default low-contrast sort glyph signals "sortable" before any click. */
+  th[data-key]::after { content: " ↕"; color: var(--border-strong);
+                        font-size: 0.9em; }
+  th.sorted-asc::after  { content: " ▲"; color: var(--accent); }
+  th.sorted-desc::after { content: " ▼"; color: var(--accent); }
+  td.num, th.num { text-align: right; }
+  td code { font-size: var(--t-2); }
+  /* Heat overlay as a CSS gradient on the cell background. Text sits
+     above the background naturally — no positioning gymnastics, no
+     pseudo-element painting over plain-text cell content. */
+  td.heat {
+    background: linear-gradient(
+      to right,
+      var(--hot-soft) 0,
+      var(--hot-soft) var(--heat, 0%),
+      transparent var(--heat, 0%)
+    );
+  }
+  tr.hidden { display: none; }
+
+  details { background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--r-lg); margin: var(--s-2) 0;
+            padding: var(--s-2) var(--s-3); }
+  summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+  summary > .small { color: var(--muted); font-weight: normal;
+                     margin-left: var(--s-2); }
+
+  .hbar-list { display: flex; flex-direction: column; gap: 2px;
+               max-width: 100%; margin-bottom: var(--s-3); }
+  .hbar { position: relative; height: 26px;
+          background: var(--surface-2); border-radius: var(--r-md); overflow: hidden;
+          /* Subtle border so the unfilled portion of the track is
+             visible against the page bg in dark mode (where surface-2
+             and bg differ by only a few percent of lightness). */
+          border: 1px solid var(--border); }
+  .hbar > .fill { position: absolute; left: 0; top: 0; bottom: 0;
+                  background: var(--accent); opacity: 0.6; }
+  .hbar > .lbl, .hbar > .val {
+    position: absolute; top: 0; line-height: 26px;
+    font-size: var(--t-2); padding: 0 var(--s-2); white-space: nowrap;
+  }
+  .hbar > .lbl { left: 0; max-width: 70%; overflow: hidden;
+                 text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
+  .hbar > .val { right: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .stacked { height: 32px; display: flex; background: var(--surface-2);
+             border-radius: var(--r-md); overflow: hidden; margin: var(--s-2) 0; }
+  .stacked > div { display: flex; align-items: center; justify-content: center;
+                   color: var(--surface); font-size: var(--t-2); font-weight: 600;
+                   font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; background: var(--surface-2); color: var(--muted);
+          padding: 1px var(--s-2); border-radius: var(--r-pill); font-size: var(--t-2); }
+  .small { font-size: var(--t-2); color: var(--muted); }
+  .empty-state {
+    margin: var(--s-2) 0;
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-lg);
+    color: var(--ink-2);
+  }
+  .empty-state code { color: var(--ink); }
+  td.empty-state-row {
+    text-align: center;
+    padding: var(--s-4) var(--s-3);
+    color: var(--muted);
+    font-size: var(--t-2);
+  }
+  .danger { color: var(--hot); }
+  /* Project paths run long. Fluid cap so wide displays get more room. */
+  .truncate { display: inline-block; max-width: clamp(360px, 55vw, 820px);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              vertical-align: bottom; }
+  /* Path-style cells (project paths, session subtitles) read better in
+     mono — fixed character width keeps paths column-aligned. */
+  .path { font-family: var(--font-mono); font-size: var(--t-2); }
+  /* Reserve enough min-width on project-bearing columns so the table's
+     auto-layout doesn't squeeze them when other columns get greedy. */
+  th[data-key="Project"], th[data-key="Subtitle"] {
+    min-width: clamp(280px, 30vw, 460px);
+  }
+  /* For cache-project, the project path lives under the generic "Key"
+     column header. Same min-width treatment via a class on the table. */
+  table[data-table="cache-project"] th[data-key="Key"] {
+    min-width: clamp(280px, 30vw, 460px);
+  }
+  details.tool-drill summary code {
+    background: var(--surface-2); padding: 1px var(--s-2);
+    border-radius: 3px; font-size: var(--t-2);
+  }
+
+  /* Hotspot cards */
+  .hotspots { display: grid; grid-template-columns: 1fr; gap: var(--s-2); }
+  .hotspot {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-2) var(--s-3);
+    /* transition is set by the consolidated rule above (box-shadow + transform);
+       we add border-color here so the hover state animates that too. */
+    transition: box-shadow var(--motion-fast) var(--motion-ease),
+                transform var(--motion-fast) var(--motion-ease),
+                border-color var(--motion-fast) var(--motion-ease);
+  }
+  .hotspot:hover { border-color: var(--border-strong); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hotspot { transition: none; }
+  }
+  .hotspot summary { display: flex; align-items: baseline; gap: var(--s-3);
+                     list-style: none; cursor: pointer; }
+  .hotspot summary::-webkit-details-marker { display: none; }
+  .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.5em;
+                   font-variant-numeric: tabular-nums; }
+  .hotspot .h-title { font-weight: 600; flex: 1; overflow: hidden;
+                      text-overflow: ellipsis; white-space: nowrap;
+                      color: var(--ink); }
+  .hotspot .h-cost { font-weight: 600; color: var(--hot);
+                     font-variant-numeric: tabular-nums; }
+  .hotspot .h-pct { color: var(--muted); font-size: var(--t-2);
+                    font-variant-numeric: tabular-nums; }
+  .hotspot[open] { border-color: var(--accent); }
+  .hotspot .body { margin-top: var(--s-2); }
+  .hotspot .actions { display: flex; gap: var(--s-2);
+                      margin: 0 0 var(--s-2); align-items: center; }
+  .hotspot button.copy {
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: var(--accent); color: var(--surface);
+    border: none; border-radius: var(--r-sm); cursor: pointer;
+  }
+  .hotspot button.copy:hover { filter: brightness(1.06); }
+  .hotspot button.copy:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .hotspot button.copy.copied { background: var(--accent-2); }
+  .hotspot .view-session, .by-prompt-table .view-session {
+    font: inherit; font-weight: 500;
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .hotspot .view-session:hover, .by-prompt-table .view-session:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .hotspot .view-session.is-disabled, .by-prompt-table .view-session.is-disabled {
+    color: var(--muted);
+    border-color: var(--border);
+    cursor: not-allowed;
+    background: var(--surface-2);
+  }
+  .hotspot .view-session.is-disabled:hover, .by-prompt-table .view-session.is-disabled:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
+  .hotspot pre {
+    margin: 0; padding: var(--s-2) var(--s-3);
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r-sm); font-size: var(--t-2); line-height: 1.5;
+    max-height: 360px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--ink-2);
+  }
+  .hotspot-kind {
+    display: inline-block; background: var(--surface-2); color: var(--muted);
+    padding: 1px var(--s-2); border-radius: var(--r-sm);
+    font-size: var(--t-1); text-transform: uppercase;
+    letter-spacing: 0.06em; font-weight: 500;
+  }
+
+  /* Trend section + sparkline column */
+  .trend-chart {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-3);
+    margin: var(--s-2) 0 var(--s-4);
+    box-shadow: var(--shadow-sm);
+  }
+  /* Per-chart heights — viewBox is sized to the actual panel width at
+     render time (see trendLineChart / hitRatioChart in JS), so these
+     CSS heights match the viewBox h value exactly and the chart fills
+     end-to-end with no preserveAspectRatio padding. */
+  .chart-host[data-chart-type="cost"] svg     { display: block; width: 100%; height: 320px; }
+  .chart-host[data-chart-type="hitratio"] svg { display: block; width: 100%; height: 110px; }
+  .chart-host[data-chart-type="forecast"] svg { display: block; width: 100%; height: 320px; }
+  .trend-axis { stroke: var(--border); stroke-width: 1; }
+  /* Line path. Stroke-linecap/linejoin round to match the soft corner
+     language; the bezier-smoothed path benefits from rounded joins. */
+  .trend-line {
+    fill: none; stroke: var(--accent); stroke-width: 2.25;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .trend-line-2 { stroke: var(--accent-2); }
+  .trend-hitratio { margin-top: var(--s-2); }
+  .trend-subtitle { color: var(--ink-2); font-weight: 600;
+                    font-size: var(--t-2); margin-top: var(--s-3); }
+  .trend-area { stroke: none; }
+  /* Month-end forecast extension on the daily cost chart: a horizontal
+     dashed line at the MTD daily rate, stretched from the last actual
+     bucket to month-end. The label sits just above its right end. */
+  .trend-forecast {
+    stroke: var(--ink-2); stroke-width: 2.25;
+    stroke-linecap: round; opacity: 0.7;
+  }
+  .trend-forecast-label {
+    fill: var(--ink); font-family: var(--font-mono);
+    font-size: var(--t-4); font-weight: 700;
+  }
+  .trend-pt-forecast {
+    fill: var(--ink-2); stroke: var(--surface); stroke-width: 2;
+  }
+  .chart-host[data-chart-type="forecast"] .crosshair-dot {
+    fill: var(--ink-2);
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--ink-2) 40%, transparent));
+  }
+  .chart-host[data-chart-type="forecast"] .chart-tooltip {
+    border-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+  }
+  .chart-host[data-chart-type="forecast"] .chart-tooltip::after {
+    border-right-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+    border-bottom-color: color-mix(in oklch, var(--ink-2) 32%, var(--border));
+  }
+  /* Gradient stops referenced from inline <linearGradient>s. Defined as
+     CSS classes so the gradient inherits the live --accent / --accent-2,
+     which would not happen with hardcoded SVG attributes. */
+  .grad-stop-cost-top { stop-color: var(--accent); stop-opacity: 0.32; }
+  .grad-stop-cost-mid { stop-color: var(--accent); stop-opacity: 0.10; }
+  .grad-stop-cost-bot { stop-color: var(--accent); stop-opacity: 0; }
+  .grad-stop-hit-top  { stop-color: var(--accent-2); stop-opacity: 0.28; }
+  .grad-stop-hit-bot  { stop-color: var(--accent-2); stop-opacity: 0; }
+  /* Data points — soft drop shadow gives a tactile feel; they grow on
+     hover via a sibling-target rule on the crosshair. */
+  .trend-pt {
+    fill: var(--accent); stroke: var(--surface); stroke-width: 2;
+    transition: r var(--motion-fast) var(--motion-ease);
+  }
+  .chart-host[data-chart-type="hitratio"] .trend-pt { fill: var(--accent-2); }
+  /* Anomaly dots — coral, slightly larger, drop-shadowed so they read
+     as flagged even at a glance. The accompanying marker text sits next
+     to the dot ("▲ 3.4×" above cost spikes, "▼ −32pp" below ratio drops). */
+  .trend-pt-anomaly {
+    fill: var(--hot); stroke: var(--surface); stroke-width: 2;
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--hot) 50%, transparent));
+  }
+  .chart-host[data-chart-type="hitratio"] .trend-pt-anomaly { fill: var(--hot); }
+  .trend-anomaly-marker {
+    fill: var(--hot);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  /* Tick labels — a touch quieter than the body. */
+  .trend-tick {
+    font-size: 11px; fill: var(--muted);
+    font-family: var(--font-mono);
+    letter-spacing: 0.02em;
+  }
+  .trend-spark { vertical-align: middle; }
+  .trend-spark rect { fill: var(--accent); fill-opacity: 0.6; }
+
+  /* Chart hover affordances — crosshair + chart-anchored tooltip. */
+  .chart-host { position: relative; }
+  .chart-host svg { cursor: crosshair; }
+  .crosshair {
+    pointer-events: none;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .crosshair-line {
+    stroke: var(--border-strong);
+    stroke-width: 1; stroke-dasharray: 2 3;
+  }
+  .crosshair-dot {
+    fill: var(--accent); stroke: var(--surface); stroke-width: 3;
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent) 40%, transparent));
+  }
+  .chart-host[data-chart-type="hitratio"] .crosshair-dot {
+    fill: var(--accent-2);
+    filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent-2) 40%, transparent));
+  }
+  /* Chart-anchored tooltip — same surface treatment as #claudit-tooltip
+     but lives inside the chart-host so it tracks the chart on resize. */
+  .chart-tooltip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 4;
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lift);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--t-2); line-height: 1.35;
+    transform: translate(-50%, calc(-100% - 14px));
+    white-space: nowrap;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+    will-change: transform, left, top, opacity;
+  }
+  .chart-host[data-chart-type="hitratio"] .chart-tooltip {
+    border-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+  }
+  .chart-tooltip .ct-label {
+    color: var(--muted);
+    font-size: var(--t-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .chart-tooltip .ct-primary {
+    font-size: var(--t-4);
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .chart-tooltip[data-chart-type="hitratio"] .ct-primary {
+    color: var(--accent-2);
+  }
+  .chart-tooltip .ct-meta {
+    color: var(--ink-2); font-size: var(--t-2);
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-tooltip .ct-anomaly {
+    color: var(--hot); font-size: var(--t-1);
+    margin-top: 4px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  /* Tooltip arrow — small triangle on the bottom edge that points
+     down at the crosshair dot. */
+  .chart-tooltip::after {
+    content: ""; position: absolute;
+    width: 9px; height: 9px;
+    background: var(--surface);
+    border-right: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-bottom: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    transform: rotate(45deg);
+    left: 50%; bottom: -5px;
+    margin-left: -4.5px;
+  }
+  .chart-host[data-chart-type="hitratio"] .chart-tooltip::after {
+    border-right-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+    border-bottom-color: color-mix(in oklch, var(--accent-2) 32%, var(--border));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .crosshair, .chart-tooltip, .trend-pt { transition: none; }
+  }
+  .trend-cell { white-space: nowrap; }
+  .trend-summary {
+    display: flex; gap: var(--s-4); margin-top: var(--s-1);
+    color: var(--muted); font-size: var(--t-2); flex-wrap: wrap;
+  }
+  .trend-summary strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .trend-delta-up { color: var(--hot); }
+  .trend-delta-down { color: var(--accent-2); }
+
+  /* ─── Sessions drill-down view ─────────────────────────────────────
+     Nested <details>: outer = session card, inner = prompt. Each prompt
+     reveals a turn-row list. No fancy virtualization yet — the backend
+     caps at --sessions=N (default 50) which keeps the payload bounded. */
+  .session-list { display: flex; flex-direction: column; gap: var(--s-3); }
+  .session-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .session-card > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-3) var(--s-4);
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    transition: background var(--motion-fast) ease;
+  }
+  .session-card > summary::-webkit-details-marker { display: none; }
+  .session-card > summary:hover { background: var(--surface-2); }
+  .session-card[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .session-card .s-id {
+    /* Notion-style pill — same soft-tint pattern as the per-tool color
+       chips, applied to the session ID so a long list of cards visually
+       chunks into distinct sessions. data-c rotates 1..5 per session. */
+    justify-self: start;
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    background: var(--surface-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .session-card .s-id[data-c="1"] { background: color-mix(in oklch, var(--c-1) 14%, var(--surface)); color: var(--c-1); border-color: color-mix(in oklch, var(--c-1) 28%, var(--border)); }
+  .session-card .s-id[data-c="2"] { background: color-mix(in oklch, var(--c-2) 14%, var(--surface)); color: var(--c-2); border-color: color-mix(in oklch, var(--c-2) 28%, var(--border)); }
+  .session-card .s-id[data-c="3"] { background: color-mix(in oklch, var(--c-3) 14%, var(--surface)); color: var(--c-3); border-color: color-mix(in oklch, var(--c-3) 28%, var(--border)); }
+  .session-card .s-id[data-c="4"] { background: color-mix(in oklch, var(--c-4) 14%, var(--surface)); color: var(--c-4); border-color: color-mix(in oklch, var(--c-4) 28%, var(--border)); }
+  .session-card .s-id[data-c="5"] { background: color-mix(in oklch, var(--c-5) 14%, var(--surface)); color: var(--c-5); border-color: color-mix(in oklch, var(--c-5) 28%, var(--border)); }
+  .session-card .s-preview {
+    /* First user prompt of the session, truncated. Spans the full row so
+       it reads as the "title" of the session — the most useful at-a-glance
+       label since UUIDs are opaque. */
+    grid-column: 1 / -1;
+    font-size: var(--t-2);
+    color: var(--ink-2);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-card .s-preview.is-empty {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .session-card .s-cwd {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session-card .s-stats {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    font-size: var(--t-2);
+    display: flex;
+    gap: var(--s-3);
+    align-items: baseline;
+    white-space: nowrap;
+  }
+  .session-card .s-stats .s-cost {
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: var(--t-4);
+  }
+  .session-card .s-time {
+    grid-column: 1 / -1;
+    font-size: var(--t-1);
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .session-body { padding: var(--s-3) var(--s-4); display: flex; flex-direction: column; gap: var(--s-2); }
+  .prompt-block {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .prompt-block > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: var(--s-2) var(--s-3);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    transition: background var(--motion-fast) ease;
+  }
+  .prompt-block > summary::-webkit-details-marker { display: none; }
+  .prompt-block > summary:hover { background: var(--surface-3); }
+  .prompt-block[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-3);
+  }
+  .prompt-block .p-text {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prompt-block[open] .p-text {
+    /* Once expanded, let the prompt wrap — engineers usually want to
+       read the whole thing, not be teased by an ellipsis. */
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .prompt-block .p-stats {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    font-size: var(--t-2);
+    display: flex;
+    gap: var(--s-3);
+    white-space: nowrap;
+  }
+  .prompt-block .p-stats .p-cost {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .prompt-block .p-redacted {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .prompt-block .p-truncated {
+    color: var(--muted);
+    font-size: var(--t-1);
+    font-style: italic;
+    margin-top: var(--s-1);
+  }
+  .turn-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    background: var(--surface);
+  }
+  .turn-row {
+    display: grid;
+    grid-template-columns: max-content max-content auto auto 1fr;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-3);
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--t-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .turn-row:last-child { border-bottom: none; }
+  /* Notion-style per-field coloring — each column gets a stable palette
+     slot so the eye learns to find "the green column = tokens" without
+     reading headers. Saturation is high enough to scan but not so high
+     that the row feels like a Christmas tree. Cost stays in ink because
+     it's the headline number — coloring it would make it compete with
+     the tool pills. */
+  .turn-row .t-time  { color: var(--c-2); font-family: var(--font-mono); white-space: nowrap; }
+  .turn-row .t-time .t-dur {
+    /* Wall-clock gap to next turn. Uses a different palette slot from the
+       timestamp so the two read as separate facts (when, then how long). */
+    margin-left: 4px;
+    font-size: var(--t-1);
+    color: var(--c-4);
+  }
+  .turn-row .t-model  { color: var(--c-1); font-family: var(--font-mono); white-space: nowrap; }
+  .turn-row .t-tokens { color: var(--c-3); white-space: nowrap; }
+  .turn-row .t-tokens .t-cache {
+    /* Cache total uses its own palette slot — it's a separate signal from
+       the in/out counts (it's the cost driver) and gets italic to mark
+       it as a secondary token type. Tooltip carries the read vs create
+       breakdown. */
+    color: var(--c-5);
+    font-style: italic;
+  }
+  .turn-row .t-cost { color: var(--ink); font-weight: 600; min-width: 6ch; text-align: right; }
+  .turn-row .t-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+  .turn-row .t-tool {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: var(--t-1);
+    color: var(--ink-2);
+    max-width: 40ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Notion-style color tagging — each tool name hashes to one of five
+     palette slots, so "Bash" reads the same color everywhere. Background
+     is a soft tint of the color so the pill stays subdued; the name takes
+     the saturated hue so it pops without shouting. */
+  .turn-row .t-tool[data-c="1"] { background: color-mix(in oklch, var(--c-1) 14%, var(--surface)); color: var(--c-1); border-color: color-mix(in oklch, var(--c-1) 28%, var(--border)); }
+  .turn-row .t-tool[data-c="2"] { background: color-mix(in oklch, var(--c-2) 14%, var(--surface)); color: var(--c-2); border-color: color-mix(in oklch, var(--c-2) 28%, var(--border)); }
+  .turn-row .t-tool[data-c="3"] { background: color-mix(in oklch, var(--c-3) 14%, var(--surface)); color: var(--c-3); border-color: color-mix(in oklch, var(--c-3) 28%, var(--border)); }
+  .turn-row .t-tool[data-c="4"] { background: color-mix(in oklch, var(--c-4) 14%, var(--surface)); color: var(--c-4); border-color: color-mix(in oklch, var(--c-4) 28%, var(--border)); }
+  .turn-row .t-tool[data-c="5"] { background: color-mix(in oklch, var(--c-5) 14%, var(--surface)); color: var(--c-5); border-color: color-mix(in oklch, var(--c-5) 28%, var(--border)); }
+  .turn-row .t-tool-detail {
+    /* Sub-label inside a pill: "Bash · git status". Slightly muted via
+       opacity so it inherits the pill's color hue but reads as a
+       qualifier rather than competing with the tool name. */
+    font-family: var(--font-mono);
+    opacity: 0.75;
+  }
+  .turn-row .t-side {
+    margin-left: 4px;
+    padding: 0 4px;
+    background: var(--accent-soft);
+    border-radius: var(--r-sm);
+    font-size: var(--t-1);
+    color: var(--accent);
+  }
+  .empty-note {
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--r-md);
+    color: var(--muted);
+    font-size: var(--t-2);
+  }
+
+  /* ─── Deep-link anchor (#) — small "copy link" affordance on each
+     hotspot card and session card. Visible but unobtrusive: muted by
+     default, brightens on hover. Click sets location.hash, which the
+     router catches and scrolls/opens. */
+  .anchor-link {
+    margin-left: var(--s-2);
+    padding: 0 6px;
+    border-radius: var(--r-sm);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    text-decoration: none;
+    opacity: 0.55;
+    transition: opacity var(--motion-fast) ease, background var(--motion-fast) ease, color var(--motion-fast) ease;
+  }
+  .anchor-link:hover {
+    opacity: 1;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .anchor-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    opacity: 1;
+  }
+
+  /* ─── Print stylesheet ─────────────────────────────────────────────
+     Goal: a printed/PDF copy of the report contains all the data and is
+     readable on paper. Strategy: drop the app shell to single-column,
+     un-stick everything, force-show every view + every <details> body,
+     force light palette, hide interactive-only chrome, and start each
+     top-level section on a fresh page so the PDF has a sensible TOC-ish
+     structure. Tested with Chrome "Save as PDF". */
+  @media print {
+    /* Force light theme regardless of system preference — dark mode
+       blasts ink and washes out on most printers. Reset the tokens that
+       drive surfaces/text so all the component CSS inherits correctly. */
+    :root {
+      color-scheme: light;
+      --bg:           #fff;
+      --surface:      #fff;
+      --surface-2:    #fafafa;
+      --surface-3:    #f3f3f3;
+      --border:       #ccc;
+      --border-strong:#999;
+      --ink:          #111;
+      --ink-2:        #333;
+      --muted:        #666;
+      --shadow-sm:    none;
+      --shadow-md:    none;
+      --shadow-lift:  none;
+      --accent-soft:  #f5f0ff;
+      --hot-soft:     transparent;
+    }
+
+    /* Single-column layout: drop the sidebar entirely, let the panel
+       flow to full page width. The sidebar is navigation — meaningless
+       on paper. */
+    body { padding: 0; background: #fff; color: #111; }
+    .app { display: block; }
+    .nav { display: none; }
+    .panel { padding: var(--s-4); max-width: none; }
+
+    /* Un-stick the filter controls; they're inert on paper. Hide them. */
+    .controls { display: none; }
+
+    /* Show every view, not just the active one. View nav exists only on
+       screen — print needs the whole report. */
+    .view { display: block !important; opacity: 1 !important; page-break-before: always; }
+    .view:first-of-type { page-break-before: auto; }
+    .subview { display: block !important; }
+    .subtabs { display: none; } /* same reason as .controls — nav is dead on paper */
+
+    /* Force every <details> open so its body prints. The user can't
+       click to expand a PDF page. */
+    details { display: block !important; }
+    details > summary { list-style: none !important; cursor: default !important; }
+    details > summary::-webkit-details-marker { display: none !important; }
+    details:not([open]) > *:not(summary) { display: revert !important; }
+    details > *:not(summary) { display: revert !important; }
+
+    /* Hide JS-driven affordances that have no print meaning. */
+    .chart-tooltip, .cl-tooltip, [role="tooltip"] { display: none !important; }
+    button.copy, .view-session, .anchor-link, .session-card .s-cwd[title]::after { display: none !important; }
+
+    /* Avoid splitting cards/tables/rows mid-element. page-break-inside is
+       the legacy name; break-inside is the modern alias. Use both for
+       browser coverage. */
+    table, .hotspot, .session-card, .prompt-block, .totals .metric, .warning-card {
+      page-break-inside: avoid; break-inside: avoid;
+    }
+    thead { display: table-header-group; } /* repeat header on each page */
+    tr { page-break-inside: avoid; break-inside: avoid; }
+
+    /* Remove decorative shadows and gradients — they cost ink and rarely
+       reproduce well. */
+    * { box-shadow: none !important; text-shadow: none !important; }
+
+    /* Headings stay attached to their following content. */
+    h1, h2, h3 { page-break-after: avoid; break-after: avoid; }
+
+    /* Print-paper sizing. A4-friendly margins; landscape is the user's
+       call via the browser dialog. */
+    @page { margin: 12mm; }
+  }
+  /* Reload toast — fallback when a silent reload has been deferred
+     for a long time (e.g. user has details open for minutes while new
+     data has piled up). The default reload path is silent; the toast
+     only appears as the "too stale to ignore" signal. */
+  .claudit-reload-toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 9999;
+    display: none; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: var(--r-md);
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-md);
+    font: 500 var(--t-3)/1.3 var(--font-sans);
+  }
+  .claudit-reload-toast.is-visible { display: inline-flex; }
+  .claudit-reload-toast button {
+    border: 1px solid var(--border-strong); background: var(--accent);
+    color: white; padding: 6px 10px; border-radius: var(--r-sm);
+    font: 600 var(--t-2)/1 var(--font-sans); cursor: pointer;
+  }
+  .claudit-reload-toast .dismiss {
+    background: transparent; color: var(--muted); border-color: transparent;
+  }
+  /* Date-range popover — appended to <body> at runtime by the picker
+     JS, positioned beneath the brand-sub button. */
+  .claudit-date-popover {
+    position: absolute; z-index: 9997;
+    display: none;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border-strong); border-radius: var(--r-md);
+    box-shadow: var(--shadow-md);
+    padding: var(--s-3); min-width: 240px;
+    font: 500 var(--t-3)/1.3 var(--font-sans);
+  }
+  .claudit-date-popover.is-visible { display: block; }
+  .claudit-date-popover .row {
+    display: flex; flex-direction: column; gap: 2px;
+    margin-bottom: var(--s-2);
+  }
+  .claudit-date-popover label {
+    font-size: var(--t-2); color: var(--muted); font-weight: 600;
+  }
+  .claudit-date-popover input[type="date"] {
+    font: inherit; padding: var(--s-1) var(--s-2);
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--ink);
+    color-scheme: light dark;
+  }
+  .claudit-date-popover input[type="date"]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  .claudit-date-popover .buttons {
+    display: flex; gap: var(--s-2); justify-content: flex-end;
+    margin-top: var(--s-2);
+  }
+  .claudit-date-popover button {
+    border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--ink); padding: 6px 10px; border-radius: var(--r-sm);
+    font: 600 var(--t-2)/1 var(--font-sans); cursor: pointer;
+  }
+  .claudit-date-popover button.primary {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  .claudit-date-popover button.subtle {
+    background: transparent; border-color: transparent; color: var(--muted);
+  }
+  @media print {
+    .claudit-reload-toast, .claudit-date-popover { display: none !important; }
+  }
