@@ -48,7 +48,9 @@ func TestServer_ReportHTML(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServer(t, dir)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	// Post-Phase-8: the fat HTML report lives at /legacy. "/" serves
+	// the SPA shell — see TestRoot_ServesSPAShell.
+	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 
@@ -72,7 +74,7 @@ func TestServer_ReportHTML(t *testing.T) {
 
 func TestServer_ReportBadQueryRejected(t *testing.T) {
 	srv := newTestServer(t, t.TempDir())
-	r := httptest.NewRequest(http.MethodGet, "/?since=not-a-date", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?since=not-a-date", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
@@ -90,7 +92,7 @@ func TestServer_ReportFilterByProject(t *testing.T) {
 	// should yield a report with zero turns. We don't assert the
 	// exact numbers (renderer-internal), just that the request
 	// succeeds and the filter is honored end-to-end.
-	r := httptest.NewRequest(http.MethodGet, "/?project=does-not-exist", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?project=does-not-exist", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != 200 {
@@ -215,7 +217,7 @@ func TestServer_Report_LogsWriteError(t *testing.T) {
 	srv := newTestServer(t, t.TempDir())
 	srv.opts.Logger = newSlogToBuf(&buf)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w, r)
 
@@ -241,7 +243,7 @@ func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
 	srv := newTestServerWithCache(t, dir, 4)
 
 	// Warm-up request — populates the render cache.
-	r1 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r1 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w1 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w1, r1)
 	if w1.Code != 200 {
@@ -258,7 +260,7 @@ func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
 	// the cached branch (lookup succeeds, writeCached fails).
 	var buf bytes.Buffer
 	srv.opts.Logger = newSlogToBuf(&buf)
-	r2 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r2 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w2 := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w2, r2)
 
@@ -287,14 +289,15 @@ func TestServer_RootMethodNotAllowed(t *testing.T) {
 
 // TestServer_ReportHEAD covers the HEAD branch of handleReport: status
 // 200, correct response headers, but no body. Browsers and probes use
-// HEAD to check freshness without paying for a render.
+// HEAD to check freshness without paying for a render. Targets the
+// post-cutover home of the fat HTML at /legacy.
 func TestServer_ReportHEAD(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServer(t, dir)
 
-	r := httptest.NewRequest(http.MethodHead, "/", nil)
+	r := httptest.NewRequest(http.MethodHead, "/legacy", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 

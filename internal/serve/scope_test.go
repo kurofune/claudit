@@ -130,7 +130,10 @@ var scopeNoteDOMRegex = regexp.MustCompile(`<span\s+class="scope-note"`)
 
 func TestServer_ScopeNoteRendered(t *testing.T) {
 	srv := newTestServerWithDefaults(t, t.TempDir())
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	// Scope note lives in the fat HTML report, which is reachable at
+	// /legacy post-Phase-8. The SPA renders its own scope note from
+	// the snapshot API payload.
+	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != 200 {
@@ -151,7 +154,7 @@ func TestServer_ScopeNoteRendered(t *testing.T) {
 
 func TestServer_ScopeNoteSuppressedWhenScopeAll(t *testing.T) {
 	srv := newTestServerWithDefaults(t, t.TempDir())
-	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != 200 {

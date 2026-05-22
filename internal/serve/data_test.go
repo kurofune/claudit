@@ -236,16 +236,17 @@ func TestServer_DataEndpoint_HEAD(t *testing.T) {
 }
 
 // TestServer_ReportHTML_DefersData asserts that the served-mode HTML
-// at "/" does NOT inline the JSON island and instead carries the
+// at /legacy does NOT inline the JSON island and instead carries the
 // fetch preamble targeting /_claudit/data.json. This is the wiring
-// test for Phase 4 — serve's renderHTML must set DeferData=true.
+// test for Phase 4 — serve's renderHTML must set DeferData=true. The
+// fat HTML moved from "/" to "/legacy" in Phase 8.
 func TestServer_ReportHTML_DefersData(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServer(t, dir)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -313,7 +314,7 @@ func TestServer_HTMLReport_PrewarmsJSONCache(t *testing.T) {
 		t.Fatalf("baseline: data section entries = %d, want 0 (no requests yet)", got)
 	}
 
-	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -321,7 +322,7 @@ func TestServer_HTMLReport_PrewarmsJSONCache(t *testing.T) {
 	}
 
 	if got := srv.sectionCacheLen(sectionData); got != 1 {
-		t.Errorf("after GET /: data section entries = %d, want 1 (HTML render must pre-warm JSON cache)", got)
+		t.Errorf("after GET /legacy: data section entries = %d, want 1 (HTML render must pre-warm JSON cache)", got)
 	}
 }
 

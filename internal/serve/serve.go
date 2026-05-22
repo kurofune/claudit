@@ -169,7 +169,14 @@ func NewServer(cache *Cache, opts Options) *Server {
 }
 
 func (s *Server) routes() {
-	s.mux.HandleFunc("/", s.handleReport)
+	// Phase 8 cutover: "/" now serves the SPA shell. The fat HTML
+	// moves to /legacy as a one-minor-release escape hatch for
+	// bookmarks and external scripts. /app is retained as an alias so
+	// callers that learned the URL during the Phase-5 A/B window
+	// continue to work — both routes go through handleApp, which
+	// accepts either path.
+	s.mux.HandleFunc(rootPath, s.handleApp)
+	s.mux.HandleFunc(legacyPath, s.handleReport)
 	s.mux.HandleFunc("/_claudit/status", s.handleStatus)
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
 	s.mux.HandleFunc(dataPath, s.handleData)
@@ -193,10 +200,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(apiPathSessions, s.handleAPISessions)
 	s.mux.HandleFunc(apiPathSessions+"/", s.handleAPISessionsTree)
 
-	// Phase 5: SPA shell at /app + hashed asset URLs at
-	// /_claudit/web/<base>.<hash>.<ext>. The legacy fat-HTML route at
-	// "/" stays as-is until the Phase 8 cutover so users can A/B.
-	s.mux.HandleFunc(appPath, s.handleApp)
 	s.mux.HandleFunc(webAssetURLPrefix, s.handleWebAsset)
 }
 
@@ -390,11 +393,16 @@ func (s *Server) Addr() string {
 	return "http://" + a
 }
 
-// handleReport is the main HTML endpoint. Re-aggregates the snapshot
-// against the URL query and renders the report with auto-reload +
-// scope-pill chrome injected. Cached per (canonical query, generation).
+// handleReport renders the legacy fat-HTML report. After the Phase 8
+// cutover this is reachable only at /legacy — / and /app serve the SPA
+// shell. The route stays for one minor release as an escape hatch for
+// bookmarks and external scripts; Phase 10 removes it.
+//
+// Re-aggregates the snapshot against the URL query and renders the
+// report with auto-reload + scope-pill chrome injected. Cached per
+// (canonical query, generation).
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if r.URL.Path != legacyPath {
 		http.NotFound(w, r)
 		return
 	}
@@ -591,6 +599,12 @@ func (s *Server) applyDefaults(q *Query) ScopeInfo {
 // buildLiftURL takes the canonical request query and returns a URL
 // with scope=all added (or replaced). The pill links to this to
 // switch the page out of default-scope mode in one click.
+//
+// Targets legacyPath because this URL is only emitted from the fat
+// HTML report (handleReport), which after the Phase 8 cutover lives at
+// /legacy. Keeping the user on /legacy preserves their currently-open
+// view when they click "show all"; jumping them back to "/" would
+// silently swap them into the SPA.
 func buildLiftURL(rawQuery string) string {
 	vals, _ := url.ParseQuery(rawQuery)
 	vals.Set("scope", "all")
@@ -602,9 +616,9 @@ func buildLiftURL(rawQuery string) string {
 	vals.Del("until")
 	q := vals.Encode()
 	if q == "" {
-		return "/"
+		return legacyPath
 	}
-	return "/?" + q
+	return legacyPath + "?" + q
 }
 
 // humanDuration formats a Duration into a short human label suitable

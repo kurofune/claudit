@@ -36,7 +36,7 @@ func TestRenderCache_RepeatRequestReusesEntry(t *testing.T) {
 	srv := newTestServerWithCache(t, dir, 4)
 
 	doReq := func() string {
-		r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+		r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
 		if w.Code != 200 {
@@ -64,7 +64,7 @@ func TestRenderCache_DifferentQueriesGetSeparateEntries(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 8)
 
-	for _, url := range []string{"/?scope=all", "/?project=p&scope=all", "/?last=30d"} {
+	for _, url := range []string{"/legacy?scope=all", "/legacy?project=p&scope=all", "/legacy?last=30d"} {
 		r := httptest.NewRequest(http.MethodGet, url, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
@@ -93,7 +93,7 @@ func TestRenderCache_GenerationBumpKeepsOldEntry(t *testing.T) {
 	writeJSONL(t, path, mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 8)
 
-	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if got := srv.sectionCacheLen(sectionHTML); got != 1 {
@@ -113,7 +113,7 @@ func TestRenderCache_GenerationBumpKeepsOldEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2 := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r2 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	w2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w2, r2)
 	// Both the old-generation and new-generation HTML entries must be
@@ -129,7 +129,7 @@ func TestRenderCache_QueryOrderingIsCanonical(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	for _, url := range []string{"/?scope=all&project=foo", "/?project=foo&scope=all"} {
+	for _, url := range []string{"/legacy?scope=all&project=foo", "/legacy?project=foo&scope=all"} {
 		r := httptest.NewRequest(http.MethodGet, url, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
@@ -149,7 +149,7 @@ func TestServer_GzipWhenAccepted(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	r.Header.Set("Accept-Encoding", "gzip, deflate")
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
@@ -182,7 +182,7 @@ func TestServer_NoGzipWhenNotAccepted(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	r := httptest.NewRequest(http.MethodGet, "/?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
 	// No Accept-Encoding header.
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)

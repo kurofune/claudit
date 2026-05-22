@@ -29,9 +29,15 @@ const webRoot = "web"
 // served. Browser requests look like /_claudit/web/app.<hash>.js.
 const webAssetURLPrefix = "/_claudit/web/"
 
-// appPath is the SPA's entry URL. Runs alongside the legacy fat HTML
-// at "/" through Phase 7; Phase 8 cuts "/" over to point here.
-const appPath = "/app"
+// rootPath is the SPA's canonical entry URL after the Phase 8 cutover.
+// appPath is kept as an alias so /app bookmarks from the Phase 5/6/7
+// A/B window still resolve. legacyPath is the one-minor-release escape
+// hatch for callers that still want the self-contained fat HTML.
+const (
+	rootPath   = "/"
+	appPath    = "/app"
+	legacyPath = "/legacy"
+)
 
 // assetEntry is one rewritten file ready to be served. body has already
 // had its import URLs (.js) or {{asset "..."}} placeholders (.html)
@@ -193,18 +199,23 @@ func buildAssetManifest(fsys fs.FS, root string) (*assetManifest, error) {
 	return m, nil
 }
 
-// handleApp serves the SPA shell at /app. The shell bytes are baked
-// at startup (see buildAssetManifest) with the {{asset "name.ext"}}
-// placeholders already resolved to hashed /_claudit/web/... URLs, so
-// the request path is a flat memcpy.
+// handleApp serves the SPA shell at "/" and "/app". The shell bytes
+// are baked at startup (see buildAssetManifest) with the
+// {{asset "name.ext"}} placeholders already resolved to hashed
+// /_claudit/web/... URLs, so the request path is a flat memcpy.
 //
 // Cache-Control: no-cache, must-revalidate — the shell itself is
 // tiny and its hashed-asset references rotate whenever the source
 // rotates, so we want the browser to revalidate (ETag → 304) on each
 // load rather than serve a stale shell that points at evicted hashed
 // URLs.
+//
+// Routes "/" through this handler as a catch-all post-Phase-8: the
+// only paths that should answer with the shell are "/" and the
+// historical "/app" alias. Everything else 404s here rather than
+// silently rendering the shell under a typo'd URL.
 func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != appPath {
+	if r.URL.Path != rootPath && r.URL.Path != appPath {
 		http.NotFound(w, r)
 		return
 	}
@@ -236,7 +247,7 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(entry.body); err != nil {
 		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write app shell failed",
 			slog.Any("err", err),
-			slog.String("path", appPath))
+			slog.String("path", r.URL.Path))
 	}
 }
 
