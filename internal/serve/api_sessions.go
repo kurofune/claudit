@@ -94,7 +94,7 @@ func (s *Server) handleAPISessionTimeline(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_ = s.applyDefaults(&q)
+	s.applyDefaults(&q)
 
 	snap := s.cache.Snapshot()
 

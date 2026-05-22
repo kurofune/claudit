@@ -36,7 +36,7 @@ func TestRenderCache_RepeatRequestReusesEntry(t *testing.T) {
 	srv := newTestServerWithCache(t, dir, 4)
 
 	doReq := func() string {
-		r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+		r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
 		if w.Code != 200 {
@@ -46,11 +46,11 @@ func TestRenderCache_RepeatRequestReusesEntry(t *testing.T) {
 	}
 
 	b1 := doReq()
-	if got := srv.sectionCacheLen(sectionHTML); got != 1 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 1 {
 		t.Errorf("after first request: html entries = %d, want 1", got)
 	}
 	b2 := doReq()
-	if got := srv.sectionCacheLen(sectionHTML); got != 1 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 1 {
 		t.Errorf("after second request: html entries = %d, want 1 (hit, not miss)", got)
 	}
 	if b1 != b2 {
@@ -64,7 +64,7 @@ func TestRenderCache_DifferentQueriesGetSeparateEntries(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 8)
 
-	for _, url := range []string{"/legacy?scope=all", "/legacy?project=p&scope=all", "/legacy?last=30d"} {
+	for _, url := range []string{"/_claudit/api/cost?scope=all", "/_claudit/api/cost?project=p&scope=all", "/_claudit/api/cost?last=30d"} {
 		r := httptest.NewRequest(http.MethodGet, url, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
@@ -72,7 +72,7 @@ func TestRenderCache_DifferentQueriesGetSeparateEntries(t *testing.T) {
 			t.Fatalf("%s: status %d", url, w.Code)
 		}
 	}
-	if got := srv.sectionCacheLen(sectionHTML); got != 3 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 3 {
 		t.Errorf("html entries = %d, want 3", got)
 	}
 }
@@ -93,10 +93,10 @@ func TestRenderCache_GenerationBumpKeepsOldEntry(t *testing.T) {
 	writeJSONL(t, path, mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 8)
 
-	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
-	if got := srv.sectionCacheLen(sectionHTML); got != 1 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 1 {
 		t.Fatalf("after first req: html entries = %d, want 1", got)
 	}
 
@@ -113,12 +113,12 @@ func TestRenderCache_GenerationBumpKeepsOldEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r2 := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	w2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w2, r2)
 	// Both the old-generation and new-generation HTML entries must be
 	// present — distinct keys, no eager prune. LRU evicts them later.
-	if got := srv.sectionCacheLen(sectionHTML); got != 2 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 2 {
 		t.Errorf("after generation bump: html entries = %d, want 2 (old retained, new added)", got)
 	}
 }
@@ -129,7 +129,7 @@ func TestRenderCache_QueryOrderingIsCanonical(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	for _, url := range []string{"/legacy?scope=all&project=foo", "/legacy?project=foo&scope=all"} {
+	for _, url := range []string{"/_claudit/api/cost?scope=all&project=foo", "/_claudit/api/cost?project=foo&scope=all"} {
 		r := httptest.NewRequest(http.MethodGet, url, nil)
 		w := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(w, r)
@@ -138,7 +138,7 @@ func TestRenderCache_QueryOrderingIsCanonical(t *testing.T) {
 		}
 	}
 	// Both URLs collapse to the same canonical key.
-	if got := srv.sectionCacheLen(sectionHTML); got != 1 {
+	if got := srv.sectionCacheLen(apiSectionCost); got != 1 {
 		t.Errorf("html entries = %d, want 1 (canonical query collapse)", got)
 	}
 }
@@ -149,7 +149,7 @@ func TestServer_GzipWhenAccepted(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	r.Header.Set("Accept-Encoding", "gzip, deflate")
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
@@ -162,7 +162,7 @@ func TestServer_GzipWhenAccepted(t *testing.T) {
 	if got := w.Header().Get("Vary"); !strings.Contains(got, "Accept-Encoding") {
 		t.Errorf("Vary = %q, want Accept-Encoding present", got)
 	}
-	// Decompress and verify it's the report.
+	// Decompress and verify it's a JSON object (the /api/cost payload).
 	zr, err := gzip.NewReader(w.Body)
 	if err != nil {
 		t.Fatalf("body is not valid gzip: %v", err)
@@ -171,8 +171,8 @@ func TestServer_GzipWhenAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(out), "<!DOCTYPE html>") {
-		t.Errorf("decompressed body missing doctype")
+	if !strings.HasPrefix(strings.TrimSpace(string(out)), "{") {
+		t.Errorf("decompressed body is not a JSON object; got prefix: %q", string(out)[:min(60, len(out))])
 	}
 }
 
@@ -182,15 +182,15 @@ func TestServer_NoGzipWhenNotAccepted(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	r := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	// No Accept-Encoding header.
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	if got := w.Header().Get("Content-Encoding"); got != "" {
 		t.Errorf("Content-Encoding = %q, want empty", got)
 	}
-	if !strings.Contains(w.Body.String(), "<!DOCTYPE html>") {
-		t.Errorf("uncompressed body missing doctype")
+	if !strings.HasPrefix(strings.TrimSpace(w.Body.String()), "{") {
+		t.Errorf("uncompressed body is not a JSON object; got prefix: %q", w.Body.String()[:min(60, w.Body.Len())])
 	}
 }
 
@@ -233,6 +233,16 @@ func TestNewRenderLRU_NonPositiveCapDefaultsTo16(t *testing.T) {
 		}
 	}
 }
+
+// Test-only section labels for the LRU unit tests below. The cache is
+// section-agnostic — any string keys work — so these stand in for what
+// used to be the production sectionHTML / sectionData constants. The
+// LRU eviction / canonical-key / promotion behavior is the only thing
+// under test here.
+const (
+	sectionHTML = "html"
+	sectionData = "data"
+)
 
 // cacheTestServer is the smallest Server scaffolding the eviction unit
 // tests need — just a renderLRU with no real cache/options. The store/

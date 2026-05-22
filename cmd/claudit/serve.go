@@ -29,7 +29,6 @@ func runServe(args []string) error {
 	sessionsTop := fs.Int("sessions", 10, "default top-N sessions in the drill-down view when ?sessions is not in the URL (0 disables; ?scope=all lifts it per-request)")
 	by := fs.String("by", "day", "default trend bucket when ?by is not in the URL (day|week|month|off)")
 	redact := fs.Bool("redact", false, "default redaction state when ?redact is not in the URL")
-	reloadSec := fs.Int("reload-sec", 30, "in-page silent-reload cadence; deferred while you're reading (any details open or recent activity)")
 	cacheSize := fs.Int("cache", 16, "max rendered HTML responses to cache, keyed on (filter, generation); 0 disables")
 	openBrowser := fs.Bool("open", true, "open the report in your default browser on startup (skipped on headless hosts)")
 	fs.Usage = func() {
@@ -90,7 +89,6 @@ func runServe(args []string) error {
 		DefaultSessionsTop: *sessionsTop,
 		DefaultPeriod:      period,
 		DefaultRedact:      *redact,
-		ReloadIntervalSec:  *reloadSec,
 		MaxCachedRenders:   *cacheSize,
 		Version:            versionShort(),
 	})

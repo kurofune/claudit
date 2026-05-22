@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +23,6 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
-	"github.com/kurofune/claudit/internal/render"
 )
 
 // Options configures the server. Bind defaults to loopback only; do
@@ -44,11 +42,6 @@ type Options struct {
 	DefaultSessionsTop int
 	DefaultPeriod      aggregate.Period
 	DefaultRedact      bool
-
-	// ReloadIntervalSec is how often the in-page script attempts a
-	// silent reload (deferred while the user is reading). Browsers
-	// poll /status independently of this for the data-change check.
-	ReloadIntervalSec int
 
 	// MaxCachedRenders bounds the (filter, generation) HTML cache.
 	// 0 disables caching; 16 is plenty for a single-user tool.
@@ -136,9 +129,6 @@ func NewServer(cache *Cache, opts Options) *Server {
 	if opts.DefaultPeriod == "" {
 		opts.DefaultPeriod = aggregate.Period("day")
 	}
-	if opts.ReloadIntervalSec <= 0 {
-		opts.ReloadIntervalSec = 30
-	}
 	s := &Server{
 		cache:           cache,
 		opts:            opts,
@@ -169,17 +159,11 @@ func NewServer(cache *Cache, opts Options) *Server {
 }
 
 func (s *Server) routes() {
-	// Phase 8 cutover: "/" now serves the SPA shell. The fat HTML
-	// moves to /legacy as a one-minor-release escape hatch for
-	// bookmarks and external scripts. /app is retained as an alias so
-	// callers that learned the URL during the Phase-5 A/B window
-	// continue to work — both routes go through handleApp, which
-	// accepts either path.
+	// "/" serves the SPA shell. /app is retained as an alias so URLs
+	// learned during the Phase-5 A/B window keep working — both routes
+	// go through handleApp, which accepts either path.
 	s.mux.HandleFunc(rootPath, s.handleApp)
-	s.mux.HandleFunc(legacyPath, s.handleReport)
-	s.mux.HandleFunc("/_claudit/status", s.handleStatus)
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
-	s.mux.HandleFunc(dataPath, s.handleData)
 	s.mux.HandleFunc("/events", s.handleEvents)
 
 	// Phase 3: thin API. /_claudit/api/snapshot is no-store; the
@@ -393,157 +377,9 @@ func (s *Server) Addr() string {
 	return "http://" + a
 }
 
-// handleReport renders the legacy fat-HTML report. After the Phase 8
-// cutover this is reachable only at /legacy — / and /app serve the SPA
-// shell. The route stays for one minor release as an escape hatch for
-// bookmarks and external scripts; Phase 10 removes it.
-//
-// Re-aggregates the snapshot against the URL query and renders the
-// report with auto-reload + scope-pill chrome injected. Cached per
-// (canonical query, generation).
-func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != legacyPath {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	q, err := parseQuery(r.URL.Query(), time.Now())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	scope := s.applyDefaults(&q)
-
-	snap := s.cache.Snapshot()
-	wantGzip := acceptsGzip(r)
-
-	// Common response headers. Cache-Control no-store: the report
-	// reflects a live snapshot that can change at any moment;
-	// browser caching is the wrong layer to lean on. Vary on Accept-
-	// Encoding so the response cache is correct across clients that
-	// don't ask for gzip.
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Vary", "Accept-Encoding")
-
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Render-cache lookup: same canonical query, same generation
-	// → reuse the bytes we computed last time. Auto-reload polls
-	// often land back on the same URL within a generation, so this
-	// is the highest-leverage perf win.
-	if body, ok := s.lookupCached(q, sectionHTML, snap.Generation, wantGzip); ok {
-		if err := writeCached(w, body, wantGzip); err != nil {
-			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write report response failed",
-				slog.Any("err", err),
-				slog.String("path", "/"),
-				slog.Bool("cached", true))
-		}
-		return
-	}
-
-	html, payload, err := s.renderHTML(r.Context(), snap, q, scope)
-	if err != nil {
-		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: render failed",
-			slog.Any("err", err),
-			slog.String("path", "/"))
-		http.Error(w, "render failed", http.StatusInternalServerError)
-		return
-	}
-
-	plain := html
-	var gz []byte
-	if wantGzip {
-		gz = gzipBytes(html)
-	}
-
-	s.storeCached(q, sectionHTML, snap.Generation, plain, gz)
-	// Pre-warm the JSON cache so the page's imminent fetch of
-	// /_claudit/data.json is a cache hit, not a second aggregation
-	// pass. On a real corpus this cuts cold-refresh server work
-	// roughly in half (~1.9s × 2 → ~1.9s).
-	s.storeCached(q, sectionData, snap.Generation, payload, gzipBytes(payload))
-
-	body := plain
-	if wantGzip {
-		body = gz
-	}
-	if err := writeCached(w, body, wantGzip); err != nil {
-		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write report response failed",
-			slog.Any("err", err),
-			slog.String("path", "/"),
-			slog.Bool("cached", false))
-	}
-}
-
-// renderHTML runs the standard aggregation pipeline and returns both the
-// rendered HTML and the JSON payload the page will fetch asynchronously.
-// Building the payload here is near-free — we already have the
-// aggregator and session timelines in hand — and pre-warming the JSON
-// cache from the caller eliminates the doubled aggregation work that a
-// cold Cmd-R would otherwise pay (HTML handler computes, then data
-// handler computes the same thing again ~1.9s later).
-func (s *Server) renderHTML(ctx context.Context, snap *Snapshot, q Query, scope ScopeInfo) (html, payload []byte, err error) {
-	agg, timelines, err := s.sharedAggregateData(ctx, snap, q)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	payload, err = render.BuildPayload(ctx, agg, render.HTMLOptions{
-		SessionTimelines: timelines,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var buf bytes.Buffer
-	err = render.HTMLWithOptions(ctx, &buf, agg, render.HTMLOptions{
-		SessionTimelines: timelines,
-		Version:          s.opts.Version,
-		Serve: render.ServeOptions{
-			Enabled:           true,
-			Generation:        snap.Generation,
-			StatusPath:        "/_claudit/status",
-			ReloadIntervalSec: s.opts.ReloadIntervalSec,
-			ScopeIsDefault:    scope.IsDefault,
-			ScopeWindowLabel:  scope.WindowLabel,
-			ScopeSessionsCap:  scope.SessionsCap,
-			ScopeLiftURL:      scope.LiftURL,
-			// Phase 4: the JSON payload is served at dataPath and
-			// fetched asynchronously by the page so initial paint
-			// doesn't block on the ~1 MB inline blob.
-			DeferData: true,
-			DataPath:  dataPath,
-		},
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return buf.Bytes(), payload, nil
-}
-
-// ScopeInfo is the "what's been pruned" summary the scope pill renders.
-// Empty WindowLabel + SessionsCap=0 mean nothing was narrowed.
-type ScopeInfo struct {
-	IsDefault   bool
-	WindowLabel string
-	SessionsCap int
-	// LiftURL is a relative URL ("/?...") the pill links to. It
-	// preserves any user-set params and adds scope=all.
-	LiftURL string
-}
-
-// applyDefaults overlays server defaults onto an unset query. Returns
-// the ScopeInfo describing what narrowing the user is currently seeing
-// (used for the scope pill).
+// applyDefaults overlays server defaults onto an unset query. Mutates
+// q in place; the SPA renders its own scope chrome from the snapshot
+// API payload, so no descriptor return is needed.
 //
 // Rules:
 //   - ?scope=all skips every server narrowing.
@@ -552,28 +388,19 @@ type ScopeInfo struct {
 //   - Server's DefaultSessionsTop applies only when the URL didn't
 //     specify ?sessions.
 //   - Server's DefaultHotspots / DefaultPeriod / DefaultRedact apply
-//     when the URL didn't specify them. Period default does NOT count
-//     as "narrowing" (it changes the trend bucket, not the corpus).
-func (s *Server) applyDefaults(q *Query) ScopeInfo {
-	scope := ScopeInfo{}
-
+//     when the URL didn't specify them.
+func (s *Server) applyDefaults(q *Query) {
 	urlSetWindow := q.URLHasLast || q.URLHasSince || q.URLHasUntil
 	applyDefaultWindow := !q.ScopeAll && !urlSetWindow && s.opts.DefaultLast > 0
 	if applyDefaultWindow {
 		now := time.Now()
 		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		q.Filter.Since = midnight.Add(-s.opts.DefaultLast)
-		scope.IsDefault = true
-		scope.WindowLabel = humanDuration(s.opts.DefaultLast)
 	}
 
 	if !q.ScopeAll && !q.URLHasSess {
 		if q.SessionsTop < 0 {
 			q.SessionsTop = s.opts.DefaultSessionsTop
-		}
-		if s.opts.DefaultSessionsTop > 0 {
-			scope.IsDefault = true
-			scope.SessionsCap = s.opts.DefaultSessionsTop
 		}
 	} else if q.SessionsTop < 0 {
 		// URL didn't specify sessions but did pass scope=all — lift
@@ -588,51 +415,6 @@ func (s *Server) applyDefaults(q *Query) ScopeInfo {
 	}
 	if !q.URLHasPeriod {
 		q.Period = s.opts.DefaultPeriod
-	}
-
-	if scope.IsDefault {
-		scope.LiftURL = buildLiftURL(q.rawQuery)
-	}
-	return scope
-}
-
-// buildLiftURL takes the canonical request query and returns a URL
-// with scope=all added (or replaced). The pill links to this to
-// switch the page out of default-scope mode in one click.
-//
-// Targets legacyPath because this URL is only emitted from the fat
-// HTML report (handleReport), which after the Phase 8 cutover lives at
-// /legacy. Keeping the user on /legacy preserves their currently-open
-// view when they click "show all"; jumping them back to "/" would
-// silently swap them into the SPA.
-func buildLiftURL(rawQuery string) string {
-	vals, _ := url.ParseQuery(rawQuery)
-	vals.Set("scope", "all")
-	// Drop the keys the user almost certainly wants reset when
-	// they hit "show all" — the default window. Leave project,
-	// hotspots, by, etc. alone so partial filters are preserved.
-	vals.Del("last")
-	vals.Del("since")
-	vals.Del("until")
-	q := vals.Encode()
-	if q == "" {
-		return legacyPath
-	}
-	return legacyPath + "?" + q
-}
-
-// humanDuration formats a Duration into a short human label suitable
-// for the scope pill: "7 days", "2 weeks", "30 days". Used only for
-// the server's default window.
-func humanDuration(d time.Duration) string {
-	days := int(d / (24 * time.Hour))
-	switch {
-	case days >= 14 && days%7 == 0:
-		return fmt.Sprintf("%d weeks", days/7)
-	case days == 7:
-		return "7 days"
-	default:
-		return fmt.Sprintf("%d days", days)
 	}
 }
 
@@ -707,40 +489,6 @@ func (s *Server) subagentLookup() aggregate.SubagentLookup {
 		m, _ := parse.ReadSubagentMeta(t.SourceFile)
 		s.subagentCache.Store(t.SourceFile, m)
 		return m.AgentType, m.Description
-	}
-}
-
-// handleStatus emits a tiny JSON object the auto-reload script polls
-// for. Keep it cheap: no aggregation, just snapshot vitals.
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	snap := s.cache.Snapshot()
-	host := s.cache.hostInfo()
-	body := struct {
-		Generation  int64    `json:"generation"`
-		LastUpdated string   `json:"last_updated"`
-		FileCount   int      `json:"file_count"`
-		TurnCount   int      `json:"turn_count"`
-		Malformed   int      `json:"malformed"`
-		Host        hostInfo `json:"host"`
-	}{
-		Generation:  snap.Generation,
-		LastUpdated: snap.LastUpdate.UTC().Format(time.RFC3339),
-		FileCount:   snap.FileCount,
-		TurnCount:   len(snap.Turns),
-		Malformed:   snap.Malformed,
-		Host:        host,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := writeJSON(w, body); err != nil {
-		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write status response failed",
-			slog.Any("err", err),
-			slog.String("path", "/_claudit/status"))
 	}
 }
 

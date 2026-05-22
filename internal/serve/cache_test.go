@@ -16,15 +16,6 @@ func mkAssistantLine(uuid, parent string, ts time.Time) string {
 		uuid, parent, ts.Format(time.RFC3339))
 }
 
-// mkUserLine builds a user prompt line matching the schema parse expects
-// (type:"user", message.role:"user", message.content as string). Used by
-// data-endpoint tests that exercise the SessionTimelines → prompt_keys
-// pipeline; mkAssistantLine alone produces orphan turns.
-func mkUserLine(uuid, text string, ts time.Time) string {
-	return fmt.Sprintf(`{"type":"user","uuid":%q,"timestamp":%q,"sessionId":"s1","cwd":"/p","message":{"role":"user","content":%q}}`,
-		uuid, ts.Format(time.RFC3339), text)
-}
-
 func writeJSONL(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

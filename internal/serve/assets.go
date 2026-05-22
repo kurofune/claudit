@@ -29,14 +29,12 @@ const webRoot = "web"
 // served. Browser requests look like /_claudit/web/app.<hash>.js.
 const webAssetURLPrefix = "/_claudit/web/"
 
-// rootPath is the SPA's canonical entry URL after the Phase 8 cutover.
-// appPath is kept as an alias so /app bookmarks from the Phase 5/6/7
-// A/B window still resolve. legacyPath is the one-minor-release escape
-// hatch for callers that still want the self-contained fat HTML.
+// rootPath is the SPA's canonical entry URL. appPath is kept as an
+// alias so /app bookmarks from the Phase 5/6/7 A/B window still
+// resolve — both routes go through handleApp.
 const (
-	rootPath   = "/"
-	appPath    = "/app"
-	legacyPath = "/legacy"
+	rootPath = "/"
+	appPath  = "/app"
 )
 
 // assetEntry is one rewritten file ready to be served. body has already

@@ -56,6 +56,33 @@ type SnapshotPayload struct {
 // too — adding it here is the only step.
 var trendDims = []string{"model", "project", "session", "tool", "subagent"}
 
+// promptKeysFromTimelines returns the deduplicated set of non-empty
+// PromptTimeline.Key values across all sessions, in first-occurrence
+// order. The SPA uses this slice to check hotspot cross-link
+// availability in O(1) without needing the full session_timelines
+// payload.
+//
+// Returns an empty (non-nil) slice when no usable keys exist so
+// json.Marshal emits "[]" rather than "null" — keeps the JS
+// consumer's `for (const k of D.prompt_keys)` loop simple.
+func promptKeysFromTimelines(sessions []aggregate.SessionTimeline) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, s := range sessions {
+		for _, p := range s.Prompts {
+			if p.Key == "" {
+				continue
+			}
+			if _, ok := seen[p.Key]; ok {
+				continue
+			}
+			seen[p.Key] = struct{}{}
+			out = append(out, p.Key)
+		}
+	}
+	return out
+}
+
 // BuildStaticBundle composes every section the SPA needs to render
 // offline. Called only from the static one-shot render path; serve
 // mode keeps using the per-endpoint handlers + BuildPayload for the

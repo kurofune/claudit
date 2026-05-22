@@ -1,8 +1,6 @@
 package render
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,9 +9,8 @@ import (
 
 // buildHotspotsForJSON resolves the aggregator's top hotspots into
 // the renderable HotspotForJSON shape — same data plus a baked-in
-// LLM prompt and an optional cross-link key. Shared by BuildPayload
-// (for the JSON island) and HTMLWithOptions (for the SSR hotspot
-// cards) so the two surfaces stay in lockstep automatically.
+// LLM prompt and an optional cross-link key. Consumed by BuildOverview
+// (which both the API and the static report share).
 func buildHotspotsForJSON(a *aggregate.Aggregator) []HotspotForJSON {
 	raw := a.Hotspots(10)
 	out := make([]HotspotForJSON, 0, len(raw))
@@ -40,16 +37,18 @@ func buildHotspotsForJSON(a *aggregate.Aggregator) []HotspotForJSON {
 	return out
 }
 
+// sidePart is the per-side roll-up the Subagents tab uses to show
+// "Main vs sidechain" totals. Travels inside SubagentsPayload.
+type sidePart struct {
+	Cost   float64          `json:"cost"`
+	Turns  int              `json:"turns"`
+	Tokens aggregate.Tokens `json:"tokens"`
+}
+
 // OverviewPayload is what /_claudit/api/overview returns. It bundles
 // the umbrella set the SPA needs to paint the landing tab in one
 // fetch — headline totals, the ranked hotspot stack, the totals trend
 // line, the month-end forecast, and any unknown-model warnings.
-//
-// Phase 3 of the serve-API plan: this struct (and the matching
-// per-tab structs below) is the single source of truth for "what
-// each section's data looks like." The static report's inline blob
-// (BuildPayload) and the served-mode API both walk through these
-// builders so the two surfaces can't drift.
 type OverviewPayload struct {
 	Totals        aggregate.Totals       `json:"totals"`
 	Hotspots      []HotspotForJSON       `json:"hotspots"`
@@ -89,10 +88,7 @@ type ToolsPayload struct {
 // SubagentsPayload backs /_claudit/api/subagents — the subagent-type
 // roll-up plus every individual invocation row. Main and Sidechain
 // carry the main-thread / sidechain totals fueling the "Main vs
-// sidechain" subtab; the static report's inline blob exposed these as
-// top-level `main` / `sidechain` fields, but the Subagents tab is the
-// only consumer so they ride alongside the rest of the subagents data
-// here.
+// sidechain" subtab.
 type SubagentsPayload struct {
 	BySubagent       []aggregate.SubagentBucket  `json:"by_subagent"`
 	AgentInvocations []aggregate.AgentInvocation `json:"agent_invocations"`
@@ -120,9 +116,7 @@ type TrendsPayload struct {
 // SessionSummary is one row in /_claudit/api/sessions. Carries the
 // totals view of a session without the per-prompt Timeline body —
 // that's the lazy-fetch payload served by
-// /_claudit/api/sessions/{id}/timeline (Phase 7 of the SPA plan).
-// Trimming Prompts here keeps the list endpoint to ~50KB for a busy
-// corpus instead of the multi-MB blob the static report ships today.
+// /_claudit/api/sessions/{id}/timeline.
 type SessionSummary struct {
 	SessionID string    `json:"session_id"`
 	CWD       string    `json:"cwd"`
@@ -253,102 +247,4 @@ func BuildSessions(timelines []aggregate.SessionTimeline) SessionsPayload {
 		})
 	}
 	return SessionsPayload{Sessions: out}
-}
-
-// inlinePayload is the legacy union shape that BuildPayload marshals
-// into the static report's <script id="claudit-data"> island. Embeds
-// the per-section payload structs so a field added to (say)
-// CostPayload automatically lands in the inline blob — no
-// manual-struct sync step where the static and API surfaces could
-// drift.
-//
-// OverviewPayload is NOT embedded because it carries Hotspots, which
-// the static surface SSRs separately via renderHotspotsHTML in
-// html.go — duplicating the JSON would inflate the blob with bytes
-// the static page never reads. The non-hotspot OverviewPayload
-// fields are promoted by hand below, and the contract test in
-// payload_contract_test.go catches any drift between BuildOverview
-// and the manual promotion.
-//
-// Per-dim trend maps and Period are kept in the legacy flat shape
-// (trend_by_model, trend_by_project, ...) because the static report
-// predates the per-dim split that TrendsPayload introduced for the
-// /_claudit/api/trends endpoint. The contract test reassembles the
-// API responses into this flat shape so the equivalence check still
-// holds across the two surfaces.
-type inlinePayload struct {
-	CostPayload
-	CachePayload
-	ToolsPayload
-	SubagentsPayload
-	AnomaliesPayload
-
-	// Promoted OverviewPayload fields (hotspots intentionally excluded).
-	Totals        aggregate.Totals       `json:"totals"`
-	TrendTotals   []aggregate.TrendPoint `json:"trend_totals"`
-	Forecast      aggregate.Forecast     `json:"forecast"`
-	UnknownModels []string               `json:"unknown_models"`
-
-	// Static-only: prompt_keys drives hotspot cross-link availability
-	// in the JS. main/sidechain ride along via the embedded
-	// SubagentsPayload above.
-	PromptKeys []string `json:"prompt_keys"`
-
-	// Legacy flat trend shape — predates TrendsPayload's per-dim split.
-	Period          aggregate.Period                  `json:"period"`
-	TrendByModel    map[string][]aggregate.TrendPoint `json:"trend_by_model"`
-	TrendByProject  map[string][]aggregate.TrendPoint `json:"trend_by_project"`
-	TrendByTool     map[string][]aggregate.TrendPoint `json:"trend_by_tool"`
-	TrendBySession  map[string][]aggregate.TrendPoint `json:"trend_by_session"`
-	TrendBySubagent map[string][]aggregate.TrendPoint `json:"trend_by_subagent"`
-}
-
-// BuildPayload returns the JSON bytes that the static HTML report
-// consumes as its data island. Today the same bytes are embedded
-// inline in the rendered HTML via <script id="claudit-data"
-// type="application/json">; the serve daemon also serves them at
-// /_claudit/data.json so the page can paint without waiting for the
-// data.
-//
-// Composes the per-section builders (BuildCost, BuildCache, ...) so
-// the static report and the /_claudit/api/* endpoints can't drift on
-// field shape. The contract test in payload_contract_test.go locks
-// this invariant — a field added to a per-section builder shows up
-// in both surfaces or the test fails.
-//
-// Returns ctx.Err() early when the caller (typically a disconnected
-// HTTP client) cancels before json.Marshal completes.
-func BuildPayload(ctx context.Context, a *aggregate.Aggregator, opts HTMLOptions) ([]byte, error) {
-	overview := BuildOverview(a)
-
-	payload := inlinePayload{
-		CostPayload:      BuildCost(a),
-		CachePayload:     BuildCache(a),
-		ToolsPayload:     BuildTools(a),
-		SubagentsPayload: BuildSubagents(a),
-		AnomaliesPayload: BuildAnomalies(a),
-
-		Totals:        overview.Totals,
-		TrendTotals:   overview.TrendTotals,
-		Forecast:      overview.Forecast,
-		UnknownModels: overview.UnknownModels,
-
-		PromptKeys: promptKeysFromTimelines(opts.SessionTimelines),
-
-		Period:          a.Period(),
-		TrendByModel:    a.TrendByModel(),
-		TrendByProject:  a.TrendByProject(),
-		TrendByTool:     a.TrendByTool(),
-		TrendBySession:  a.TrendBySession(),
-		TrendBySubagent: a.TrendBySubagent(),
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal report data: %w", err)
-	}
-	return data, nil
 }

@@ -40,11 +40,10 @@ func TestApp_ServesSPAShell(t *testing.T) {
 	}
 }
 
-// TestRoot_ServesSPAShell is the Phase 8 cutover assertion: GET / now
-// returns the same SPA shell that /app serves. The shell carries a
-// hashed app.<hash>.js script tag and no raw {{asset}} placeholders.
-// Before Phase 8 this URL served the fat HTML; that body has moved to
-// /legacy (see TestLegacy_ServesFatHTML).
+// TestRoot_ServesSPAShell asserts GET / returns the same SPA shell
+// that /app serves: the only route after Phase 10 cleanup. The shell
+// carries a hashed app.<hash>.js script tag and no raw {{asset}}
+// placeholders.
 func TestRoot_ServesSPAShell(t *testing.T) {
 	s := fixtureServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -63,33 +62,18 @@ func TestRoot_ServesSPAShell(t *testing.T) {
 	if !strings.Contains(body, "/_claudit/web/app.") || !strings.Contains(body, ".js") {
 		t.Errorf("/ missing hashed /_claudit/web/app.<hash>.js script tag:\n%s", body[:min(500, len(body))])
 	}
-	// Fat-HTML's hallmark is the SSR'd #totals block. The SPA shell
-	// has no such element pre-rendered, so its absence proves we hit
-	// the shell handler and not the legacy renderer.
-	if strings.Contains(body, `id="totals"`) {
-		t.Errorf("/ still serves legacy fat HTML (#totals found in body)")
-	}
 }
 
-// TestLegacy_ServesFatHTML asserts the fat HTML is reachable at /legacy
-// — the one-minor-release escape hatch the Phase 8 cutover provides. A
-// caller (a bookmark, an external script) that still wants the
-// self-contained fat report can hit /legacy until the deprecation
-// window closes in Phase 10.
-func TestLegacy_ServesFatHTML(t *testing.T) {
+// TestLegacy_RouteIsGone is the Phase 10 cleanup assertion: /legacy
+// no longer answers — the deprecation window has closed and bookmarks
+// pointing at the old URL now 404. The SPA at / is the only path.
+func TestLegacy_RouteIsGone(t *testing.T) {
 	s := fixtureServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/legacy", nil)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/legacy status = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `id="totals"`) {
-		t.Errorf("/legacy not serving fat HTML (missing #totals):\n%s", body[:min(800, len(body))])
-	}
-	if !strings.Contains(body, "claudit-reload-toast") {
-		t.Errorf("/legacy missing serve-mode auto-reload toast")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("/legacy status = %d, want 404", rec.Code)
 	}
 }
 

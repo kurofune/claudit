@@ -39,15 +39,6 @@ type renderEntry struct {
 	gzip  []byte // nil if not yet computed
 }
 
-// Section labels currently in use. Plain strings (not a typed enum)
-// so adding a per-API-tab section in a later phase doesn't require
-// touching this file — it just becomes another string passed into
-// lookupCached / storeCached.
-const (
-	sectionHTML = "html"
-	sectionData = "data"
-)
-
 func newRenderLRU(cap int) *renderLRU {
 	if cap <= 0 {
 		cap = 16

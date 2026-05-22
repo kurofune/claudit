@@ -31,11 +31,9 @@ const (
 	sessionTimelineSuffix = "/timeline"
 )
 
-// Section labels for the per-section render cache. Distinct from the
-// internal sectionHTML/sectionData labels used by /_claudit/data.json
-// so the new API surface coexists with the static report's caches.
-// Trends uses a composite "api-trends-<dim>" to keep per-dim payloads
-// from churning each other.
+// Section labels for the per-section render cache. Trends uses a
+// composite "api-trends-<dim>" to keep per-dim payloads from churning
+// each other.
 const (
 	apiSectionOverview  = "api-overview"
 	apiSectionCost      = "api-cost"
@@ -100,7 +98,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_ = s.applyDefaults(&q)
+	s.applyDefaults(&q)
 
 	snap := s.cache.Snapshot()
 	etag := buildAPIEtag(snap.Generation, spec.section)

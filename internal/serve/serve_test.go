@@ -3,13 +3,11 @@ package serve
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -40,103 +38,6 @@ func newTestServer(t *testing.T, dir string) *Server {
 		DefaultHotspots:    10,
 		DefaultSessionsTop: 50,
 	})
-}
-
-func TestServer_ReportHTML(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
-	srv := newTestServer(t, dir)
-
-	// Post-Phase-8: the fat HTML report lives at /legacy. "/" serves
-	// the SPA shell — see TestRoot_ServesSPAShell.
-	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Errorf("content-type = %q, want text/html...", ct)
-	}
-	body := w.Body.String()
-	if !strings.Contains(body, "<!DOCTYPE html>") {
-		t.Errorf("body missing doctype; first 200 chars: %q", body[:min(200, len(body))])
-	}
-	// ServeMode injection: the auto-reload toast div MUST be present
-	// for served renders. One-shot renders skip it (covered in the
-	// render package tests).
-	if !strings.Contains(body, "claudit-reload-toast") {
-		t.Errorf("served render missing auto-reload toast")
-	}
-}
-
-func TestServer_ReportBadQueryRejected(t *testing.T) {
-	srv := newTestServer(t, t.TempDir())
-	r := httptest.NewRequest(http.MethodGet, "/legacy?since=not-a-date", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body=%s", w.Code, w.Body.String())
-	}
-}
-
-func TestServer_ReportFilterByProject(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
-	srv := newTestServer(t, dir)
-
-	// cwd in mkAssistantLine is "/p"; filter to a non-matching string
-	// should yield a report with zero turns. We don't assert the
-	// exact numbers (renderer-internal), just that the request
-	// succeeds and the filter is honored end-to-end.
-	r := httptest.NewRequest(http.MethodGet, "/legacy?project=does-not-exist", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-}
-
-func TestServer_Status(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
-	srv := newTestServer(t, dir)
-
-	r := httptest.NewRequest(http.MethodGet, "/_claudit/status", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("content-type = %q, want application/json", ct)
-	}
-	var body struct {
-		Generation  int64  `json:"generation"`
-		LastUpdated string `json:"last_updated"`
-		FileCount   int    `json:"file_count"`
-		TurnCount   int    `json:"turn_count"`
-		Malformed   int    `json:"malformed"`
-		Host        struct {
-			Root string `json:"root"`
-		} `json:"host"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("status not JSON: %v; body=%s", err, w.Body.String())
-	}
-	if body.Generation < 1 {
-		t.Errorf("generation = %d, want >= 1", body.Generation)
-	}
-	if body.FileCount != 1 || body.TurnCount != 1 {
-		t.Errorf("counts = %+v, want 1/1", body)
-	}
-	if body.Host.Root != dir {
-		t.Errorf("host.root = %q, want %q", body.Host.Root, dir)
-	}
 }
 
 func TestServer_Healthz(t *testing.T) {
@@ -187,92 +88,6 @@ func TestServer_Healthz_LogsWriteError(t *testing.T) {
 	}
 }
 
-// TestServer_Status_LogsWriteError asserts handleStatus logs when
-// json encoding fails to drain to the response writer (typically
-// client disconnect mid-write).
-func TestServer_Status_LogsWriteError(t *testing.T) {
-	var buf bytes.Buffer
-	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = newSlogToBuf(&buf)
-
-	r := httptest.NewRequest(http.MethodGet, "/_claudit/status", nil)
-	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
-	srv.Handler().ServeHTTP(w, r)
-
-	out := buf.String()
-	if !strings.Contains(out, "status") {
-		t.Errorf("log = %q, want to contain %q", out, "status")
-	}
-	if !strings.Contains(out, "conn reset") {
-		t.Errorf("log = %q, want to contain %q", out, "conn reset")
-	}
-}
-
-// TestServer_Report_LogsWriteError asserts handleReport logs when
-// writeCached can't drain the response body. The cached and
-// freshly-rendered paths both go through writeCached; this test
-// exercises the freshly-rendered branch (no prior cache entry).
-func TestServer_Report_LogsWriteError(t *testing.T) {
-	var buf bytes.Buffer
-	srv := newTestServer(t, t.TempDir())
-	srv.opts.Logger = newSlogToBuf(&buf)
-
-	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
-	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
-	srv.Handler().ServeHTTP(w, r)
-
-	out := buf.String()
-	if !strings.Contains(out, "report") {
-		t.Errorf("log = %q, want to contain %q", out, "report")
-	}
-	if !strings.Contains(out, "conn reset") {
-		t.Errorf("log = %q, want to contain %q", out, "conn reset")
-	}
-}
-
-// TestServer_Report_LogsWriteError_CachedBranch covers the
-// render-cache-hit branch of handleReport (the sibling of the test
-// above). Prewarms the cache with a successful request, then issues
-// a second request whose ResponseWriter rejects writes — the cached
-// bytes are looked up successfully but writeCached errors on the way
-// to the client, and the failure must be logged.
-func TestServer_Report_LogsWriteError_CachedBranch(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
-	srv := newTestServerWithCache(t, dir, 4)
-
-	// Warm-up request — populates the render cache.
-	r1 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
-	w1 := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w1, r1)
-	if w1.Code != 200 {
-		t.Fatalf("warmup status = %d", w1.Code)
-	}
-	// Warm-up populates two cache entries: the rendered HTML for the
-	// requested query, plus the pre-warmed JSON section (so the page's
-	// imminent fetch of /_claudit/data.json is a hit).
-	if srv.cacheLen() != 2 {
-		t.Fatalf("cache not warmed: cacheLen = %d, want 2 (html + prewarmed data)", srv.cacheLen())
-	}
-
-	// Second request with a write-erroring response writer — exercises
-	// the cached branch (lookup succeeds, writeCached fails).
-	var buf bytes.Buffer
-	srv.opts.Logger = newSlogToBuf(&buf)
-	r2 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
-	w2 := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
-	srv.Handler().ServeHTTP(w2, r2)
-
-	out := buf.String()
-	if !strings.Contains(out, "report") {
-		t.Errorf("log = %q, want to contain %q", out, "report")
-	}
-	if !strings.Contains(out, "conn reset") {
-		t.Errorf("log = %q, want to contain %q", out, "conn reset")
-	}
-}
-
 func TestServer_RootMethodNotAllowed(t *testing.T) {
 	srv := newTestServer(t, t.TempDir())
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body"))
@@ -284,37 +99,6 @@ func TestServer_RootMethodNotAllowed(t *testing.T) {
 	allow := w.Header().Get("Allow")
 	if !strings.Contains(allow, "GET") || !strings.Contains(allow, "HEAD") {
 		t.Errorf("Allow = %q, want it to advertise GET and HEAD", allow)
-	}
-}
-
-// TestServer_ReportHEAD covers the HEAD branch of handleReport: status
-// 200, correct response headers, but no body. Browsers and probes use
-// HEAD to check freshness without paying for a render. Targets the
-// post-cutover home of the fat HTML at /legacy.
-func TestServer_ReportHEAD(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
-	srv := newTestServer(t, dir)
-
-	r := httptest.NewRequest(http.MethodHead, "/legacy", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Errorf("Content-Type = %q, want text/html...", ct)
-	}
-	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("Cache-Control = %q, want no-store", cc)
-	}
-	if v := w.Header().Get("Vary"); !strings.Contains(v, "Accept-Encoding") {
-		t.Errorf("Vary = %q, want Accept-Encoding present", v)
-	}
-	if w.Body.Len() != 0 {
-		t.Errorf("body len = %d, want 0 for HEAD response", w.Body.Len())
 	}
 }
 

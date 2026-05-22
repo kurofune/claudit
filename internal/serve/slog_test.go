@@ -31,17 +31,17 @@ func newSlogToBuf(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(h)
 }
 
-// TestServer_LogsRequestID_OnReportWriteError exercises the report
-// handler's freshly-rendered write-error branch and asserts the log
-// record carries a non-empty request_id attribute. This is the
-// observability win the migration is for: ops can correlate a single
-// failed render with all the events it produced.
-func TestServer_LogsRequestID_OnReportWriteError(t *testing.T) {
+// TestServer_LogsRequestID_OnAPIWriteError exercises an API handler's
+// write-error branch and asserts the log record carries a non-empty
+// request_id attribute. This is the observability win the migration
+// is for: ops can correlate a single failed render with all the events
+// it produced.
+func TestServer_LogsRequestID_OnAPIWriteError(t *testing.T) {
 	var buf bytes.Buffer
 	srv := newTestServer(t, t.TempDir())
 	srv.opts.Logger = newSlogToBuf(&buf)
 
-	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost", nil)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w, r)
 
@@ -68,13 +68,7 @@ func TestServer_EchoesInboundRequestID(t *testing.T) {
 	srv.opts.Logger = newSlogToBuf(&buf)
 
 	const inbound = "abc-12345"
-	// Targets /legacy because that handler emits a log line on the
-	// write-error branch we exercise here — handleApp also logs, but
-	// the legacy path has been the canonical observability surface
-	// since the package was introduced. Either route would work; the
-	// legacy route happens to be the one with the longest-stable log
-	// shape.
-	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost", nil)
 	r.Header.Set("X-Request-ID", inbound)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w, r)
@@ -97,7 +91,7 @@ func TestServer_RejectsHostileInboundRequestID(t *testing.T) {
 	srv.opts.Logger = newSlogToBuf(&buf)
 
 	hostile := "line1\nline2 with spaces and = signs"
-	r := httptest.NewRequest(http.MethodGet, "/legacy", nil)
+	r := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost", nil)
 	r.Header.Set("X-Request-ID", hostile)
 	w := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w, r)
@@ -111,16 +105,16 @@ func TestServer_RejectsHostileInboundRequestID(t *testing.T) {
 	}
 }
 
-// TestServer_LogsRequestID_OnReportCachedBranch is the cached-hit
+// TestServer_LogsRequestID_OnAPICachedBranch is the cached-hit
 // sibling of the freshly-rendered test above; warms the cache, then
 // retries the same URL with a failing writer.
-func TestServer_LogsRequestID_OnReportCachedBranch(t *testing.T) {
+func TestServer_LogsRequestID_OnAPICachedBranch(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 	srv := newTestServerWithCache(t, dir, 4)
 
-	r1 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r1 := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	w1 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w1, r1)
 	if w1.Code != 200 {
@@ -129,7 +123,7 @@ func TestServer_LogsRequestID_OnReportCachedBranch(t *testing.T) {
 
 	var buf bytes.Buffer
 	srv.opts.Logger = newSlogToBuf(&buf)
-	r2 := httptest.NewRequest(http.MethodGet, "/legacy?scope=all", nil)
+	r2 := httptest.NewRequest(http.MethodGet, "/_claudit/api/cost?scope=all", nil)
 	w2 := &errResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: errors.New("conn reset")}
 	srv.Handler().ServeHTTP(w2, r2)
 

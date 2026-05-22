@@ -509,23 +509,6 @@ func TestAPISessionsTree_UnknownSubpath(t *testing.T) {
 	}
 }
 
-// TestAPI_DataJSONStillWorks: the old /_claudit/data.json endpoint
-// keeps working after Phase 3. Locks the "additive only" promise
-// the plan makes — the SPA migration can land progressively
-// because the static-report fetch path doesn't change.
-func TestAPI_DataJSONStillWorks(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, dataPath, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	body := readJSONResponse(t, w)
-	// The legacy data.json carries the union shape; spot-check one key.
-	if _, ok := body["totals"]; !ok {
-		t.Errorf("data.json missing totals key")
-	}
-}
-
 func keysOf(m map[string]json.RawMessage) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
