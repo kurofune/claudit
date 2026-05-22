@@ -37,7 +37,15 @@ onChange(async (route) => {
 // change after page load → surface the toast"; later phases can opt
 // to silently invalidate per-section caches instead of forcing a full
 // reload.
+//
+// Offline / static-report mode: when window.__claudit_static_data is
+// set, there is no server to push generation events from — skip the
+// EventSource so we don't fire spurious connection-failure noise.
+// wireReloadToast is also a no-op against missing DOM, so the static
+// template's omission of the toast markup keeps the bundle quiet.
 const toastEl = document.getElementById('reload-toast');
 const btnEl = document.getElementById('reload-toast-btn');
 const onUpdate = wireReloadToast(toastEl, btnEl);
-startSSE(onUpdate);
+if (!window.__claudit_static_data) {
+  startSSE(onUpdate);
+}

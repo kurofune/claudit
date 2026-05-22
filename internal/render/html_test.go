@@ -40,8 +40,11 @@ func TestHTML_OneShotOmitsServeOnlyChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := buf.String()
-	if strings.Contains(body, "claudit-reload-toast") {
-		t.Errorf("one-shot HTML render leaked the serve-only reload toast")
+	// `.claudit-reload-toast` CSS rides along inside app.css for the
+	// SPA's serve mode — only the legacy element id is forbidden in
+	// one-shot output.
+	if strings.Contains(body, `id="claudit-reload-toast"`) {
+		t.Errorf("one-shot HTML render leaked the serve-only reload toast element")
 	}
 	if strings.Contains(body, "/_claudit/status") {
 		t.Errorf("one-shot HTML render leaked the serve-only status path")
@@ -137,6 +140,11 @@ func TestHTML_ServeModeDefaultStatusPath(t *testing.T) {
 // session_timelines no longer ships in the inline JSON island — that
 // data is now server-rendered into #session-list and the payload
 // trimmed accordingly. Guards the Phase 1 SSR win against regression.
+//
+// Phase 9 note: the static (one-shot) render path now uses the SPA
+// shell with a different per-section data island. This test targets
+// the legacy fat-HTML template still served at /legacy in serve mode,
+// hence Serve.Enabled=true.
 func TestHTML_JSONPayloadDropsSessionTimelines(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
@@ -148,6 +156,7 @@ func TestHTML_JSONPayloadDropsSessionTimelines(t *testing.T) {
 	}}
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		SessionTimelines: st,
+		Serve:            ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +182,7 @@ func TestHTML_JSONPayloadDropsSessionTimelines(t *testing.T) {
 // TestHTML_JSONPayloadHasPromptKeys asserts that the JSON payload
 // includes a prompt_keys array carrying each non-orphan prompt's Key
 // (deduped) — the JS uses it to check cross-link availability in O(1).
+// Targets the legacy fat-HTML template (Phase 9 note above).
 func TestHTML_JSONPayloadHasPromptKeys(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
@@ -195,6 +205,7 @@ func TestHTML_JSONPayloadHasPromptKeys(t *testing.T) {
 	}
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		SessionTimelines: st,
+		Serve:            ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +243,7 @@ func trim400(s string) string {
 
 // TestHTML_SessionListIsSSR asserts that #session-list now carries
 // the server-rendered session-card markup inline, instead of being an
-// empty div populated by the JS IIFE.
+// empty div populated by the JS IIFE. Legacy template (Phase 9 note).
 func TestHTML_SessionListIsSSR(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
@@ -245,6 +256,7 @@ func TestHTML_SessionListIsSSR(t *testing.T) {
 	}}
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		SessionTimelines: st,
+		Serve:            ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -268,10 +280,13 @@ func TestHTML_SessionListIsSSR(t *testing.T) {
 
 // TestHTML_RenderSessionsJSIIFE_Removed: the renderSessions JS IIFE
 // is no longer in the template — sessions are server-rendered.
+// Targets the legacy template (still served at /legacy).
 func TestHTML_RenderSessionsJSIIFE_Removed(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -285,10 +300,13 @@ func TestHTML_RenderSessionsJSIIFE_Removed(t *testing.T) {
 // TestHTML_BuildPromptKeySet_ReadsFromPromptKeys: the
 // buildPromptKeySet helper now consumes D.prompt_keys (a flat string
 // array), not the legacy nested D.session_timelines walk.
+// Legacy template path (Phase 9 note).
 func TestHTML_BuildPromptKeySet_ReadsFromPromptKeys(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -303,7 +321,7 @@ func TestHTML_BuildPromptKeySet_ReadsFromPromptKeys(t *testing.T) {
 // TestHTML_RedactNotice_ShownWhenAnyRedacted: when at least one
 // prompt in any session has the "[redacted N chars]" prefix, the
 // #session-redact-notice element is server-rendered with the
-// explainer text — the JS no longer toggles it.
+// explainer text — the JS no longer toggles it. Legacy template.
 func TestHTML_RedactNotice_ShownWhenAnyRedacted(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
@@ -315,6 +333,7 @@ func TestHTML_RedactNotice_ShownWhenAnyRedacted(t *testing.T) {
 	}}
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		SessionTimelines: st,
+		Serve:            ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +344,7 @@ func TestHTML_RedactNotice_ShownWhenAnyRedacted(t *testing.T) {
 }
 
 // TestHTML_RedactNotice_EmptyWhenNoRedaction: with no redacted
-// prompts, the element exists but is empty.
+// prompts, the element exists but is empty. Legacy template.
 func TestHTML_RedactNotice_EmptyWhenNoRedaction(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
@@ -337,6 +356,7 @@ func TestHTML_RedactNotice_EmptyWhenNoRedaction(t *testing.T) {
 	}}
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		SessionTimelines: st,
+		Serve:            ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -349,11 +369,13 @@ func TestHTML_RedactNotice_EmptyWhenNoRedaction(t *testing.T) {
 // TestHTML_SessionEmptyVisibleWhenNoSessions: the #session-empty
 // fallback renders without the `hidden` attribute when no sessions
 // were supplied. The JS no longer toggles this — it's SSR.
+// Legacy template (Phase 9 note).
 func TestHTML_SessionEmptyVisibleWhenNoSessions(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
 	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
 		// SessionTimelines empty.
+		Serve: ServeOptions{Enabled: true},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -372,10 +394,13 @@ func TestHTML_SessionEmptyVisibleWhenNoSessions(t *testing.T) {
 // populated by server-rendered markup (a headline + three metric
 // blocks), not an empty div the JS would fill in. Also checks the
 // totals-building JS IIFE is removed from the template.
+// Legacy template path (Phase 9 note).
 func TestHTML_TotalsIsSSR(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -401,11 +426,13 @@ func TestHTML_TotalsIsSSR(t *testing.T) {
 
 // TestHTML_HotspotsAreSSR: #hotspots paints the empty-state on
 // first byte (or, with rows, the card stack) — and the hotspots()
-// JS IIFE is removed from the template.
+// JS IIFE is removed from the template. Legacy template.
 func TestHTML_HotspotsAreSSR(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -429,10 +456,13 @@ func TestHTML_HotspotsAreSSR(t *testing.T) {
 // and toolBars() JS IIFEs are gone from the template. The
 // #bars-tool element may be empty because the fixture has no tool
 // calls — the absence of the JS IIFE is the durable check there.
+// Legacy template (Phase 9 note).
 func TestHTML_ProjectAndToolBarsAreSSR(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()
@@ -453,11 +483,13 @@ func TestHTML_ProjectAndToolBarsAreSSR(t *testing.T) {
 
 // TestHTML_ModelBarsAreSSR asserts the #bars-model element now
 // contains server-rendered .hbar rows on first byte, and the
-// modelBars() JS IIFE is removed from the template.
+// modelBars() JS IIFE is removed from the template. Legacy template.
 func TestHTML_ModelBarsAreSSR(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()

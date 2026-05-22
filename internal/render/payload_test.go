@@ -9,9 +9,11 @@ import (
 )
 
 // TestBuildPayload_MatchesInlineDataJSON locks the invariant that the
-// bytes the JSON endpoint will serve are the same bytes the one-shot
-// HTML still inlines. If these two ever drift, the served-mode page
-// would render against different data than the server thinks it sent.
+// bytes the JSON endpoint will serve are the same bytes the legacy
+// (fat-HTML) template inlines via <script id="claudit-data">. Phase 9
+// split the static one-shot path off to a separate SPA-shell template
+// with its own section-keyed bundle (covered by TestBuildStaticBundle_*),
+// so this test now targets the /legacy serve-mode render explicitly.
 func TestBuildPayload_MatchesInlineDataJSON(t *testing.T) {
 	a := htmlSetup(t)
 	want, err := BuildPayload(context.Background(), a, HTMLOptions{})
@@ -19,7 +21,9 @@ func TestBuildPayload_MatchesInlineDataJSON(t *testing.T) {
 		t.Fatalf("BuildPayload: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatalf("HTML: %v", err)
 	}
 	body := buf.String()
@@ -157,10 +161,13 @@ func TestHTML_ServeModeFetchPreambleForwardsLocationSearch(t *testing.T) {
 // IIFE is wrapped as an async function awaiting window.__claudit_data.
 // This is the contract that lets both the inline-resolve and the
 // fetch paths converge on the same downstream code.
+// Legacy template path (Phase 9 note).
 func TestHTML_ConsumerScriptAwaitsDataPromise(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatalf("HTML: %v", err)
 	}
 	body := buf.String()
@@ -203,24 +210,28 @@ func TestHTML_ServeModeFetchPreambleHasCatch(t *testing.T) {
 	}
 }
 
-// TestHTML_OneShotInlinesDataJSON guards the one-shot rendering path:
-// even after the serve-mode fetch indirection lands, a `claudit report
-// --html > file.html` invocation must still embed the JSON inline. A
-// static file has no server to fetch from.
-func TestHTML_OneShotInlinesDataJSON(t *testing.T) {
+// TestLegacyHTML_InlinesDataJSON guards the legacy fat-HTML render
+// path (used at /legacy in serve mode and by any caller passing
+// Serve.Enabled=true without DeferData): the JSON island must be
+// inline. Phase 9 moved the one-shot static path to a separate
+// SPA-shell template (see TestStatic_InlinesSectionData), so this
+// test is now scoped to the legacy template only.
+func TestLegacyHTML_InlinesDataJSON(t *testing.T) {
 	a := htmlSetup(t)
 	var buf bytes.Buffer
-	if err := HTML(context.Background(), &buf, a); err != nil {
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{
+		Serve: ServeOptions{Enabled: true},
+	}); err != nil {
 		t.Fatalf("HTML: %v", err)
 	}
 	body := buf.String()
 	if !strings.Contains(body, `<script id="claudit-data" type="application/json">`) {
-		t.Errorf("one-shot HTML missing inline claudit-data script tag")
+		t.Errorf("legacy HTML missing inline claudit-data script tag")
 	}
 	// The inline path also installs window.__claudit_data as a resolved
 	// promise so the main consumer can `await` it uniformly.
 	if !strings.Contains(body, "window.__claudit_data") {
-		t.Errorf("one-shot HTML missing window.__claudit_data preamble")
+		t.Errorf("legacy HTML missing window.__claudit_data preamble")
 	}
 }
 

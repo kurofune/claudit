@@ -3,15 +3,21 @@ package render
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"strings"
 
+	webassets "github.com/kurofune/claudit"
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 //go:embed report.html.tmpl
 var htmlTemplate string
+
+//go:embed report_static.html.tmpl
+var staticHTMLTemplate string
 
 // tokensCSS is the shared design-token block embedded once and injected
 // into both report.html.tmpl and diff.html.tmpl via {{ .Tokens }}. The
@@ -22,7 +28,23 @@ var htmlTemplate string
 //go:embed tokens.css
 var tokensCSS string
 
+// appCSS is the SPA's main stylesheet, read once at init from the
+// shared embed at the repo root. Inlined into the static report so
+// the downloaded HTML file is self-contained. Read at init (rather
+// than //go:embed'd at this file's path) because //go:embed cannot
+// reach across packages — the canonical copy lives under web/.
+var appCSS string
+
+func init() {
+	data, err := fs.ReadFile(webassets.WebFS, "web/app.css")
+	if err != nil {
+		panic(fmt.Sprintf("render: read web/app.css: %v", err))
+	}
+	appCSS = string(data)
+}
+
 var htmlTpl = template.Must(template.New("report").Parse(htmlTemplate))
+var staticHTMLTpl = template.Must(template.New("static-report").Parse(staticHTMLTemplate))
 
 // HotspotForJSON is the same data as aggregate.Hotspot but with the
 // pre-rendered LLM prompt baked in, so the front-end can copy it to the
@@ -123,7 +145,69 @@ func HTML(ctx context.Context, w io.Writer, a *aggregate.Aggregator) error {
 // sections supplied via opts (currently: SessionTimelines). Returns
 // ctx.Err() early if the caller (typically a disconnected HTTP client)
 // cancels before the JSON marshal or template execute steps.
+//
+// Phase 9 of the serve-API rearchitecture introduced two render
+// paths:
+//
+//   - Serve mode (opts.Serve.Enabled=true) uses the legacy fat-HTML
+//     template at report.html.tmpl. /legacy preserves it as the
+//     escape hatch from the SPA for one deprecation window.
+//   - One-shot / static mode (opts.Serve.Enabled=false) uses the
+//     SPA-shell template at report_static.html.tmpl. The output
+//     inlines the per-section JSON and the SPA's ES module bundle
+//     so a downloaded .html file is fully interactive offline.
+//
+// The branch is structural — the two templates emit very different
+// markup and ship very different bytes — so callers don't need to
+// pass a "which template" flag; the existing Serve.Enabled signal
+// is enough.
 func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
+	if !opts.Serve.Enabled {
+		return renderStaticHTML(ctx, w, a, opts)
+	}
+	return renderLegacyHTML(ctx, w, a, opts)
+}
+
+// renderStaticHTML is the SPA-shell path (Phase 9). Inlines per-
+// section JSON via BuildStaticBundle and the SPA bundle via
+// BuildSPABundle. The output is a single self-contained .html file.
+func renderStaticHTML(ctx context.Context, w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
+	// Fast cancellation path: a disconnected client (or a test
+	// passing a pre-canceled ctx) should short-circuit before the
+	// CPU-heavy bundle build.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	bundleJSON, err := BuildStaticBundle(ctx, a, opts)
+	if err != nil {
+		return err
+	}
+	spaBundle, err := BuildSPABundle(webassets.WebFS)
+	if err != nil {
+		return fmt.Errorf("build SPA bundle: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return staticHTMLTpl.Execute(w, struct {
+		Tokens           template.CSS
+		AppCSS           template.CSS
+		StaticBundleJSON template.JS
+		SPABundleHTML    template.HTML
+		Version          string
+	}{
+		Tokens:           template.CSS(tokensCSS),
+		AppCSS:           template.CSS(appCSS),
+		StaticBundleJSON: template.JS(bundleJSON),
+		SPABundleHTML:    template.HTML(spaBundle),
+		Version:          opts.Version,
+	})
+}
+
+// renderLegacyHTML is the fat-HTML path served at /legacy and used
+// by any caller passing opts.Serve.Enabled=true. Body unchanged
+// from pre-Phase-9 behavior. Will go away with Phase 10's cleanup.
+func renderLegacyHTML(ctx context.Context, w io.Writer, a *aggregate.Aggregator, opts HTMLOptions) error {
 	// When DeferData is on, the browser fetches the JSON from DataPath
 	// asynchronously — embedding it inline would just duplicate the
 	// bytes and undo the whole point. The render cache and the JSON
