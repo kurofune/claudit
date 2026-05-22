@@ -77,7 +77,11 @@ func TestBuildTools_ShapeAndKeys(t *testing.T) {
 }
 
 // TestBuildSubagents_ShapeAndKeys: subagents tab has the type
-// roll-up plus the per-invocation rows.
+// roll-up plus the per-invocation rows AND the main/sidechain split
+// the "Main vs sidechain" subtab consumes — the legacy SSR'd inline
+// blob exposed those separately as `main`/`sidechain` but the SPA's
+// Subagents tab is the only consumer, so they ride alongside the rest
+// of the subagents data here.
 func TestBuildSubagents_ShapeAndKeys(t *testing.T) {
 	a := htmlSetup(t)
 	p := BuildSubagents(a)
@@ -88,7 +92,40 @@ func TestBuildSubagents_ShapeAndKeys(t *testing.T) {
 	wantTopLevel(t, got, []string{
 		"by_subagent",
 		"agent_invocations",
+		"main",
+		"sidechain",
 	})
+}
+
+// TestBuildSubagents_MainSidechainMatchesAggregator: the Main and
+// Sidechain fields must reflect the aggregator's MainTotals() and
+// SidechainTotals() exactly — the SPA's mainside table reads cost,
+// turns, and tokens.CacheReadTokens directly.
+func TestBuildSubagents_MainSidechainMatchesAggregator(t *testing.T) {
+	a := htmlSetup(t)
+	p := BuildSubagents(a)
+
+	mainTok, mainCost, mainTurns := a.MainTotals()
+	sideTok, sideCost, sideTurns := a.SidechainTotals()
+
+	if p.Main.Cost != mainCost {
+		t.Errorf("main.cost: got %v, want %v", p.Main.Cost, mainCost)
+	}
+	if p.Main.Turns != mainTurns {
+		t.Errorf("main.turns: got %v, want %v", p.Main.Turns, mainTurns)
+	}
+	if p.Main.Tokens != mainTok {
+		t.Errorf("main.tokens: got %+v, want %+v", p.Main.Tokens, mainTok)
+	}
+	if p.Sidechain.Cost != sideCost {
+		t.Errorf("sidechain.cost: got %v, want %v", p.Sidechain.Cost, sideCost)
+	}
+	if p.Sidechain.Turns != sideTurns {
+		t.Errorf("sidechain.turns: got %v, want %v", p.Sidechain.Turns, sideTurns)
+	}
+	if p.Sidechain.Tokens != sideTok {
+		t.Errorf("sidechain.tokens: got %+v, want %+v", p.Sidechain.Tokens, sideTok)
+	}
 }
 
 // TestBuildAnomalies_ShapeAndKeys: anomalies endpoint is a thin

@@ -7,6 +7,50 @@
 
 import { fmtMoney, escHtml, bucketLabel, pointHitRatio } from './format.js';
 
+// trendSpark — tiny inline SVG bar sparkline for a table cell, cost-
+// normalized (bar heights scale to the largest cost in the series).
+// Bars (not a polyline) make sparse/single-cell series readable.
+// Ported from report.html.tmpl:2163.
+export function trendSpark(points, period, w, h) {
+  w = w || 90; h = h || 18;
+  if (!points || points.length === 0) return '<span class="small">—</span>';
+  let max = 0;
+  for (const p of points) { if ((p.cost_usd || 0) > max) max = p.cost_usd; }
+  const n = points.length;
+  const bw = w / n;
+  let bars = '';
+  for (let i = 0; i < n; i++) {
+    const v = points[i].cost_usd || 0;
+    const bh = max > 0 ? (v / max) * (h - 1) : 0;
+    const x = i * bw;
+    const y = h - bh;
+    const label = `${escHtml(bucketLabel(points[i].time, period))}: ${fmtMoney(v)}`;
+    bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(bw*0.85).toFixed(2)}" height="${bh.toFixed(2)}" data-tooltip="${label}"></rect>`;
+  }
+  return `<svg class="trend-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bars}</svg>`;
+}
+
+// trendSparkHit — hit-ratio variant: bars from 0..1 (axis-fixed) so a
+// 30%-hit row reads visibly shorter than a 90%-hit row even when
+// their cacheable volume is identical. Ported from
+// report.html.tmpl:2770.
+export function trendSparkHit(points, period, w, h) {
+  w = w || 90; h = h || 18;
+  if (!points || points.length === 0) return '<span class="small">—</span>';
+  const n = points.length;
+  const bw = w / n;
+  let bars = '';
+  for (let i = 0; i < n; i++) {
+    const r = pointHitRatio(points[i]);
+    const bh = r * (h - 1);
+    const x = i * bw;
+    const y = h - bh;
+    const label = `${escHtml(bucketLabel(points[i].time, period))}: ${(r * 100).toFixed(1)}% hit`;
+    bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${(bw*0.85).toFixed(2)}" height="${bh.toFixed(2)}" data-tooltip="${label}"></rect>`;
+  }
+  return `<svg class="trend-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bars}</svg>`;
+}
+
 // anomalyIndex narrows D.anomalies to a single kind, indexed by
 // bucket timestamp string. The string comes from json.Marshal of
 // time.Time so it matches TrendPoint.time bytes-for-bytes.

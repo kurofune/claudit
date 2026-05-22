@@ -87,10 +87,17 @@ type ToolsPayload struct {
 }
 
 // SubagentsPayload backs /_claudit/api/subagents — the subagent-type
-// roll-up plus every individual invocation row.
+// roll-up plus every individual invocation row. Main and Sidechain
+// carry the main-thread / sidechain totals fueling the "Main vs
+// sidechain" subtab; the static report's inline blob exposed these as
+// top-level `main` / `sidechain` fields, but the Subagents tab is the
+// only consumer so they ride alongside the rest of the subagents data
+// here.
 type SubagentsPayload struct {
 	BySubagent       []aggregate.SubagentBucket  `json:"by_subagent"`
 	AgentInvocations []aggregate.AgentInvocation `json:"agent_invocations"`
+	Main             sidePart                    `json:"main"`
+	Sidechain        sidePart                    `json:"sidechain"`
 }
 
 // AnomaliesPayload backs /_claudit/api/anomalies — a single top-level
@@ -178,9 +185,13 @@ func BuildTools(a *aggregate.Aggregator) ToolsPayload {
 // type filter on the aggregator method is a holdover from the CLI's
 // --subagent flag.
 func BuildSubagents(a *aggregate.Aggregator) SubagentsPayload {
+	mainTok, mainCost, mainTurns := a.MainTotals()
+	sideTok, sideCost, sideTurns := a.SidechainTotals()
 	return SubagentsPayload{
 		BySubagent:       a.BySubagent(),
 		AgentInvocations: a.AgentInvocations(""),
+		Main:             sidePart{Cost: mainCost, Turns: mainTurns, Tokens: mainTok},
+		Sidechain:        sidePart{Cost: sideCost, Turns: sideTurns, Tokens: sideTok},
 	}
 }
 
@@ -278,10 +289,9 @@ type inlinePayload struct {
 	Forecast      aggregate.Forecast     `json:"forecast"`
 	UnknownModels []string               `json:"unknown_models"`
 
-	// Static-only: main/sidechain totals fuel SSR'd headline tiles;
-	// prompt_keys drives hotspot cross-link availability in the JS.
-	Main       sidePart `json:"main"`
-	Sidechain  sidePart `json:"sidechain"`
+	// Static-only: prompt_keys drives hotspot cross-link availability
+	// in the JS. main/sidechain ride along via the embedded
+	// SubagentsPayload above.
 	PromptKeys []string `json:"prompt_keys"`
 
 	// Legacy flat trend shape — predates TrendsPayload's per-dim split.
@@ -311,9 +321,6 @@ type inlinePayload struct {
 func BuildPayload(ctx context.Context, a *aggregate.Aggregator, opts HTMLOptions) ([]byte, error) {
 	overview := BuildOverview(a)
 
-	mainTok, mainCost, mainTurns := a.MainTotals()
-	sideTok, sideCost, sideTurns := a.SidechainTotals()
-
 	payload := inlinePayload{
 		CostPayload:      BuildCost(a),
 		CachePayload:     BuildCache(a),
@@ -326,8 +333,6 @@ func BuildPayload(ctx context.Context, a *aggregate.Aggregator, opts HTMLOptions
 		Forecast:      overview.Forecast,
 		UnknownModels: overview.UnknownModels,
 
-		Main:       sidePart{Cost: mainCost, Turns: mainTurns, Tokens: mainTok},
-		Sidechain:  sidePart{Cost: sideCost, Turns: sideTurns, Tokens: sideTok},
 		PromptKeys: promptKeysFromTimelines(opts.SessionTimelines),
 
 		Period:          a.Period(),

@@ -11,6 +11,24 @@ export const fmtMoney = v => {
 
 export const fmtPct = (part, total) => total > 0 ? (100 * part / total).toFixed(1) + '%' : '—';
 
+// pct is the table-mapper-friendly alias used by table cell rows. Same
+// math as fmtPct, named to match the legacy inline JS where it sits
+// alongside fmtMoney / fmtNum.
+export const pct = fmtPct;
+
+// truncate clips a long string by dropping middle characters and
+// prepending an ellipsis — keeps the tail visible (file basename,
+// session-id suffix). Mirrors the Go renderer's truncate() in
+// internal/render/markdown.go so a project path looks the same in
+// the SPA's hbar list and in the markdown report.
+export function truncate(s, max) {
+  if (!s) return '';
+  const str = String(s);
+  if (str.length <= max) return str;
+  if (max <= 1) return '…';
+  return '…' + str.slice(str.length - (max - 1));
+}
+
 export const fmtPct1 = v => (v == null || isNaN(v)) ? '—' : (100 * v).toFixed(1) + '%';
 
 export const fmtNum = v => v == null ? '0' : Number(v).toLocaleString();

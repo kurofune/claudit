@@ -187,7 +187,7 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "subagents",
 			path:     "/_claudit/api/subagents",
-			wantKeys: []string{"by_subagent", "agent_invocations"},
+			wantKeys: []string{"by_subagent", "agent_invocations", "main", "sidechain"},
 		},
 		{
 			name:     "anomalies",

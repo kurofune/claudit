@@ -59,8 +59,6 @@ func TestStaticPayload_EqualsUnionOfAPISections(t *testing.T) {
 	// Fields the static surface needs but the API doesn't expose
 	// (each section endpoint returns only its own slice of the data).
 	staticOnly := map[string]string{
-		"main":        "main-chain totals — fed to SSR'd headline tiles",
-		"sidechain":   "sidechain totals — fed to SSR'd headline tiles",
 		"prompt_keys": "derived from opts.SessionTimelines for cross-link availability",
 	}
 
