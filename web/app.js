@@ -12,6 +12,7 @@ import { paint as paintCost } from './view-cost.js';
 import { paint as paintCache } from './view-cache.js';
 import { paint as paintTools } from './view-tools.js';
 import { paint as paintSubagents } from './view-subagents.js';
+import { paint as paintSessions } from './view-sessions.js';
 import { start as startSSE, wireReloadToast } from './sse.js';
 
 const VIEW_PAINTERS = {
@@ -20,6 +21,7 @@ const VIEW_PAINTERS = {
   cache: paintCache,
   tools: paintTools,
   subagents: paintSubagents,
+  sessions: paintSessions,
 };
 
 onChange(async (route) => {
