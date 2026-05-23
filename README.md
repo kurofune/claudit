@@ -51,8 +51,6 @@ claudit serve --port=9000 --open=false
 #   http://127.0.0.1:8787/?project=myrepo&last=7d
 #   http://127.0.0.1:8787/?since=2026-05-01&until=2026-05-15&by=week#cost
 #   http://127.0.0.1:8787/#sessions/<session-id>     # deep-link a session
-# The legacy single-file HTML report is still reachable at /legacy for one
-# minor release; new bookmarks should target /.
 ```
 
 Run `claudit help` for the subcommand list and `claudit <cmd> --help` for per-command flags.
