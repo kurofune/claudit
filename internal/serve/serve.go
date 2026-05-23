@@ -153,9 +153,47 @@ func NewServer(cache *Cache, opts Options) *Server {
 			slog.Any("err", aerr))
 	} else {
 		s.assets = manifest
+		// {{version}} placeholder in index.html → the build label in the
+		// sidebar footer (or removed entirely when opts.Version is empty,
+		// e.g. tests / unstamped binaries). Substituted once at startup
+		// against the already-rewritten shell body so handleApp stays a
+		// straight memcpy.
+		substituteVersionPlaceholder(manifest, opts.Version)
 	}
 	s.routes()
 	return s
+}
+
+// substituteVersionPlaceholder swaps the literal "{{version}}" token in
+// the SPA shell for either a populated <footer class="nav-footer"> or an
+// empty string when version is blank. Operates on the in-memory entry
+// body directly — the manifest's ETag hash is derived from the original
+// source bytes, so mutating .body here leaves cache validation
+// untouched.
+func substituteVersionPlaceholder(m *assetManifest, version string) {
+	entry, ok := m.bySourceName["index.html"]
+	if !ok {
+		return
+	}
+	var replacement []byte
+	if version != "" {
+		replacement = []byte(`<footer class="nav-footer">` + htmlEscape(version) + `</footer>`)
+	}
+	entry.body = bytes.ReplaceAll(entry.body, []byte("{{version}}"), replacement)
+}
+
+// htmlEscape escapes the four characters that matter inside a text
+// node so a malicious or weird version string can't break out of the
+// footer markup. Kept local to avoid pulling in html/template just for
+// this single substitution.
+func htmlEscape(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+	)
+	return r.Replace(s)
 }
 
 func (s *Server) routes() {

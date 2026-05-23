@@ -296,3 +296,109 @@ func TestServer_ShutdownErrorIsLogged(t *testing.T) {
 	close(release)
 	<-reqDone
 }
+
+// TestServer_VersionFooter_Injected confirms that opts.Version is
+// substituted into the SPA shell so the sidebar shows the build label
+// the user expects (this regressed during the SPA cutover — the legacy
+// fat-HTML template emitted .nav-footer, but the SPA shell carried no
+// equivalent until {{version}} was added).
+func TestServer_VersionFooter_Injected(t *testing.T) {
+	cache := NewCache(t.TempDir())
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{
+		Prices:             loadPricesForTest(t),
+		DefaultHotspots:    10,
+		DefaultSessionsTop: 50,
+		Version:            "v1.2.3-abc",
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	want := `<footer class="nav-footer">v1.2.3-abc</footer>`
+	if !strings.Contains(body, want) {
+		t.Errorf("body missing %q (showing nav block):\n%s", want, snippetAround(body, "nav-list"))
+	}
+	if strings.Contains(body, "{{version}}") {
+		t.Errorf("body still contains unresolved {{version}} placeholder")
+	}
+}
+
+// TestServer_VersionFooter_EmptyOmits — when no version is stamped
+// (unstamped binary, `go run`, tests), the placeholder must vanish
+// rather than leave a literal "{{version}}" or an empty <footer>
+// taking up nav-bottom space.
+func TestServer_VersionFooter_EmptyOmits(t *testing.T) {
+	cache := NewCache(t.TempDir())
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{
+		Prices:             loadPricesForTest(t),
+		DefaultHotspots:    10,
+		DefaultSessionsTop: 50,
+		Version:            "",
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+	body := w.Body.String()
+	if strings.Contains(body, "{{version}}") {
+		t.Errorf("body still contains literal {{version}} when Version is empty")
+	}
+	if strings.Contains(body, `class="nav-footer"`) {
+		t.Errorf("body should not emit nav-footer when Version is empty:\n%s", snippetAround(body, "nav-list"))
+	}
+}
+
+// TestServer_VersionFooter_EscapesHTML — version strings flow in from
+// debug.ReadBuildInfo / -ldflags; not user input, but escaping the four
+// HTML text-node specials is cheap insurance against a future caller
+// passing something exotic.
+func TestServer_VersionFooter_EscapesHTML(t *testing.T) {
+	cache := NewCache(t.TempDir())
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{
+		Prices:             loadPricesForTest(t),
+		DefaultHotspots:    10,
+		DefaultSessionsTop: 50,
+		Version:            `<script>alert(1)</script>`,
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+	body := w.Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") {
+		t.Errorf("body contains un-escaped <script> tag")
+	}
+	want := "&lt;script&gt;alert(1)&lt;/script&gt;"
+	if !strings.Contains(body, want) {
+		t.Errorf("body missing escaped form %q", want)
+	}
+}
+
+func snippetAround(s, marker string) string {
+	i := strings.Index(s, marker)
+	if i < 0 {
+		return "(marker not found)"
+	}
+	lo := i - 200
+	if lo < 0 {
+		lo = 0
+	}
+	hi := i + 400
+	if hi > len(s) {
+		hi = len(s)
+	}
+	return s[lo:hi]
+}
