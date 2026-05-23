@@ -10,6 +10,7 @@ import { trendSparkHit } from './charts.js';
 import {
   buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
 } from './table.js';
+import { tableBodySkeleton, summaryBandSkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -102,6 +103,21 @@ const SHELL = `
   </div>
 `;
 
+function paintCacheSkeletons(container) {
+  const summary = container.querySelector('#cache-summary');
+  if (summary) summary.innerHTML = summaryBandSkeleton();
+  const tables = {
+    'cache-project': 6,
+    'cache-session': 7,
+    'cache-subagent': 6,
+    'cache-invocation': 7,
+  };
+  for (const [name, cols] of Object.entries(tables)) {
+    const tb = container.querySelector(`[data-table="${name}"] tbody`);
+    if (tb) tb.innerHTML = tableBodySkeleton(cols, 6);
+  }
+}
+
 function activateSubview(container, sub) {
   const subs = container.querySelectorAll('.subtab[data-subtab]');
   if (!subs.length) return;
@@ -114,6 +130,23 @@ function activateSubview(container, sub) {
 }
 
 let painted = false;
+let navPainted = false;
+
+// paintNav fetches /cache just to derive the sidebar metric (overall
+// hit-ratio pill). Called from app.js at startup; full paint() reuses
+// the same endpoint via the server's render cache.
+export async function paintNav() {
+  if (navPainted || painted) return;
+  let cache;
+  try { cache = await fetchCache(); } catch { return; }
+  const cacheNav = document.getElementById('nav-metric-cache');
+  if (cacheNav) {
+    cacheNav.innerHTML = cache.overall_hit_ratio != null
+      ? hitRatioPill(cache.overall_hit_ratio, 'tier-sm') + ' <span class="small">hit</span>'
+      : '—';
+  }
+  navPainted = true;
+}
 
 export async function paint(route) {
   const container = document.getElementById('view-cache');
@@ -125,6 +158,7 @@ export async function paint(route) {
   }
 
   container.innerHTML = SHELL;
+  paintCacheSkeletons(container);
 
   let cache;
   try {
@@ -228,6 +262,7 @@ export async function paint(route) {
   }
 
   painted = true;
+  navPainted = true;
 }
 
-export function reset() { painted = false; }
+export function reset() { painted = false; navPainted = false; }

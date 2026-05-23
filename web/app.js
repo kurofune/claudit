@@ -8,12 +8,13 @@
 
 import { onChange, activate, parseHash } from './router.js';
 import { paint as paintOverview } from './view-overview.js';
-import { paint as paintCost } from './view-cost.js';
-import { paint as paintCache } from './view-cache.js';
-import { paint as paintTools } from './view-tools.js';
-import { paint as paintSubagents } from './view-subagents.js';
-import { paint as paintSessions } from './view-sessions.js';
+import { paint as paintCost, paintNav as paintNavCost } from './view-cost.js';
+import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js';
+import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
+import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
+import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
 import { start as startSSE, wireReloadToast } from './sse.js';
+import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 
 const VIEW_PAINTERS = {
   overview: paintOverview,
@@ -49,3 +50,33 @@ const onUpdate = wireReloadToast(toastEl, btnEl);
 if (!window.__claudit_static_data) {
   startSSE(onUpdate);
 }
+
+// Sidebar metric prefetch — fires the five non-overview sections in
+// parallel at startup so their nav-metric dashes resolve before the
+// user clicks each tab. Each paintNav() short-circuits if its full
+// paint() has already run (e.g. via deep link), and falls back to
+// leaving the metric as "—" if the fetch fails.
+//
+// Paint shimmer pills first so the bare `—` doesn't flash before the
+// fetch lands. skeletonResetIfPending() reverts to "—" for any pill
+// whose paintNav silently failed (catch+return without writing the
+// metric), so we never shimmer forever.
+// Overview's metric + date-range are painted by view-overview.js's
+// paint(), which only fires when Overview is the active route — skeleton
+// them only if we're starting on Overview, otherwise leave them as "—".
+paintNavSkeletons(parseHash().view === 'overview');
+// Pills fed by the five paintNavs below — nav-metric-overview and
+// date-range are owned by view-overview.js and reset there on error.
+const NAV_SKEL_IDS = [
+  'nav-metric-cost', 'nav-metric-sessions',
+  'nav-metric-cache', 'nav-metric-tools', 'nav-metric-subagents',
+];
+Promise.all([
+  paintNavCost(),
+  paintNavCache(),
+  paintNavTools(),
+  paintNavSubagents(),
+  paintNavSessions(),
+])
+  .catch(err => console.error('nav metric prefetch failed:', err))
+  .finally(() => NAV_SKEL_IDS.forEach(skeletonResetIfPending));

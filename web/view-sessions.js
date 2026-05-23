@@ -17,6 +17,7 @@
 
 import { fetchSessions, fetchSessionTimeline } from './api.js';
 import { fmtMoney, escHtml } from './format.js';
+import { sessionListSkeleton, timelineSkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -47,9 +48,22 @@ const SHELL = `
 const timelineCache = new Map();
 
 let painted = false;
+let navPainted = false;
 // Tracks the most-recently-applied deep-link sub so a hashchange
 // from the same value (no-op) doesn't re-trigger scroll/expand.
 let appliedSub = null;
+
+// paintNav fetches /sessions just to derive the sidebar metric (count
+// · top cost). Called at startup so the metric resolves before the
+// user clicks the tab. Cheap on cache hit.
+export async function paintNav() {
+  if (navPainted || painted) return;
+  let payload;
+  try { payload = await fetchSessions(); } catch { return; }
+  const sessions = (payload && payload.sessions) || [];
+  updateNavMetric(sessions);
+  navPainted = true;
+}
 
 export async function paint(route) {
   const container = document.getElementById('view-sessions');
@@ -61,6 +75,8 @@ export async function paint(route) {
   }
 
   container.innerHTML = SHELL;
+  const listEl = container.querySelector('#session-list');
+  if (listEl) listEl.innerHTML = sessionListSkeleton(8);
 
   let payload;
   try {
@@ -84,11 +100,13 @@ export async function paint(route) {
   updateNavMetric(sessions);
 
   painted = true;
+  navPainted = true;
   applyDeepLink(container, route.sub);
 }
 
 export function reset() {
   painted = false;
+  navPainted = false;
   appliedSub = null;
   timelineCache.clear();
 }
@@ -113,7 +131,7 @@ function sessionCardHTML(s, colorSlot) {
       <span class="s-time">${escHtml(formatTimeRange(s.started_at, s.ended_at))}</span>
     </summary>
     <div class="session-body" data-loaded="0">
-      <div class="small empty-state">Loading timeline…</div>
+      ${timelineSkeleton(3)}
     </div>
   </details>`;
 }

@@ -10,6 +10,7 @@ import { trendSpark } from './charts.js';
 import {
   buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
 } from './table.js';
+import { hbarListSkeleton, tableBodySkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -119,6 +120,23 @@ const SHELL = `
   </div>
 `;
 
+// paintCostSkeletons fills the empty SHELL with shimmer placeholders.
+// Each spot gets overwritten when real content arrives: hbar lists via
+// innerHTML, tbodies via buildRows().
+function paintCostSkeletons(container) {
+  const barsModel = container.querySelector('#cost-bars-model');
+  if (barsModel) barsModel.innerHTML = hbarListSkeleton(5);
+  const barsProject = container.querySelector('#cost-bars-project');
+  if (barsProject) barsProject.innerHTML = hbarListSkeleton(8);
+  const tables = {
+    model: 6, project: 6, skill: 5, prompt: 6,
+  };
+  for (const [name, cols] of Object.entries(tables)) {
+    const tb = container.querySelector(`[data-table="${name}"] tbody`);
+    if (tb) tb.innerHTML = tableBodySkeleton(cols, 6);
+  }
+}
+
 function activateSubview(container, sub) {
   const subs = container.querySelectorAll('.subtab[data-subtab]');
   if (!subs.length) return;
@@ -138,6 +156,23 @@ function updateNavMetric(id, html) {
 }
 
 let painted = false;
+let navPainted = false;
+
+// paintNav fetches /cost just to derive the sidebar metric (top model
+// by spend). Called from app.js at startup so the metric resolves
+// before the user clicks the tab; the full paint() reuses the same
+// endpoint via the server's render cache.
+export async function paintNav() {
+  if (navPainted || painted) return;
+  let cost;
+  try { cost = await fetchCost(); } catch { return; }
+  const byModel = cost.by_model || [];
+  const topModel = byModel.filter(r => r.CostUSD > 0)[0];
+  updateNavMetric('nav-metric-cost', topModel
+    ? `${truncate(topModel.Model, 18)} · ${fmtMoney(topModel.CostUSD)}`
+    : '—');
+  navPainted = true;
+}
 
 export async function paint(route) {
   const container = document.getElementById('view-cost');
@@ -149,6 +184,7 @@ export async function paint(route) {
   }
 
   container.innerHTML = SHELL;
+  paintCostSkeletons(container);
 
   let cost;
   try {
@@ -243,6 +279,7 @@ export async function paint(route) {
     : '—');
 
   painted = true;
+  navPainted = true;
 }
 
-export function reset() { painted = false; }
+export function reset() { painted = false; navPainted = false; }

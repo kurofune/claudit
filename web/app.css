@@ -1523,3 +1523,100 @@
   @media print {
     .claudit-reload-toast, .claudit-date-popover { display: none !important; }
   }
+
+  /* ─── Skeleton loaders ────────────────────────────────────────────────
+     Animated placeholders used while a view's data is in-flight. Base
+     `.skeleton` paints a darker block with a bright left-to-right
+     shimmer sweep so it reads as "loading" rather than "empty card".
+     Shape variants (skel-tile, skel-bar, …) carry the per-context
+     sizing. Reduced-motion drops the animation and just shows a static
+     darker block. Prevent the shimmer from rendering inside a print
+     pass. */
+  .skeleton {
+    display: inline-block;
+    position: relative;
+    overflow: hidden;
+    /* Darker than surface-2 so the block visibly contrasts with the
+       page bg + the surrounding chrome — reads as "something is going
+       to land here", not "empty container". */
+    background: color-mix(in oklch, var(--ink) 12%, var(--surface-2));
+    border-radius: var(--r-md);
+    color: transparent;
+    user-select: none;
+    pointer-events: none;
+    isolation: isolate;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute; inset: 0;
+    /* Bright sweep — uses the page surface color (light or dark
+       theme) at high opacity so the band reads as a clear highlight
+       moving across the darker base. */
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--surface) 70%, transparent) 50%,
+      transparent 100%
+    );
+    transform: translateX(-100%);
+    animation: claudit-skel-shimmer 1.1s ease-in-out infinite;
+  }
+
+  @keyframes claudit-skel-shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Shape variants. Heights mirror their real-content counterparts so
+     the layout doesn't jump when the skeleton is swapped out. */
+  .skel-line     { display: block; height: 0.9em; border-radius: var(--r-sm); }
+  .skel-pill     { height: 1em; min-width: 4ch; border-radius: var(--r-pill); }
+  .skel-tile     { display: block; height: 76px; border-radius: var(--r-lg); }
+  .skel-tile-lg  { display: block; height: 108px; border-radius: var(--r-lg); }
+  .skel-bar      { display: block; height: 26px; border-radius: var(--r-md); }
+  .skel-stacked  { display: block; height: 32px; border-radius: var(--r-md); }
+  .skel-row      { display: block; height: 38px; border-radius: var(--r-sm); }
+  .skel-row-sm   { display: block; height: 28px; border-radius: var(--r-sm); }
+  .skel-chart    { display: block; height: 220px; border-radius: var(--r-lg); }
+  .skel-summary  { display: block; height: 28px; border-radius: var(--r-md); flex: 1 1 100%; min-width: 0; }
+  .skel-hotspot  { display: block; height: 44px; border-radius: var(--r-lg); }
+  .skel-card     { display: block; height: 52px; border-radius: var(--r-lg); }
+
+  /* Container helpers — give the skeleton stacks the same gap/flow as the
+     real content so swap-in doesn't cause reflow. */
+  .skel-list { display: flex; flex-direction: column; gap: var(--s-2); }
+  .skel-totals {
+    display: flex; flex-wrap: wrap; gap: var(--s-3);
+    margin-bottom: var(--s-5);
+  }
+  .skel-totals > .skeleton { flex: 1 1 220px; }
+  .skel-hbars {
+    display: flex; flex-direction: column; gap: 2px;
+    max-width: 100%; margin-bottom: var(--s-3);
+  }
+
+  /* Skeleton rows inside a real <tbody>. Each row is one skeleton TD
+     spanning the row; the TR carries no border so it reads as a single
+     shimmering bar. */
+  tr.skel-tr td {
+    padding: var(--s-2) var(--s-3);
+  }
+  tr.skel-tr .skel-line {
+    width: 100%; height: 1.1em;
+  }
+
+  /* Nav-metric pill skeleton — sized to roughly match a 12ch metric
+     like "30 · top $9.80". */
+  .nav-metric .skel-pill,
+  #date-range .skel-pill {
+    min-width: 7ch;
+    height: 0.9em;
+    vertical-align: -0.1em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after { animation: none; opacity: 0.35; transform: translateX(0); }
+  }
+  @media print {
+    .skeleton::after { animation: none; display: none; }
+  }

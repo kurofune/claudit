@@ -9,6 +9,7 @@ import { trendSpark } from './charts.js';
 import {
   buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
 } from './table.js';
+import { hbarListSkeleton, tableBodySkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -99,6 +100,21 @@ const SHELL = `
   </div>
 `;
 
+function paintToolsSkeletons(container) {
+  const bars = container.querySelector('#tools-bars');
+  if (bars) bars.innerHTML = hbarListSkeleton(7);
+  const tb = container.querySelector('[data-table="tool"] tbody');
+  if (tb) tb.innerHTML = tableBodySkeleton(6, 6);
+  const drill = container.querySelector('#drill-container');
+  if (drill) {
+    drill.innerHTML = `<div class="skel-list">
+      <span class="skeleton skel-card"></span>
+      <span class="skeleton skel-card"></span>
+      <span class="skeleton skel-card"></span>
+    </div>`;
+  }
+}
+
 function activateSubview(container, sub) {
   const subs = container.querySelectorAll('.subtab[data-subtab]');
   if (!subs.length) return;
@@ -111,6 +127,23 @@ function activateSubview(container, sub) {
 }
 
 let painted = false;
+let navPainted = false;
+
+// paintNav fetches /tools just to derive the sidebar metric (top tool
+// name + cost). Called from app.js at startup; full paint() reuses
+// the same endpoint via the server's render cache.
+export async function paintNav() {
+  if (navPainted || painted) return;
+  let tools;
+  try { tools = await fetchTools(); } catch { return; }
+  const byTool = tools.by_tool || [];
+  const topTool = byTool[0];
+  const navEl = document.getElementById('nav-metric-tools');
+  if (navEl) navEl.textContent = topTool
+    ? `${truncate(topTool.Name, 14)} · ${fmtMoney(topTool.CostUSD)}`
+    : '—';
+  navPainted = true;
+}
 
 export async function paint(route) {
   const container = document.getElementById('view-tools');
@@ -122,6 +155,7 @@ export async function paint(route) {
   }
 
   container.innerHTML = SHELL;
+  paintToolsSkeletons(container);
 
   // Tools needs a totalCost figure for the "%" column. The /tools
   // endpoint doesn't include the overall cost; sourcing from /cost
@@ -181,6 +215,7 @@ export async function paint(route) {
     : '—';
 
   painted = true;
+  navPainted = true;
 }
 
-export function reset() { painted = false; }
+export function reset() { painted = false; navPainted = false; }

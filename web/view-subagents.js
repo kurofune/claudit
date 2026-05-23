@@ -10,6 +10,7 @@
 import { fetchSubagents, fetchOverview } from './api.js';
 import { fmtNum, fmtMoney, fmtPct, fmtDate, escHtml, truncate, pct } from './format.js';
 import { buildRows, wireGlobalFilters } from './table.js';
+import { tableBodySkeleton, stackedSkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -78,6 +79,20 @@ const SHELL = `
   </div>
 `;
 
+function paintSubagentsSkeletons(container) {
+  const stacked = container.querySelector('#stacked-main');
+  if (stacked) stacked.innerHTML = stackedSkeleton();
+  const tables = {
+    mainside: 5,
+    subagent: 6,
+    invocation: 6,
+  };
+  for (const [name, cols] of Object.entries(tables)) {
+    const tb = container.querySelector(`[data-table="${name}"] tbody`);
+    if (tb) tb.innerHTML = tableBodySkeleton(cols, name === 'mainside' ? 2 : 6);
+  }
+}
+
 function activateSubview(container, sub) {
   const subs = container.querySelectorAll('.subtab[data-subtab]');
   if (!subs.length) return;
@@ -90,6 +105,28 @@ function activateSubview(container, sub) {
 }
 
 let painted = false;
+let navPainted = false;
+
+// paintNav fetches /subagents + /overview to derive the sidebar metric
+// (sidechain cost · share of total). Called from app.js at startup;
+// full paint() reuses both endpoints via the server's render cache.
+export async function paintNav() {
+  if (navPainted || painted) return;
+  let subagents, overview;
+  try {
+    [subagents, overview] = await Promise.all([fetchSubagents(), fetchOverview()]);
+  } catch { return; }
+  const side = subagents.sidechain || { cost: 0 };
+  const sideCost = side.cost || 0;
+  const totalCost = (overview.totals && overview.totals.CostUSD) || 0;
+  const navEl = document.getElementById('nav-metric-subagents');
+  if (navEl) {
+    navEl.textContent = totalCost > 0
+      ? `${fmtMoney(sideCost)} · ${fmtPct(sideCost, totalCost)}`
+      : '—';
+  }
+  navPainted = true;
+}
 
 export async function paint(route) {
   const container = document.getElementById('view-subagents');
@@ -101,6 +138,7 @@ export async function paint(route) {
   }
 
   container.innerHTML = SHELL;
+  paintSubagentsSkeletons(container);
 
   let subagents, overview;
   try {
@@ -173,6 +211,7 @@ export async function paint(route) {
   }
 
   painted = true;
+  navPainted = true;
 }
 
-export function reset() { painted = false; }
+export function reset() { painted = false; navPainted = false; }

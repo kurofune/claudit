@@ -9,6 +9,7 @@
 import { fetchOverview, fetchAnomalies } from './api.js';
 import { fmtMoney, fmtNum, hitRatioPill, escHtml, pointHitRatio } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart } from './charts.js';
+import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -196,7 +197,7 @@ export async function paint() {
   if (painted) return; // first-render only for Phase 5 — re-fetch comes with SSE-driven invalidation in a later phase.
 
   container.innerHTML = `<div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
-    <div class="small">Loading overview…</div>`;
+    ${overviewSkeleton()}`;
 
   let overview, anomalies;
   try {
@@ -207,6 +208,8 @@ export async function paint() {
   } catch (err) {
     container.innerHTML = `<div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
       <div class="warning-card" role="alert"><strong class="danger">Failed to load overview:</strong> ${escHtml(err.message)}</div>`;
+    skeletonResetIfPending('nav-metric-overview');
+    skeletonResetIfPending('date-range');
     return;
   }
 
