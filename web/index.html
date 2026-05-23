@@ -76,7 +76,11 @@
   <aside class="nav" aria-label="Sections">
     <div class="brand">
       <div class="brand-name">claudit</div>
-      <div class="brand-sub" id="date-range">—</div>
+      <button type="button" class="brand-sub brand-sub-button" id="date-range-button"
+              aria-haspopup="dialog" aria-expanded="false" title="Pick a date range">
+        <svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
+        <span id="date-range">—</span>
+      </button>
     </div>
     <nav class="nav-list">
       <a class="nav-item is-active" href="#overview" data-view="overview">

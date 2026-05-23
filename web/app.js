@@ -14,6 +14,7 @@ import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js'
 import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
 import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
 import { start as startSSE, wireReloadToast } from './sse.js';
+import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 
 const VIEW_PAINTERS = {
@@ -50,6 +51,10 @@ const onUpdate = wireReloadToast(toastEl, btnEl);
 if (!window.__claudit_static_data) {
   startSSE(onUpdate);
 }
+
+// Date-range picker — serve-mode only. The static report renders a
+// plain <div id="date-range">, so wireDatePicker() no-ops there.
+wireDatePicker();
 
 // Sidebar metric prefetch — fires the five non-overview sections in
 // parallel at startup so their nav-metric dashes resolve before the
