@@ -1,0 +1,38 @@
+/* Monokai Pro — olive-warm-dark with pink/orange/green/blue palette.
+   Accent leans pink #ff6188 (Pro variant's signature). */
+:root[data-theme="monokai-pro"] {
+  color-scheme: dark;
+  --brand-h: 350;
+
+  --bg:           oklch(25% 0.010 30);    /* #2d2a2e */
+  --surface:      oklch(29% 0.010 30);
+  --surface-2:    oklch(34% 0.010 30);
+  --surface-3:    oklch(40% 0.012 30);
+  --border:       oklch(42% 0.012 30);
+  --border-strong:oklch(56% 0.014 30);
+  --ink:          oklch(98% 0.006 80);    /* #fcfcfa */
+  --ink-2:        oklch(82% 0.010 80);
+  --muted:        oklch(62% 0.014 60);
+
+  --accent:       oklch(72% 0.18 5);      /* pink-red #ff6188 */
+  --accent-2:     oklch(86% 0.18 130);    /* green    #a9dc76 */
+  --warn:         oklch(82% 0.15 65);     /* orange   #fc9867 */
+  --hot:          oklch(72% 0.20 15);     /* red      */
+
+  --hot-soft:      oklch(72% 0.22 15 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(82% 0.12 220);   /* cyan   #78dce8 */
+  --c-2: oklch(76% 0.14 295);   /* purple #ab9df2 */
+  --c-3: oklch(86% 0.18 130);   /* green  */
+  --c-4: oklch(90% 0.16  95);   /* yellow #ffd866 */
+  --c-5: oklch(72% 0.18   5);   /* pink   */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 25%, transparent),
+               0 4px 12px color-mix(in oklch, black 35%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
+                 0 12px 28px color-mix(in oklch, black 40%, transparent);
+}

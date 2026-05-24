@@ -1,0 +1,38 @@
+/* Catppuccin Mocha — pastel mauve/peach/sky on a dark plum base.
+   Accent = mauve #cba6f7 (signature). */
+:root[data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --brand-h: 285;
+
+  --bg:           oklch(22% 0.026 290);   /* base    #1e1e2e */
+  --surface:      oklch(20% 0.026 290);   /* mantle  #181825 */
+  --surface-2:    oklch(30% 0.026 290);   /* surface0 #313244 */
+  --surface-3:    oklch(36% 0.026 290);   /* surface1 #45475a */
+  --border:       oklch(40% 0.026 290);
+  --border-strong:oklch(54% 0.024 290);
+  --ink:          oklch(90% 0.030 270);   /* text    #cdd6f4 */
+  --ink-2:        oklch(80% 0.030 270);   /* subtext1 */
+  --muted:        oklch(70% 0.026 270);   /* subtext0 */
+
+  --accent:       oklch(78% 0.15 295);    /* mauve   #cba6f7 */
+  --accent-2:     oklch(86% 0.16 140);    /* green   #a6e3a1 */
+  --warn:         oklch(90% 0.12 90);     /* yellow  #f9e2af */
+  --hot:          oklch(74% 0.15 10);     /* red     #f38ba8 */
+
+  --hot-soft:      oklch(74% 0.17 10 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(76% 0.14 250);   /* blue   #89b4fa */
+  --c-2: oklch(82% 0.14 330);   /* pink   #f5c2e7 */
+  --c-3: oklch(86% 0.16 140);   /* green  */
+  --c-4: oklch(82% 0.14  60);   /* peach  #fab387 */
+  --c-5: oklch(86% 0.10 195);   /* teal   #94e2d5 */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 35%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 30%, transparent),
+               0 4px 12px color-mix(in oklch, black 40%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 35%, transparent),
+                 0 12px 28px color-mix(in oklch, black 45%, transparent);
+}

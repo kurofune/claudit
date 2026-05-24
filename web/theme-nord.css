@@ -1,0 +1,38 @@
+/* Nord — Arctic Ice Studio's polar-night surfaces, frost accent, aurora
+   chart palette. Accent = nord8 #88c0d0 frost cyan. */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+  --brand-h: 215;
+
+  --bg:           oklch(29% 0.020 250);   /* nord0 #2e3440 */
+  --surface:      oklch(33% 0.020 250);   /* nord1 #3b4252 */
+  --surface-2:    oklch(38% 0.020 250);   /* nord2 #434c5e */
+  --surface-3:    oklch(45% 0.020 250);   /* nord3 #4c566a */
+  --border:       oklch(45% 0.020 250);
+  --border-strong:oklch(60% 0.022 250);
+  --ink:          oklch(90% 0.014 230);   /* nord4 #d8dee9 */
+  --ink-2:        oklch(94% 0.012 230);   /* nord5 */
+  --muted:        oklch(72% 0.018 230);
+
+  --accent:       oklch(82% 0.08 215);    /* frost  #88c0d0 */
+  --accent-2:     oklch(82% 0.12 130);    /* aurora green  #a3be8c */
+  --warn:         oklch(86% 0.13 80);     /* aurora yellow #ebcb8b */
+  --hot:          oklch(68% 0.13 22);     /* aurora red    #bf616a */
+
+  --hot-soft:      oklch(68% 0.15 22 / 0.40);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(62% 0.10 240);   /* frost deep #5e81ac */
+  --c-2: oklch(76% 0.10 330);   /* aurora purple #b48ead */
+  --c-3: oklch(82% 0.12 130);   /* green  */
+  --c-4: oklch(86% 0.13  80);   /* yellow */
+  --c-5: oklch(74% 0.13  35);   /* orange #d08770 */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 25%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 20%, transparent),
+               0 4px 12px color-mix(in oklch, black 30%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 25%, transparent),
+                 0 12px 28px color-mix(in oklch, black 35%, transparent);
+}

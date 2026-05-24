@@ -1,0 +1,32 @@
+/* Gruvbox Light — Pavel Pertsev's warm cream with the same retro
+   accent palette as Gruvbox Dark. Accent = orange #d65d0e. */
+:root[data-theme="gruvbox-light"] {
+  color-scheme: light;
+  --brand-h: 50;
+
+  --bg:           oklch(95%  0.040 85);   /* #fbf1c7 */
+  --surface:      oklch(97%  0.030 85);
+  --surface-2:    oklch(88%  0.050 85);   /* #ebdbb2 */
+  --surface-3:    oklch(84%  0.054 85);
+  --border:       oklch(78%  0.050 80);
+  --border-strong:oklch(60%  0.046 65);
+  --ink:          oklch(30%  0.020 70);   /* #3c3836 */
+  --ink-2:        oklch(44%  0.022 65);
+  --muted:        oklch(56%  0.030 65);
+
+  --accent:       oklch(60% 0.18 50);     /* orange  #d65d0e */
+  --accent-2:     oklch(62% 0.16 120);    /* green   #98971a */
+  --warn:         oklch(68% 0.16 80);     /* yellow  #d79921 */
+  --hot:          oklch(50% 0.22 25);     /* red     #cc241d */
+
+  --hot-soft:      oklch(50% 0.22 25 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  --c-1: oklch(50% 0.08 220);   /* blue   #458588 */
+  --c-2: oklch(54% 0.10 340);   /* purple #b16286 */
+  --c-3: oklch(62% 0.16 120);   /* green  */
+  --c-4: oklch(68% 0.16  80);   /* yellow */
+  --c-5: oklch(60% 0.18  50);   /* orange */
+}

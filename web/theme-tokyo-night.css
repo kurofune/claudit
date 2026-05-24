@@ -1,0 +1,38 @@
+/* Tokyo Night — enkia's deep navy with purple/cyan/orange. Accent =
+   blue #7aa2f7, with mauve #bb9af7 as the secondary character color. */
+:root[data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --brand-h: 245;
+
+  --bg:           oklch(18% 0.024 270);   /* #1a1b26 */
+  --surface:      oklch(22% 0.024 270);   /* #24283b */
+  --surface-2:    oklch(28% 0.024 270);
+  --surface-3:    oklch(34% 0.024 270);
+  --border:       oklch(36% 0.024 270);
+  --border-strong:oklch(50% 0.026 270);
+  --ink:          oklch(86% 0.040 270);   /* #c0caf5 */
+  --ink-2:        oklch(74% 0.040 270);
+  --muted:        oklch(58% 0.040 265);
+
+  --accent:       oklch(72% 0.15 260);    /* blue   #7aa2f7 */
+  --accent-2:     oklch(80% 0.16 135);    /* green  #9ece6a */
+  --warn:         oklch(80% 0.13 70);     /* yellow #e0af68 */
+  --hot:          oklch(72% 0.16 12);     /* red    #f7768e */
+
+  --hot-soft:      oklch(72% 0.18 12 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(72% 0.15 260);   /* blue   */
+  --c-2: oklch(78% 0.16 305);   /* magenta #bb9af7 */
+  --c-3: oklch(80% 0.16 135);   /* green  */
+  --c-4: oklch(82% 0.14  60);   /* orange #ff9e64 */
+  --c-5: oklch(86% 0.12 215);   /* cyan   #7dcfff */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 35%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 30%, transparent),
+               0 4px 12px color-mix(in oklch, black 40%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 35%, transparent),
+                 0 12px 28px color-mix(in oklch, black 45%, transparent);
+}

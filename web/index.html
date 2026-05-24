@@ -9,6 +9,42 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{asset "tokens.css"}}">
   <link rel="stylesheet" href="{{asset "app.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-ayu-light.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-catppuccin-latte.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-gruvbox-light.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-one-light.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-papercolor-light.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-solarized-light.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-catppuccin-mocha.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-dracula.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-github-dark.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-gruvbox-dark.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-monokai-pro.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-night-owl.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-nord.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-one-dark.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-solarized-dark.css"}}">
+  <link rel="stylesheet" href="{{asset "theme-tokyo-night.css"}}">
+  <script>
+    // Apply persisted theme before first paint to avoid FOUC. Inlined
+    // (not a module import) so it runs synchronously in <head>. Mirrors
+    // themes.js getStored() + apply() — keep the slug list in sync if
+    // themes are added or removed.
+    (function () {
+      var SLUGS = [
+        "ayu-light","catppuccin-latte","gruvbox-light","one-light",
+        "papercolor-light","solarized-light",
+        "catppuccin-mocha","dracula","github-dark","gruvbox-dark",
+        "monokai-pro","night-owl","nord","one-dark","solarized-dark","tokyo-night"
+      ];
+      try {
+        var v = localStorage.getItem("claudit.theme");
+        if (v && SLUGS.indexOf(v) !== -1) {
+          document.documentElement.setAttribute("data-theme", v);
+        }
+      } catch (e) { /* private mode etc. */ }
+    })();
+  </script>
 </head>
 <body>
 
@@ -68,6 +104,10 @@
       <path d="M8 2v4"/>
       <path d="M3 10h18"/>
     </symbol>
+    <symbol id="icon-gear" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </symbol>
   </defs>
 </svg>
 
@@ -108,7 +148,15 @@
         <span class="nav-metric" id="nav-metric-subagents">—</span>
       </a>
     </nav>
-    {{version}}
+    <div class="sidebar-foot">
+      {{version}}
+      <button id="theme-toggle" class="theme-toggle" type="button"
+              aria-label="Choose theme" aria-haspopup="menu" aria-expanded="false"
+              aria-controls="theme-menu" title="Theme">
+        <svg class="icon" aria-hidden="true"><use href="#icon-gear"/></svg>
+      </button>
+      <div id="theme-menu" class="theme-menu" role="menu" hidden></div>
+    </div>
   </aside>
 
   <main class="panel" id="panel">

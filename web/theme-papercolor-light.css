@@ -1,0 +1,32 @@
+/* PaperColor Light — paper-cream surfaces with high-contrast saturated
+   accents (the "newsprint" vibe). Accent = blue #005faf. */
+:root[data-theme="papercolor-light"] {
+  color-scheme: light;
+  --brand-h: 240;
+
+  --bg:           oklch(94%  0     0);    /* #eeeeee */
+  --surface:      oklch(97%  0     0);
+  --surface-2:    oklch(88%  0     0);    /* #d0d0d0 */
+  --surface-3:    oklch(82%  0     0);
+  --border:       oklch(76%  0     0);
+  --border-strong:oklch(62%  0     0);    /* #878787 */
+  --ink:          oklch(36%  0     0);    /* #444444 */
+  --ink-2:        oklch(50%  0     0);
+  --muted:        oklch(62%  0     0);
+
+  --accent:       oklch(40% 0.22 250);    /* blue   #005faf */
+  --accent-2:     oklch(54% 0.20 140);    /* green  #008700 */
+  --warn:         oklch(58% 0.16 80);     /* yellow #af8700 */
+  --hot:          oklch(48% 0.22 25);     /* red    #af0000 */
+
+  --hot-soft:      oklch(48% 0.24 25 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  --c-1: oklch(40% 0.22 250);   /* blue   */
+  --c-2: oklch(44% 0.24 325);   /* purple #870087 */
+  --c-3: oklch(54% 0.20 140);   /* green  */
+  --c-4: oklch(58% 0.16  80);   /* yellow */
+  --c-5: oklch(58% 0.20  45);   /* orange #d75f00 */
+}

@@ -1,0 +1,38 @@
+/* One Dark (Pro) — Atom's signature; warm dark slate with muted
+   blue/red. Accent = #61afef blue. */
+:root[data-theme="one-dark"] {
+  color-scheme: dark;
+  --brand-h: 220;
+
+  --bg:           oklch(22% 0.014 270);   /* #282c34 */
+  --surface:      oklch(26% 0.014 270);
+  --surface-2:    oklch(31% 0.014 270);
+  --surface-3:    oklch(36% 0.014 270);
+  --border:       oklch(38% 0.014 270);
+  --border-strong:oklch(52% 0.016 270);
+  --ink:          oklch(78% 0.014 250);   /* #abb2bf */
+  --ink-2:        oklch(70% 0.014 250);
+  --muted:        oklch(58% 0.014 250);
+
+  --accent:       oklch(72% 0.14 245);    /* blue   #61afef */
+  --accent-2:     oklch(76% 0.14 140);    /* green  #98c379 */
+  --warn:         oklch(80% 0.13 80);     /* yellow #e5c07b */
+  --hot:          oklch(70% 0.16 20);     /* red    #e06c75 */
+
+  --hot-soft:      oklch(70% 0.18 20 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(72% 0.14 245);   /* blue    */
+  --c-2: oklch(70% 0.14 310);   /* magenta #c678dd */
+  --c-3: oklch(76% 0.14 140);   /* green   */
+  --c-4: oklch(80% 0.13  80);   /* yellow  */
+  --c-5: oklch(70% 0.16  20);   /* red     */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 30%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 25%, transparent),
+               0 4px 12px color-mix(in oklch, black 35%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 30%, transparent),
+                 0 12px 28px color-mix(in oklch, black 40%, transparent);
+}

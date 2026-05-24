@@ -243,15 +243,113 @@
   .brand-sub { font-size: var(--t-2); color: var(--muted);
                font-variant-numeric: tabular-nums;
                font-family: var(--font-mono); }
-  /* Build label pinned to the bottom of the sidebar. margin-top: auto
-     uses the .nav flex column to push the footer down; border-top is a
-     hair lighter than --border so it reads as a divider, not a row. */
-  .nav-footer { margin-top: auto;
-                padding: var(--s-3) var(--s-2) 0;
-                border-top: 1px solid var(--border);
-                font-size: var(--t-1); color: var(--muted);
+  /* Sidebar foot: hosts the optional version label + the always-on
+     theme-picker gear. margin-top: auto uses the .nav flex column to
+     push the footer row down; border-top mimics the old .nav-footer
+     divider. Relative so the .theme-menu popover anchors here. */
+  .sidebar-foot { margin-top: auto;
+                  padding: var(--s-3) var(--s-2) 0;
+                  border-top: 1px solid var(--border);
+                  position: relative;
+                  display: flex; align-items: center;
+                  justify-content: space-between; gap: var(--s-2); }
+  /* .nav-footer in the SPA is always wrapped by .sidebar-foot, so its
+     layout properties live on the wrapper. The static-report and diff
+     templates ship their own .nav-footer rule with the standalone
+     layout — don't touch those. */
+  .nav-footer { font-size: var(--t-1); color: var(--muted);
                 font-family: var(--font-mono); opacity: 0.7;
                 letter-spacing: 0.01em; }
+
+  /* Theme-picker gear — ghost button, sits to the right of the version
+     in .sidebar-foot. Picks up the same color/hover treatment as other
+     muted controls. */
+  .theme-toggle {
+    margin-left: auto;
+    width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0; background: transparent;
+    color: var(--muted);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .theme-toggle .icon { width: 16px; height: 16px;
+                        stroke-width: 1.6; }
+  .theme-toggle:hover {
+    background: var(--surface-2); border-color: var(--border);
+    color: var(--ink-2);
+  }
+  .theme-toggle:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .theme-toggle[aria-expanded="true"] {
+    background: var(--surface-2); border-color: var(--border);
+    color: var(--ink);
+  }
+
+  /* Theme popover — opens upward from the gear (sidebar foot is at the
+     bottom of the viewport). Sized to fit the longest label without
+     wrapping; the swatch column reads as the "scheme" indicator. */
+  .theme-menu {
+    position: absolute;
+    right: var(--s-2); bottom: calc(100% + 6px);
+    min-width: 200px;
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lift);
+    padding: 6px;
+    display: flex; flex-direction: column; gap: 1px;
+    z-index: 50;
+    /* Lock scrolling inside the popover so wheeling over a long theme
+       list never spills into the page below. */
+    overscroll-behavior: contain;
+  }
+  .theme-menu[hidden] { display: none; }
+  .theme-menu-sep {
+    height: 1px; margin: 4px 0;
+    background: var(--border);
+  }
+  .theme-menu-item {
+    display: grid;
+    grid-template-columns: 14px 1fr 14px;
+    align-items: center; gap: 10px;
+    padding: 6px 8px;
+    background: transparent; border: 0;
+    border-radius: var(--r-sm);
+    color: var(--ink-2);
+    font: inherit; font-size: var(--t-2);
+    text-align: left; cursor: pointer;
+    transition: background-color 80ms ease, color 80ms ease;
+  }
+  .theme-menu-item:hover { background: var(--surface-2); color: var(--ink); }
+  .theme-menu-item:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .theme-menu-item.is-active { color: var(--ink); font-weight: 600; }
+  .theme-menu-check { opacity: 0; color: var(--accent); }
+  .theme-menu-item.is-active .theme-menu-check { opacity: 1; }
+  /* Swatch — tiny color chip that previews the theme's surface/accent.
+     Scheme-keyed so light themes get a pale chip with brand-accent
+     ring, dark themes get a dark chip with the lifted accent ring,
+     and "auto" gets a half-and-half split to signal "follows system". */
+  .theme-menu-swatch {
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    border: 1px solid var(--border-strong);
+  }
+  .theme-menu-swatch[data-scheme="light"] {
+    background: linear-gradient(135deg, #f6f6f6 50%, oklch(58% 0.14 190) 50%);
+  }
+  .theme-menu-swatch[data-scheme="dark"] {
+    background: linear-gradient(135deg, #1c1c1c 50%, oklch(74% 0.13 190) 50%);
+  }
+  .theme-menu-swatch[data-scheme="auto"] {
+    background: linear-gradient(135deg, #f6f6f6 50%, #1c1c1c 50%);
+  }
   /* Serve-mode variant: same look as .brand-sub but clickable. Hosts
      the calendar icon + dates and opens the date-range popover. */
   .brand-sub-button {

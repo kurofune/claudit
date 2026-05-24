@@ -1,0 +1,38 @@
+/* Night Owl — Sarah Drasner's deep navy with bright cyan/coral. Accent
+   = #82aaff blue, with #7fdbca cyan for the other hero. */
+:root[data-theme="night-owl"] {
+  color-scheme: dark;
+  --brand-h: 235;
+
+  --bg:           oklch(18% 0.040 240);   /* #011627 */
+  --surface:      oklch(24% 0.040 240);   /* #0b2942 */
+  --surface-2:    oklch(30% 0.040 240);
+  --surface-3:    oklch(38% 0.038 240);
+  --border:       oklch(40% 0.038 240);
+  --border-strong:oklch(54% 0.034 240);
+  --ink:          oklch(88% 0.024 250);   /* #d6deeb */
+  --ink-2:        oklch(78% 0.024 250);
+  --muted:        oklch(52% 0.030 200);   /* #637777 */
+
+  --accent:       oklch(76% 0.14 255);    /* blue   #82aaff */
+  --accent-2:     oklch(86% 0.18 130);    /* lime   #addb67 */
+  --warn:         oklch(86% 0.13 75);     /* yellow #ffeb95 / orange #f78c6c */
+  --hot:          oklch(68% 0.20 22);     /* coral  #ef5350 */
+
+  --hot-soft:      oklch(68% 0.22 22 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(76% 0.14 255);   /* blue   */
+  --c-2: oklch(78% 0.16 295);   /* purple #c792ea */
+  --c-3: oklch(86% 0.18 130);   /* lime   */
+  --c-4: oklch(76% 0.14  50);   /* orange #f78c6c */
+  --c-5: oklch(82% 0.10 195);   /* cyan   #7fdbca */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 45%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 40%, transparent),
+               0 4px 12px color-mix(in oklch, black 50%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 45%, transparent),
+                 0 12px 28px color-mix(in oklch, black 55%, transparent);
+}

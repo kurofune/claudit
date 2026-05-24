@@ -1,0 +1,32 @@
+/* One Light — Atom's light counterpart; soft warm white with the
+   muted-jewel One palette. Accent = blue #4078f2. */
+:root[data-theme="one-light"] {
+  color-scheme: light;
+  --brand-h: 220;
+
+  --bg:           oklch(98%  0.004 270);  /* #fafafa */
+  --surface:      oklch(100% 0     0);
+  --surface-2:    oklch(95%  0.006 270);  /* #f0f0f1 */
+  --surface-3:    oklch(91%  0.008 270);
+  --border:       oklch(86%  0.010 270);
+  --border-strong:oklch(72%  0.014 260);
+  --ink:          oklch(34%  0.012 270);  /* #383a42 */
+  --ink-2:        oklch(48%  0.012 260);  /* #696c77 */
+  --muted:        oklch(58%  0.012 260);
+
+  --accent:       oklch(58% 0.22 260);    /* blue   #4078f2 */
+  --accent-2:     oklch(62% 0.16 140);    /* green  #50a14f */
+  --warn:         oklch(64% 0.13 75);     /* yellow #c18401 */
+  --hot:          oklch(60% 0.22 25);     /* red    #e45649 */
+
+  --hot-soft:      oklch(60% 0.24 25 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  --c-1: oklch(58% 0.22 260);   /* blue    */
+  --c-2: oklch(50% 0.22 325);   /* magenta #a626a4 */
+  --c-3: oklch(62% 0.16 140);   /* green   */
+  --c-4: oklch(64% 0.13  75);   /* yellow  */
+  --c-5: oklch(60% 0.18 220);   /* cyan    #0184bc */
+}

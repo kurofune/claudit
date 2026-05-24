@@ -1,0 +1,32 @@
+/* Ayu Light — warm off-white background, soft orange/teal accents.
+   Accent = ayu's signature amber #ff9940. */
+:root[data-theme="ayu-light"] {
+  color-scheme: light;
+  --brand-h: 50;
+
+  --bg:           oklch(98%  0.004 80);   /* #fafafa */
+  --surface:      oklch(99%  0.003 80);
+  --surface-2:    oklch(95%  0.008 80);   /* #f3f4f5 */
+  --surface-3:    oklch(91%  0.012 80);
+  --border:       oklch(86%  0.012 80);
+  --border-strong:oklch(70%  0.014 80);
+  --ink:          oklch(45%  0.012 240);  /* #5c6166 */
+  --ink-2:        oklch(58%  0.012 240);  /* #8a9199 */
+  --muted:        oklch(66%  0.012 240);
+
+  --accent:       oklch(72% 0.18 60);     /* amber  #ff9940 */
+  --accent-2:     oklch(68% 0.18 125);    /* green  #86b300 */
+  --warn:         oklch(78% 0.14 80);     /* tag    #e6ba7e */
+  --hot:          oklch(64% 0.18 25);     /* red    #f07171 */
+
+  --hot-soft:      oklch(64% 0.18 25 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  --c-1: oklch(60% 0.18 230);   /* blue   #399ee6 */
+  --c-2: oklch(60% 0.16 310);   /* magenta #a37acc */
+  --c-3: oklch(68% 0.18 125);   /* green  */
+  --c-4: oklch(78% 0.14  80);   /* tag    */
+  --c-5: oklch(72% 0.18  60);   /* amber  */
+}

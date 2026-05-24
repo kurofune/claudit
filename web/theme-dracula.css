@@ -1,0 +1,38 @@
+/* Dracula — purple/pink/cyan on near-black. Signature accent is the
+   purple #bd93f9; pink and cyan show up in chart slots. */
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+  --brand-h: 295;
+
+  --bg:           oklch(20% 0.020 285);   /* #282a36 */
+  --surface:      oklch(24% 0.022 285);
+  --surface-2:    oklch(30% 0.022 285);   /* #44475a current-line */
+  --surface-3:    oklch(36% 0.022 285);
+  --border:       oklch(38% 0.024 285);
+  --border-strong:oklch(52% 0.028 285);
+  --ink:          oklch(97% 0.008 80);    /* #f8f8f2 fg */
+  --ink-2:        oklch(82% 0.010 80);
+  --muted:        oklch(60% 0.060 270);   /* #6272a4 comment */
+
+  --accent:       oklch(76% 0.16 295);    /* purple #bd93f9 */
+  --accent-2:     oklch(82% 0.20 145);    /* green  #50fa7b */
+  --warn:         oklch(82% 0.16 65);     /* orange #ffb86c */
+  --hot:          oklch(70% 0.20 15);     /* red    #ff5555 */
+
+  --hot-soft:      oklch(70% 0.22 15 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(80% 0.16 240);   /* cyan   #8be9fd */
+  --c-2: oklch(76% 0.18 330);   /* pink   #ff79c6 */
+  --c-3: oklch(82% 0.20 145);   /* green  */
+  --c-4: oklch(90% 0.14  95);   /* yellow #f1fa8c */
+  --c-5: oklch(70% 0.20  15);   /* red    */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 35%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 30%, transparent),
+               0 4px 12px color-mix(in oklch, black 40%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 35%, transparent),
+                 0 12px 28px color-mix(in oklch, black 45%, transparent);
+}

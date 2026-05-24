@@ -1,0 +1,32 @@
+/* Solarized Light — Schoonover's tan-on-cream classic. base3 bg,
+   base00 ink, canonical blue accent #268bd2. */
+:root[data-theme="solarized-light"] {
+  color-scheme: light;
+  --brand-h: 220;
+
+  --bg:           oklch(96.5% 0.022 90);  /* base3 #fdf6e3 */
+  --surface:      oklch(98%   0.016 90);
+  --surface-2:    oklch(93%   0.028 90);  /* base2 #eee8d5 */
+  --surface-3:    oklch(89%   0.030 90);
+  --border:       oklch(82%   0.024 90);
+  --border-strong:oklch(68%   0.020 200);
+  --ink:          oklch(45%   0.024 220); /* base00 #657b83 */
+  --ink-2:        oklch(55%   0.020 220); /* base0  #839496 */
+  --muted:        oklch(62%   0.016 220); /* base1  #93a1a1 */
+
+  --accent:       oklch(58% 0.16 240);    /* blue    #268bd2 */
+  --accent-2:     oklch(64% 0.17 140);    /* green   #859900 */
+  --warn:         oklch(72% 0.16 75);     /* yellow  #b58900 */
+  --hot:          oklch(58% 0.20 25);     /* red     #dc322f */
+
+  --hot-soft:      oklch(58% 0.20 25 / 0.22);
+  --warn-soft:     color-mix(in oklch, var(--warn) 14%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 14%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 16%, var(--surface));
+
+  --c-1: oklch(58% 0.16 240);   /* blue    */
+  --c-2: oklch(60% 0.18 325);   /* magenta #d33682 */
+  --c-3: oklch(64% 0.17 140);   /* green   */
+  --c-4: oklch(72% 0.16  75);   /* yellow  */
+  --c-5: oklch(60% 0.18  35);   /* orange  #cb4b16 */
+}

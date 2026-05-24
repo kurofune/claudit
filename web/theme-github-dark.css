@@ -1,0 +1,38 @@
+/* GitHub Dark — clean near-black with the official primer palette.
+   Accent = accent.fg blue #58a6ff. */
+:root[data-theme="github-dark"] {
+  color-scheme: dark;
+  --brand-h: 220;
+
+  --bg:           oklch(15% 0.014 260);   /* canvas-default #0d1117 */
+  --surface:      oklch(20% 0.014 260);   /* canvas-subtle  #161b22 */
+  --surface-2:    oklch(24% 0.014 260);   /* #21262d */
+  --surface-3:    oklch(30% 0.014 260);
+  --border:       oklch(36% 0.014 260);   /* #30363d */
+  --border-strong:oklch(48% 0.014 260);
+  --ink:          oklch(86% 0.014 240);   /* #c9d1d9 */
+  --ink-2:        oklch(78% 0.014 240);
+  --muted:        oklch(62% 0.014 240);   /* #8b949e */
+
+  --accent:       oklch(72% 0.16 245);    /* accent.fg #58a6ff */
+  --accent-2:     oklch(72% 0.18 145);    /* success.fg #3fb950 */
+  --warn:         oklch(74% 0.16 75);     /* attention.fg #d29922 */
+  --hot:          oklch(64% 0.20 25);     /* danger.fg #f85149 */
+
+  --hot-soft:      oklch(64% 0.22 25 / 0.42);
+  --warn-soft:     color-mix(in oklch, var(--warn) 18%, var(--surface));
+  --accent-soft:   color-mix(in oklch, var(--accent) 18%, var(--surface));
+  --accent-2-soft: color-mix(in oklch, var(--accent-2) 22%, var(--surface));
+
+  --c-1: oklch(72% 0.16 245);   /* blue   */
+  --c-2: oklch(68% 0.18 305);   /* purple #a371f7 done.fg */
+  --c-3: oklch(72% 0.18 145);   /* green  */
+  --c-4: oklch(74% 0.16  75);   /* yellow */
+  --c-5: oklch(66% 0.18  45);   /* orange #db6d28 */
+
+  --shadow-sm: 0 1px 2px color-mix(in oklch, black 40%, transparent);
+  --shadow-md: 0 1px 2px  color-mix(in oklch, black 35%, transparent),
+               0 4px 12px color-mix(in oklch, black 45%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in oklch, black 40%, transparent),
+                 0 12px 28px color-mix(in oklch, black 50%, transparent);
+}

@@ -16,6 +16,7 @@ import { paint as paintSessions, paintNav as paintNavSessions } from './view-ses
 import { start as startSSE, wireReloadToast } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
+import { init as initThemes } from './themes.js';
 
 const VIEW_PAINTERS = {
   overview: paintOverview,
@@ -55,6 +56,11 @@ if (!window.__claudit_static_data) {
 // Date-range picker — serve-mode only. The static report renders a
 // plain <div id="date-range">, so wireDatePicker() no-ops there.
 wireDatePicker();
+
+// Theme picker — gear icon next to the version footer. The chosen
+// theme is already applied by the inline FOUC-prevention script in
+// index.html; init() just binds the popover.
+initThemes();
 
 // Sidebar metric prefetch — fires the five non-overview sections in
 // parallel at startup so their nav-metric dashes resolve before the
