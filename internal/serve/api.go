@@ -24,6 +24,7 @@ const (
 	apiPathSessions  = "/_claudit/api/sessions"
 	apiPathTrends    = "/_claudit/api/trends"
 	apiPathAnomalies = "/_claudit/api/anomalies"
+	apiPathTheme     = "/_claudit/api/theme"
 
 	// sessionTimelineSuffix lives on a /api/sessions/{id}/timeline path.
 	// The dispatcher in handleAPISessionsTree splits the path and matches

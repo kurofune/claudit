@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{{ if .ThemeSlug }} data-theme="{{ .ThemeSlug }}"{{ end }}>
 <head>
 <meta charset="utf-8">
 <title>claudit report</title>
@@ -14,6 +14,7 @@
 <style>
 {{ .Tokens }}
 {{ .AppCSS }}
+{{ .ThemeCSS }}
 </style>
 </head>
 <body>

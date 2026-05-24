@@ -50,6 +50,25 @@ export function getStored() {
 
 export function setStored(slug) {
   try { localStorage.setItem(STORAGE_KEY, slug); } catch { /* private mode etc. */ }
+  syncToServer(slug);
+}
+
+// syncToServer tells the daemon which theme the SPA is showing so
+// `claudit report` / `claudit diff` can inherit it. Best-effort: fails
+// silently when there's no server (static report opened via file://, or
+// no `claudit serve` running) — the SPA still works, exports just won't
+// pick up the choice. Called both on an active pick (setStored) and once
+// on boot (init), so the persisted slug always mirrors what serve is
+// currently displaying even if the user never re-picks.
+function syncToServer(slug) {
+  try {
+    fetch("/_claudit/api/theme", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch { /* fetch unavailable */ }
 }
 
 export function apply(slug) {
@@ -73,6 +92,12 @@ export function init() {
   const btn  = document.getElementById("theme-toggle");
   const menu = document.getElementById("theme-menu");
   if (!btn || !menu) return;
+
+  // Boot sync: mirror the current theme to the daemon up front, so a
+  // report/diff generated without an explicit re-pick still inherits
+  // whatever serve is showing. The early-return above means this never
+  // fires in the static report (no gear there) or in file:// contexts.
+  syncToServer(getStored());
 
   // Build the menu once. Each row is a button (radio-style) — the
   // active theme gets aria-checked + .is-active.

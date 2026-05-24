@@ -172,7 +172,14 @@ type diffHTMLSection struct {
 type diffHTMLData struct {
 	// Tokens carries the shared design-token CSS (see tokens.css). The
 	// template injects it inside <style> with {{ .Tokens }}.
-	Tokens          template.CSS
+	Tokens template.CSS
+	// ThemeCSS is the single inherited theme's variable-override block
+	// (read from ~/.config/claudit/theme via loadInheritedTheme — set
+	// by the SPA picker through POST /api/theme). Empty when no theme
+	// is persisted; the template appends it inside <style>. ThemeSlug
+	// is stamped on <html> so the selectors match.
+	ThemeCSS        template.CSS
+	ThemeSlug       string
 	Version         string
 	LabelA, LabelB  string
 	TotalsA         aggregate.Totals
@@ -225,8 +232,11 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		}
 	}
 
+	themeSlug, themeCSS := loadInheritedTheme()
 	data := diffHTMLData{
 		Tokens:    template.CSS(tokensCSS),
+		ThemeCSS:  template.CSS(themeCSS),
+		ThemeSlug: themeSlug,
 		Version:   opt.Version,
 		LabelA:    opt.LabelA,
 		LabelB:    opt.LabelB,

@@ -107,15 +107,20 @@ func HTMLWithOptions(ctx context.Context, w io.Writer, a *aggregate.Aggregator, 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	themeSlug, themeCSS := loadInheritedTheme()
 	return staticHTMLTpl.Execute(w, struct {
 		Tokens           template.CSS
 		AppCSS           template.CSS
+		ThemeCSS         template.CSS
+		ThemeSlug        string
 		StaticBundleJSON template.JS
 		SPABundleHTML    template.HTML
 		Version          string
 	}{
 		Tokens:           template.CSS(tokensCSS),
 		AppCSS:           template.CSS(appCSS),
+		ThemeCSS:         template.CSS(themeCSS),
+		ThemeSlug:        themeSlug,
 		StaticBundleJSON: template.JS(bundleJSON),
 		SPABundleHTML:    template.HTML(spaBundle),
 		Version:          opts.Version,
