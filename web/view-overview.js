@@ -8,7 +8,7 @@
 
 import { fetchOverview, fetchAnomalies } from './api.js';
 import { fmtMoney, fmtNum, hitRatioPill, escHtml, pointHitRatio } from './format.js';
-import { trendLineChart, hitRatioChart, forecastChart } from './charts.js';
+import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
@@ -230,6 +230,7 @@ export async function paint() {
 
   wireHotspots(container, overview.hotspots || []);
   wireTrendTabs(container);
+  wireChartInteractivity(container);
 
   updateNavMetric('overview', fmtMoney(totals.CostUSD || 0));
   updateDateRange(totals.First, totals.Last);

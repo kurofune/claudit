@@ -266,6 +266,131 @@ export function trendLineChart(points, period, anomalies) {
     </div>`;
 }
 
+// wireChartInteractivity — bind hover crosshair + tooltip to every
+// .chart-host under `root`. Each host carries its data + viewBox
+// padding as data-* attrs; we bind one mousemove listener per host,
+// find the closest x-bucket, and reposition the in-SVG crosshair plus
+// an HTML tooltip anchored to the host. Pure DOM, no chart lib.
+//
+// Ported verbatim from the chartInteractivity() IIFE that lived in the
+// legacy report.html.tmpl (removed in the Phase 10 cleanup); the SPA
+// cutover ported the chart *emitters* but dropped this wiring, so the
+// crosshair markup rendered inert until a view called this. Must be
+// invoked after the chart markup is injected into the DOM.
+export function wireChartInteractivity(root) {
+  (root || document).querySelectorAll('.chart-host').forEach(host => {
+    let pts;
+    try { pts = JSON.parse(host.dataset.chartPoints); }
+    catch { return; }
+    if (!pts || pts.length < 2) return;
+
+    const svg     = host.querySelector('svg');
+    const cross   = host.querySelector('.crosshair');
+    const cline   = cross && cross.querySelector('.crosshair-line');
+    const cdot    = cross && cross.querySelector('.crosshair-dot');
+    const tip     = host.querySelector('.chart-tooltip');
+    if (!svg || !cross || !tip) return;
+
+    const padL  = parseFloat(host.dataset.padL);
+    const padR  = parseFloat(host.dataset.padR);
+    const padT  = parseFloat(host.dataset.padT);
+    const padB  = parseFloat(host.dataset.padB);
+    const vbW   = parseFloat(host.dataset.vbW);
+    const vbH   = parseFloat(host.dataset.vbH);
+    const innerW = vbW - padL - padR;
+    const innerH = vbH - padT - padB;
+    const n = pts.length;
+    const xAt = i => padL + (i / (n - 1)) * innerW;
+    const type = host.dataset.chartType;
+
+    // Pre-compute Y for each point. Cost scales by max in the data;
+    // forecast scales by data-y-max (so the dashed projection line
+    // matches the rendered ymax exactly); hitratio is 0..1.
+    let yAt;
+    if (type === 'cost') {
+      let max = 0;
+      for (const p of pts) { if ((p.cost || 0) > max) max = p.cost; }
+      if (max <= 0) max = 1;
+      yAt = i => padT + innerH - ((pts[i].cost || 0) / max) * innerH;
+    } else if (type === 'forecast') {
+      const yMax = parseFloat(host.dataset.yMax) || 1;
+      yAt = i => padT + innerH - ((pts[i].cum || 0) / yMax) * innerH;
+    } else {
+      yAt = i => padT + innerH - (pts[i].ratio || 0) * innerH;
+    }
+
+    function fmtCostLocal(v) {
+      if (v >= 1000) return '$' + Math.round(v).toLocaleString();
+      return '$' + v.toFixed(2);
+    }
+    function anomalyLine(a) {
+      if (!a) return '';
+      if (a.kind === 'cost_spike') {
+        return `<div class="ct-anomaly">▲ spike: ${a.ratio.toFixed(1)}× rolling 7-bucket median</div>`;
+      }
+      if (a.kind === 'hitratio_drop') {
+        return `<div class="ct-anomaly">▼ hit-ratio drop: −${(a.ratio * 100).toFixed(0)} pp vs rolling median</div>`;
+      }
+      return '';
+    }
+    function tooltipHTML(i) {
+      const p = pts[i];
+      if (type === 'cost') {
+        return `<div class="ct-label">${escHtml(p.label)}</div>
+                <div class="ct-primary">${fmtCostLocal(p.cost)}</div>
+                <div class="ct-meta">${Number(p.turns).toLocaleString()} turns</div>
+                ${anomalyLine(p.anomaly)}`;
+      }
+      if (type === 'forecast') {
+        return `<div class="ct-label">${escHtml(p.label)}</div>
+                <div class="ct-primary">${fmtCostLocal(p.cum || 0)}</div>
+                <div class="ct-meta">${p.projected ? 'projected cumulative' : 'cumulative MTD'}</div>`;
+      }
+      return `<div class="ct-label">${escHtml(p.label)}</div>
+              <div class="ct-primary">${(p.ratio * 100).toFixed(1)}% hit</div>
+              ${anomalyLine(p.anomaly)}`;
+    }
+
+    function show() { cross.style.opacity = '1'; tip.style.opacity = '1'; }
+    function hide() { cross.style.opacity = '0'; tip.style.opacity = '0'; }
+    hide();
+
+    svg.addEventListener('mousemove', (e) => {
+      // Convert the cursor's screen position into the SVG's viewBox
+      // coordinate space. getScreenCTM gives the inverse mapping for free.
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const inv = ctm.inverse();
+      const ept = svg.createSVGPoint();
+      ept.x = e.clientX; ept.y = e.clientY;
+      const sp = ept.matrixTransform(inv);
+      // Convert SVG x to nearest data index.
+      const t = (sp.x - padL) / innerW;
+      let i = Math.round(t * (n - 1));
+      if (i < 0) i = 0;
+      if (i > n - 1) i = n - 1;
+      // Crosshair position in SVG coords.
+      const cx = xAt(i);
+      const cy = yAt(i);
+      cline.setAttribute('x1', cx);
+      cline.setAttribute('x2', cx);
+      cdot.setAttribute('cx', cx);
+      cdot.setAttribute('cy', cy);
+      // Tooltip in DOM coords — map the SVG point back to screen, then
+      // subtract host's offset to get host-relative pixels.
+      const sptOut = svg.createSVGPoint();
+      sptOut.x = cx; sptOut.y = cy;
+      const dom = sptOut.matrixTransform(ctm);
+      const hostRect = host.getBoundingClientRect();
+      tip.style.left = `${dom.x - hostRect.left}px`;
+      tip.style.top  = `${dom.y - hostRect.top}px`;
+      tip.innerHTML  = tooltipHTML(i);
+      show();
+    });
+    svg.addEventListener('mouseleave', hide);
+  });
+}
+
 // forecastChart — cumulative cost burn-up with a dashed projection to
 // month-end. X spans [window_start, month_end), Y is cumulative $.
 export function forecastChart(forecast, points) {
@@ -368,7 +493,12 @@ export function forecastChart(forecast, points) {
         ${todayLabel}
         ${projLabel}
         ${xTicks}
+        <g class="crosshair" style="opacity:0">
+          <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+          <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+        </g>
       </svg>
+      <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
     </div>
     <div class="trend-summary">
       <span>Spent in window: <strong>${escHtml(fmtMoney(forecast.mtd_cost_usd))}</strong> over <strong>${(forecast.days_elapsed || 0).toFixed(1)}</strong> days</span>
