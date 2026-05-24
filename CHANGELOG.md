@@ -4,6 +4,8 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-05-23
+
 ### Added
 
 - **Selectable theme picker in `claudit serve` — 16 palettes plus Auto.** A gear button in the sidebar footer opens a popover offering Auto + 6 light + 10 dark themes (Ayu Light, Catppuccin Latte, Gruvbox Light, One Light, PaperColor Light, Solarized Light; Catppuccin Mocha, Dracula, GitHub Dark, Gruvbox Dark, Monokai Pro, Night Owl, Nord, One Dark, Solarized Dark, Tokyo Night), alphabetized within each scheme group. Each theme is an OKLCH variable-override file (`web/theme-<slug>.css`) layered over the shared `tokens.css` design tokens; only `--accent` shifts to the theme's signature hue while the semantic accents (`--hot` red, `--accent-2` green, `--warn` amber) stay anchored to their families. The choice persists in `localStorage` and an inline `<head>` script applies it before first paint, so there's no flash of the wrong theme on reload. Auto (the default) follows the OS `prefers-color-scheme`.
