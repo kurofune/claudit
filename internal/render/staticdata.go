@@ -121,7 +121,7 @@ func BuildStaticBundle(ctx context.Context, a *aggregate.Aggregator, opts HTMLOp
 		Tokens:           BuildTokens(a),
 		Tools:            BuildTools(a),
 		Subagents:        BuildSubagents(a),
-		Sessions:         BuildSessions(opts.SessionTimelines),
+		Sessions:         BuildSessions(opts.SessionTimelines, a.Totals().Sessions),
 		Anomalies:        BuildAnomalies(a),
 		Trends:           trends,
 		SessionTimelines: timelines,

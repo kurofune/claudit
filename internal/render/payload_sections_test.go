@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
+	"time"
+
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 // TestBuildOverview_ShapeAndKeys is the red-phase entry for the
@@ -194,12 +199,12 @@ func TestBuildSessions_ShapeAndKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build timelines: %v", err)
 	}
-	p := BuildSessions(timelines)
+	p := BuildSessions(timelines, len(timelines))
 	got, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal SessionsPayload: %v", err)
 	}
-	wantTopLevel(t, got, []string{"sessions"})
+	wantTopLevel(t, got, []string{"sessions", "total_sessions"})
 
 	// Each session row must carry totals but NOT the full prompts
 	// slice (that's the lazy-fetch payload). Probe one row.
@@ -214,6 +219,54 @@ func TestBuildSessions_ShapeAndKeys(t *testing.T) {
 	// data — that's what makes the list cheap to fetch.
 	if !sessionsListOmitsPrompts(got) {
 		t.Errorf("SessionsPayload accidentally carries per-prompt data; should be timeline-free")
+	}
+}
+
+// TestBuildSessions_TotalSessionsReconcilesWithOverviewTile captures
+// the guarantee the total_sessions field exists to provide: the
+// sidebar's full session count (SessionsPayload.TotalSessions) must
+// equal the Overview tile's session total (OverviewPayload.Totals.
+// Sessions) for the same aggregator. Before this field, the sidebar
+// rendered the CAPPED len(Sessions) under the same "Sessions" label as
+// the tile's full count — two correct numbers that read as a
+// contradiction. This test locks the two back into agreement and
+// asserts the full count is never less than the (possibly capped)
+// shown count.
+func TestBuildSessions_TotalSessionsReconcilesWithOverviewTile(t *testing.T) {
+	// The reconciliation only holds when the aggregator and the
+	// timeline slice describe the SAME corpus. htmlSetup feeds turns
+	// with no SessionID (which the aggregator does not count as a
+	// session), while buildTimelinesForTest feeds a SessionID-bearing
+	// turn — so we build a fresh aggregator from a matching
+	// SessionID-bearing turn here, mirroring the timeline fixture.
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	a := aggregate.New(prices)
+	a.Add(parse.Turn{
+		Model:     "claude-opus-4-7",
+		CWD:       "/p/x",
+		SessionID: "fixture-session-1",
+		UUID:      "turn-uuid-1",
+		Usage:     parse.Usage{InputTokens: 1_000_000, OutputTokens: 200_000},
+		Timestamp: t0,
+	})
+
+	timelines, err := buildTimelinesForTest(t)
+	if err != nil {
+		t.Fatalf("build timelines: %v", err)
+	}
+	sessions := BuildSessions(timelines, a.Totals().Sessions)
+	overview := BuildOverview(a)
+
+	if got, want := sessions.TotalSessions, overview.Totals.Sessions; got != want {
+		t.Errorf("TotalSessions = %d, want overview tile's %d", got, want)
+	}
+	if sessions.TotalSessions < len(sessions.Sessions) {
+		t.Errorf("TotalSessions (%d) must be >= len(Sessions) (%d): the full window count is never less than the shown count",
+			sessions.TotalSessions, len(sessions.Sessions))
 	}
 }
 

@@ -61,7 +61,7 @@ export async function paintNav() {
   let payload;
   try { payload = await fetchSessions(); } catch { return; }
   const sessions = (payload && payload.sessions) || [];
-  updateNavMetric(sessions);
+  updateNavMetric(sessions, payload && payload.total_sessions);
   navPainted = true;
 }
 
@@ -97,7 +97,7 @@ export async function paint(route) {
     wireCardOpens(list);
   }
 
-  updateNavMetric(sessions);
+  updateNavMetric(sessions, payload && payload.total_sessions);
 
   painted = true;
   navPainted = true;
@@ -400,15 +400,29 @@ function cssEscape(s) {
   return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 }
 
-function updateNavMetric(sessions) {
+function updateNavMetric(sessions, total) {
   const el = document.getElementById('nav-metric-sessions');
   if (!el) return;
   if (!sessions || sessions.length === 0) {
     el.textContent = '—';
+    el.removeAttribute('title');
     return;
   }
-  // Match the legacy fat-HTML metric: count · top session cost.
   // Server-side sort is by cost desc, so sessions[0] is the top.
   const top = sessions[0];
-  el.textContent = `${sessions.length} · top ${fmtMoney(top.cost_usd || 0)}`;
+  const shown = sessions.length;
+  const cost = `top ${fmtMoney(top.cost_usd || 0)}`;
+  if (total != null && total > shown) {
+    // The list is capped (server --sessions / ?sessions). Show "N of M"
+    // so this metric doesn't read as contradicting the Overview tile,
+    // which counts ALL M sessions in the window. total_sessions ships
+    // from Go (aggregate.Totals().Sessions) — the same source the tile
+    // reads, so the two numbers reconcile.
+    el.textContent = `${shown} of ${total} · ${cost}`;
+    el.title = `Showing the top ${shown} sessions by cost; ${total} sessions ran in this window. Raise the --sessions cap (or open with ?scope=all) to list more.`;
+  } else {
+    // Not capped — the shown count is the full count.
+    el.textContent = `${total != null ? total : shown} · ${cost}`;
+    el.removeAttribute('title');
+  }
 }
