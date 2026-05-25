@@ -33,6 +33,28 @@ type TokensPayload struct {
 	ByModel     []TokenModelRow        `json:"by_model"`
 }
 
+// tokenComposition splits a token tuple into the canonical 4-category
+// breakdown (Input / Output / Cache write / Cache read), each with its
+// share of grand (0..100, or 0 when grand is zero). The category order
+// is fixed so callers can zip two compositions positionally — relied on
+// by BuildTokenDiff to pair A against B. Cache write folds the 5m and 1h
+// cache-create buckets into one figure.
+func tokenComposition(tot aggregate.Tokens, grand int64) []TokenCategory {
+	pct := func(n int64) float64 {
+		if grand == 0 {
+			return 0
+		}
+		return 100 * float64(n) / float64(grand)
+	}
+	cw := tot.CacheCreate5mTokens + tot.CacheCreate1hTokens
+	return []TokenCategory{
+		{Label: "Input", Tokens: tot.InputTokens, Pct: pct(tot.InputTokens)},
+		{Label: "Output", Tokens: tot.OutputTokens, Pct: pct(tot.OutputTokens)},
+		{Label: "Cache write", Tokens: cw, Pct: pct(cw)},
+		{Label: "Cache read", Tokens: tot.CacheReadTokens, Pct: pct(tot.CacheReadTokens)},
+	}
+}
+
 // BuildTokens rolls the aggregator into the Tokens-tab payload.
 func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 	tot := a.Totals().Tokens
@@ -44,12 +66,7 @@ func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 		return 100 * float64(n) / float64(grand)
 	}
 
-	composition := []TokenCategory{
-		{Label: "Input", Tokens: tot.InputTokens, Pct: pct(tot.InputTokens)},
-		{Label: "Output", Tokens: tot.OutputTokens, Pct: pct(tot.OutputTokens)},
-		{Label: "Cache write", Tokens: tot.CacheCreate5mTokens + tot.CacheCreate1hTokens, Pct: pct(tot.CacheCreate5mTokens + tot.CacheCreate1hTokens)},
-		{Label: "Cache read", Tokens: tot.CacheReadTokens, Pct: pct(tot.CacheReadTokens)},
-	}
+	composition := tokenComposition(tot, grand)
 
 	buckets := a.ByModel()
 	byModel := make([]TokenModelRow, 0, len(buckets))

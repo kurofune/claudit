@@ -139,6 +139,37 @@ func TestDiffMarkdown_TopMoversAndNewHotspots(t *testing.T) {
 	}
 }
 
+func TestDiffMarkdown_TokensSection(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	a := aggregate.New(prices)
+	a.Add(mkTokenTurn("claude-opus-4-7", "/p", 100, 20, 30, 10, 1000, t0))
+	b := aggregate.New(prices)
+	b.Add(mkTokenTurn("claude-opus-4-7", "/p", 200, 50, 40, 20, 5000, t0))
+
+	var buf bytes.Buffer
+	if err := DiffMarkdown(&buf, a, b, DiffOptions{LabelA: "A", LabelB: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"## Tokens",
+		"| Input |",
+		"| Output |",
+		"| Cache write |",
+		"| Cache read |",
+		// Cache read jumped 1,000 → 5,000, a +4,000 signed delta with
+		// thousands separators.
+		"+4,000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in markdown:\n%s", want, out)
+		}
+	}
+}
+
 func TestDiffMarkdown_EmptySections(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	a := aggregate.New(prices)
@@ -190,6 +221,11 @@ func TestDiffHTML_RendersCoreSections(t *testing.T) {
 		">By model<",
 		">By project<",
 		">By tool<",
+		// Tokens section: nav + heading + the A/B mix bars.
+		`id="tokens"`,
+		">Tokens<",
+		"tokbar",
+		">Cache read<",
 		"/p/new",
 		// Hotspot section header renders when Hotspots > 0, regardless
 		// of whether any rows ended up new — covers both code paths.
@@ -247,6 +283,7 @@ func TestDiffJSON_Shape(t *testing.T) {
 		`"label_a": "A"`, `"label_b": "B"`,
 		`"totals_a"`, `"totals_b"`,
 		`"model_movers"`, `"project_movers"`,
+		`"tokens"`, `"label": "Cache read"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in JSON:\n%s", want, out)

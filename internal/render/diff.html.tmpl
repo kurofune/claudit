@@ -511,6 +511,52 @@
   .totals .metric.neutral .delta-up,
   .totals .metric.neutral .delta-down { color: var(--ink-2); }
 
+  /* ─── Tokens section — A/B composition mix bars + per-category Δ.
+     The bars show how the token *mix* shifted (each side normalized to
+     its own 100%); the rows give absolute before→after with signed Δ.
+     Band colors mirror the report's Tokens tab — cache-read is muted
+     toward the surface so the dominant band recedes (see app.css). */
+  .tokbars { display: flex; flex-direction: column; gap: var(--s-2);
+    margin: var(--s-4) 0 var(--s-5); }
+  .tokbar-row { display: grid; grid-template-columns: 1.25em 1fr;
+    align-items: center; gap: var(--s-3); }
+  .tokbar-side { font-size: var(--t-2); font-weight: 600; color: var(--muted); }
+  .tokbar { display: flex; height: 18px; width: 100%;
+    border-radius: var(--r-sm); overflow: hidden; background: var(--surface-3); }
+  .tokseg { height: 100%; min-width: 0; }
+  .tokseg:not(:last-child) { border-right: 1px solid var(--surface); }
+
+  /* Band fills — shared by the mix-bar segments and the legend swatch. */
+  .tok-input  { background: var(--warn); }
+  .tok-output { background: var(--hot); }
+  .tok-cwrite { background: var(--accent); }
+  .tok-cread  { background: color-mix(in oklch, var(--accent-2) 72%, var(--surface)); }
+
+  .tokrows { display: flex; flex-direction: column; }
+  .tokrow {
+    display: grid;
+    grid-template-columns: minmax(9em, 1fr) auto auto;
+    align-items: baseline; gap: var(--s-2) var(--s-5);
+    padding: var(--s-2) 0; border-bottom: 1px solid var(--border);
+    font-size: var(--t-2);
+  }
+  .tokrow-total {
+    border-bottom: none; border-top: 2px solid var(--border-strong);
+    margin-top: var(--s-1); padding-top: var(--s-3); font-weight: 600;
+  }
+  .tokrow-key { display: flex; align-items: center; gap: var(--s-2); color: var(--ink-2); }
+  .toksw { display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; flex: none; }
+  .tokrow-ab { font-variant-numeric: tabular-nums; color: var(--ink);
+    justify-self: end; }
+  .tokrow-ab .arrow { color: var(--ink-2); margin: 0 2px; }
+  .tokrow-delta { font-variant-numeric: tabular-nums; justify-self: end;
+    white-space: nowrap; min-width: 11ch; text-align: right; }
+  .tokrow-pct { color: var(--muted); margin-left: var(--s-1); }
+  .tokrow-delta.up   { color: var(--hot); }       /* more tokens = cost-hot */
+  .tokrow-delta.down { color: var(--accent-2); }
+  .tokrow-delta.zero { color: var(--muted); }
+
   /* ─── Mover rows — dumbbell plot ─────────────────────────────────
      Each row: [key] [dumbbell ●━━━●] [A → B values] [signed Δ + %].
      The dumbbell uses the section's Max as its right-edge axis so dot
@@ -791,6 +837,11 @@
       <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
       <path d="M12 18V6"/>
     </symbol>
+    <symbol id="icon-tokens" viewBox="0 0 24 24">
+      <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+      <polyline points="2 12 12 17 22 12"/>
+      <polyline points="2 17 12 22 22 17"/>
+    </symbol>
     <symbol id="icon-brain" viewBox="0 0 24 24">
       <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
       <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
@@ -828,6 +879,10 @@
     <a class="nav-item is-active" href="#overview" data-view="overview">
       <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</span>
       <span class="nav-metric {{ deltaSign .TotalsA.CostUSD .TotalsB.CostUSD }}">{{ signedMoney (sub .TotalsB.CostUSD .TotalsA.CostUSD) }}</span>
+    </a>
+    <a class="nav-item" href="#tokens" data-view="tokens">
+      <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tokens"/></svg>Tokens</span>
+      <span class="nav-metric {{ tokDeltaSign .TokenComp.TotalA .TokenComp.TotalB }}">{{ tokDeltaPct .TokenComp.TotalA .TokenComp.TotalB }}</span>
     </a>
     {{ range .Sections }}
     <a class="nav-item" href="#{{ .ID }}" data-view="{{ .ID }}">
@@ -954,6 +1009,50 @@
       <div class="delta delta-{{ deltaSign .HitRatioA .HitRatioB }}">
         {{ deltaRatio .HitRatioA .HitRatioB }}
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="view section" id="tokens" data-view="tokens">
+  <header class="view-head">
+    <h1><svg class="icon" aria-hidden="true"><use href="#icon-tokens"/></svg>Tokens</h1>
+    <span class="meta">{{ tokNum .TokenComp.TotalA }} → {{ tokNum .TokenComp.TotalB }} total</span>
+  </header>
+
+  <details class="guide">
+    <summary>Reading the token shift</summary>
+    <div class="body">
+      <p>The two bars show token <strong>composition</strong> — A's mix on top, B's below — so you can see whether the <em>shape</em> of usage changed (e.g. cache-read crowding out everything else), independent of the absolute counts. The table below breaks out each category's before → after with a signed Δ and Δ% (B − A; A is the denominator). <strong>Cache read</strong> normally dominates: it's the conversation history re-read from cache on every turn.</p>
+    </div>
+  </details>
+
+  <div class="tokbars" aria-hidden="true">
+    <div class="tokbar-row">
+      <span class="tokbar-side">A</span>
+      <div class="tokbar">
+        {{ range .TokenComp.Rows }}<div class="tokseg {{ tokClass .Label }}" style="width: {{ printf "%.3f" .PctA }}%" title="{{ .Label }}: {{ printf "%.1f" .PctA }}%"></div>{{ end }}
+      </div>
+    </div>
+    <div class="tokbar-row">
+      <span class="tokbar-side">B</span>
+      <div class="tokbar">
+        {{ range .TokenComp.Rows }}<div class="tokseg {{ tokClass .Label }}" style="width: {{ printf "%.3f" .PctB }}%" title="{{ .Label }}: {{ printf "%.1f" .PctB }}%"></div>{{ end }}
+      </div>
+    </div>
+  </div>
+
+  <div class="tokrows">
+    {{ range .TokenComp.Rows }}
+    <div class="tokrow">
+      <span class="tokrow-key"><i class="toksw {{ tokClass .Label }}"></i>{{ .Label }}</span>
+      <span class="tokrow-ab">{{ tokNum .A }} <span class="arrow">→</span> {{ tokNum .B }}</span>
+      <span class="tokrow-delta {{ tokDeltaSign .A .B }}">{{ tokDelta .A .B }} <span class="tokrow-pct">{{ tokDeltaPct .A .B }}</span></span>
+    </div>
+    {{ end }}
+    <div class="tokrow tokrow-total">
+      <span class="tokrow-key">Total</span>
+      <span class="tokrow-ab">{{ tokNum .TokenComp.TotalA }} <span class="arrow">→</span> {{ tokNum .TokenComp.TotalB }}</span>
+      <span class="tokrow-delta {{ tokDeltaSign .TokenComp.TotalA .TokenComp.TotalB }}">{{ tokDelta .TokenComp.TotalA .TokenComp.TotalB }} <span class="tokrow-pct">{{ tokDeltaPct .TokenComp.TotalA .TokenComp.TotalB }}</span></span>
     </div>
   </div>
 </section>

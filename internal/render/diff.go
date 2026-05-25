@@ -38,7 +38,31 @@ var diffTpl = template.Must(template.New("diff").Funcs(template.FuncMap{
 	"dotPct":         dotPct,
 	"lineLeftPct":    lineLeftPct,
 	"lineWidthPct":   lineWidthPct,
+	// Tokens section. Counts run to int64; deltaPct/deltaSign take
+	// float64, so the wrappers cast at the call boundary.
+	"tokNum":       num,
+	"tokDelta":     deltaInt64,
+	"tokDeltaPct":  func(a, b int64) string { return deltaPct(float64(a), float64(b)) },
+	"tokDeltaSign": func(a, b int64) string { return deltaSign(float64(a), float64(b)) },
+	"tokClass":     tokClass,
 }).Parse(diffHTMLTemplate))
+
+// tokClass maps a token-composition label to the CSS class that paints
+// its band (mix-bar segment and legend swatch). Kept in lockstep with the
+// .tok-input/.tok-output/.tok-cwrite/.tok-cread rules in diff.html.tmpl.
+func tokClass(label string) string {
+	switch label {
+	case "Input":
+		return "tok-input"
+	case "Output":
+		return "tok-output"
+	case "Cache write":
+		return "tok-cwrite"
+	case "Cache read":
+		return "tok-cread"
+	}
+	return ""
+}
 
 // dotPct returns the x-axis position (0..100) of a value on a dumbbell
 // row whose right edge is max. Used to place each ●. Clamped so a value
@@ -186,6 +210,7 @@ type diffHTMLData struct {
 	TotalsB         aggregate.Totals
 	HitRatioA       float64
 	HitRatioB       float64
+	TokenComp       TokenDiff         // 4-category composition, A vs B, for the Tokens section
 	Sections        []diffHTMLSection // fixed order, drives the sidebar nav
 	NewHotspots     []aggregate.Hotspot
 	NewHotspotsShow bool // true when the section is enabled (Hotspots > 0)
@@ -244,6 +269,7 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		TotalsB:   b.Totals(),
 		HitRatioA: a.Totals().HitRatio(),
 		HitRatioB: b.Totals().HitRatio(),
+		TokenComp: BuildTokenDiff(a, b),
 		Sections: []diffHTMLSection{
 			mkSection("models", "By model", "brain", ModelMovers(a, b)),
 			mkSection("projects", "By project", "folder", ProjectMovers(a, b)),
@@ -335,6 +361,24 @@ func DiffMarkdown(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) erro
 		deltaRatio(totA.HitRatio(), totB.HitRatio()))
 	ew.Println()
 
+	// Token composition — per-category counts plus the grand total.
+	td := BuildTokenDiff(a, b)
+	ew.Println("## Tokens")
+	ew.Println()
+	ew.Println("_Token-volume composition. Δ is B − A; Δ% uses A as the denominator._")
+	ew.Println()
+	ew.Println("| Category | A | B | Δ | Δ% |")
+	ew.Println("|---|---:|---:|---:|---:|")
+	for _, r := range td.Rows {
+		ew.Printf("| %s | %s | %s | %s | %s |\n",
+			r.Label, num(r.A), num(r.B), deltaInt64(r.A, r.B),
+			deltaPct(float64(r.A), float64(r.B)))
+	}
+	ew.Printf("| **Total** | %s | %s | %s | %s |\n",
+		num(td.TotalA), num(td.TotalB), deltaInt64(td.TotalA, td.TotalB),
+		deltaPct(float64(td.TotalA), float64(td.TotalB)))
+	ew.Println()
+
 	writeMoversTable(ew, "By model", ModelMovers(a, b), opt.TopMovers)
 	writeMoversTable(ew, "By project", ProjectMovers(a, b), opt.TopMovers)
 	writeMoversTable(ew, "By tool", ToolMovers(a, b), opt.TopMovers)
@@ -374,6 +418,7 @@ func DiffJSON(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		TotalsB        aggregate.Totals    `json:"totals_b"`
 		HitRatioA      float64             `json:"hit_ratio_a"`
 		HitRatioB      float64             `json:"hit_ratio_b"`
+		Tokens         TokenDiff           `json:"tokens"`
 		ModelMovers    []DiffMover         `json:"model_movers"`
 		ProjectMovers  []DiffMover         `json:"project_movers"`
 		ToolMovers     []DiffMover         `json:"tool_movers"`
@@ -387,6 +432,7 @@ func DiffJSON(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 		TotalsB:        b.Totals(),
 		HitRatioA:      a.Totals().HitRatio(),
 		HitRatioB:      b.Totals().HitRatio(),
+		Tokens:         BuildTokenDiff(a, b),
 		ModelMovers:    rankMovers(ModelMovers(a, b), opt.TopMovers),
 		ProjectMovers:  rankMovers(ProjectMovers(a, b), opt.TopMovers),
 		ToolMovers:     rankMovers(ToolMovers(a, b), opt.TopMovers),
@@ -562,6 +608,20 @@ func deltaInt(prev, cur int) string {
 	}
 	if d < 0 {
 		return "-" + num(int64(-d))
+	}
+	return "0"
+}
+
+// deltaInt64 formats a signed int64 delta with US-style thousands
+// separators. The int64 variant of deltaInt — token counts run into the
+// billions, past the range deltaInt's int parameter safely covers.
+func deltaInt64(prev, cur int64) string {
+	d := cur - prev
+	if d > 0 {
+		return "+" + num(d)
+	}
+	if d < 0 {
+		return "-" + num(-d)
 	}
 	return "0"
 }
