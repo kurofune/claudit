@@ -61,6 +61,11 @@
       <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
       <path d="M12 18V6"/>
     </symbol>
+    <symbol id="icon-tokens" viewBox="0 0 24 24">
+      <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+      <polyline points="2 12 12 17 22 12"/>
+      <polyline points="2 17 12 22 22 17"/>
+    </symbol>
     <symbol id="icon-cache" viewBox="0 0 24 24">
       <ellipse cx="12" cy="5" rx="9" ry="3"/>
       <path d="M3 5v14a9 3 0 0 0 18 0V5"/>
@@ -131,6 +136,10 @@
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</span>
         <span class="nav-metric" id="nav-metric-cost">—</span>
       </a>
+      <a class="nav-item" href="#tokens" data-view="tokens">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tokens"/></svg>Tokens</span>
+        <span class="nav-metric" id="nav-metric-tokens">—</span>
+      </a>
       <a class="nav-item" href="#sessions" data-view="sessions">
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-sessions"/></svg>Sessions</span>
         <span class="nav-metric" id="nav-metric-sessions">—</span>
@@ -172,6 +181,9 @@
 
     <section class="view" id="view-cost" data-view="cost">
       <!-- Filled at runtime by web/view-cost.js -->
+    </section>
+    <section class="view" id="view-tokens" data-view="tokens">
+      <!-- Filled at runtime by web/view-tokens.js -->
     </section>
     <section class="view" id="view-sessions" data-view="sessions">
       <!-- Filled at runtime by web/view-sessions.js -->

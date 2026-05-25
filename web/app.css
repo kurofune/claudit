@@ -554,7 +554,9 @@
   }
   .totals .headline,
   .totals .metric {
-    flex: 1 1 220px;
+    /* Basis sized so all five tiles (cost · sessions · turns · tokens ·
+       hit ratio) sit on one row at desktop widths; they grow to fill. */
+    flex: 1 1 170px;
   }
   .totals .headline { display: flex; flex-direction: column; gap: 2px; }
   .totals .headline .label { font-size: var(--t-1); color: var(--muted);
@@ -1717,4 +1719,101 @@
   }
   @media print {
     .skeleton::after { animation: none; display: none; }
+  }
+
+  /* ─── Tokens view ─────────────────────────────────────────────────────
+     Composition story (grand total + 4-way breakdown), the stacked
+     volume chart's band colors, and the by-model table. Band colors are
+     semantic theme tokens so they adapt across all themes: output→hot
+     (most expensive per token), input→warn, cache write→accent, cache
+     read→accent-2 (the cheap/good one). */
+
+  /* Overview tile that links into this view. */
+  .totals .metric-link {
+    text-decoration: none; color: inherit; cursor: pointer;
+    border-radius: var(--r-md);
+    transition: color var(--motion-fast) var(--motion-ease);
+  }
+  .totals .metric-link:hover .value { color: var(--accent); }
+  .totals .metric-link:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px;
+  }
+
+  /* Band fills — shared by chart polygons (fill) and the legend /
+     composition / tooltip swatches (color → currentColor). */
+  .tok-area-output { fill: var(--hot);      color: var(--hot); }
+  .tok-area-input  { fill: var(--warn);     color: var(--warn); }
+  .tok-area-cwrite { fill: var(--accent);   color: var(--accent); }
+  .tok-area-cread  { fill: var(--accent-2); color: var(--accent-2); }
+  .tok-area { stroke: var(--surface); stroke-width: 0.5; }
+
+  /* Composition block. */
+  .tok-composition {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: var(--s-4);
+    margin-bottom: var(--s-5);
+  }
+  .tok-headline { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--s-3); }
+  .tok-headline .label {
+    font-size: var(--t-1); color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+    display: flex; align-items: center; gap: var(--s-1);
+  }
+  .tok-headline .label .icon { width: 1em; height: 1em; color: var(--accent); }
+  .tok-headline .value {
+    font-family: var(--font-display); font-optical-sizing: auto;
+    font-feature-settings: "tnum", "lnum", "ss01";
+    font-size: var(--t-7); font-weight: 700; line-height: 1;
+    letter-spacing: -0.035em; font-variant-numeric: tabular-nums lining-nums;
+    color: var(--ink);
+  }
+  /* Proportion bar — segments sized by pct, colored by category. */
+  .tok-comp-bar {
+    display: flex; height: 16px; width: 100%;
+    border-radius: var(--r-sm); overflow: hidden;
+    background: var(--surface-3);
+  }
+  .tok-comp-seg { height: 100%; min-width: 0; }
+  .tok-comp-seg:not(:last-child) { border-right: 1px solid var(--surface); }
+  /* Category legend rows under the bar. */
+  .tok-comp-rows {
+    display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5);
+    margin-top: var(--s-3);
+  }
+  .tok-comp-row {
+    display: flex; align-items: baseline; gap: var(--s-2);
+    font-size: var(--t-2);
+  }
+  .tok-comp-key { display: flex; align-items: center; gap: var(--s-1); color: var(--ink-2); }
+  .tok-comp-num { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); }
+  .tok-comp-pct { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+  /* Swatch — small colored square in legends + tooltip. Background is
+     currentColor, which the tok-area-* class sets. */
+  .sw {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; background: currentColor; flex: none;
+  }
+
+  /* Stacked-chart legend. */
+  .tok-legend {
+    display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4);
+    margin: var(--s-2) 0;
+    font-size: var(--t-2); color: var(--ink-2);
+  }
+  .tok-legend span { display: flex; align-items: center; gap: var(--s-1); }
+
+  /* Token tooltip breakdown — override the tooltip's nowrap so the four
+     category rows stack into a tidy two-column grid. */
+  .chart-host[data-chart-type="tokens"] .chart-tooltip { white-space: normal; }
+  .chart-tooltip .ct-breakdown {
+    display: grid; grid-template-columns: auto auto; gap: 1px var(--s-3);
+    margin-top: var(--s-1);
+  }
+  .chart-tooltip .ct-breakdown span {
+    display: flex; align-items: center; gap: var(--s-1);
+    font-size: var(--t-1); color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
   }

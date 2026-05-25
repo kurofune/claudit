@@ -30,6 +30,7 @@ type StaticBundle struct {
 	Overview         OverviewPayload                      `json:"overview"`
 	Cost             CostPayload                          `json:"cost"`
 	Cache            CachePayload                         `json:"cache"`
+	Tokens           TokensPayload                        `json:"tokens"`
 	Tools            ToolsPayload                         `json:"tools"`
 	Subagents        SubagentsPayload                     `json:"subagents"`
 	Sessions         SessionsPayload                      `json:"sessions"`
@@ -117,6 +118,7 @@ func BuildStaticBundle(ctx context.Context, a *aggregate.Aggregator, opts HTMLOp
 		Overview:         BuildOverview(a),
 		Cost:             BuildCost(a),
 		Cache:            BuildCache(a),
+		Tokens:           BuildTokens(a),
 		Tools:            BuildTools(a),
 		Subagents:        BuildSubagents(a),
 		Sessions:         BuildSessions(opts.SessionTimelines),

@@ -167,7 +167,7 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "overview",
 			path:     "/_claudit/api/overview",
-			wantKeys: []string{"totals", "hotspots", "trend_totals", "forecast", "unknown_models"},
+			wantKeys: []string{"totals", "overall_hit_ratio", "total_tokens", "hotspots", "trend_totals", "forecast", "unknown_models"},
 		},
 		{
 			name:     "cost",
@@ -178,6 +178,11 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 			name:     "cache",
 			path:     "/_claudit/api/cache",
 			wantKeys: []string{"overall_hit_ratio", "cache_by_project", "cache_by_session", "cache_by_subagent", "cache_by_invocation"},
+		},
+		{
+			name:     "tokens",
+			path:     "/_claudit/api/tokens",
+			wantKeys: []string{"total", "composition", "trend", "by_model"},
 		},
 		{
 			name:     "tools",
@@ -227,6 +232,7 @@ func TestAPISections_EtagRevalidation(t *testing.T) {
 		"/_claudit/api/overview",
 		"/_claudit/api/cost",
 		"/_claudit/api/cache",
+		"/_claudit/api/tokens",
 		"/_claudit/api/tools",
 		"/_claudit/api/subagents",
 		"/_claudit/api/anomalies",

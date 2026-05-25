@@ -19,6 +19,7 @@ const (
 	apiPathOverview  = "/_claudit/api/overview"
 	apiPathCost      = "/_claudit/api/cost"
 	apiPathCache     = "/_claudit/api/cache"
+	apiPathTokens    = "/_claudit/api/tokens"
 	apiPathTools     = "/_claudit/api/tools"
 	apiPathSubagents = "/_claudit/api/subagents"
 	apiPathSessions  = "/_claudit/api/sessions"
@@ -39,6 +40,7 @@ const (
 	apiSectionOverview  = "api-overview"
 	apiSectionCost      = "api-cost"
 	apiSectionCache     = "api-cache"
+	apiSectionTokens    = "api-tokens"
 	apiSectionTools     = "api-tools"
 	apiSectionSubagents = "api-subagents"
 	apiSectionSessions  = "api-sessions"
@@ -297,6 +299,15 @@ func (s *Server) handleAPICache(w http.ResponseWriter, r *http.Request) {
 		section: apiSectionCache,
 		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
 			return render.BuildCache(a), nil
+		},
+	})
+}
+
+func (s *Server) handleAPITokens(w http.ResponseWriter, r *http.Request) {
+	s.serveAPISection(w, r, apiSectionSpec{
+		section: apiSectionTokens,
+		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+			return render.BuildTokens(a), nil
 		},
 	})
 }

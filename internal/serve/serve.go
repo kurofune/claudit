@@ -213,6 +213,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(apiPathOverview, s.handleAPIOverview)
 	s.mux.HandleFunc(apiPathCost, s.handleAPICost)
 	s.mux.HandleFunc(apiPathCache, s.handleAPICache)
+	s.mux.HandleFunc(apiPathTokens, s.handleAPITokens)
 	s.mux.HandleFunc(apiPathTools, s.handleAPITools)
 	s.mux.HandleFunc(apiPathSubagents, s.handleAPISubagents)
 	s.mux.HandleFunc(apiPathTrends, s.handleAPITrends)

@@ -33,6 +33,18 @@ export const fmtPct1 = v => (v == null || isNaN(v)) ? '—' : (100 * v).toFixed(
 
 export const fmtNum = v => v == null ? '0' : Number(v).toLocaleString();
 
+// fmtCompact abbreviates large counts for chart axes and tooltips
+// where a full comma-grouped integer is too wide: 1234567 → "1.2M",
+// 34000 → "34k". Full precision still lives in fmtNum for table cells.
+export const fmtCompact = v => {
+  v = Number(v) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return (v / 1e9).toFixed(abs >= 1e10 ? 0 : 1) + 'B';
+  if (abs >= 1e6) return (v / 1e6).toFixed(abs >= 1e7 ? 0 : 1) + 'M';
+  if (abs >= 1e3) return (v / 1e3).toFixed(abs >= 1e4 ? 0 : 1) + 'k';
+  return String(Math.round(v));
+};
+
 export const fmtDate = ts => {
   if (!ts) return '—';
   try { return new Date(ts).toISOString().slice(0, 16).replace('T', ' '); }

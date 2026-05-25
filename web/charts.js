@@ -5,7 +5,33 @@
 // between SSR-only and SPA-hosted chrome without users seeing a
 // rendering shift.
 
-import { fmtMoney, escHtml, bucketLabel, pointHitRatio } from './format.js';
+import { fmtMoney, escHtml, bucketLabel, pointHitRatio, fmtCompact } from './format.js';
+
+// TOKEN_BANDS — the stacked-area layers, bottom→top. Largest category
+// (cache read) sits on the bottom so the baseline stays visually
+// stable; output (smallest, most expensive) rides on top where it's
+// easiest to read. Each band's CSS class supplies its fill color.
+const TOKEN_BANDS = [
+  { key: 'cacheRead',  label: 'Cache read',  cls: 'tok-area-cread'  },
+  { key: 'cacheWrite', label: 'Cache write', cls: 'tok-area-cwrite' },
+  { key: 'input',      label: 'Input',       cls: 'tok-area-input'  },
+  { key: 'output',     label: 'Output',      cls: 'tok-area-output' },
+];
+
+// normalizeTokenPoint flattens a TrendPoint's five raw token fields
+// into the four chart bands (cache_create_5m + _1h collapse into one
+// "cache write" band) plus the per-period total.
+function normalizeTokenPoint(p, period) {
+  const input = p.InputTokens || 0;
+  const output = p.OutputTokens || 0;
+  const cacheWrite = (p.CacheCreate5mTokens || 0) + (p.CacheCreate1hTokens || 0);
+  const cacheRead = p.CacheReadTokens || 0;
+  return {
+    label: bucketLabel(p.time, period),
+    input, output, cacheWrite, cacheRead,
+    total: input + output + cacheWrite + cacheRead,
+  };
+}
 
 // trendSpark — tiny inline SVG bar sparkline for a table cell, cost-
 // normalized (bar heights scale to the largest cost in the series).
@@ -266,6 +292,84 @@ export function trendLineChart(points, period, anomalies) {
     </div>`;
 }
 
+// tokensStackedChart — stacked-area chart of token volume per period,
+// one band per category (TOKEN_BANDS, largest at the bottom). Y scales
+// to the tallest per-period total. Shares the crosshair system via
+// data-chart-type "tokens": the dot rides the stack top (the period
+// total) and the tooltip lists every category for that period. Bands
+// are straight-segment polygons (not smoothed) so stacked layers never
+// bezier-overshoot and cross. Mirrors trendLineChart's axis/tick chrome.
+export function tokensStackedChart(points, period) {
+  if (!points || points.length === 0) return '<div class="small">(no token trend data)</div>';
+  if (points.length === 1) {
+    return `<div class="small">Only one ${escHtml(period)} of data — chart hidden.</div>`;
+  }
+  const w = chartViewboxWidth(), h = 320;
+  const pad = { l: 64, r: 16, t: 12, b: 32 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+
+  const data = points.map(p => normalizeTokenPoint(p, period));
+  let max = 0;
+  for (const d of data) { if (d.total > max) max = d.total; }
+  if (max <= 0) max = 1;
+  const n = data.length;
+  const xAt = i => pad.l + (i / (n - 1)) * innerW;
+  const yAt = v => pad.t + innerH - (v / max) * innerH;
+
+  // Stack bottom→top, carrying a running cumulative per point. Each
+  // band's polygon = its top boundary (cumulative, left→right) joined
+  // to its bottom boundary (previous cumulative, right→left).
+  const cum = new Array(n).fill(0);
+  let bands = '';
+  for (const band of TOKEN_BANDS) {
+    const lower = cum.slice();
+    for (let i = 0; i < n; i++) cum[i] += data[i][band.key];
+    const top = [], bot = [];
+    for (let i = 0; i < n; i++) top.push(`${xAt(i).toFixed(2)},${yAt(cum[i]).toFixed(2)}`);
+    for (let i = n - 1; i >= 0; i--) bot.push(`${xAt(i).toFixed(2)},${yAt(lower[i]).toFixed(2)}`);
+    bands += `<polygon class="tok-area ${band.cls}" points="${top.join(' ')} ${bot.join(' ')}"/>`;
+  }
+
+  let yAxis = '';
+  for (const v of [0, max / 2, max]) {
+    yAxis += `<line class="trend-axis" x1="${pad.l}" x2="${w - pad.r}" y1="${yAt(v).toFixed(2)}" y2="${yAt(v).toFixed(2)}" stroke-dasharray="2,3"/>`;
+    yAxis += `<text class="trend-tick" x="${pad.l - 6}" y="${(yAt(v) + 4).toFixed(2)}" text-anchor="end">${escHtml(fmtCompact(v))}</text>`;
+  }
+
+  const tickCount = Math.min(n, 8);
+  const tickIdx = [];
+  {
+    const seen = new Set();
+    for (let k = 0; k < tickCount; k++) {
+      const i = tickCount === 1 ? 0 : Math.round(k * (n - 1) / (tickCount - 1));
+      if (!seen.has(i)) { seen.add(i); tickIdx.push(i); }
+    }
+  }
+  let xTicks = '';
+  for (const i of tickIdx) {
+    xTicks += `<text class="trend-tick" x="${xAt(i).toFixed(2)}" y="${h - pad.b + 16}" text-anchor="middle">${escHtml(data[i].label)}</text>`;
+  }
+
+  return `
+    <div class="chart-host" data-chart-type="tokens"
+         data-chart-points='${encodeChartData(data)}'
+         data-pad-l="${pad.l}" data-pad-r="${pad.r}"
+         data-pad-t="${pad.t}" data-pad-b="${pad.b}"
+         data-vb-w="${w}" data-vb-h="${h}" data-y-max="${max}">
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        ${yAxis}
+        ${bands}
+        ${xTicks}
+        <g class="crosshair" style="opacity:0">
+          <line class="crosshair-line" x1="0" x2="0" y1="${pad.t}" y2="${(pad.t + innerH).toFixed(2)}"/>
+          <circle class="crosshair-dot" cx="0" cy="0" r="5"/>
+        </g>
+      </svg>
+      <div class="chart-tooltip" role="tooltip" style="opacity:0; left:0; top:0;"></div>
+    </div>`;
+}
+
 // wireChartInteractivity — bind hover crosshair + tooltip to every
 // .chart-host under `root`. Each host carries its data + viewBox
 // padding as data-* attrs; we bind one mousemove listener per host,
@@ -315,6 +419,11 @@ export function wireChartInteractivity(root) {
     } else if (type === 'forecast') {
       const yMax = parseFloat(host.dataset.yMax) || 1;
       yAt = i => padT + innerH - ((pts[i].cum || 0) / yMax) * innerH;
+    } else if (type === 'tokens') {
+      // Dot rides the stack top — the period total — against the
+      // chart's data-y-max (the tallest total across periods).
+      const yMax = parseFloat(host.dataset.yMax) || 1;
+      yAt = i => padT + innerH - ((pts[i].total || 0) / yMax) * innerH;
     } else {
       yAt = i => padT + innerH - (pts[i].ratio || 0) * innerH;
     }
@@ -345,6 +454,18 @@ export function wireChartInteractivity(root) {
         return `<div class="ct-label">${escHtml(p.label)}</div>
                 <div class="ct-primary">${fmtCostLocal(p.cum || 0)}</div>
                 <div class="ct-meta">${p.projected ? 'projected cumulative' : 'cumulative MTD'}</div>`;
+      }
+      if (type === 'tokens') {
+        // Order matches the stack top→bottom so the tooltip reads in the
+        // same order the eye scans the bands.
+        return `<div class="ct-label">${escHtml(p.label)}</div>
+                <div class="ct-primary">${fmtCompact(p.total || 0)} tokens</div>
+                <div class="ct-breakdown">
+                  <span><i class="sw tok-area-output"></i>Output ${fmtCompact(p.output || 0)}</span>
+                  <span><i class="sw tok-area-input"></i>Input ${fmtCompact(p.input || 0)}</span>
+                  <span><i class="sw tok-area-cwrite"></i>Cache write ${fmtCompact(p.cacheWrite || 0)}</span>
+                  <span><i class="sw tok-area-cread"></i>Cache read ${fmtCompact(p.cacheRead || 0)}</span>
+                </div>`;
       }
       return `<div class="ct-label">${escHtml(p.label)}</div>
               <div class="ct-primary">${(p.ratio * 100).toFixed(1)}% hit</div>

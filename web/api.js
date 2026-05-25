@@ -44,6 +44,7 @@ function offlineLookup(path) {
     case '/snapshot':  return data.snapshot;
     case '/overview':  return data.overview;
     case '/cost':      return data.cost;
+    case '/tokens':    return data.tokens;
     case '/cache':     return data.cache;
     case '/tools':     return data.tools;
     case '/subagents': return data.subagents;
@@ -86,6 +87,7 @@ async function getJSON(path) {
 export const fetchSnapshot = () => getJSON('/snapshot');
 export const fetchOverview = () => getJSON('/overview');
 export const fetchCost = () => getJSON('/cost');
+export const fetchTokens = () => getJSON('/tokens');
 export const fetchCache = () => getJSON('/cache');
 export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');

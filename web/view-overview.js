@@ -13,7 +13,7 @@ import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
-function totalsHTML(totals, overallHitRatio) {
+function totalsHTML(totals, overallHitRatio, totalTokens) {
   const cost = totals.CostUSD || 0;
   const sessions = totals.Sessions || 0;
   const turns = totals.Turns || 0;
@@ -30,6 +30,10 @@ function totalsHTML(totals, overallHitRatio) {
       <div class="label">${labelIcon('turns')}Assistant turns</div>
       <div class="value">${escHtml(fmtNum(turns))}</div>
     </div>
+    <a class="metric metric-link" href="#tokens" title="Open the Tokens breakdown">
+      <div class="label">${labelIcon('tokens')}Total tokens</div>
+      <div class="value">${escHtml(fmtNum(totalTokens))}</div>
+    </a>
     <div class="metric">
       <div class="label">${labelIcon('gauge')}Cache hit ratio</div>
       <div class="value">${hitRatioPill(overallHitRatio)}</div>
@@ -214,14 +218,14 @@ export async function paint() {
   }
 
   const totals = overview.totals || {};
-  const overallHitRatio = pointHitRatio(totals);
-  // OverallHitRatio isn't part of OverviewPayload, so derive from
-  // the Totals struct's token counts — same math as the Go-side
-  // pointHitRatio.
+  // OverallHitRatio is computed server-side (aggregate.OverallHitRatio)
+  // and shipped on the payload — read it rather than reimplementing the
+  // formula here. Single source of truth lives in Go.
+  const overallHitRatio = overview.overall_hit_ratio || 0;
 
   container.innerHTML = `
     <div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
-    <div class="totals">${totalsHTML(totals, overallHitRatio)}</div>
+    <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0)}</div>
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
     <h2>${labelIcon('flame')}Top cost hotspots</h2>

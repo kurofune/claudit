@@ -9,6 +9,7 @@
 import { onChange, activate, parseHash } from './router.js';
 import { paint as paintOverview } from './view-overview.js';
 import { paint as paintCost, paintNav as paintNavCost } from './view-cost.js';
+import { paint as paintTokens, paintNav as paintNavTokens } from './view-tokens.js';
 import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js';
 import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
 import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
@@ -21,6 +22,7 @@ import { init as initThemes } from './themes.js';
 const VIEW_PAINTERS = {
   overview: paintOverview,
   cost: paintCost,
+  tokens: paintTokens,
   cache: paintCache,
   tools: paintTools,
   subagents: paintSubagents,
@@ -79,11 +81,12 @@ paintNavSkeletons(parseHash().view === 'overview');
 // Pills fed by the five paintNavs below — nav-metric-overview and
 // date-range are owned by view-overview.js and reset there on error.
 const NAV_SKEL_IDS = [
-  'nav-metric-cost', 'nav-metric-sessions',
+  'nav-metric-cost', 'nav-metric-tokens', 'nav-metric-sessions',
   'nav-metric-cache', 'nav-metric-tools', 'nav-metric-subagents',
 ];
 Promise.all([
   paintNavCost(),
+  paintNavTokens(),
   paintNavCache(),
   paintNavTools(),
   paintNavSubagents(),

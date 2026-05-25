@@ -23,7 +23,19 @@ func TestBuildOverview_ShapeAndKeys(t *testing.T) {
 		"trend_totals",
 		"forecast",
 		"unknown_models",
+		"overall_hit_ratio",
+		"total_tokens",
 	})
+}
+
+// TestBuildOverview_HitRatioMatchesAggregator: the overview's headline
+// cache hit ratio must equal the aggregator's OverallHitRatio() so the
+// landing tab's cache stat matches the cache tab exactly.
+func TestBuildOverview_HitRatioMatchesAggregator(t *testing.T) {
+	a := htmlSetup(t)
+	if got, want := BuildOverview(a).OverallHitRatio, a.OverallHitRatio(); got != want {
+		t.Errorf("OverallHitRatio = %v, want %v", got, want)
+	}
 }
 
 // TestBuildCost_ShapeAndKeys: cost tab covers by_model, by_project,

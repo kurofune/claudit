@@ -7,7 +7,7 @@
 // The fat HTML used the same shape, so old bookmarks keep working
 // when the cutover phase flips / to the SPA.
 
-const KNOWN_VIEWS = new Set(['overview', 'cost', 'sessions', 'cache', 'tools', 'subagents']);
+const KNOWN_VIEWS = new Set(['overview', 'cost', 'tokens', 'sessions', 'cache', 'tools', 'subagents']);
 
 export function parseHash() {
   const raw = (window.location.hash || '#overview').slice(1);

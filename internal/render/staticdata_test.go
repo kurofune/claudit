@@ -28,7 +28,7 @@ func TestBuildStaticBundle_HasAllAPIKeys(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("unmarshal: %v; raw=%s", err, raw)
 	}
-	for _, want := range []string{"snapshot", "overview", "cost", "cache", "tools", "subagents", "sessions", "anomalies", "trends", "session_timelines"} {
+	for _, want := range []string{"snapshot", "overview", "cost", "cache", "tokens", "tools", "subagents", "sessions", "anomalies", "trends", "session_timelines"} {
 		if _, ok := m[want]; !ok {
 			t.Errorf("static bundle missing %q key (keys=%v)", want, keys(m))
 		}

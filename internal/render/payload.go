@@ -50,11 +50,13 @@ type sidePart struct {
 // fetch — headline totals, the ranked hotspot stack, the totals trend
 // line, the month-end forecast, and any unknown-model warnings.
 type OverviewPayload struct {
-	Totals        aggregate.Totals       `json:"totals"`
-	Hotspots      []HotspotForJSON       `json:"hotspots"`
-	TrendTotals   []aggregate.TrendPoint `json:"trend_totals"`
-	Forecast      aggregate.Forecast     `json:"forecast"`
-	UnknownModels []string               `json:"unknown_models"`
+	Totals          aggregate.Totals       `json:"totals"`
+	OverallHitRatio float64                `json:"overall_hit_ratio"`
+	TotalTokens     int64                  `json:"total_tokens"`
+	Hotspots        []HotspotForJSON       `json:"hotspots"`
+	TrendTotals     []aggregate.TrendPoint `json:"trend_totals"`
+	Forecast        aggregate.Forecast     `json:"forecast"`
+	UnknownModels   []string               `json:"unknown_models"`
 }
 
 // CostPayload backs /_claudit/api/cost — every "where did the money
@@ -137,11 +139,13 @@ type SessionsPayload struct {
 // umbrella struct the SPA fetches in one round trip.
 func BuildOverview(a *aggregate.Aggregator) OverviewPayload {
 	return OverviewPayload{
-		Totals:        a.Totals(),
-		Hotspots:      buildHotspotsForJSON(a),
-		TrendTotals:   a.TrendTotals(),
-		Forecast:      a.MonthEndForecast(time.Now()),
-		UnknownModels: a.UnknownModels(),
+		Totals:          a.Totals(),
+		OverallHitRatio: a.OverallHitRatio(),
+		TotalTokens:     a.Totals().Total(),
+		Hotspots:        buildHotspotsForJSON(a),
+		TrendTotals:     a.TrendTotals(),
+		Forecast:        a.MonthEndForecast(time.Now()),
+		UnknownModels:   a.UnknownModels(),
 	}
 }
 
