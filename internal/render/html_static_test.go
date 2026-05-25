@@ -32,6 +32,7 @@ func TestStatic_UsesSPAShellStructure(t *testing.T) {
 	for _, want := range []string{
 		`id="view-overview"`,
 		`id="view-cost"`,
+		`id="view-tokens"`,
 		`id="view-sessions"`,
 		`id="view-cache"`,
 		`id="view-tools"`,
@@ -233,6 +234,7 @@ func TestStatic_PreservesURLContract(t *testing.T) {
 	for _, want := range []string{
 		`href="#overview"`,
 		`href="#cost"`,
+		`href="#tokens"`,
 		`href="#sessions"`,
 		`href="#cache"`,
 		`href="#tools"`,
