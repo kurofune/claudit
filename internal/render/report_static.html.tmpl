@@ -14,6 +14,14 @@
 <style>
 {{ .Tokens }}
 {{ .AppCSS }}
+/* Pin the build label to the bottom of the sidebar. app.css's shared
+   .nav-footer rule is layout-free on purpose (the serve-mode SPA wraps
+   it in .sidebar-foot, which owns the positioning); here the footer is a
+   standalone direct child of .nav, so it needs margin-top:auto to sink
+   to the bottom of the column. Mirrors diff.html.tmpl's .nav-footer. */
+.nav-footer { margin-top: auto;
+              padding: var(--s-3) var(--s-2) 0;
+              border-top: 1px solid var(--border); }
 {{ .ThemeCSS }}
 </style>
 </head>
@@ -123,8 +131,8 @@
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-subagents"/></svg>Subagents</span>
         <span class="nav-metric" id="nav-metric-subagents">—</span>
       </a>
-      {{if .Version}}<div class="nav-footer">{{.Version}}</div>{{end}}
     </nav>
+    {{if .Version}}<footer class="nav-footer">{{.Version}}</footer>{{end}}
   </aside>
 
   <main class="panel" id="panel">

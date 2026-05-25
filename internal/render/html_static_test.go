@@ -44,6 +44,33 @@ func TestStatic_UsesSPAShellStructure(t *testing.T) {
 	}
 }
 
+// TestStatic_VersionPinnedToSidebarFoot: the build label renders as a
+// standalone <footer> *after* the nav-list (a direct flex child of the
+// sidebar), not as a <div> tucked inside .nav-list. Only from there can
+// its margin-top:auto sink it to the bottom of the column — the prior
+// in-list placement stranded the version directly under the last nav
+// item instead of at the foot of the sidebar.
+func TestStatic_VersionPinnedToSidebarFoot(t *testing.T) {
+	a := htmlSetup(t)
+	var buf bytes.Buffer
+	if err := HTMLWithOptions(context.Background(), &buf, a, HTMLOptions{Version: "vTEST 1234567"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	foot := strings.Index(out, `<footer class="nav-footer">`)
+	if foot < 0 {
+		t.Fatal(`version not rendered as a standalone <footer class="nav-footer">`)
+	}
+	navClose := strings.Index(out, "</nav>") // first </nav> is the sidebar nav-list
+	if navClose < 0 || foot < navClose {
+		t.Errorf("version footer (idx %d) must follow the nav-list close </nav> (idx %d), not sit inside it", foot, navClose)
+	}
+	if !strings.Contains(out, "vTEST 1234567") {
+		t.Error("version text missing from report")
+	}
+}
+
 // TestStatic_InlinesSPABundle: the SPA's ES modules are embedded as
 // text/x-claudit-mod storage tags + a bootstrap that creates blob
 // URLs. Without this the page is a dead shell offline.
