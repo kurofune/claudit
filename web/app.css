@@ -1744,7 +1744,16 @@
   .tok-area-output { fill: var(--hot);      color: var(--hot); }
   .tok-area-input  { fill: var(--warn);     color: var(--warn); }
   .tok-area-cwrite { fill: var(--accent);   color: var(--accent); }
-  .tok-area-cread  { fill: var(--accent-2); color: var(--accent-2); }
+  /* Cache read is the dominant band (~95% of volume), so it reads as the
+     chart's background context. Mute the theme's green toward the surface
+     so the giant fill recedes (instead of glowing lime) and the small,
+     expensive bands on top stay legible. Derived from --accent-2 so it
+     still adapts per theme. Shared by the chart fill, the composition
+     bar/swatches (background → currentColor) and the legend. */
+  .tok-area-cread  {
+    --cread: color-mix(in oklch, var(--accent-2) 72%, var(--surface));
+    fill: var(--cread); color: var(--cread);
+  }
   .tok-area { stroke: var(--surface); stroke-width: 0.5; }
 
   /* Composition block. */
@@ -1775,7 +1784,7 @@
     border-radius: var(--r-sm); overflow: hidden;
     background: var(--surface-3);
   }
-  .tok-comp-seg { height: 100%; min-width: 0; }
+  .tok-comp-seg { height: 100%; min-width: 0; background: currentColor; }
   .tok-comp-seg:not(:last-child) { border-right: 1px solid var(--surface); }
   /* Category legend rows under the bar. */
   .tok-comp-rows {
