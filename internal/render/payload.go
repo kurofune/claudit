@@ -135,7 +135,8 @@ type SessionSummary struct {
 // (vs a bare []SessionSummary) lets future fields (pagination
 // cursor, redaction notice) land without an API-shape break.
 type SessionsPayload struct {
-	Sessions []SessionSummary `json:"sessions"`
+	Sessions      []SessionSummary `json:"sessions"`
+	TotalSessions int              `json:"total_sessions"`
 }
 
 // BuildOverview rolls the aggregator's landing-tab data into the
@@ -246,7 +247,13 @@ func BuildTrends(a *aggregate.Aggregator, dim string) (TrendsPayload, error) {
 // already have them — e.g. the static report renderer — don't pay
 // twice. The Prompts slice is intentionally dropped here; clients
 // fetch it per-session via /_claudit/api/sessions/{id}/timeline.
-func BuildSessions(timelines []aggregate.SessionTimeline) SessionsPayload {
+//
+// totalSessions is the full count of distinct sessions in the window
+// (aggregator's Totals().Sessions), which may exceed len(Sessions)
+// because the timeline slice is capped (q.SessionsTop). Shipping it
+// alongside the capped list lets the UI render "N of M" rather than a
+// bare "N" that contradicts the Overview tile's session total.
+func BuildSessions(timelines []aggregate.SessionTimeline, totalSessions int) SessionsPayload {
 	out := make([]SessionSummary, 0, len(timelines))
 	for _, s := range timelines {
 		out = append(out, SessionSummary{
@@ -258,5 +265,5 @@ func BuildSessions(timelines []aggregate.SessionTimeline) SessionsPayload {
 			Turns:     s.Turns,
 		})
 	}
-	return SessionsPayload{Sessions: out}
+	return SessionsPayload{Sessions: out, TotalSessions: totalSessions}
 }

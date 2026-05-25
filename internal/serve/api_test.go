@@ -415,7 +415,7 @@ func TestAPISessions_ListShape(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 	body := readJSONResponse(t, w)
-	assertTopLevelKeys(t, body, []string{"sessions"})
+	assertTopLevelKeys(t, body, []string{"sessions", "total_sessions"})
 
 	// One session-summary per fixture session, no per-prompt data.
 	var p struct {

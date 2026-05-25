@@ -27,8 +27,8 @@ import (
 func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSessions,
-		build: func(_ *aggregate.Aggregator, timelines []aggregate.SessionTimeline) (any, error) {
-			return render.BuildSessions(timelines), nil
+		build: func(agg *aggregate.Aggregator, timelines []aggregate.SessionTimeline) (any, error) {
+			return render.BuildSessions(timelines, agg.Totals().Sessions), nil
 		},
 		needsTimelines: true,
 	})
