@@ -173,8 +173,9 @@ export async function paint(route) {
   const sess = cache.cache_by_session || [];
   const subs = cache.cache_by_subagent || [];
   const invs = cache.cache_by_invocation || [];
-  let totalMiss = 0;
-  for (const r of proj) totalMiss += r.Miss || 0;
+  // total_miss ships from Go (aggregate.Totals().MissTokens) — equals
+  // the per-project Miss sum this used to reduce, computed once upstream.
+  const totalMiss = cache.total_miss || 0;
 
   const summary = container.querySelector('#cache-summary');
   if (summary) {

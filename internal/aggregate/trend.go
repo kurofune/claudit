@@ -71,6 +71,7 @@ type TrendPoint struct {
 	CostUSD  float64   `json:"cost_usd"`
 	Turns    int       `json:"turns"`
 	Sessions int       `json:"sessions"`
+	HitRatio float64   `json:"hit_ratio"`
 	Tokens
 }
 
@@ -102,7 +103,13 @@ func gapFill(p Period, m map[time.Time]*TrendPoint) []TrendPoint {
 	var out []TrendPoint
 	for t := first; !t.After(last); t = p.Step(t) {
 		if pt := m[t]; pt != nil {
-			out = append(out, *pt)
+			cell := *pt
+			// Materialize the per-bucket hit ratio so JS reading
+			// p.hit_ratio is byte-identical to the embedded
+			// Tokens.HitRatio() formula it replaces. Gap-filled cells
+			// keep HitRatio 0 (no cacheable traffic).
+			cell.HitRatio = pt.Tokens.HitRatio()
+			out = append(out, cell)
 		} else {
 			out = append(out, TrendPoint{Time: t})
 		}

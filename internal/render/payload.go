@@ -63,16 +63,18 @@ type OverviewPayload struct {
 // go" lens (model, project, skill, prompt) in one umbrella so the
 // Cost tab paints with one fetch.
 type CostPayload struct {
-	ByModel   []aggregate.ModelBucket   `json:"by_model"`
-	ByProject []aggregate.ProjectBucket `json:"by_project"`
-	BySkill   []aggregate.SkillBucket   `json:"by_skill"`
-	ByPrompt  []aggregate.PromptBucket  `json:"by_prompt"`
+	TotalCostUSD float64                   `json:"total_cost_usd"`
+	ByModel      []aggregate.ModelBucket   `json:"by_model"`
+	ByProject    []aggregate.ProjectBucket `json:"by_project"`
+	BySkill      []aggregate.SkillBucket   `json:"by_skill"`
+	ByPrompt     []aggregate.PromptBucket  `json:"by_prompt"`
 }
 
 // CachePayload backs /_claudit/api/cache — the four cache-efficiency
 // drill-downs plus the headline overall hit ratio.
 type CachePayload struct {
 	OverallHitRatio   float64              `json:"overall_hit_ratio"`
+	TotalMiss         int64                `json:"total_miss"`
 	CacheByProject    []aggregate.CacheRow `json:"cache_by_project"`
 	CacheBySession    []aggregate.CacheRow `json:"cache_by_session"`
 	CacheBySubagent   []aggregate.CacheRow `json:"cache_by_subagent"`
@@ -96,6 +98,7 @@ type SubagentsPayload struct {
 	AgentInvocations []aggregate.AgentInvocation `json:"agent_invocations"`
 	Main             sidePart                    `json:"main"`
 	Sidechain        sidePart                    `json:"sidechain"`
+	MainSideCost     float64                     `json:"main_side_cost"`
 }
 
 // AnomaliesPayload backs /_claudit/api/anomalies — a single top-level
@@ -152,10 +155,11 @@ func BuildOverview(a *aggregate.Aggregator) OverviewPayload {
 // BuildCost rolls the aggregator into the Cost-tab payload.
 func BuildCost(a *aggregate.Aggregator) CostPayload {
 	return CostPayload{
-		ByModel:   a.ByModel(),
-		ByProject: a.ByProject(),
-		BySkill:   a.BySkill(),
-		ByPrompt:  a.ByPrompt(),
+		TotalCostUSD: a.Totals().CostUSD,
+		ByModel:      a.ByModel(),
+		ByProject:    a.ByProject(),
+		BySkill:      a.BySkill(),
+		ByPrompt:     a.ByPrompt(),
 	}
 }
 
@@ -163,6 +167,7 @@ func BuildCost(a *aggregate.Aggregator) CostPayload {
 func BuildCache(a *aggregate.Aggregator) CachePayload {
 	return CachePayload{
 		OverallHitRatio:   a.OverallHitRatio(),
+		TotalMiss:         a.Totals().MissTokens(),
 		CacheByProject:    a.CacheByProject(),
 		CacheBySession:    a.CacheBySession(),
 		CacheBySubagent:   a.CacheBySubagent(),
@@ -190,6 +195,9 @@ func BuildSubagents(a *aggregate.Aggregator) SubagentsPayload {
 		AgentInvocations: a.AgentInvocations(""),
 		Main:             sidePart{Cost: mainCost, Turns: mainTurns, Tokens: mainTok},
 		Sidechain:        sidePart{Cost: sideCost, Turns: sideTurns, Tokens: sideTok},
+		// Literal main+side sum (NOT a.Totals().CostUSD) so JS reading
+		// main_side_cost is byte-identical to `main.cost + side.cost`.
+		MainSideCost: mainCost + sideCost,
 	}
 }
 

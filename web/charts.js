@@ -5,7 +5,7 @@
 // between SSR-only and SPA-hosted chrome without users seeing a
 // rendering shift.
 
-import { fmtMoney, escHtml, bucketLabel, pointHitRatio, fmtCompact } from './format.js';
+import { fmtMoney, escHtml, bucketLabel, fmtCompact } from './format.js';
 
 // TOKEN_BANDS — the stacked-area layers, bottom→top. Largest category
 // (cache read) sits on the bottom so the baseline stays visually
@@ -67,7 +67,9 @@ export function trendSparkHit(points, period, w, h) {
   const bw = w / n;
   let bars = '';
   for (let i = 0; i < n; i++) {
-    const r = pointHitRatio(points[i]);
+    // hit_ratio ships per TrendPoint from Go (aggregate.Tokens.HitRatio);
+    // read it rather than reimplementing the formula here.
+    const r = points[i].hit_ratio || 0;
     const bh = r * (h - 1);
     const x = i * bw;
     const y = h - bh;
@@ -140,7 +142,7 @@ export function hitRatioChart(points, period, anomalies) {
   const yAt = r => pad.t + innerH - r * innerH;
   const anomIdx = anomalyIndex(anomalies, 'hitratio_drop');
 
-  const coords = points.map((p, i) => [xAt(i), yAt(pointHitRatio(p))]);
+  const coords = points.map((p, i) => [xAt(i), yAt(p.hit_ratio || 0)]);
   const linePath = smoothPath(coords);
   const areaPath = linePath +
     ` L ${xAt(n-1).toFixed(2)} ${(pad.t + innerH).toFixed(2)}` +
@@ -153,7 +155,7 @@ export function hitRatioChart(points, period, anomalies) {
   }
   let dots = '', markers = '';
   for (let i = 0; i < n; i++) {
-    const r = pointHitRatio(points[i]);
+    const r = points[i].hit_ratio || 0;
     const a = anomIdx.get(points[i].time);
     const cls = a ? 'trend-pt trend-pt-anomaly' : 'trend-pt';
     const rad = a ? 5 : 3;
@@ -166,7 +168,7 @@ export function hitRatioChart(points, period, anomalies) {
 
   const data = points.map(p => ({
     label: bucketLabel(p.time, period),
-    ratio: pointHitRatio(p),
+    ratio: p.hit_ratio || 0,
     anomaly: anomIdx.get(p.time) || null,
   }));
 

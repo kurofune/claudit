@@ -172,12 +172,12 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "cost",
 			path:     "/_claudit/api/cost",
-			wantKeys: []string{"by_model", "by_project", "by_skill", "by_prompt"},
+			wantKeys: []string{"by_model", "by_project", "by_skill", "by_prompt", "total_cost_usd"},
 		},
 		{
 			name:     "cache",
 			path:     "/_claudit/api/cache",
-			wantKeys: []string{"overall_hit_ratio", "cache_by_project", "cache_by_session", "cache_by_subagent", "cache_by_invocation"},
+			wantKeys: []string{"overall_hit_ratio", "cache_by_project", "cache_by_session", "cache_by_subagent", "cache_by_invocation", "total_miss"},
 		},
 		{
 			name:     "tokens",
@@ -192,7 +192,7 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "subagents",
 			path:     "/_claudit/api/subagents",
-			wantKeys: []string{"by_subagent", "agent_invocations", "main", "sidechain"},
+			wantKeys: []string{"by_subagent", "agent_invocations", "main", "sidechain", "main_side_cost"},
 		},
 		{
 			name:     "anomalies",

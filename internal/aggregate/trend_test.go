@@ -98,11 +98,52 @@ func TestTrend_HitRatioPerBucket(t *testing.T) {
 	if len(pts) != 2 {
 		t.Fatalf("want 2 buckets, got %d", len(pts))
 	}
-	if got := pts[0].HitRatio(); got != 0 {
+	if got := pts[0].Tokens.HitRatio(); got != 0 {
 		t.Errorf("d1 hit ratio: %v, want 0", got)
 	}
-	if got := pts[1].HitRatio(); got != 0.9 {
+	if got := pts[1].Tokens.HitRatio(); got != 0.9 {
 		t.Errorf("d2 hit ratio: %v, want 0.9", got)
+	}
+}
+
+func TestTrend_HitRatioField_MatchesEmbeddedMethod(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithPeriod(PeriodDay)
+
+	// day1: cache traffic. day3: cache traffic. day2 is a gap-fill cell.
+	d1 := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
+	d3 := d1.AddDate(0, 0, 2)
+
+	// d1: input=100, cache_read=900 → hit ratio 0.9.
+	agg.Add(fullTurn("s1", "/p/x", "claude-opus-4-7", 100, 0, 0, 0, 900, d1))
+	// d3: input=1000, cache_read=0 → hit ratio 0.
+	agg.Add(fullTurn("s1", "/p/x", "claude-opus-4-7", 1000, 0, 0, 0, 0, d3))
+
+	pts := agg.TrendTotals()
+	if len(pts) != 3 {
+		t.Fatalf("want 3 cells (day1,day2,day3), got %d", len(pts))
+	}
+
+	// Every materialized point's HitRatio field must equal its embedded
+	// Tokens.HitRatio() exactly — JS reading p.hit_ratio must be
+	// byte-identical to the formula it replaces.
+	for i, p := range pts {
+		if got, want := p.HitRatio, p.Tokens.HitRatio(); got != want {
+			t.Errorf("pts[%d].HitRatio = %v, want embedded Tokens.HitRatio() = %v", i, got, want)
+		}
+	}
+
+	// Spot-check materialized values.
+	if pts[0].HitRatio != 0.9 {
+		t.Errorf("day1 HitRatio field = %v, want 0.9", pts[0].HitRatio)
+	}
+	if pts[2].HitRatio != 0 {
+		t.Errorf("day3 HitRatio field = %v, want 0", pts[2].HitRatio)
+	}
+
+	// Gap-filled zero cell (day2) keeps HitRatio == 0.
+	if pts[1].HitRatio != 0 {
+		t.Errorf("gap-filled day2 HitRatio field = %v, want 0", pts[1].HitRatio)
 	}
 }
 

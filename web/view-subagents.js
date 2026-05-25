@@ -158,7 +158,9 @@ export async function paint(route) {
   const side = subagents.sidechain || { cost: 0, turns: 0, tokens: {} };
   const totalCost = (overview.totals && overview.totals.CostUSD) || 0;
   const sideCost = side.cost || 0;
-  const totalMainSide = main.cost + side.cost;
+  // main_side_cost ships from Go as the literal main+side sum; the
+  // per-bucket share division below stays client-side.
+  const totalMainSide = subagents.main_side_cost || 0;
 
   // Stacked bar — main vs sidechain.
   const stacked = container.querySelector('#stacked-main');
