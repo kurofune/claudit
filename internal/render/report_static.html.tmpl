@@ -88,11 +88,10 @@
   <aside class="nav" aria-label="Sections">
     <div class="brand">
       <div class="brand-name">claudit</div>
-      <!-- Static one-shot reports have nothing to navigate to, so the
-           date range stays a plain <div> rather than a button. Serve
-           mode uses the legacy template (with the popover-backed
-           button) for /legacy; the SPA-shell URL `/` doesn't render
-           this template at all. -->
+      <!-- Static one-shot reports can't re-query a date range (no live
+           server behind them), so this stays a plain <div> rather than
+           the popover-backed date-range button the serve-mode SPA
+           (web/index.html) renders at `/`. -->
       <div class="brand-sub" id="date-range">—</div>
     </div>
     <nav class="nav-list">
