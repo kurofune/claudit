@@ -52,7 +52,18 @@ func TestBuildCost_ShapeAndKeys(t *testing.T) {
 		"by_project",
 		"by_skill",
 		"by_prompt",
+		"total_cost_usd",
 	})
+}
+
+// TestBuildCost_TotalCostMatchesAggregator: the cost tab's headline
+// total must equal the aggregator's Totals().CostUSD exactly so JS can
+// read it directly instead of re-summing per-row costs.
+func TestBuildCost_TotalCostMatchesAggregator(t *testing.T) {
+	a := htmlSetup(t)
+	if got, want := BuildCost(a).TotalCostUSD, a.Totals().CostUSD; got != want {
+		t.Errorf("TotalCostUSD = %v, want %v", got, want)
+	}
 }
 
 // TestBuildCache_ShapeAndKeys: cache tab covers the four
@@ -70,7 +81,22 @@ func TestBuildCache_ShapeAndKeys(t *testing.T) {
 		"cache_by_session",
 		"cache_by_subagent",
 		"cache_by_invocation",
+		"total_miss",
 	})
+}
+
+// TestBuildCache_TotalMissMatchesProjectSum proves the shipped TotalMiss
+// is byte-equivalent to the JS reduce it replaces: Σ over cache_by_project
+// rows of .Miss. These are int64 sums, so they must be EXACTLY equal.
+func TestBuildCache_TotalMissMatchesProjectSum(t *testing.T) {
+	a := htmlSetup(t)
+	var want int64
+	for _, row := range a.CacheByProject() {
+		want += row.Miss
+	}
+	if got := BuildCache(a).TotalMiss; got != want {
+		t.Errorf("TotalMiss = %d, want Σ CacheByProject().Miss = %d", got, want)
+	}
 }
 
 // TestBuildTools_ShapeAndKeys: tools tab has the parent buckets plus
@@ -106,7 +132,20 @@ func TestBuildSubagents_ShapeAndKeys(t *testing.T) {
 		"agent_invocations",
 		"main",
 		"sidechain",
+		"main_side_cost",
 	})
+}
+
+// TestBuildSubagents_MainSideCostIsMainPlusSide: the shipped MainSideCost
+// must equal the literal Main.Cost + Sidechain.Cost sum so JS reading it
+// is byte-identical to the `main.cost + side.cost` it replaces — NOT
+// a.Totals().CostUSD, which sums in a different order.
+func TestBuildSubagents_MainSideCostIsMainPlusSide(t *testing.T) {
+	a := htmlSetup(t)
+	p := BuildSubagents(a)
+	if got, want := p.MainSideCost, p.Main.Cost+p.Sidechain.Cost; got != want {
+		t.Errorf("MainSideCost = %v, want Main.Cost+Sidechain.Cost = %v", got, want)
+	}
 }
 
 // TestBuildSubagents_MainSidechainMatchesAggregator: the Main and

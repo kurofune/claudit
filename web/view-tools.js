@@ -172,7 +172,9 @@ export async function paint(route) {
 
   const byTool = tools.by_tool || [];
   const detail = tools.by_tool_detail || {};
-  const totalCost = (cost.by_model || []).reduce((s, r) => s + (r.CostUSD || 0), 0);
+  // total_cost_usd ships from Go (aggregate.Totals().CostUSD); the
+  // /cost fetch above is the source for the "%" column denominator.
+  const totalCost = cost.total_cost_usd || 0;
 
   // hbar list — SSR-equivalent client render.
   const barsEl = container.querySelector('#tools-bars');

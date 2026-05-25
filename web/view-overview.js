@@ -7,7 +7,7 @@
 // the inline trendSection() IIFE in report.html.tmpl).
 
 import { fetchOverview, fetchAnomalies } from './api.js';
-import { fmtMoney, fmtNum, hitRatioPill, escHtml, pointHitRatio } from './format.js';
+import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 
@@ -95,7 +95,7 @@ function trendSectionHTML(data, anomalies) {
     }
   }
 
-  const latestHit = pointHitRatio(points[points.length - 1]);
+  const latestHit = points[points.length - 1].hit_ratio || 0;
   const forecast = data.forecast || null;
   const showForecastTab = !!forecast && (forecast.projected_month_end_usd || 0) > 0;
 

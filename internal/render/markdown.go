@@ -509,7 +509,7 @@ func renderTrendSection(ew *errWriter, period aggregate.Period, points []aggrega
 		}
 		hit := "—"
 		if p.CacheableTokens() > 0 {
-			hit = ratioPct(p.HitRatio())
+			hit = ratioPct(p.Tokens.HitRatio())
 		}
 		ew.Printf("| %s | %s | %s | %d | %s |\n",
 			formatBucket(period, p.Time), money(p.CostUSD), delta, p.Turns, hit)

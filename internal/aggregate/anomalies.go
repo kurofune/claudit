@@ -96,14 +96,14 @@ func (a *Aggregator) Anomalies() []Anomaly {
 			if pts[j].CacheableTokens() == 0 {
 				continue
 			}
-			ratios = append(ratios, pts[j].HitRatio())
+			ratios = append(ratios, pts[j].Tokens.HitRatio())
 		}
 		if len(ratios) < anomalyWindow/2 {
 			// Not enough prior cache-eligible buckets to baseline against.
 			continue
 		}
 		medRatio := stat.Median(ratios)
-		hr := pts[i].HitRatio()
+		hr := pts[i].Tokens.HitRatio()
 		if medRatio-hr >= anomalyHitRatioDrop {
 			out = append(out, Anomaly{
 				Time:     pts[i].Time,

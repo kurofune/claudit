@@ -199,7 +199,10 @@ export async function paint(route) {
   const byProject = cost.by_project || [];
   const bySkill = cost.by_skill || [];
   const byPrompt = cost.by_prompt || [];
-  const totalCost = byModel.reduce((s, r) => s + (r.CostUSD || 0), 0);
+  // total_cost_usd ships from Go (aggregate.Totals().CostUSD) — read it
+  // rather than re-summing per-row costs. The per-row pct() division
+  // stays client-side (which denominator applies is a per-view choice).
+  const totalCost = cost.total_cost_usd || 0;
 
   // SSR-equivalent hbar rendering. Static report SSRs these; the SPA
   // builds them client-side from the same data.
