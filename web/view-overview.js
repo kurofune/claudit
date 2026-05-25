@@ -30,10 +30,10 @@ function totalsHTML(totals, overallHitRatio, totalTokens) {
       <div class="label">${labelIcon('turns')}Assistant turns</div>
       <div class="value">${escHtml(fmtNum(turns))}</div>
     </div>
-    <a class="metric metric-link" href="#tokens" title="Open the Tokens breakdown">
+    <div class="metric">
       <div class="label">${labelIcon('tokens')}Total tokens</div>
       <div class="value">${escHtml(fmtNum(totalTokens))}</div>
-    </a>
+    </div>
     <div class="metric">
       <div class="label">${labelIcon('gauge')}Cache hit ratio</div>
       <div class="value">${hitRatioPill(overallHitRatio)}</div>

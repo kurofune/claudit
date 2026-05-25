@@ -1728,17 +1728,6 @@
      (most expensive per token), input→warn, cache write→accent, cache
      read→accent-2 (the cheap/good one). */
 
-  /* Overview tile that links into this view. */
-  .totals .metric-link {
-    text-decoration: none; color: inherit; cursor: pointer;
-    border-radius: var(--r-md);
-    transition: color var(--motion-fast) var(--motion-ease);
-  }
-  .totals .metric-link:hover .value { color: var(--accent); }
-  .totals .metric-link:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 3px;
-  }
-
   /* Band fills — shared by chart polygons (fill) and the legend /
      composition / tooltip swatches (color → currentColor). */
   .tok-area-output { fill: var(--hot);      color: var(--hot); }
