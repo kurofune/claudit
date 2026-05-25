@@ -47,3 +47,23 @@ func BuildTokenDiff(a, b *aggregate.Aggregator) TokenDiff {
 	}
 	return TokenDiff{Rows: rows, TotalA: ta.Total(), TotalB: tb.Total()}
 }
+
+// tokenAxisMax returns the largest single per-category count across both
+// sides of a TokenDiff. It's the right-edge axis for the Tokens section's
+// dumbbell rows, so dot positions stay comparable across categories — the
+// dominant band (usually cache-read) defines the scale, exactly as a mover
+// section's Max does. Excludes the grand totals on purpose: a total exceeds
+// any single band and would peg every dot to 100%. Returns 0 for an empty
+// diff so dotPct's max<=0 guard short-circuits.
+func tokenAxisMax(td TokenDiff) float64 {
+	var max int64
+	for _, r := range td.Rows {
+		if r.A > max {
+			max = r.A
+		}
+		if r.B > max {
+			max = r.B
+		}
+	}
+	return float64(max)
+}

@@ -45,6 +45,12 @@ var diffTpl = template.Must(template.New("diff").Funcs(template.FuncMap{
 	"tokDeltaPct":  func(a, b int64) string { return deltaPct(float64(a), float64(b)) },
 	"tokDeltaSign": func(a, b int64) string { return deltaSign(float64(a), float64(b)) },
 	"tokClass":     tokClass,
+	// Tokens dumbbell positioning — counts are int64, the geometry helpers
+	// are float64, so the wrappers cast at the call boundary (mirroring
+	// the tokDelta* funcs above).
+	"tokDotPct":       func(v int64, max float64) string { return dotPct(float64(v), max) },
+	"tokLineLeftPct":  func(a, b int64, max float64) string { return lineLeftPct(float64(a), float64(b), max) },
+	"tokLineWidthPct": func(a, b int64, max float64) string { return lineWidthPct(float64(a), float64(b), max) },
 }).Parse(diffHTMLTemplate))
 
 // tokClass maps a token-composition label to the CSS class that paints
@@ -211,6 +217,7 @@ type diffHTMLData struct {
 	HitRatioA       float64
 	HitRatioB       float64
 	TokenComp       TokenDiff         // 4-category composition, A vs B, for the Tokens section
+	TokenMax        float64           // largest single A/B category count — the dumbbell axis for the Tokens rows
 	Sections        []diffHTMLSection // fixed order, drives the sidebar nav
 	NewHotspots     []aggregate.Hotspot
 	NewHotspotsShow bool // true when the section is enabled (Hotspots > 0)
@@ -278,6 +285,7 @@ func DiffHTML(w io.Writer, a, b *aggregate.Aggregator, opt DiffOptions) error {
 			mkSection("subagents", "By subagent type", "subagents", SubagentMovers(a, b)),
 		},
 	}
+	data.TokenMax = tokenAxisMax(data.TokenComp)
 	for _, s := range data.Sections {
 		if d := math.Abs(s.TotalDelta); d > data.MaxAbsSectionDelta {
 			data.MaxAbsSectionDelta = d

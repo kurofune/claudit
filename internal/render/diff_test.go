@@ -242,6 +242,46 @@ func TestDiffHTML_RendersCoreSections(t *testing.T) {
 	}
 }
 
+// TestDiffHTML_TokensAsDumbbells locks in the two presentation changes:
+// the Overview gains a "Total tokens" A→B tile, and the Tokens section
+// renders the per-category rows as dumbbell movers (the old .tokrow table
+// is gone) while keeping the A/B mix bars on top.
+func TestDiffHTML_TokensAsDumbbells(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	a := aggregate.New(prices)
+	a.Add(mkTokenTurn("claude-opus-4-7", "/p", 100, 20, 30, 10, 1000, t0))
+	b := aggregate.New(prices)
+	b.Add(mkTokenTurn("claude-opus-4-7", "/p", 200, 50, 40, 20, 5000, t0))
+
+	var buf bytes.Buffer
+	if err := DiffHTML(&buf, a, b, DiffOptions{LabelA: "A", LabelB: "B"}); err != nil {
+		t.Fatalf("DiffHTML returned error: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"Total tokens",      // new Overview tile
+		"tokbar",            // A/B mix bars still present on top
+		"mover mover-total", // Tokens total row uses the mover layout
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("DiffHTML output missing %q", want)
+		}
+	}
+	// The old token table classes must be fully retired.
+	if strings.Contains(out, "tokrow") {
+		t.Errorf("DiffHTML still emits the retired .tokrow table markup")
+	}
+	// A token dumbbell carries a plain-count title (no $), distinguishing
+	// it from the cost movers' money titles — proof the Tokens section now
+	// plots dumbbells.
+	if !strings.Contains(out, `title="A: 1,000  →  B: 5,000"`) {
+		t.Errorf("Tokens section missing a per-category dumbbell:\n%s", headSnippet(out))
+	}
+}
+
 func TestDiffHTML_EmptyCorpus(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	a := aggregate.New(prices)

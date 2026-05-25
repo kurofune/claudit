@@ -93,6 +93,33 @@ func TestBuildTokenDiff_TotalsAndShares(t *testing.T) {
 	}
 }
 
+// TestTokenAxisMax: the dumbbell axis is the largest single per-category
+// count across both sides — never the grand total, which exceeds any band
+// and would peg every dot to the right edge.
+func TestTokenAxisMax(t *testing.T) {
+	td := TokenDiff{
+		Rows: []TokenCompositionRow{
+			{Label: "Input", A: 100, B: 200},
+			{Label: "Output", A: 20, B: 50},
+			{Label: "Cache write", A: 40, B: 60},
+			{Label: "Cache read", A: 1000, B: 5000},
+		},
+		TotalA: 1160,
+		TotalB: 5310,
+	}
+	if got := tokenAxisMax(td); got != 5000 {
+		t.Errorf("tokenAxisMax = %v, want 5000 (largest single A/B count, not the total)", got)
+	}
+}
+
+// TestTokenAxisMax_Empty: no rows → zero axis, so dotPct's max<=0 guard
+// short-circuits and nothing divides by zero.
+func TestTokenAxisMax_Empty(t *testing.T) {
+	if got := tokenAxisMax(TokenDiff{}); got != 0 {
+		t.Errorf("tokenAxisMax(empty) = %v, want 0", got)
+	}
+}
+
 // TestBuildTokenDiff_EmptySides: a zero corpus on either side must not
 // divide by zero — shares fall back to 0 and totals are 0.
 func TestBuildTokenDiff_EmptySides(t *testing.T) {

@@ -532,30 +532,10 @@
   .tok-cwrite { background: var(--accent); }
   .tok-cread  { background: color-mix(in oklch, var(--accent-2) 72%, var(--surface)); }
 
-  .tokrows { display: flex; flex-direction: column; }
-  .tokrow {
-    display: grid;
-    grid-template-columns: minmax(9em, 1fr) auto auto;
-    align-items: baseline; gap: var(--s-2) var(--s-5);
-    padding: var(--s-2) 0; border-bottom: 1px solid var(--border);
-    font-size: var(--t-2);
-  }
-  .tokrow-total {
-    border-bottom: none; border-top: 2px solid var(--border-strong);
-    margin-top: var(--s-1); padding-top: var(--s-3); font-weight: 600;
-  }
-  .tokrow-key { display: flex; align-items: center; gap: var(--s-2); color: var(--ink-2); }
+  /* Category swatch carried into the dumbbell row's key, tying each row
+     back to its band in the A/B mix bars above. */
   .toksw { display: inline-block; width: 10px; height: 10px;
     border-radius: 2px; flex: none; }
-  .tokrow-ab { font-variant-numeric: tabular-nums; color: var(--ink);
-    justify-self: end; }
-  .tokrow-ab .arrow { color: var(--ink-2); margin: 0 2px; }
-  .tokrow-delta { font-variant-numeric: tabular-nums; justify-self: end;
-    white-space: nowrap; min-width: 11ch; text-align: right; }
-  .tokrow-pct { color: var(--muted); margin-left: var(--s-1); }
-  .tokrow-delta.up   { color: var(--hot); }       /* more tokens = cost-hot */
-  .tokrow-delta.down { color: var(--accent-2); }
-  .tokrow-delta.zero { color: var(--muted); }
 
   /* ─── Mover rows — dumbbell plot ─────────────────────────────────
      Each row: [key] [dumbbell ●━━━●] [A → B values] [signed Δ + %].
@@ -651,6 +631,43 @@
   .mover .delta-line.up   .delta-money { color: var(--hot); }
   .mover .delta-line.down .delta-money { color: var(--accent-2); }
   .mover .delta-line.zero .delta-money { color: var(--muted); }
+
+  /* Tokens section reuses the mover/dumbbell row, but token counts run to
+     ten-plus digits — far longer than the dollar amounts the base 14ch
+     value/delta columns were sized for. Rather than per-row .mover grids
+     (whose auto columns size independently, leaving every dumbbell track a
+     different width), the rows share ONE grid: the wrapper defines the four
+     columns and each row is a subgrid spanning them. The auto value/delta
+     columns then size to the widest row's content, so the A→B and Δ numbers
+     line up as a table and every dumbbell track is identical width. Each
+     row keeps its own border/hover box. */
+  #tokens .tok-movers {
+    display: grid;
+    grid-template-columns: minmax(14ch, 22ch) minmax(120px, 1fr) auto auto;
+    column-gap: var(--s-4);
+  }
+  #tokens .mover {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+  }
+  /* The key carries the band swatch (the other sections' keys are bare),
+     so lay it out as a flex row — swatch and label on one baseline. */
+  #tokens .mover .key { display: flex; align-items: center; gap: var(--s-2); }
+  /* The grand-total summary row: same 4-column grid, but no dumbbell
+     (a total exceeds every band and would just peg to the right edge).
+     The spacer holds the dumbbell column empty so the A→B / Δ columns
+     stay aligned with the rows above. Styled like the old table total —
+     ruled off on top, bold, no hover lift. */
+  .dumbbell-spacer { min-height: 22px; }
+  .mover.mover-total {
+    border-bottom: none;
+    border-top: 2px solid var(--border-strong);
+    margin-top: var(--s-1);
+    padding-top: var(--s-3);
+    font-weight: 600;
+  }
+  .mover.mover-total:hover { background: none; }
+  .mover.mover-total .key { font-weight: 600; }
 
   /* Narrow viewport: drop the dumbbell to a second line so the key and
      numbers keep room to breathe. */
@@ -975,6 +992,19 @@
       </div>
     </div>
 
+    <div class="metric">
+      <span class="label">Total tokens</span>
+      <div class="ab-row">
+        <span class="value-a">{{ tokNum .TokenComp.TotalA }}</span>
+        <span class="arrow">→</span>
+        <span class="value-b">{{ tokNum .TokenComp.TotalB }}</span>
+      </div>
+      <div class="delta delta-{{ tokDeltaSign .TokenComp.TotalA .TokenComp.TotalB }}">
+        {{ tokDelta .TokenComp.TotalA .TokenComp.TotalB }}
+        ({{ tokDeltaPct .TokenComp.TotalA .TokenComp.TotalB }})
+      </div>
+    </div>
+
     <div class="metric neutral">
       <span class="label">Sessions</span>
       <div class="ab-row">
@@ -1041,19 +1071,40 @@
     </div>
   </div>
 
-  <div class="tokrows">
-    {{ range .TokenComp.Rows }}
-    <div class="tokrow">
-      <span class="tokrow-key"><i class="toksw {{ tokClass .Label }}"></i>{{ .Label }}</span>
-      <span class="tokrow-ab">{{ tokNum .A }} <span class="arrow">→</span> {{ tokNum .B }}</span>
-      <span class="tokrow-delta {{ tokDeltaSign .A .B }}">{{ tokDelta .A .B }} <span class="tokrow-pct">{{ tokDeltaPct .A .B }}</span></span>
+  {{ $tmax := .TokenMax }}
+  <div class="tok-movers">
+  {{ range .TokenComp.Rows }}
+  <div class="mover">
+    <div class="key"><i class="toksw {{ tokClass .Label }}"></i>{{ .Label }}</div>
+    <div class="dumbbell {{ tokDeltaSign .A .B }}" title="A: {{ tokNum .A }}  →  B: {{ tokNum .B }}">
+      <div class="line" style="left: {{ tokLineLeftPct .A .B $tmax }}%; width: {{ tokLineWidthPct .A .B $tmax }}%"></div>
+      <div class="dot a" style="left: {{ tokDotPct .A $tmax }}%" title="A: {{ tokNum .A }}"></div>
+      <div class="dot b" style="left: {{ tokDotPct .B $tmax }}%" title="B: {{ tokNum .B }}"></div>
     </div>
-    {{ end }}
-    <div class="tokrow tokrow-total">
-      <span class="tokrow-key">Total</span>
-      <span class="tokrow-ab">{{ tokNum .TokenComp.TotalA }} <span class="arrow">→</span> {{ tokNum .TokenComp.TotalB }}</span>
-      <span class="tokrow-delta {{ tokDeltaSign .TokenComp.TotalA .TokenComp.TotalB }}">{{ tokDelta .TokenComp.TotalA .TokenComp.TotalB }} <span class="tokrow-pct">{{ tokDeltaPct .TokenComp.TotalA .TokenComp.TotalB }}</span></span>
+    <div class="db-values">
+      <span class="val-a">{{ tokNum .A }}</span>
+      <span class="arrow">→</span>
+      <span class="val-b">{{ tokNum .B }}</span>
     </div>
+    <div class="delta-line {{ tokDeltaSign .A .B }}">
+      <span class="delta-money">{{ tokDelta .A .B }}</span>
+      <span class="delta-pct">{{ tokDeltaPct .A .B }}</span>
+    </div>
+  </div>
+  {{ end }}
+  <div class="mover mover-total">
+    <div class="key">Total</div>
+    <div class="dumbbell-spacer" aria-hidden="true"></div>
+    <div class="db-values">
+      <span class="val-a">{{ tokNum .TokenComp.TotalA }}</span>
+      <span class="arrow">→</span>
+      <span class="val-b">{{ tokNum .TokenComp.TotalB }}</span>
+    </div>
+    <div class="delta-line {{ tokDeltaSign .TokenComp.TotalA .TokenComp.TotalB }}">
+      <span class="delta-money">{{ tokDelta .TokenComp.TotalA .TokenComp.TotalB }}</span>
+      <span class="delta-pct">{{ tokDeltaPct .TokenComp.TotalA .TokenComp.TotalB }}</span>
+    </div>
+  </div>
   </div>
 </section>
 
