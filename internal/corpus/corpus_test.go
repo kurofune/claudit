@@ -223,9 +223,6 @@ func TestLoadConcurrent_AllFiles(t *testing.T) {
 }
 
 func TestLoadConcurrent_SurfacesFileErrors(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: permission bits are not enforced")
-	}
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	ok := filepath.Join(dir, "ok.jsonl")
@@ -236,6 +233,15 @@ func TestLoadConcurrent_SurfacesFileErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(bad, 0o644) })
+
+	// Permission bits aren't enforced everywhere: Windows os.Chmod can't
+	// clear the read bit, and root bypasses them. If the file is still
+	// readable, this test's premise (a per-file open error) can't be
+	// reproduced — skip rather than report a false failure.
+	if f, err := os.Open(bad); err == nil {
+		_ = f.Close()
+		t.Skip("file permissions not enforced here (Windows or root); cannot simulate an unreadable file")
+	}
 
 	snap, err := LoadConcurrent(dir, time.Time{})
 	if err != nil {
