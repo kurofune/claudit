@@ -2,7 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] — 2026-05-27
+
+### Added
+
+- **Tokens view in `claudit serve` and the static report.** A dedicated tab answering "how many tokens did I burn, and what is that number made of": the grand total broken into the four categories (input / output / cache-write / cache-read), a stacked token-volume trend over time, and a by-model breakdown. On real corpora the total is dominated by cache-read, which this view makes legible. All roll-ups (grand total, composition percentages, per-model totals) are computed server-side in `render.BuildTokens` and shipped via a new `/_claudit/api/tokens` endpoint — inlined into the static bundle for offline use — so the JS view is purely presentational. An **Overview "Total tokens" tile** also lands between Assistant turns and Cache hit ratio.
+- **Token comparison in `claudit diff`** across all three outputs. A markdown `## Tokens` table, a JSON `tokens` block, and an HTML section with A/B mix-shift bars plus per-category before→after **dumbbell** rows (signed Δ and Δ%, colored with the diff's existing up/down semantics), sharing one dumbbell axis so dot positions stay comparable across categories. The diff Overview also gains a **"Total tokens" A→B tile**. Categories reuse the same composition split as the report (`BuildTokenDiff` pairs each side off the shared `tokenComposition`), so the diff's categories never drift from the report's.
 
 ### Changed
 
@@ -16,6 +21,7 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 ### Fixed
 
 - **`claudit watch` rolling totals no longer under-report, often dramatically.** The hour/today/week/month panel was seeded from a one-time startup scan bounded by `--scan-days` (default 30) and thereafter only updated from the session file(s) being tailed. Two failure modes followed: the **month** total was clamped whenever `--scan-days` was shorter than the elapsed part of the calendar month (e.g. `--scan-days=7` showed ~$2.5k of a ~$9.7k month), and a long-running `watch` drifted below reality as spend accrued in other projects it wasn't tailing — so the same month that `serve` reported at ~$9.9k could show as ~$4k or ~$2.5k in `watch`. The panel is now computed over the full corpus and refreshed on a 2 s poll, so `watch`'s totals track `serve` / `report` for the same window.
+- **Build label pinned to the bottom of the static report sidebar.** The version + commit footer (added in v1.3.0) floated mid-sidebar in the standalone `claudit report` export; it now sticks to the sidebar bottom as it already did in `claudit serve`.
 
 ## [1.3.0] — 2026-05-23
 
@@ -141,7 +147,9 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/kurofune/claudit/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/kurofune/claudit/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/kurofune/claudit/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/kurofune/claudit/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/kurofune/claudit/compare/v1.0.0...v1.1.0
