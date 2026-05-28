@@ -92,10 +92,15 @@ export function timelineSkeleton(n = 3) {
 // pill to "—" rather than shimmering forever.
 const SKEL_ATTR = 'data-skel';
 
-// Skeleton the pills that resolve at boot. nav-metric-overview and
-// date-range are only painted by view-overview.js's paint(), so we
-// skeleton them only when Overview is the initial route — otherwise
-// they would shimmer indefinitely until the user clicks Overview.
+// Skeleton the pills that resolve at boot. nav-metric-overview is
+// painted by view-overview.js's paint() (an async fetch), so we
+// skeleton it only when Overview is the initial route — otherwise it
+// would shimmer indefinitely until the user clicks Overview.
+//
+// #date-range is deliberately NOT skeletoned: in serve mode the date
+// picker paints it synchronously from the URL on wire, and in static
+// mode the inlined data fills it instantly — there is no async gap to
+// cover, and a shimmer would only clobber the already-correct label.
 export function paintNavSkeletons(includeOverview) {
   const ids = [
     'nav-metric-cost',
@@ -105,7 +110,7 @@ export function paintNavSkeletons(includeOverview) {
     'nav-metric-subagents',
   ];
   if (includeOverview) {
-    ids.push('nav-metric-overview', 'date-range');
+    ids.push('nav-metric-overview');
   }
   for (const id of ids) {
     const el = document.getElementById(id);

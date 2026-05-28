@@ -13,30 +13,52 @@
 // SPA bundle is shared between serve and static modes; the markup
 // difference is what gates the behavior.
 
+// UTC math dodges local-timezone DST surprises — claudit treats
+// date-only values as UTC midnight throughout.
+export function addDays(ymdStr, delta) {
+  const [y, m, d] = ymdStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  const Y = dt.getUTCFullYear();
+  const M = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const D = String(dt.getUTCDate()).padStart(2, '0');
+  return `${Y}-${M}-${D}`;
+}
+
+// Format a Date's LOCAL components as 'YYYY-MM-DD'. The default
+// "last 7 days" seed is anchored to the user's local today.
+function ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+// Translate the URL's ?since/&until into the user-facing INCLUSIVE
+// range the picker and label both render. The server's `until` is
+// exclusive, so the inclusive end is until-1. `now` is injected for
+// deterministic tests — never read the clock internally.
+export function urlToRange(search, now = new Date()) {
+  const params = new URLSearchParams(search);
+  const since = params.get('since');
+  const untilExcl = params.get('until');
+  let end = untilExcl ? addDays(untilExcl, -1) : '';
+  let start = since || '';
+  if (!start && !end) {
+    // Default seed mirrors the server's last=7d default scope.
+    const weekAgo = new Date(now);
+    weekAgo.setDate(now.getDate() - 7);
+    start = ymd(weekAgo);
+    end = ymd(now);
+  }
+  return { start, end };
+}
+
 export function wireDatePicker() {
   const btn = document.getElementById('date-range-button');
   if (!btn) return; // static-report mode, or markup not yet rendered
 
   let popover = null;
-
-  function ymd(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${dd}`;
-  }
-
-  // UTC math dodges local-timezone DST surprises — claudit treats
-  // date-only values as UTC midnight throughout.
-  function addDays(ymdStr, delta) {
-    const [y, m, d] = ymdStr.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dt.setUTCDate(dt.getUTCDate() + delta);
-    const Y = dt.getUTCFullYear();
-    const M = String(dt.getUTCMonth() + 1).padStart(2, '0');
-    const D = String(dt.getUTCDate()).padStart(2, '0');
-    return `${Y}-${M}-${D}`;
-  }
 
   function build() {
     if (popover) return popover;
@@ -76,25 +98,10 @@ export function wireDatePicker() {
   }
 
   function seedInputs() {
-    const p = new URLSearchParams(window.location.search);
-    const start = p.get('since');
-    const endExcl = p.get('until');
-    // Translate the URL's exclusive `until` into the user-facing
-    // inclusive End: subtract one day for display so the picker
-    // shows what the user actually selected last time.
-    let end = endExcl ? addDays(endExcl, -1) : '';
-    let startVal = start || '';
-    if (!startVal && !end) {
-      // Default seed mirrors the server's last=7d default scope so
-      // the picker opens onto values that match what the user is
-      // currently seeing.
-      const now = new Date();
-      const weekAgo = new Date(now);
-      weekAgo.setDate(now.getDate() - 7);
-      startVal = ymd(weekAgo);
-      end = ymd(now);
-    }
-    popover.querySelector('#claudit-date-start').value = startVal;
+    // Single source of truth: urlToRange does the exclusive→inclusive
+    // translation and the last=7d default seed, shared with the label.
+    const { start, end } = urlToRange(window.location.search);
+    popover.querySelector('#claudit-date-start').value = start;
     popover.querySelector('#claudit-date-end').value = end;
   }
 
@@ -159,6 +166,20 @@ export function wireDatePicker() {
     const qs = p.toString();
     window.location.search = qs ? ('?' + qs) : '';
   }
+
+  // Paint the brand-sub button label from the SELECTED WINDOW so the
+  // pill matches what the picker shows — one source (urlToRange) backs
+  // both. The URL only changes via a full reload, so painting once on
+  // wire is enough. Static-report mode has no #date-range-button, so
+  // wireDatePicker already returned above and view-overview paints the
+  // data span into #date-range instead.
+  function renderLabel() {
+    const span = document.getElementById('date-range');
+    if (!span) return;
+    const { start, end } = urlToRange(window.location.search);
+    span.textContent = (start || end) ? `${start || '…'} → ${end || '…'}` : '—';
+  }
+  renderLabel();
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();

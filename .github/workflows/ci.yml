@@ -35,3 +35,13 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test ./...
+  # Unit tests for the SPA's pure JS logic (Node's built-in test runner,
+  # no npm dependencies). OS-independent, so one runner is enough.
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: npm test

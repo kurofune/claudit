@@ -1,0 +1,9 @@
+{
+  "name": "claudit-web",
+  "private": true,
+  "type": "module",
+  "description": "Unit tests for the claudit SPA's pure JS logic. Run with `npm test` (Node's built-in test runner, no dependencies). Tests live in jstest/ — deliberately OUTSIDE web/, which is //go:embed'd into the binary and bundled into the static report.",
+  "scripts": {
+    "test": "node --test 'jstest/**/*.test.js'"
+  }
+}

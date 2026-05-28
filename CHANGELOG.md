@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The sidebar date-range pill now matches the picker in `claudit serve`.** The pill label was rendered from the corpus's actual first/last turn timestamps (sliced off a UTC string), while the picker popover showed the selected window — so the two disagreed. Two symptoms: an off-by-one at the inclusive/exclusive boundary (a late-evening turn in a UTC-behind zone slid the label's end a day forward, e.g. label `→ 05-28` vs picker `05-27`), and on first open the label showed the last turn's date instead of the window end (today). The label now derives from the same `urlToRange` translation the picker uses, so they always agree. The static report still shows the corpus data span (it has no picker). Backed by the project's first JS unit tests (`jstest/`, Node's built-in runner, wired into CI).
+
 ## [1.4.0] — 2026-05-27
 
 ### Added

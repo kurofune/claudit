@@ -189,6 +189,11 @@ function updateNavMetric(view, text) {
 function updateDateRange(first, last) {
   const el = document.getElementById('date-range');
   if (!el) return;
+  // Serve mode: the date picker owns this label and paints the SELECTED
+  // WINDOW (matching the picker) from urlToRange. Don't clobber it with
+  // the data span. Static-report mode has no picker button, so fall
+  // through and show the corpus's actual first→last turn span.
+  if (document.getElementById('date-range-button')) return;
   if (!first || !last) { el.textContent = '—'; return; }
   el.textContent = `${first.slice(0,10)} → ${last.slice(0,10)}`;
 }
