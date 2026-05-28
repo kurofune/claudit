@@ -55,6 +55,8 @@ claudit diff --a=2026-04-01..2026-04-15 --b=2026-04-15..2026-05-01 > diff.html
 
 Run `claudit help` for the subcommand list and `claudit <cmd> --help` for per-command flags.
 
+Date filters (`--since` / `--until`, `diff`'s `--a` / `--b` ranges, and serve's `?since` / `?until`) are calendar dates interpreted at midnight in your **local** time zone — consistent with `--last` and the `watch` rolling totals.
+
 ## What it reports
 
 - **Totals.** Turns, sessions, tokens (input / output / cache-read / 5m-cache-write / 1h-cache-write), cost in USD, and the time range covered.
@@ -102,7 +104,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 | Command | Purpose |
 |---|---|
 | `serve` | Run a local web daemon that re-renders the report as JSONLs change. Filters via URL query. Loopback-only by default. |
-| `watch` | Tail the active session (or all recently-modified sessions with `--all`) and print running cost in a full-screen TUI. Rolling totals, spike detection, budget alerts. |
+| `watch` | Tail the active session (or all recently-modified sessions with `--all`) and print running cost in a full-screen TUI. Rolling hour/today/week/month totals computed over your full history and refreshed live (no scan window — `--scan-days` is deprecated and ignored), plus spike detection and budget alerts. |
 | `report` | Generate a cost/usage report. Default if no subcommand is given. |
 | `diff` | Compare two date ranges and report top movers. |
 

@@ -55,15 +55,19 @@ func TestParseQuery_Last(t *testing.T) {
 }
 
 func TestParseQuery_SinceUntil(t *testing.T) {
+	// ?since / ?until parse the date in the request's local zone (the
+	// location of now), matching ?last and watch's rolling buckets. A
+	// non-UTC now exercises that the boundary is local midnight, not UTC.
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.FixedZone("PDT", -7*3600))
 	v := url.Values{}
 	v.Set("since", "2026-05-01")
 	v.Set("until", "2026-05-15")
-	q, err := parseQuery(v, time.Now())
+	q, err := parseQuery(v, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSince := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	wantUntil := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+	wantSince := time.Date(2026, 5, 1, 0, 0, 0, 0, now.Location())
+	wantUntil := time.Date(2026, 5, 15, 0, 0, 0, 0, now.Location())
 	if !q.Filter.Since.Equal(wantSince) {
 		t.Errorf("Since = %s, want %s", q.Filter.Since, wantSince)
 	}

@@ -4,6 +4,19 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **Unified the data layer behind every command into one `internal/corpus` package.** `report`, `diff`, `serve`, and `watch` now load session JSONL through a single loader (concurrent cold-load, incremental `(mtime, size)` polling for the long-lived consumers, and an mtime pre-filter for date-windowed one-shots) and roll it up through the same `internal/aggregate` pipeline. Previously `watch` reimplemented its own windowed scan plus a bespoke rolling-totals sum, which is exactly why its hour/today/week/month figures could diverge from `serve` and `report`. That parallel path is deleted; `watch`'s rolling panel is now `aggregate.RollingTotals` over the shared corpus, so it matches the other commands by construction (verified: `watch --all` month and `report --since=<1st>` month agree to the cent).
+- **Date filters now resolve in local time.** `--since` / `--until`, `diff`'s `--a` / `--b` ranges, and serve's `?since` / `?until` are interpreted as calendar dates at midnight in your **local** time zone — consistent with `--last` and the `watch` rolling buckets, which were already local. They previously pinned the boundary to UTC, which shifted the window for non-UTC users and left `serve` internally inconsistent (`?last` was local while `?since` was UTC).
+
+### Deprecated
+
+- **`claudit watch --scan-days` is deprecated and ignored.** The rolling panel now reads the full corpus and refreshes on a poll, so there is no startup scan window to size — and therefore no clamp. The flag is still accepted (so existing invocations and aliases don't error) but has no effect; passing it prints a one-line deprecation notice.
+
+### Fixed
+
+- **`claudit watch` rolling totals no longer under-report, often dramatically.** The hour/today/week/month panel was seeded from a one-time startup scan bounded by `--scan-days` (default 30) and thereafter only updated from the session file(s) being tailed. Two failure modes followed: the **month** total was clamped whenever `--scan-days` was shorter than the elapsed part of the calendar month (e.g. `--scan-days=7` showed ~$2.5k of a ~$9.7k month), and a long-running `watch` drifted below reality as spend accrued in other projects it wasn't tailing — so the same month that `serve` reported at ~$9.9k could show as ~$4k or ~$2.5k in `watch`. The panel is now computed over the full corpus and refreshed on a 2 s poll, so `watch`'s totals track `serve` / `report` for the same window.
+
 ## [1.3.0] — 2026-05-23
 
 ### Added

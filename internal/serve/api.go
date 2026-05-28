@@ -245,7 +245,7 @@ func (s *Server) handleAPISnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap := s.cache.Snapshot()
-	host := s.cache.hostInfo()
+	host := s.cache.HostInfo()
 	body := struct {
 		Generation  int64    `json:"generation"`
 		LastUpdated string   `json:"last_updated"`

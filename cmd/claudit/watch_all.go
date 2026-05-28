@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/notify"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
@@ -30,7 +32,7 @@ const (
 // runWatchAll is the entry point for `claudit watch --all`. Runs the
 // discovery loop, spawns Tail goroutines per session, fans events
 // into a single render goroutine that owns all state.
-func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool, scanDays int) error {
+func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool) error {
 	fmt.Fprintf(os.Stderr, "claudit watch --all: tailing every session under %s touched in the last %s\n", root, recentWindow)
 	if budget > 0 {
 		fmt.Fprintf(os.Stderr, "claudit watch --all: budget alert at $%.2f (combined across sessions)\n", budget)
@@ -41,17 +43,22 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 	if notifyOn {
 		notifier = notify.Default()
 	}
-	var rollingState *rollingTotals
+	var cache *corpus.Cache
 	if rolling {
-		rs, scanErr := newRollingTotalsWithDays(root, prices, time.Now(), scanDays)
-		if scanErr != nil {
+		cache = corpus.New(root)
+		// Prime synchronously so the first frame shows real totals; the
+		// poller's initial refresh is then a cheap no-op.
+		if _, scanErr := cache.Refresh(); scanErr != nil {
 			fmt.Fprintf(os.Stderr, "claudit watch --all: rolling totals disabled (%v)\n", scanErr)
+			cache = nil
 		} else {
-			rollingState = rs
+			go cache.RunPoller(ctx, rollingPollInterval, func(err error) {
+				fmt.Fprintf(os.Stderr, "claudit watch --all: rolling refresh: %v\n", err)
+			})
 		}
 	}
 
-	hub := newMultiHub(prices, budget, spikeThresh, notifier, p, rollingState)
+	hub := newMultiHub(prices, budget, spikeThresh, notifier, p, cache)
 	defer hub.shutdown(os.Stderr)
 	stopCh := make(chan struct{})
 
@@ -100,7 +107,9 @@ type multiHub struct {
 	spikeThresh float64
 	notifier    notify.Notifier
 	painter     painter
-	rolling     *rollingTotals
+	// cache is the shared corpus loader backing the rolling panel; nil
+	// when rolling totals are disabled.
+	cache *corpus.Cache
 
 	eventCh  chan taggedEvent
 	noticeCh chan taggedNotice
@@ -121,14 +130,14 @@ type taggedNotice struct {
 	n    watch.Notice
 }
 
-func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, rolling *rollingTotals) *multiHub {
+func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, cache *corpus.Cache) *multiHub {
 	return &multiHub{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
 		notifier:    notifier,
 		painter:     p,
-		rolling:     rolling,
+		cache:       cache,
 		eventCh:     make(chan taggedEvent, 256),
 		noticeCh:    make(chan taggedNotice, 64),
 		tailing:     map[string]bool{},
@@ -237,9 +246,6 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 	s.lastTurnAt = time.Now()
 	s.lastTools = lastToolNames(t.ToolUses)
 	h.state.combinedCost += cost
-	if h.rolling != nil && te.ev.Live {
-		h.rolling.addLive(t.Timestamp, cost, time.Now())
-	}
 	s.recordCost(cost)
 	if te.ev.Live && h.spikeThresh > 0 && s.tcCount >= spikeWindow/2 && !sameCost(cost, prevTurnCost) {
 		med := stat.Median(s.snapshotCosts())
@@ -307,8 +313,8 @@ func (h *multiHub) paint() {
 	now := time.Now()
 	st := h.painter.Style()
 	frame := Frame{}
-	if h.rolling != nil {
-		hour, today, week, month := h.rolling.totals(now)
+	if h.cache != nil {
+		hour, today, week, month := aggregate.RollingTotals(h.cache.Snapshot().Turns, h.prices, now)
 		frame.HasRolling = true
 		frame.Rolling = RollingPanelData{Hour: hour, Today: today, Week: week, Month: month}
 	}

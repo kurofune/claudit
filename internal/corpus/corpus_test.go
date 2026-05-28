@@ -1,4 +1,4 @@
-package serve
+package corpus
 
 import (
 	"fmt"
@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// mkAssistantLine matches the schema used in internal/watch tests so
-// these fixtures look like real session JSONL. One assistant line per
-// call; uuid/parent unique enough that the chain walks behave.
+// mkAssistantLine matches the schema used elsewhere so these fixtures
+// look like real session JSONL. One assistant line per call.
 func mkAssistantLine(uuid, parent string, ts time.Time) string {
 	return fmt.Sprintf(`{"type":"assistant","uuid":%q,"parentUuid":%q,"timestamp":%q,"sessionId":"s1","cwd":"/p","message":{"model":"claude-opus-4-7","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}}}}`,
 		uuid, parent, ts.Format(time.RFC3339))
@@ -32,10 +31,8 @@ func writeJSONL(t *testing.T, path string, lines ...string) {
 
 func TestCache_RefreshDetectsAddedFile(t *testing.T) {
 	dir := t.TempDir()
-	c := NewCache(dir)
+	c := New(dir)
 
-	// Empty root: refresh succeeds but does not bump generation
-	// because the snapshot starts empty and stays empty.
 	changed, err := c.Refresh()
 	if err != nil {
 		t.Fatalf("first refresh: %v", err)
@@ -44,7 +41,6 @@ func TestCache_RefreshDetectsAddedFile(t *testing.T) {
 		t.Errorf("first refresh of empty dir reported changed; expected false")
 	}
 
-	// Add a file and refresh — should bump generation and parse one turn.
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 
@@ -72,13 +68,12 @@ func TestCache_RefreshSkipsUnchanged(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 
-	c := NewCache(dir)
+	c := New(dir)
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
 	genA := c.Snapshot().Generation
 
-	// No file changes: second refresh must not bump generation.
 	changed, err := c.Refresh()
 	if err != nil {
 		t.Fatal(err)
@@ -97,18 +92,13 @@ func TestCache_RefreshDetectsAppend(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, path, mkAssistantLine("a1", "", t0))
 
-	c := NewCache(dir)
+	c := New(dir)
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
 	gen0 := c.Snapshot().Generation
 	turns0 := len(c.Snapshot().Turns)
 
-	// Append a second turn. mtime resolution on some filesystems (HFS+,
-	// older FAT) is coarse enough that an immediate rewrite can keep
-	// the same mtime; size changes too, which is why the cache keys on
-	// (mtime, size). To make the test robust everywhere, also force a
-	// future mtime stamp.
 	writeJSONL(t, path,
 		mkAssistantLine("a1", "", t0),
 		mkAssistantLine("a2", "a1", t0.Add(time.Second)),
@@ -142,7 +132,7 @@ func TestCache_RefreshDropsRemovedFile(t *testing.T) {
 	writeJSONL(t, a, mkAssistantLine("a1", "", t0))
 	writeJSONL(t, b, mkAssistantLine("b1", "", t0))
 
-	c := NewCache(dir)
+	c := New(dir)
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +162,7 @@ func TestCache_RecursiveWalk(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(nested, "s.jsonl"), mkAssistantLine("a1", "", t0))
 
-	c := NewCache(dir)
+	c := New(dir)
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -182,9 +172,108 @@ func TestCache_RecursiveWalk(t *testing.T) {
 }
 
 func TestCache_HostInfo(t *testing.T) {
-	c := NewCache(t.TempDir())
-	hi := c.hostInfo()
+	c := New(t.TempDir())
+	hi := c.HostInfo()
 	if hi.Root == "" || hi.GoOS == "" || hi.NumCPU < 1 {
 		t.Errorf("hostInfo looks empty: %+v", hi)
+	}
+}
+
+// --- new behavior: concurrent cold-load over many files -------------
+
+func TestCache_ConcurrentColdLoadCountsAllTurns(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	const files = 50
+	for i := 0; i < files; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("proj-%d", i), "s.jsonl")
+		writeJSONL(t, p,
+			mkAssistantLine(fmt.Sprintf("a%d", i), "", t0),
+			mkAssistantLine(fmt.Sprintf("b%d", i), "", t0.Add(time.Minute)),
+		)
+	}
+	c := New(dir)
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	snap := c.Snapshot()
+	if got, want := len(snap.Turns), files*2; got != want {
+		t.Errorf("turns = %d, want %d (concurrent parse dropped data?)", got, want)
+	}
+	if snap.FileCount != files {
+		t.Errorf("file count = %d, want %d", snap.FileCount, files)
+	}
+}
+
+// --- new behavior: one-shot LoadConcurrent with mtime pre-filter ----
+
+func TestLoadConcurrent_AllFiles(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, filepath.Join(dir, "a.jsonl"), mkAssistantLine("a1", "", t0))
+	writeJSONL(t, filepath.Join(dir, "b.jsonl"), mkAssistantLine("b1", "", t0))
+
+	snap, err := LoadConcurrent(dir, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snap.Turns); got != 2 {
+		t.Errorf("turns = %d, want 2", got)
+	}
+}
+
+func TestLoadConcurrent_SurfacesFileErrors(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits are not enforced")
+	}
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	ok := filepath.Join(dir, "ok.jsonl")
+	bad := filepath.Join(dir, "bad.jsonl")
+	writeJSONL(t, ok, mkAssistantLine("a1", "", t0))
+	writeJSONL(t, bad, mkAssistantLine("b1", "", t0))
+	if err := os.Chmod(bad, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bad, 0o644) })
+
+	snap, err := LoadConcurrent(dir, time.Time{})
+	if err != nil {
+		t.Fatalf("walk should not fail on a per-file open error: %v", err)
+	}
+	if got := len(snap.Turns); got != 1 {
+		t.Errorf("turns = %d, want 1 (readable file should still load)", got)
+	}
+	if len(snap.FileErrors) != 1 {
+		t.Errorf("FileErrors = %d, want 1 (unreadable file should be surfaced)", len(snap.FileErrors))
+	}
+}
+
+func TestLoadConcurrent_MtimePreFilterSkipsOldFiles(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	oldF := filepath.Join(dir, "old.jsonl")
+	newF := filepath.Join(dir, "new.jsonl")
+	writeJSONL(t, oldF, mkAssistantLine("o1", "", t0))
+	writeJSONL(t, newF, mkAssistantLine("n1", "", t0))
+
+	// Stamp old file well in the past, new file now.
+	past := time.Now().AddDate(0, 0, -60)
+	if err := os.Chtimes(oldF, past, past); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(newF, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// earliest = 30 days ago → old file (mtime -60d) must be skipped.
+	earliest := time.Now().AddDate(0, 0, -30)
+	snap, err := LoadConcurrent(dir, earliest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snap.Turns); got != 1 {
+		t.Errorf("turns = %d, want 1 (old file should be mtime-skipped)", got)
 	}
 }

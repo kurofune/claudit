@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/render"
 )
 
@@ -66,14 +67,14 @@ func runReport(args []string) error {
 		filter.Since = midnight.Add(-d)
 	}
 	if *since != "" {
-		t, err := time.Parse("2006-01-02", *since)
+		t, err := parseLocalDate(*since)
 		if err != nil {
 			return fmt.Errorf("--since: %w", err)
 		}
 		filter.Since = t
 	}
 	if *until != "" {
-		t, err := time.Parse("2006-01-02", *until)
+		t, err := parseLocalDate(*until)
 		if err != nil {
 			return fmt.Errorf("--until: %w", err)
 		}
@@ -82,13 +83,12 @@ func runReport(args []string) error {
 
 	// mtime pre-filter: when --since (or --last) bounds the window,
 	// any file whose mtime predates the bound can't contain a turn
-	// inside the window, so skip it before opening.
-	files, err := listJSONL(*root, filter.Since)
+	// inside the window, so corpus skips it before opening.
+	snap, err := corpus.LoadConcurrent(*root, filter.Since)
 	if err != nil {
 		return err
 	}
-
-	turns, userMsgs, parentLinks, malformed, fileErrs := parseConcurrently(files)
+	turns, userMsgs, parentLinks := snap.Turns, snap.Users, snap.Links
 
 	period := aggregate.Period(*by)
 	if *by != "" && !period.Valid() {
@@ -153,8 +153,17 @@ func runReport(args []string) error {
 		}
 	}
 
-	emitWarnings(malformed, fileErrs)
+	emitWarnings(snap.Malformed, snap.FileErrors)
 	return nil
+}
+
+// parseLocalDate parses a YYYY-MM-DD date at midnight in the local
+// zone. Date filters express wall-clock intent ("everything from the
+// 1st"), so they resolve against local time — consistent with --last,
+// serve's ?since/?until, and watch's rolling buckets. Plain time.Parse
+// would silently pin the boundary to UTC.
+func parseLocalDate(s string) (time.Time, error) {
+	return time.ParseInLocation("2006-01-02", s, time.Local)
 }
 
 // parseLastDuration parses "Nd" or "Nw" (positive integer N) into a duration.

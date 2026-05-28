@@ -79,7 +79,7 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 		q.LastLabel = last
 	}
 	if since != "" {
-		t, err := time.Parse("2006-01-02", since)
+		t, err := parseDateLocal(since, now.Location())
 		if err != nil {
 			return q, fmt.Errorf("?since: %w", err)
 		}
@@ -87,7 +87,7 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 		q.URLHasSince = true
 	}
 	if until != "" {
-		t, err := time.Parse("2006-01-02", until)
+		t, err := parseDateLocal(until, now.Location())
 		if err != nil {
 			return q, fmt.Errorf("?until: %w", err)
 		}
@@ -178,6 +178,19 @@ func canonicalQueryString(v url.Values) string {
 		}
 	}
 	return sb.String()
+}
+
+// parseDateLocal parses a YYYY-MM-DD date and anchors it at midnight in
+// loc. Date-only filters are wall-clock intent ("everything from the
+// 1st"), so they resolve against the user's local zone — the same
+// convention ?last and watch's rolling buckets use. (Plain
+// time.Parse would silently pin the boundary to UTC.)
+func parseDateLocal(s string, loc *time.Location) (time.Time, error) {
+	t, err := time.ParseInLocation("2006-01-02", s, loc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t, nil
 }
 
 // parseLastDuration parses "Nd" or "Nw" (positive integer N) into a

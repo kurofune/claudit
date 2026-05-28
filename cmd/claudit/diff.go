@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/render"
 )
 
@@ -93,11 +94,11 @@ func runDiffWithRanges(
 	if sinceB.Before(earliest) {
 		earliest = sinceB
 	}
-	files, err := listJSONL(root, earliest)
+	snap, err := corpus.LoadConcurrent(root, earliest)
 	if err != nil {
 		return err
 	}
-	turns, userMsgs, parentLinks, malformed, fileErrs := parseConcurrently(files)
+	turns, userMsgs, parentLinks := snap.Turns, snap.Users, snap.Links
 
 	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
 	aAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
@@ -137,7 +138,7 @@ func runDiffWithRanges(
 		}
 	}
 
-	emitWarnings(malformed, fileErrs)
+	emitWarnings(snap.Malformed, snap.FileErrors)
 	return nil
 }
 
@@ -181,11 +182,11 @@ func parseDateRange(s string) (time.Time, time.Time, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return time.Time{}, time.Time{}, fmt.Errorf("expected START..END, got %q", s)
 	}
-	since, err := time.Parse("2006-01-02", parts[0])
+	since, err := parseLocalDate(parts[0])
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("start date %q: %w", parts[0], err)
 	}
-	until, err := time.Parse("2006-01-02", parts[1])
+	until, err := parseLocalDate(parts[1])
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("end date %q: %w", parts[1], err)
 	}

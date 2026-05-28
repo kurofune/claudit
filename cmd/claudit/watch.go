@@ -9,15 +9,23 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/notify"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
 	"github.com/kurofune/claudit/internal/watch"
 )
+
+// rollingPollInterval is how often watch re-walks the projects root to
+// refresh the hour/today/week/month panel. Stat-only for unchanged
+// files, so this stays cheap even on a large tree.
+const rollingPollInterval = 2 * time.Second
 
 func runWatch(args []string) error {
 	fs := flag.NewFlagSet("claudit watch", flag.ExitOnError)
@@ -30,7 +38,11 @@ func runWatch(args []string) error {
 	notifyOn := fs.Bool("notify", false, "send a desktop notification on budget cross and turn-cost spikes")
 	all := fs.Bool("all", false, "tail every recently-modified session under --root, grouped by project")
 	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals at the top of the UI")
-	scanDays := fs.Int("scan-days", defaultScanDays, "rolling-totals startup scan window in days; smaller is faster but clamps the month total to this window")
+	// Deprecated: the rolling panel now reads the full corpus (the same
+	// data report/serve use) and re-scans on a poll, so there is no
+	// window to clamp the month total. Kept registered so existing
+	// invocations/aliases don't error; the value is ignored.
+	fs.Int("scan-days", 30, "(deprecated; ignored) the rolling panel now scans the full corpus, so the month total is never clamped")
 	fs.Usage = func() {
 		ew := &errWriter{w: fs.Output()}
 		ew.Println("claudit watch — tail a live session JSONL and print running cost.")
@@ -51,6 +63,11 @@ func runWatch(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "scan-days" {
+			fmt.Fprintln(os.Stderr, "claudit watch: --scan-days is deprecated and ignored; the rolling panel now scans the full corpus (no clamp).")
+		}
+	})
 
 	prices, err := loadPrices(*pricesPath)
 	if err != nil {
@@ -66,7 +83,7 @@ func runWatch(args []string) error {
 		if fs.NArg() > 0 {
 			return fmt.Errorf("--all does not take a session-id argument")
 		}
-		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *notifyOn, *rolling, *scanDays)
+		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *notifyOn, *rolling)
 	}
 
 	var path string
@@ -95,18 +112,41 @@ func runWatch(args []string) error {
 	if *notifyOn {
 		notifier = notify.Default()
 	}
-	var rollingState *rollingTotals
+	var cache *corpus.Cache
 	if *rolling {
-		rs, scanErr := newRollingTotalsWithDays(*root, prices, time.Now(), *scanDays)
-		if scanErr != nil {
+		cache = corpus.New(*root)
+		// Prime synchronously so the first frame already shows real
+		// totals; the poller's own initial refresh is then a cheap no-op.
+		if _, scanErr := cache.Refresh(); scanErr != nil {
 			fmt.Fprintf(os.Stderr, "claudit watch: rolling totals disabled (%v)\n", scanErr)
+			cache = nil
 		} else {
-			rollingState = rs
+			go cache.RunPoller(ctx, rollingPollInterval, func(err error) {
+				fmt.Fprintf(os.Stderr, "claudit watch: rolling refresh: %v\n", err)
+			})
 		}
 	}
 
-	st := newWatchState(prices, *budget, *spikeThresh, notifier, p, rollingState)
+	st := newWatchState(prices, *budget, *spikeThresh, notifier, p, cache)
 	defer st.shutdown(os.Stderr)
+
+	// Repaint on a steady tick so the rolling panel reflects corpus
+	// changes (spend in other projects) even while the tailed session
+	// is idle. Live turns from the tail trigger their own repaint too.
+	if cache != nil {
+		go func() {
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					st.tick()
+				}
+			}
+		}()
+	}
 
 	opts := watch.TailOptions{
 		Interval:      time.Duration(*intervalMS) * time.Millisecond,
@@ -126,8 +166,15 @@ type watchState struct {
 	spikeThresh float64
 	notifier    notify.Notifier
 	painter     painter
-	rolling     *rollingTotals
-	started     time.Time
+	// cache is the shared corpus loader backing the rolling panel; nil
+	// when rolling totals are disabled. The same data layer serve and
+	// report use, so watch's hour/today/week/month match them.
+	cache *corpus.Cache
+
+	// mu guards the live-session fields below, which onEvent mutates
+	// from the tail goroutine and the repaint ticker reads.
+	mu      sync.Mutex
+	started time.Time
 
 	totalCost float64
 	turns     int
@@ -169,20 +216,22 @@ func (t tokensSum) hitRatio() float64 {
 	return float64(t.cr) / float64(denom)
 }
 
-func newWatchState(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, rolling *rollingTotals) *watchState {
+func newWatchState(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, cache *corpus.Cache) *watchState {
 	return &watchState{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
 		notifier:    notifier,
 		painter:     p,
-		rolling:     rolling,
+		cache:       cache,
 		started:     time.Now(),
 		toolCost:    map[string]float64{},
 	}
 }
 
 func (s *watchState) onEvent(e watch.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	switch e.Kind {
 	case parse.LineAssistant:
 		t := e.Turn
@@ -212,9 +261,6 @@ func (s *watchState) onEvent(e watch.Event) {
 		if cost > s.maxTurnCost {
 			s.maxTurnCost = cost
 			s.maxTurnIndex = s.turns
-		}
-		if s.rolling != nil && e.Live {
-			s.rolling.addLive(t.Timestamp, cost, time.Now())
 		}
 		if e.Live {
 			s.checkSpike(cost)
@@ -304,6 +350,18 @@ func (s *watchState) recordTurnCost(cost float64) {
 	}
 }
 
+// tick repaints from the repaint ticker. It takes the lock the tail
+// goroutine also uses for the live-session fields, then renders the
+// current frame — picking up any corpus refresh the poller published.
+func (s *watchState) tick() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.render()
+}
+
+// render builds and paints the current frame. Caller must hold s.mu.
+// The rolling panel is computed from the shared corpus snapshot via
+// aggregate.RollingTotals — the same data + math report and serve use.
 func (s *watchState) render() {
 	st := s.painter.Style()
 	frame := Frame{
@@ -314,8 +372,8 @@ func (s *watchState) render() {
 			},
 		},
 	}
-	if s.rolling != nil {
-		hour, today, week, month := s.rolling.totals(time.Now())
+	if s.cache != nil {
+		hour, today, week, month := aggregate.RollingTotals(s.cache.Snapshot().Turns, s.prices, time.Now())
 		frame.HasRolling = true
 		frame.Rolling = RollingPanelData{Hour: hour, Today: today, Week: week, Month: month}
 	}
@@ -325,6 +383,28 @@ func (s *watchState) render() {
 func (s *watchState) shutdown(w io.Writer) {
 	s.painter.Close()
 	s.printSummary(w)
+}
+
+// baselineHitRatio7d returns the trailing-7-day cache hit ratio (0..1)
+// across the whole corpus, or 0 when there's no cache-eligible traffic.
+// Computed via a filtered aggregator over the shared snapshot — the
+// same token accounting every other view uses.
+func (s *watchState) baselineHitRatio7d() float64 {
+	if s.cache == nil {
+		return 0
+	}
+	agg := aggregate.New(s.prices).WithFilter(aggregate.Filter{
+		Since: time.Now().AddDate(0, 0, -7),
+	})
+	for _, t := range s.cache.Snapshot().Turns {
+		agg.Add(t)
+	}
+	tok := agg.Totals().Tokens
+	denom := tok.CacheReadTokens + tok.InputTokens + tok.CacheCreate5mTokens + tok.CacheCreate1hTokens
+	if denom <= 0 {
+		return 0
+	}
+	return float64(tok.CacheReadTokens) / float64(denom)
 }
 
 func (s *watchState) printSummary(w io.Writer) {
@@ -352,8 +432,8 @@ func (s *watchState) printSummary(w io.Writer) {
 			ew.Printf("max turn:    $%.4f at turn %d\n", s.maxTurnCost, s.maxTurnIndex)
 		}
 	}
-	if s.rolling != nil {
-		if base := s.rolling.baselineHitRatio(); base > 0 && r > 0 {
+	if s.cache != nil {
+		if base := s.baselineHitRatio7d(); base > 0 && r > 0 {
 			delta := 100 * (r - base)
 			ew.Printf("vs 7d avg:   hit ratio %+.1f pp (this session %.1f%%, 7-day %.1f%%)\n",
 				delta, 100*r, 100*base)
