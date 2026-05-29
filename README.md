@@ -85,7 +85,9 @@ One thing to know if you plan to share a report: the **Sessions drill-down** vie
 
 ## Pricing config
 
-Prices live at `~/.config/claudit/prices.yaml`. On first run, claudit writes an embedded default into that path. The format is per-million-token USD rates:
+claudit ships with bundled default prices embedded in the binary, refreshed each release against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing). You don't need to do anything for those to take effect — upgrade and the new rates apply.
+
+If you have custom rates (enterprise discounts, private-preview models, or a stopgap entry for a model the next release hasn't shipped yet), create `~/.config/claudit/prices.yaml`. Entries there **overlay** the bundled defaults per-model: any model you define replaces the bundled entry for that name, and bundled entries you didn't touch stay intact. The file is per-million-token USD rates:
 
 ```yaml
 models:
@@ -97,7 +99,7 @@ models:
     cache_write_1h_per_mtok: 30.00
 ```
 
-Override the path with `--prices=path/to/file.yaml`. Models that appear in your sessions but are missing from `prices.yaml` show up in the report's `unknown_models` block with zero attributed cost — add them to the YAML to get them priced.
+Override the path with `--prices=path/to/file.yaml`. Models that appear in your sessions but are missing from both the bundle and your overlay show up in the report's `unknown_models` block with zero attributed cost — add them to your YAML to get them priced.
 
 ## Subcommands
 

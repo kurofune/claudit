@@ -1,6 +1,8 @@
-// Package pricing loads per-model token prices from a YAML file at
-// ~/.config/claudit/prices.yaml, writing a sensible default the first
-// time it's run. Unknown models cost $0 and are surfaced via a warning.
+// Package pricing loads per-model token prices. It starts from a bundled
+// default table embedded in the binary and optionally overlays a user file
+// at ~/.config/claudit/prices.yaml — per-model replacement, with bundled
+// entries the user didn't touch left intact. Unknown models cost $0 and
+// are surfaced via a warning.
 package pricing
 
 import (
@@ -54,30 +56,33 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".config", "claudit", "prices.yaml"), nil
 }
 
-// Load reads the table from path. If the file doesn't exist, it writes the
-// embedded default into place, then loads it. Returns the table and the
-// path it was actually read from (useful in startup logging).
+// Load returns a pricing Table that starts from the bundled defaults and is
+// optionally overlaid by a user file at path. Overlay is per-model
+// replacement: a model defined in the user file fully replaces the bundled
+// entry for that name; bundled entries the user didn't mention are kept;
+// user entries for new model names are added. If path does not exist, the
+// bundled defaults are returned and no file is created. Malformed or
+// unreadable user files return an error.
 func Load(path string) (*Table, error) {
+	bundled, err := LoadDefault()
+	if err != nil {
+		return nil, fmt.Errorf("parse bundled prices: %w", err)
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, fmt.Errorf("create prices dir: %w", err)
-		}
-		if err := os.WriteFile(path, defaultYAML, 0o644); err != nil {
-			return nil, fmt.Errorf("write default prices: %w", err)
-		}
+		return bundled, nil
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read prices: %w", err)
 	}
-	var t Table
-	if err := yaml.Unmarshal(b, &t); err != nil {
+	var user Table
+	if err := yaml.Unmarshal(b, &user); err != nil {
 		return nil, fmt.Errorf("parse prices: %w", err)
 	}
-	if t.Models == nil {
-		t.Models = map[string]ModelPrice{}
+	for name, price := range user.Models {
+		bundled.Models[name] = price
 	}
-	return &t, nil
+	return bundled, nil
 }
 
 // LoadDefault returns the embedded default table without touching disk —
