@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.2] — 2026-05-29
+
+### Changed
+
+- **Bundled pricing refreshed against the Anthropic pricing page on 2026-05-29.** Added Claude Opus 4.8 (`claude-opus-4-8` and the `[1m]` 1M-context variant) at the same $5/$25 input/output rates as Opus 4.7 / 4.6. All existing entries (Opus 4.7/4.6/4.5, Sonnet 4.6/4.5, Haiku 4.5) were re-verified and unchanged; their `# verified` tags were refreshed. Users with a custom `~/.config/claudit/prices.yaml` are unaffected.
+
 ## [1.4.1] — 2026-05-27
 
 ### Fixed
@@ -153,7 +159,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/kurofune/claudit/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/kurofune/claudit/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kurofune/claudit/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/kurofune/claudit/compare/v1.2.0...v1.3.0
