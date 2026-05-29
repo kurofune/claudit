@@ -55,8 +55,9 @@ if (!window.__claudit_static_data) {
   startSSE(onUpdate);
 }
 
-// Date-range picker — serve-mode only. The static report renders a
-// plain <div id="date-range">, so wireDatePicker() no-ops there.
+// Date-range picker — serve-mode only. The static report renders
+// #date-range as a plain div (no button), so wireDatePicker() no-ops
+// there.
 wireDatePicker();
 
 // Theme picker — gear icon next to the version footer. The chosen

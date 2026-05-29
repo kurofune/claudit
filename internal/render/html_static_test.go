@@ -293,3 +293,30 @@ func TestStatic_NoReloadToastInOneShot(t *testing.T) {
 		t.Errorf("static report leaked /_claudit/status reference")
 	}
 }
+
+// TestStatic_SingleDateRangeID: the report's bytes must carry exactly
+// one id="date-range" — the brand-sub <div> from
+// report_static.html.tmpl:103 that view-overview.js's updateDateRange()
+// targets in static mode.
+//
+// A second occurrence crept in via web/app.js, whose comment spelled
+// out the literal markup `<div id="date-range">`. app.js is inlined
+// verbatim into the SPA bundle's non-executable <script> text, so the
+// comment rode along into the report. It sat inside script text content
+// (not a parsed DOM element), so getElementById still returned the one
+// real div and the DOM stayed valid — but a duplicate id in the source
+// bytes is a footgun for greps, validators, and future refactors.
+// Comments now refer to the element as #date-range. Note `id="date-
+// range"` (trailing quote) does not match `id="date-range-button"`, so
+// this counts the element, not the serve-mode button hook.
+func TestStatic_SingleDateRangeID(t *testing.T) {
+	a := htmlSetup(t)
+	var buf bytes.Buffer
+	if err := HTML(context.Background(), &buf, a); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	if n := strings.Count(body, `id="date-range"`); n != 1 {
+		t.Errorf("static report must contain exactly one id=\"date-range\"; got %d", n)
+	}
+}
