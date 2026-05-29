@@ -263,6 +263,49 @@ func TestAPISections_EtagRevalidation(t *testing.T) {
 	}
 }
 
+// TestAPISections_EtagVariesByQuery locks the bug fix: two requests
+// at the same snapshot generation but with different query strings
+// (e.g. ?last=7d vs ?scope=all) MUST get different ETags, and the
+// ETag from one filter MUST NOT 304 a request for another filter.
+//
+// Pre-fix, buildAPIEtag mixed in only generation+section, so the
+// browser would revalidate a cached ?scope=all body against a fresh
+// ?last=7d request and the server would say 304 — the browser then
+// served the wrong cached body forever (until the snapshot bumped).
+func TestAPISections_EtagVariesByQuery(t *testing.T) {
+	srv := fixtureServer(t)
+	const path = "/_claudit/api/overview"
+
+	wA := doAPI(t, srv, http.MethodGet, path+"?last=7d", nil)
+	if wA.Code != http.StatusOK {
+		t.Fatalf("filter A: status = %d, want 200; body=%s", wA.Code, wA.Body.String())
+	}
+	etagA := wA.Header().Get("ETag")
+	if etagA == "" {
+		t.Fatalf("filter A: missing ETag")
+	}
+
+	wB := doAPI(t, srv, http.MethodGet, path+"?scope=all", nil)
+	if wB.Code != http.StatusOK {
+		t.Fatalf("filter B: status = %d, want 200; body=%s", wB.Code, wB.Body.String())
+	}
+	etagB := wB.Header().Get("ETag")
+	if etagB == "" {
+		t.Fatalf("filter B: missing ETag")
+	}
+
+	if etagA == etagB {
+		t.Fatalf("ETag collision across distinct filters: both = %q (snapshot generation hadn't moved, so revalidation with the stale ETag would 304 and the browser would serve the wrong cached body)", etagA)
+	}
+
+	// Replay filter A's ETag against filter B's URL: must NOT 304.
+	// The body differs; a 304 here would resurface the original bug.
+	wReplay := doAPI(t, srv, http.MethodGet, path+"?scope=all", http.Header{"If-None-Match": []string{etagA}})
+	if wReplay.Code == http.StatusNotModified {
+		t.Errorf("cross-filter If-None-Match replay returned 304: filter A's ETag must not validate filter B's response")
+	}
+}
+
 // TestAPISections_Gzip asserts the API endpoints honor Accept-
 // Encoding: gzip. The plain and gzipped paths must produce the
 // same decoded JSON — the response body is just transport-layer

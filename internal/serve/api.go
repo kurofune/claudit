@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -104,7 +106,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	s.applyDefaults(&q)
 
 	snap := s.cache.Snapshot()
-	etag := buildAPIEtag(snap.Generation, spec.section)
+	etag := buildAPIEtag(snap.Generation, spec.section, q.rawQuery)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
@@ -190,8 +192,19 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 // buildAPIEtag returns the weak ETag for a section's response. The
 // "W/" prefix signals semantic equivalence — the gzipped and plain
 // variants are the same payload, so they share an ETag.
-func buildAPIEtag(generation int64, section string) string {
-	return fmt.Sprintf(`W/"gen-%d-%s"`, generation, section)
+//
+// rawQuery is the canonical query string (sorted k=v&k=v). Mixing it
+// into the ETag is load-bearing: two requests at the same snapshot
+// generation but with different filters (?last=7d vs ?scope=all)
+// produce different bodies, so they MUST get different ETags or a
+// browser revalidation would 304 the wrong cached body. We hash the
+// query rather than embed it so a long filter doesn't blow the
+// header size — 8 hex chars (32 bits) is plenty for cache-key
+// disambiguation in a single-binary self-served app.
+func buildAPIEtag(generation int64, section, rawQuery string) string {
+	sum := sha256.Sum256([]byte(rawQuery))
+	qh := hex.EncodeToString(sum[:])[:8]
+	return fmt.Sprintf(`W/"gen-%d-%s-q%s"`, generation, section, qh)
 }
 
 // ifNoneMatchHit reports whether the client's If-None-Match header
