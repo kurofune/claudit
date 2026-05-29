@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.3] — 2026-05-29
+
+### Fixed
+
+- **Bundled pricing updates now actually reach users who have run claudit before.** `Load` previously wrote the embedded default YAML to `~/.config/claudit/prices.yaml` on first run and from then on read only that file — so any user who'd ever run claudit was permanently pinned to the prices that shipped on their first run, and bundled-pricing refreshes in later releases (e.g. the Opus 4.8 entry added in v1.4.2) silently never took effect for them. The pricing loader is now overlay-style: it always starts from the bundled defaults, and if `~/.config/claudit/prices.yaml` exists it overlays the user file's entries per-model on top. A model the user defines fully replaces the bundled entry for that name; bundled entries the user didn't touch stay intact; user entries for new models are added. The file is no longer auto-created on first run. Users with custom rates (enterprise discounts, private-preview models) keep their overrides exactly as before; everyone else now tracks every release.
+
 ## [1.4.2] — 2026-05-29
 
 ### Changed
@@ -159,7 +165,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/kurofune/claudit/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/kurofune/claudit/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/kurofune/claudit/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/kurofune/claudit/compare/v1.3.0...v1.4.0
