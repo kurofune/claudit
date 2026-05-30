@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decideReload, INTERACTION_IDLE_MS, TOAST_AFTER_MS } from '../web/sse.js';
+import {
+  decideReload,
+  INTERACTION_IDLE_MS,
+  TOAST_AFTER_MS,
+  MIN_RELOAD_INTERVAL_MS,
+} from '../web/sse.js';
 
 // decideReload is the pure decision the SSE auto-reload loop runs on
 // each tick: given the current state, should we reload now, defer
@@ -15,6 +20,9 @@ import { decideReload, INTERACTION_IDLE_MS, TOAST_AFTER_MS } from '../web/sse.js
 //                         null means "user has not interacted yet"
 //   anyDetailsOpen      — bool, true if any <details> is currently open
 //   isHidden            — bool, document.hidden
+//   pageLoadedAt        — when the current page rendered; the floor for
+//                         the next reload, so a busy corpus can't churn
+//                         the dashboard every poll interval
 //   now                 — current time
 //
 // Verb returned: 'reload' | 'defer' | 'toast'.
@@ -96,6 +104,46 @@ test('decideReload prefers toast over reload at the pile-up boundary', () => {
     lastInteractionAt: null,
     anyDetailsOpen: false,
     isHidden: false,
+    now: 1_000_000 + TOAST_AFTER_MS,
+  }), 'toast');
+});
+
+test('decideReload defers while the page is fresher than the reload floor', () => {
+  // Page just rendered. A new corpus generation arrived a tick later;
+  // the floor prevents the dashboard from churning every poll interval
+  // while a busy session writes turns.
+  assert.equal(decideReload({
+    pendingSince: 1_000_500,
+    lastInteractionAt: null,
+    anyDetailsOpen: false,
+    isHidden: false,
+    pageLoadedAt: 1_000_000,
+    now: 1_000_000 + MIN_RELOAD_INTERVAL_MS - 1,
+  }), 'defer');
+});
+
+test('decideReload reloads once the page outlives the reload floor', () => {
+  assert.equal(decideReload({
+    pendingSince: 1_000_500,
+    lastInteractionAt: null,
+    anyDetailsOpen: false,
+    isHidden: false,
+    pageLoadedAt: 1_000_000,
+    now: 1_000_000 + MIN_RELOAD_INTERVAL_MS,
+  }), 'reload');
+});
+
+test('decideReload still escalates to toast past the pile-up window even when below the floor', () => {
+  // If the page is somehow fresher than the floor but pending has aged
+  // beyond TOAST_AFTER_MS, the toast wins — five minutes of waiting is
+  // long enough that "user is in control" is friendlier than another
+  // silent defer.
+  assert.equal(decideReload({
+    pendingSince: 1_000_000,
+    lastInteractionAt: null,
+    anyDetailsOpen: false,
+    isHidden: false,
+    pageLoadedAt: 1_000_000 + TOAST_AFTER_MS - 1_000,
     now: 1_000_000 + TOAST_AFTER_MS,
   }), 'toast');
 });

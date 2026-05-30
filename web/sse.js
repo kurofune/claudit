@@ -27,6 +27,15 @@ export const INTERACTION_IDLE_MS = 10_000;
 // gives up and the toast appears for manual reload.
 export const TOAST_AFTER_MS = 5 * 60_000;
 
+// MIN_RELOAD_INTERVAL_MS is the floor between reloads. The corpus
+// poller bumps the generation every ~2s while a session writes
+// turns; without a floor the dashboard reloads every 2s, which is
+// distracting and wastes bandwidth on a tab that's not the focus of
+// attention. 15s is calm-but-not-stale for the dashboard surface;
+// watch mode (ticker tape) has its own cadence and isn't gated by
+// this.
+export const MIN_RELOAD_INTERVAL_MS = 15_000;
+
 // RECHECK_INTERVAL_MS is the loop's heartbeat. It drives the "the
 // user's interaction is now stale, reload" and "we've been pending
 // long enough, show the toast" transitions, which would otherwise
@@ -48,6 +57,13 @@ export function decideReload(state) {
       state.now - state.lastInteractionAt < INTERACTION_IDLE_MS) {
     return 'defer';
   }
+  // Reload floor: the page must have been on screen at least
+  // MIN_RELOAD_INTERVAL_MS before we replace it. Null pageLoadedAt
+  // means "no floor" — used by tests that don't care about throttle.
+  if (state.pageLoadedAt != null &&
+      state.now - state.pageLoadedAt < MIN_RELOAD_INTERVAL_MS) {
+    return 'defer';
+  }
   return 'reload';
 }
 
@@ -60,6 +76,7 @@ export function start({ toastEl = null, btnEl = null } = {}) {
   let loadedGeneration = null;
   let pendingSince = null;
   let lastInteractionAt = null;
+  const pageLoadedAt = Date.now();
 
   const showToast = () => {
     if (!toastEl) return;
@@ -95,6 +112,7 @@ export function start({ toastEl = null, btnEl = null } = {}) {
       lastInteractionAt,
       anyDetailsOpen: anyDetailsOpen(),
       isHidden: document.hidden,
+      pageLoadedAt,
       now: Date.now(),
     });
     if (verb === 'reload') {
