@@ -14,7 +14,7 @@ import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js'
 import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
 import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
 import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
-import { start as startSSE, wireReloadToast } from './sse.js';
+import { start as startSSE } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 import { init as initThemes } from './themes.js';
@@ -38,21 +38,20 @@ onChange(async (route) => {
   }
 });
 
-// SSE-driven reload toast. The current Phase-5 behavior is "any data
-// change after page load → surface the toast"; later phases can opt
-// to silently invalidate per-section caches instead of forcing a full
-// reload.
+// SSE-driven silent auto-reload. When the server pushes a new
+// generation, sse.js waits for a safe moment (tab visible, no
+// <details> open, no recent user input) and then reloads. After
+// TOAST_AFTER_MS of unsafe-to-reload pile-up it surfaces the toast as
+// the manual-reload fallback.
 //
 // Offline / static-report mode: when window.__claudit_static_data is
 // set, there is no server to push generation events from — skip the
 // EventSource so we don't fire spurious connection-failure noise.
-// wireReloadToast is also a no-op against missing DOM, so the static
-// template's omission of the toast markup keeps the bundle quiet.
-const toastEl = document.getElementById('reload-toast');
-const btnEl = document.getElementById('reload-toast-btn');
-const onUpdate = wireReloadToast(toastEl, btnEl);
 if (!window.__claudit_static_data) {
-  startSSE(onUpdate);
+  startSSE({
+    toastEl: document.getElementById('reload-toast'),
+    btnEl: document.getElementById('reload-toast-btn'),
+  });
 }
 
 // Date-range picker — serve-mode only. The static report renders
