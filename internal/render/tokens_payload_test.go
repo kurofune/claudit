@@ -3,6 +3,10 @@ package render
 import (
 	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 // TestBuildTokens_ShapeAndKeys: the tokens tab payload carries the
@@ -20,7 +24,23 @@ func TestBuildTokens_ShapeAndKeys(t *testing.T) {
 		"composition",
 		"trend",
 		"by_model",
+		"period",
 	})
+}
+
+// TestBuildTokens_CarriesPeriod: like the overview, the tokens payload
+// ships the bucket granularity so the SPA can label the trend axis
+// (HH:MM for the single-day hourly view).
+func TestBuildTokens_CarriesPeriod(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := aggregate.New(prices).WithPeriod(aggregate.PeriodHour)
+	a.Add(mkTurn("claude-opus-4-7", "/p/x", 1_000_000, 200_000, time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)))
+	if got := BuildTokens(a).Period; got != aggregate.PeriodHour {
+		t.Errorf("Period = %q, want hour", got)
+	}
 }
 
 // TestBuildTokens_CompositionSumsToGrandTotal: the 4 composition rows

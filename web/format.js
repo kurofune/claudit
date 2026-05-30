@@ -65,9 +65,19 @@ export function hitRatioPill(v, extraClass) {
 }
 
 // bucketLabel formats a TrendPoint.time for X-axis ticks. Period is
-// the report's bucket granularity — "day" | "week" | "month" | "".
+// the report's bucket granularity — "hour" | "day" | "week" | "month"
+// | "". Hour buckets ship local-zoned RFC3339 (with an offset, not Z),
+// so chars 11-12 are the user's wall-clock hour; we render it as a
+// compact 12-hour am/pm clock (12a, 1a, … 11a, 12p, … 11p).
 export function bucketLabel(ts, period) {
   if (!ts) return '';
+  if (period === 'hour') {
+    const h = parseInt(String(ts).slice(11, 13), 10);
+    if (isNaN(h)) return '';
+    const suffix = h < 12 ? 'a' : 'p';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}${suffix}`;
+  }
   const s = String(ts).slice(0, 10);
   if (period === 'month') return String(ts).slice(0, 7);
   if (period === 'week') return 'wk ' + s.slice(5);

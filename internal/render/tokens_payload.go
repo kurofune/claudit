@@ -31,6 +31,9 @@ type TokensPayload struct {
 	Composition []TokenCategory        `json:"composition"`
 	Trend       []aggregate.TrendPoint `json:"trend"`
 	ByModel     []TokenModelRow        `json:"by_model"`
+	// Period is the bucket granularity of Trend — read by the SPA to
+	// label the trend axis ("hour" → HH:MM) instead of hardcoding day.
+	Period aggregate.Period `json:"period"`
 }
 
 // tokenComposition splits a token tuple into the canonical 4-category
@@ -88,5 +91,6 @@ func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 		Composition: composition,
 		Trend:       a.TrendTotals(),
 		ByModel:     byModel,
+		Period:      a.Period(),
 	}
 }

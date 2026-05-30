@@ -4,6 +4,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- **Single-day views now break charts down by hour instead of hiding them.** Picking the same start and end date in `claudit serve` used to collapse the trend to one daily bucket, so every chart showed "Only one day of data — chart hidden." A same-day window now switches to hourly buckets: the cost, hit-ratio, and token-volume charts run from local midnight to the current hour (gap-filling empty hours), and the per-row trend sparklines on the cost/cache/tools tabs follow suit. Bucketing happens in Go (`PeriodHour`, truncated in local time so hours line up with the user's wall clock); the overview and tokens payloads now ship the bucket granularity so the SPA labels the axis on a compact 12-hour clock (`12a, 1a, … 12p, … 11p`). An explicit `?by=` still wins, and multi-day windows are unchanged.
+
 ### Fixed
 
 - **`claudit serve` actually auto-reloads when new data arrives.** The SSE-driven silent reload promised in the v1.3.0 changelog never worked: the toast wiring set the `hidden` attribute on the toast element, but the CSS hard-coded `display: none` and only revealed via a `.is-visible` class, so the toast never appeared — and there was no silent reload path either. The page just went stale until a manual refresh. Replaced with a real silent-auto-reload loop that watches the `/events` stream and reloads the page as soon as new data lands, deferred while the tab is hidden, while any `<details>` is open, or within 10s of mouse / keyboard / scroll / touch input. After 5 minutes of unsafe-to-reload pile-up it gives up on silent reload and surfaces the toast (now correctly shown) for manual reload. The decision logic is factored into a pure `decideReload(state)` with per-branch jstest coverage.

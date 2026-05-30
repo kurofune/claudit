@@ -89,12 +89,13 @@ func (s *Server) handleAPISessionTimeline(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	q, err := parseQuery(r.URL.Query(), time.Now())
+	now := time.Now()
+	q, err := parseQuery(r.URL.Query(), now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.applyDefaults(&q)
+	s.applyDefaults(&q, now)
 
 	snap := s.cache.Snapshot()
 

@@ -164,6 +164,13 @@ type Aggregator struct {
 	// because addTrend doesn't have the session ID in scope.
 	bucketSessions map[time.Time]map[string]struct{}
 
+	// Trend-fill window. When both are set, TrendTotals() spans this
+	// fixed range (zero-filling unobserved buckets) instead of the
+	// observed first..last range. Set by WithTrendFill for the
+	// single-day hourly view so the chart runs midnight..now.
+	trendFillStart time.Time
+	trendFillEnd   time.Time
+
 	// Per-prompt attribution. WithPromptIndex sets promptIndex; without
 	// it, byPrompt stays empty and ByPrompt() returns nil.
 	promptIndex *PromptIndex
@@ -217,6 +224,17 @@ func (a *Aggregator) WithPeriod(p Period) *Aggregator {
 		a.trendBySub = map[string]map[time.Time]*TrendPoint{}
 		a.bucketSessions = map[time.Time]map[string]struct{}{}
 	}
+	return a
+}
+
+// WithTrendFill fixes the totals trend series to span start..end
+// inclusive (gap-filling unobserved buckets) rather than the observed
+// first..last range. Used for the single-day hourly view so the chart
+// runs from midnight to now even when activity is sparse. Pass zero
+// times to leave the default observed-range fill in place.
+func (a *Aggregator) WithTrendFill(start, end time.Time) *Aggregator {
+	a.trendFillStart = start
+	a.trendFillEnd = end
 	return a
 }
 

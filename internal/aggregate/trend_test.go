@@ -46,6 +46,68 @@ func TestPeriod_Step(t *testing.T) {
 	}
 }
 
+func TestPeriod_HourTruncate(t *testing.T) {
+	// Hour buckets truncate in *local* time so they align with the
+	// user's wall clock (unlike day/week/month, which snap to UTC).
+	if !PeriodHour.Valid() {
+		t.Fatal("PeriodHour should be Valid()")
+	}
+
+	lt := time.Date(2026, 5, 6, 14, 30, 45, 0, time.Local)
+	wantLocal := time.Date(2026, 5, 6, 14, 0, 0, 0, time.Local)
+	if got := PeriodHour.Truncate(lt); !got.Equal(wantLocal) {
+		t.Errorf("local hour truncate: got %v, want %v", got, wantLocal)
+	}
+
+	// A UTC instant must be converted to local before truncating.
+	utc := time.Date(2026, 5, 6, 14, 30, 0, 0, time.UTC)
+	lc := utc.In(time.Local)
+	want := time.Date(lc.Year(), lc.Month(), lc.Day(), lc.Hour(), 0, 0, 0, time.Local)
+	if got := PeriodHour.Truncate(utc); !got.Equal(want) {
+		t.Errorf("utc->local hour truncate: got %v, want %v", got, want)
+	}
+}
+
+func TestPeriod_HourStep(t *testing.T) {
+	t0 := time.Date(2026, 5, 6, 9, 0, 0, 0, time.Local)
+	if got := PeriodHour.Step(t0); !got.Equal(t0.Add(time.Hour)) {
+		t.Errorf("hour step: %v", got)
+	}
+}
+
+func TestTrend_HourlyWindowFill(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+
+	// A single local day with activity only at 09:00 and 11:00; "now"
+	// is 13:00. The totals series must span midnight→now, gap-filling
+	// every empty hour in between.
+	midnight := time.Date(2026, 5, 6, 0, 0, 0, 0, time.Local)
+	nineAM := time.Date(2026, 5, 6, 9, 30, 0, 0, time.Local)
+	elevenAM := time.Date(2026, 5, 6, 11, 15, 0, 0, time.Local)
+	now := time.Date(2026, 5, 6, 13, 0, 0, 0, time.Local)
+
+	agg := New(prices).WithPeriod(PeriodHour).WithTrendFill(midnight, now)
+	agg.Add(turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", nineAM))
+	agg.Add(turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", elevenAM))
+
+	pts := agg.TrendTotals()
+	if len(pts) != 14 {
+		t.Fatalf("want 14 hourly buckets (00:00..13:00), got %d", len(pts))
+	}
+	if !pts[0].Time.Equal(midnight) {
+		t.Errorf("first bucket = %v, want midnight %v", pts[0].Time, midnight)
+	}
+	if !pts[13].Time.Equal(now) {
+		t.Errorf("last bucket = %v, want %v", pts[13].Time, now)
+	}
+	if pts[9].Turns != 1 || pts[11].Turns != 1 {
+		t.Errorf("expected activity at 09:00 and 11:00, got 9h=%d 11h=%d", pts[9].Turns, pts[11].Turns)
+	}
+	if pts[0].Turns != 0 || pts[10].Turns != 0 || pts[12].Turns != 0 {
+		t.Errorf("empty hours should be zero-fill: 0h=%d 10h=%d 12h=%d", pts[0].Turns, pts[10].Turns, pts[12].Turns)
+	}
+}
+
 func TestTrend_DailyGapFill(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)

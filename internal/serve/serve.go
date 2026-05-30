@@ -429,11 +429,10 @@ func (s *Server) Addr() string {
 //     specify ?sessions.
 //   - Server's DefaultHotspots / DefaultPeriod / DefaultRedact apply
 //     when the URL didn't specify them.
-func (s *Server) applyDefaults(q *Query) {
+func (s *Server) applyDefaults(q *Query, now time.Time) {
 	urlSetWindow := q.URLHasLast || q.URLHasSince || q.URLHasUntil
 	applyDefaultWindow := !q.ScopeAll && !urlSetWindow && s.opts.DefaultLast > 0
 	if applyDefaultWindow {
-		now := time.Now()
 		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		q.Filter.Since = midnight.Add(-s.opts.DefaultLast)
 	}
@@ -456,6 +455,38 @@ func (s *Server) applyDefaults(q *Query) {
 	if !q.URLHasPeriod {
 		q.Period = s.opts.DefaultPeriod
 	}
+
+	// Single-day window → switch from daily to hourly buckets so the
+	// same-day view still draws a chart, broken down by hour. The
+	// totals series spans midnight..now (capped at the day's end for a
+	// past day) so the chart runs from midnight to the current time
+	// regardless of when activity started. Explicit ?by wins.
+	if !q.URLHasPeriod && q.URLHasSince && q.URLHasUntil && isSingleLocalDay(q.Filter.Since, q.Filter.Until) {
+		q.Period = aggregate.PeriodHour
+		q.TrendFillStart = q.Filter.Since
+		end := q.Filter.Until.Add(-time.Nanosecond)
+		if now.Before(end) {
+			end = now
+		}
+		q.TrendFillEnd = end
+	}
+}
+
+// isSingleLocalDay reports whether [since, until) covers exactly one
+// local calendar day — i.e. since is local midnight and until is the
+// next local midnight. This is what the date picker emits when start
+// and end are the same day (until is the exclusive next day). AddDate
+// keeps the check correct across DST transitions.
+func isSingleLocalDay(since, until time.Time) bool {
+	if since.IsZero() || until.IsZero() {
+		return false
+	}
+	s := since.Local()
+	midnight := time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, s.Location())
+	if !s.Equal(midnight) {
+		return false
+	}
+	return until.Equal(midnight.AddDate(0, 0, 1))
 }
 
 // sharedAggregateData runs buildAggregator + buildTimelines for
@@ -508,6 +539,7 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 	agg := aggregate.New(s.opts.Prices).
 		WithFilter(q.Filter).
 		WithPeriod(q.Period).
+		WithTrendFill(q.TrendFillStart, q.TrendFillEnd).
 		WithPromptIndex(promptIdx)
 	for _, t := range snap.Turns {
 		agg.AddWithSubagent(t, s.subagentLookup())

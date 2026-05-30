@@ -13,6 +13,7 @@ type Period string
 
 const (
 	PeriodNone  Period = ""
+	PeriodHour  Period = "hour"
 	PeriodDay   Period = "day"
 	PeriodWeek  Period = "week"
 	PeriodMonth Period = "month"
@@ -21,15 +22,22 @@ const (
 // Valid reports whether p is a real period (PeriodNone is not).
 func (p Period) Valid() bool {
 	switch p {
-	case PeriodDay, PeriodWeek, PeriodMonth:
+	case PeriodHour, PeriodDay, PeriodWeek, PeriodMonth:
 		return true
 	}
 	return false
 }
 
-// Truncate returns the start of the period bucket containing t, in UTC.
-// Weeks snap to Monday 00:00 UTC.
+// Truncate returns the start of the period bucket containing t. Day,
+// week, and month buckets snap to UTC (weeks to Monday 00:00). Hour
+// buckets snap in *local* time so a single-day view's hours line up
+// with the user's wall clock (midnight..now), the same local-zone
+// convention the date filters use.
 func (p Period) Truncate(t time.Time) time.Time {
+	if p == PeriodHour {
+		lt := t.Local()
+		return time.Date(lt.Year(), lt.Month(), lt.Day(), lt.Hour(), 0, 0, 0, lt.Location())
+	}
 	t = t.UTC()
 	switch p {
 	case PeriodDay:
@@ -48,6 +56,8 @@ func (p Period) Truncate(t time.Time) time.Time {
 // Step returns t advanced by one period.
 func (p Period) Step(t time.Time) time.Time {
 	switch p {
+	case PeriodHour:
+		return t.Add(time.Hour)
 	case PeriodDay:
 		return t.AddDate(0, 0, 1)
 	case PeriodWeek:
@@ -117,14 +127,43 @@ func gapFill(p Period, m map[time.Time]*TrendPoint) []TrendPoint {
 	return out
 }
 
+// gapFillWindow fills every period bucket from start..end inclusive,
+// regardless of which buckets were actually observed. Used for the
+// single-day hourly view, where the totals chart must span the whole
+// window (midnight..now) even across hours with no activity. start and
+// end are truncated to the period before iterating.
+func gapFillWindow(p Period, m map[time.Time]*TrendPoint, start, end time.Time) []TrendPoint {
+	startB, endB := p.Truncate(start), p.Truncate(end)
+	var out []TrendPoint
+	for t := startB; !t.After(endB); t = p.Step(t) {
+		if pt := m[t]; pt != nil {
+			cell := *pt
+			cell.HitRatio = pt.Tokens.HitRatio()
+			out = append(out, cell)
+		} else {
+			out = append(out, TrendPoint{Time: t})
+		}
+	}
+	return out
+}
+
 // TrendTotals returns gap-filled cost-by-period for the report. Empty
 // slice when period is not set or no turns were counted. Sessions count
 // is backfilled here from the per-bucket session sets recorded in Add().
+//
+// When a trend-fill window is set (WithTrendFill — the single-day hourly
+// view), the series spans the full window rather than just the observed
+// range, so the chart runs midnight..now with zero-fill in between.
 func (a *Aggregator) TrendTotals() []TrendPoint {
 	if !a.period.Valid() {
 		return nil
 	}
-	pts := gapFill(a.period, a.trendTotals)
+	var pts []TrendPoint
+	if !a.trendFillStart.IsZero() && !a.trendFillEnd.IsZero() {
+		pts = gapFillWindow(a.period, a.trendTotals, a.trendFillStart, a.trendFillEnd)
+	} else {
+		pts = gapFill(a.period, a.trendTotals)
+	}
 	for i := range pts {
 		if s, ok := a.bucketSessions[pts[i].Time]; ok {
 			pts[i].Sessions = len(s)

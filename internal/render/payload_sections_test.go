@@ -30,7 +30,23 @@ func TestBuildOverview_ShapeAndKeys(t *testing.T) {
 		"unknown_models",
 		"overall_hit_ratio",
 		"total_tokens",
+		"period",
 	})
+}
+
+// TestBuildOverview_CarriesPeriod: the SPA reads the bucket granularity
+// off the payload (rather than hardcoding "day") so the single-day
+// hourly view labels its axis in HH:MM.
+func TestBuildOverview_CarriesPeriod(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := aggregate.New(prices).WithPeriod(aggregate.PeriodHour)
+	a.Add(mkTurn("claude-opus-4-7", "/p/x", 1_000_000, 200_000, time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)))
+	if got := BuildOverview(a).Period; got != aggregate.PeriodHour {
+		t.Errorf("Period = %q, want hour", got)
+	}
 }
 
 // TestBuildOverview_HitRatioMatchesAggregator: the overview's headline

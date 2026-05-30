@@ -57,6 +57,9 @@ type OverviewPayload struct {
 	TrendTotals     []aggregate.TrendPoint `json:"trend_totals"`
 	Forecast        aggregate.Forecast     `json:"forecast"`
 	UnknownModels   []string               `json:"unknown_models"`
+	// Period is the bucket granularity of TrendTotals. The SPA reads it
+	// to label the trend axis ("hour" → HH:MM) instead of hardcoding day.
+	Period aggregate.Period `json:"period"`
 }
 
 // CostPayload backs /_claudit/api/cost — every "where did the money
@@ -150,6 +153,7 @@ func BuildOverview(a *aggregate.Aggregator) OverviewPayload {
 		TrendTotals:     a.TrendTotals(),
 		Forecast:        a.MonthEndForecast(time.Now()),
 		UnknownModels:   a.UnknownModels(),
+		Period:          a.Period(),
 	}
 }
 

@@ -128,7 +128,7 @@ export async function paint() {
   const comp = data.composition || [];
   const byModel = data.by_model || [];
   const trend = data.trend || [];
-  const period = inferPeriod(trend);
+  const period = inferPeriod(data);
 
   const grandEl = container.querySelector('#tok-grand-total');
   if (grandEl) grandEl.textContent = fmtNum(data.total || 0);
@@ -160,12 +160,11 @@ export async function paint() {
   navPainted = true;
 }
 
-// inferPeriod mirrors view-overview's heuristic: the /tokens payload
-// reuses TrendTotals but doesn't carry the period label, so default to
-// the dominant serve-mode case (day-bucketed). Kept as a function so a
-// later payload field can override without touching call sites.
-function inferPeriod(_trend) {
-  return 'day';
+// inferPeriod reads the bucket granularity shipped on the /tokens
+// payload (a same-day window comes back as "hour"). Falls back to day
+// for older payloads / the static report that omit the field.
+function inferPeriod(data) {
+  return (data && data.period) || 'day';
 }
 
 export function reset() { painted = false; navPainted = false; }

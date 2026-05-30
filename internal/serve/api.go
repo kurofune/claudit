@@ -98,12 +98,13 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		return
 	}
 
-	q, err := parseQuery(r.URL.Query(), time.Now())
+	now := time.Now()
+	q, err := parseQuery(r.URL.Query(), now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.applyDefaults(&q)
+	s.applyDefaults(&q, now)
 
 	snap := s.cache.Snapshot()
 	etag := buildAPIEtag(snap.Generation, spec.section, q.rawQuery)

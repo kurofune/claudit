@@ -74,10 +74,10 @@ function hotspotsHTML(hotspots) {
 
 function trendSectionHTML(data, anomalies) {
   const points = data.trend_totals;
-  // The API doesn't ship the period on /overview; infer from data
-  // shape (we'll add it explicitly in a later phase if needed). For
-  // now, day-bucketed is the dominant case in serve mode.
-  const period = 'day';
+  // The API ships the bucket granularity on the payload; a same-day
+  // window comes back as "hour" so the axis reads HH:MM. Fall back to
+  // day for older payloads / the static report.
+  const period = data.period || 'day';
   if (!points || points.length === 0) return '';
 
   let peak = 0, sum = 0;

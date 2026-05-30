@@ -42,6 +42,13 @@ type Query struct {
 	// link in the pill.
 	ScopeAll bool
 
+	// TrendFillStart/End fix the totals trend series to span this range
+	// (gap-filling unobserved buckets) instead of the observed range.
+	// Set by applyDefaults for the single-day hourly view so the chart
+	// runs midnight..now. Zero when not a single-day window.
+	TrendFillStart time.Time
+	TrendFillEnd   time.Time
+
 	// rawQuery is the original query string, for cache-key purposes.
 	// Kept private — callers should treat Query as opaque.
 	rawQuery string
@@ -98,12 +105,12 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 	if by, ok := lookupTrim(v, "by"); ok {
 		q.URLHasPeriod = true
 		switch by {
-		case "day", "week", "month":
+		case "hour", "day", "week", "month":
 			q.Period = aggregate.Period(by)
 		case "off":
 			q.Period = aggregate.Period("")
 		default:
-			return q, fmt.Errorf("?by: must be one of day|week|month|off, got %q", by)
+			return q, fmt.Errorf("?by: must be one of hour|day|week|month|off, got %q", by)
 		}
 	}
 
