@@ -1,6 +1,7 @@
 package render
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"testing"
@@ -322,6 +323,59 @@ func TestBuildSessions_TotalSessionsReconcilesWithOverviewTile(t *testing.T) {
 	if sessions.TotalSessions < len(sessions.Sessions) {
 		t.Errorf("TotalSessions (%d) must be >= len(Sessions) (%d): the full window count is never less than the shown count",
 			sessions.TotalSessions, len(sessions.Sessions))
+	}
+}
+
+// TestBuildSessions_CarriesEntrypointAndFirstPrompt: each session row must
+// carry its origin (cli vs sdk-cli) and a short preview of its kickoff prompt
+// so the Sessions list is scannable and splittable without fetching every
+// per-session timeline.
+func TestBuildSessions_CarriesEntrypointAndFirstPrompt(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	user := parse.UserMessage{UUID: "p1", SessionID: "s1", Text: "drive the dungeon monster brain", Timestamp: t0}
+	turn := parse.Turn{
+		Model:      "claude-opus-4-7",
+		CWD:        "/p/x",
+		SessionID:  "s1",
+		UUID:       "a1",
+		ParentUUID: "p1",
+		Entrypoint: "sdk-cli",
+		Usage:      parse.Usage{InputTokens: 1000, OutputTokens: 100},
+		Timestamp:  t0.Add(time.Minute),
+	}
+	timelines, err := aggregate.BuildSessionTimelines(
+		context.Background(),
+		[]parse.Turn{turn}, []parse.UserMessage{user}, nil,
+		prices, aggregate.Filter{}, aggregate.SessionTimelinesOptions{MaxPromptChars: 2000})
+	if err != nil {
+		t.Fatalf("BuildSessionTimelines: %v", err)
+	}
+
+	p := BuildSessions(timelines, len(timelines))
+	if len(p.Sessions) == 0 {
+		t.Fatal("expected at least one session row")
+	}
+	row := p.Sessions[0]
+	if row.Entrypoint != "sdk-cli" {
+		t.Errorf("Entrypoint = %q, want sdk-cli", row.Entrypoint)
+	}
+	if row.FirstPrompt != "drive the dungeon monster brain" {
+		t.Errorf("FirstPrompt = %q, want the kickoff prompt", row.FirstPrompt)
+	}
+
+	// The fields must serialize under the documented JSON keys.
+	got, err := json.Marshal(row)
+	if err != nil {
+		t.Fatalf("marshal row: %v", err)
+	}
+	for _, key := range []string{`"entrypoint":`, `"first_prompt":`} {
+		if !containsKey(got, key) {
+			t.Errorf("session row missing JSON key %s; raw: %s", key, got)
+		}
 	}
 }
 

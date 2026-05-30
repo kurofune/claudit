@@ -35,6 +35,11 @@ type ToolUse struct {
 	// "git status" for Bash, ".go" for Read/Edit/Write, "github.com" for
 	// WebFetch, etc. Empty when no useful sub-key applies.
 	Detail string
+	// Input is a bounded, human-readable snippet of the tool's input for
+	// high-value tools — the full Bash command, the prompt handed to an
+	// Agent/Task subagent, etc. (see extractToolInput). Empty for tools
+	// whose Detail already says everything useful. Capped to bound payload.
+	Input string
 }
 
 // Turn is one assistant message — the only event type that costs money.
@@ -48,6 +53,10 @@ type Turn struct {
 	Model      string
 	Usage      Usage
 	ToolUses   []ToolUse
+	// Entrypoint is the session origin from the JSONL line: "cli" for an
+	// interactive session, "sdk-cli" for a headless/SDK run. Constant
+	// across a session; the aggregator lifts it to the session level.
+	Entrypoint string
 	// SourceFile is the JSONL path; lets aggregator look up subagent meta.
 	SourceFile string
 }
@@ -94,6 +103,7 @@ type rawLine struct {
 	Sidechain  bool            `json:"isSidechain"`
 	Timestamp  string          `json:"timestamp"`
 	CWD        string          `json:"cwd"`
+	Entrypoint string          `json:"entrypoint"`
 	Message    json.RawMessage `json:"message"`
 	IsMeta     bool            `json:"isMeta"`
 }
@@ -186,6 +196,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			Model:      msg.Model,
 			Usage:      convertUsage(msg.Usage),
 			ToolUses:   extractToolUses(msg.Content),
+			Entrypoint: raw.Entrypoint,
 			SourceFile: path,
 		}, UserMessage{}, LineAssistant
 	case "user":
@@ -339,6 +350,7 @@ func extractToolUses(content json.RawMessage) []ToolUse {
 			}
 		}
 		tu.Detail = extractDetail(e.Name, e.Input)
+		tu.Input = extractToolInput(e.Name, e.Input)
 		out = append(out, tu)
 	}
 	return out

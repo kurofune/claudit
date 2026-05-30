@@ -98,6 +98,89 @@ func extractDetail(name string, raw json.RawMessage) string {
 	return ""
 }
 
+// toolInputMaxChars bounds the per-invocation input snippet we retain so a
+// single huge subagent prompt or heredoc can't bloat the timeline payload.
+const toolInputMaxChars = 2000
+
+// extractToolInput returns a bounded, human-readable snippet of a tool call's
+// input for the high-value tools — the full Bash command, the prompt handed
+// to an Agent/Task subagent, the slash-command line, a WebFetch URL. Unlike
+// extractDetail (which buckets to a coarse key for roll-ups), this preserves
+// the actual input so the Sessions view can show what the agent did. Returns
+// "" for tools whose Detail already captures everything useful.
+func extractToolInput(name string, raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	switch name {
+	case "Bash", "Monitor":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.Command
+	case "Agent", "Task":
+		var in struct {
+			Prompt string `json:"prompt"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.Prompt
+	case "Skill":
+		var in struct {
+			Args    string `json:"args"`
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.Args
+		if s == "" {
+			s = in.Command
+		}
+	case "SlashCommand":
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.Command
+	case "WebFetch":
+		var in struct {
+			URL    string `json:"url"`
+			Prompt string `json:"prompt"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.URL
+		if in.Prompt != "" {
+			s = in.URL + " — " + in.Prompt
+		}
+	default:
+		return ""
+	}
+	return truncateRunes(strings.TrimSpace(s), toolInputMaxChars)
+}
+
+// truncateRunes shortens s to at most max runes, appending an ellipsis when
+// it had to cut. Rune-safe so multibyte input isn't split mid-character.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max { // bytes >= runes, so this is a safe fast path
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 // bashPattern collapses a shell command to its "shape" so similar invocations
 // bucket together. Strategy:
 //  1. If the command has "&&", "||", or ";", take the LAST segment — `cd foo

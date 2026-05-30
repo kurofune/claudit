@@ -461,6 +461,15 @@
   }
   .subtab:hover { color: var(--ink); }
   .subtab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+  /* Per-tab count chip ("SDK 24"). Muted so it reads as a secondary detail
+     next to the tab label; empty (zero) counts render nothing. */
+  .subtab .subtab-count {
+    font-size: var(--t-1);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    margin-left: 2px;
+  }
+  .subtab.is-active .subtab-count { color: var(--ink-2); }
   .subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
                           border-radius: 2px; }
 
@@ -1234,6 +1243,36 @@
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
   }
+  /* First grid cell: the session-ID pill plus its origin badge, kept on
+     one line so the badge doesn't consume a separate grid column. */
+  .session-card .s-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    min-width: 0;
+  }
+  /* Origin badge — SDK runs get the brand accent so headless sessions pop
+     out of a long list; interactive runs echo their raw entrypoint, muted. */
+  .session-card .s-entry {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--t-1);
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .session-card .s-entry-sdk {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 28%, var(--border));
+  }
+  .session-card .s-entry-interactive {
+    color: var(--ink-2);
+    background: var(--surface-2);
+  }
   .session-card .s-id {
     /* Notion-style pill — same soft-tint pattern as the per-tool color
        chips, applied to the session ID so a long list of cards visually
@@ -1366,17 +1405,56 @@
     list-style: none;
     background: var(--surface);
   }
-  .turn-row {
+  /* The grid that lays out a turn's columns. Shared by plain rows and the
+     <summary> of an expandable (has-input) row so both align identically. */
+  .turn-grid {
     display: grid;
     grid-template-columns: max-content max-content auto auto 1fr;
     gap: var(--s-3);
     padding: var(--s-2) var(--s-3);
     align-items: baseline;
-    border-bottom: 1px solid var(--border);
     font-size: var(--t-2);
     font-variant-numeric: tabular-nums;
   }
+  .turn-row {
+    border-bottom: 1px solid var(--border);
+  }
   .turn-row:last-child { border-bottom: none; }
+  /* Expandable turn: the summary holds the grid line; expanding reveals the
+     captured tool inputs. Drop the native disclosure triangle for a clean row. */
+  .turn-io > summary { cursor: pointer; list-style: none; }
+  .turn-io > summary::-webkit-details-marker { display: none; }
+  .turn-io > summary::marker { content: ''; }
+  .turn-io > summary:hover { background: var(--surface-2); }
+  .turn-io[open] > summary { background: var(--surface-2); }
+  .turn-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-3) var(--s-3) var(--s-3);
+  }
+  .tool-input .ti-head {
+    font-family: var(--font-mono);
+    font-size: var(--t-1);
+    color: var(--ink-2);
+    margin-bottom: 2px;
+  }
+  .tool-input .ti-detail { opacity: 0.7; }
+  .tool-input .ti-body {
+    margin: 0;
+    padding: var(--s-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: var(--t-1);
+    line-height: 1.5;
+    color: var(--ink);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 24em;
+    overflow: auto;
+  }
   /* Notion-style per-field coloring — each column gets a stable palette
      slot so the eye learns to find "the green column = tokens" without
      reading headers. Saturation is high enough to scan but not so high

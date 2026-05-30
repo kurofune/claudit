@@ -16,13 +16,17 @@ import (
 // each one produced. The renderer pages this into the "Sessions" view of
 // the HTML report.
 type SessionTimeline struct {
-	SessionID string           `json:"session_id"`
-	CWD       string           `json:"cwd"`
-	StartedAt time.Time        `json:"started_at"`
-	EndedAt   time.Time        `json:"ended_at"`
-	CostUSD   float64          `json:"cost_usd"`
-	Turns     int              `json:"turns"`
-	Prompts   []PromptTimeline `json:"prompts"`
+	SessionID string    `json:"session_id"`
+	CWD       string    `json:"cwd"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	CostUSD   float64   `json:"cost_usd"`
+	Turns     int       `json:"turns"`
+	// Entrypoint is the session origin lifted from its turns: "cli" for an
+	// interactive session, "sdk-cli" for a headless/SDK run. Lets the
+	// Sessions view split interactive from headless. Empty if unknown.
+	Entrypoint string           `json:"entrypoint"`
+	Prompts    []PromptTimeline `json:"prompts"`
 }
 
 // PromptTimeline is one user prompt within a session along with the
@@ -73,6 +77,11 @@ type TurnSummary struct {
 type ToolInvocation struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail"`
+	// Input is the bounded input snippet from parse.ToolUse.Input — the full
+	// Bash command, the subagent prompt, etc. Empty for tools where Detail
+	// already says everything. Distinct inputs are NOT collapsed (the dedup
+	// key includes Input), so two different Bash commands in one turn both show.
+	Input string `json:"input"`
 }
 
 // SessionTimelinesOptions tunes BuildSessionTimelines. All zero values are
@@ -194,12 +203,13 @@ func BuildSessionTimelines(
 		Turns     []TurnSummary
 	}
 	type sessionAccum struct {
-		SessionID string
-		CWD       string
-		StartedAt time.Time
-		EndedAt   time.Time
-		CostUSD   float64
-		Turns     int
+		SessionID  string
+		CWD        string
+		Entrypoint string
+		StartedAt  time.Time
+		EndedAt    time.Time
+		CostUSD    float64
+		Turns      int
 		// Map prompt UUID → accumulator. "" key holds orphan turns.
 		Prompts map[string]*promptAccum
 	}
@@ -240,6 +250,10 @@ func BuildSessionTimelines(
 		if s.CWD == "" && t.CWD != "" {
 			s.CWD = t.CWD
 		}
+		// Entrypoint is a session invariant — capture the first non-empty one.
+		if s.Entrypoint == "" && t.Entrypoint != "" {
+			s.Entrypoint = t.Entrypoint
+		}
 		if t.Timestamp.Before(s.StartedAt) {
 			s.StartedAt = t.Timestamp
 		}
@@ -276,12 +290,13 @@ func BuildSessionTimelines(
 	out := make([]SessionTimeline, 0, len(sessions))
 	for _, s := range sessions {
 		st := SessionTimeline{
-			SessionID: s.SessionID,
-			CWD:       s.CWD,
-			StartedAt: s.StartedAt,
-			EndedAt:   s.EndedAt,
-			CostUSD:   s.CostUSD,
-			Turns:     s.Turns,
+			SessionID:  s.SessionID,
+			CWD:        s.CWD,
+			StartedAt:  s.StartedAt,
+			EndedAt:    s.EndedAt,
+			CostUSD:    s.CostUSD,
+			Turns:      s.Turns,
+			Entrypoint: s.Entrypoint,
 		}
 		for _, pa := range s.Prompts {
 			raw := userText[pa.UUID]
@@ -439,17 +454,17 @@ func distinctToolInvocations(uses []parse.ToolUse) []ToolInvocation {
 	if len(uses) == 0 {
 		return nil
 	}
-	type key struct{ name, detail string }
+	type key struct{ name, detail, input string }
 	seen := make(map[key]struct{}, len(uses))
 	out := make([]ToolInvocation, 0, len(uses))
 	for _, u := range uses {
 		d := toolDetailFor(u)
-		k := key{u.Name, d}
+		k := key{u.Name, d, u.Input}
 		if _, ok := seen[k]; ok {
 			continue
 		}
 		seen[k] = struct{}{}
-		out = append(out, ToolInvocation{Name: u.Name, Detail: d})
+		out = append(out, ToolInvocation{Name: u.Name, Detail: d, Input: u.Input})
 	}
 	return out
 }

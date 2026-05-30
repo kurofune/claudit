@@ -67,6 +67,45 @@ func TestBuildSessionTimelines_GroupsPromptsAndOrdersChronologically(t *testing.
 	}
 }
 
+func TestBuildSessionTimelines_CarriesEntrypointAndToolInput(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	users := []parse.UserMessage{chainUser("p1", "", "s1", "go", t0)}
+	turn := chainTurn("a1", "p1", "s1", t0.Add(time.Minute))
+	turn.CWD = "/p/x"
+	turn.Entrypoint = "sdk-cli"
+	turn.ToolUses = []parse.ToolUse{
+		{Name: "Bash", Detail: "git status", Input: "git status -s"},
+		{Name: "Agent", SubagentType: "Explore", Input: "find all callers of Foo"},
+	}
+
+	out, err := BuildSessionTimelines(context.Background(), []parse.Turn{turn}, users, nil, prices, Filter{}, SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("want 1 session, got %d", len(out))
+	}
+	s := out[0]
+	if s.Entrypoint != "sdk-cli" {
+		t.Errorf("session Entrypoint = %q, want sdk-cli", s.Entrypoint)
+	}
+	if len(s.Prompts) != 1 || len(s.Prompts[0].Turns) != 1 {
+		t.Fatalf("unexpected prompt/turn shape: %+v", s.Prompts)
+	}
+	tools := s.Prompts[0].Turns[0].Tools
+	if len(tools) != 2 {
+		t.Fatalf("want 2 tool invocations, got %d (%+v)", len(tools), tools)
+	}
+	if tools[0].Input != "git status -s" {
+		t.Errorf("Bash invocation Input = %q, want full command", tools[0].Input)
+	}
+	if tools[1].Input != "find all callers of Foo" {
+		t.Errorf("Agent invocation Input = %q, want subagent prompt", tools[1].Input)
+	}
+}
+
 func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

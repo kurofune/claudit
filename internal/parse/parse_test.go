@@ -260,6 +260,44 @@ func TestParseLine_KindClassification(t *testing.T) {
 	}
 }
 
+func TestParseLine_CapturesEntrypoint(t *testing.T) {
+	// Headless sessions carry entrypoint:"sdk-cli"; interactive carry "cli".
+	// We surface it on the Turn so sessions can be split by origin.
+	line := `{"type":"assistant","uuid":"a","entrypoint":"sdk-cli","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1}}}`
+	turn, _, kind := ParseLine([]byte(line), "t")
+	if kind != LineAssistant {
+		t.Fatalf("kind = %v, want LineAssistant", kind)
+	}
+	if turn.Entrypoint != "sdk-cli" {
+		t.Errorf("Entrypoint = %q, want %q", turn.Entrypoint, "sdk-cli")
+	}
+}
+
+func TestExtractToolUses_CapturesInput(t *testing.T) {
+	// We retain a bounded snippet of high-value tool inputs — the full
+	// Bash command and the prompt handed to a subagent — so the Sessions
+	// view can show what the agent actually did, not just tool names.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"tool_use","name":"Bash","input":{"command":"git status -s"}},` +
+		`{"type":"tool_use","name":"Agent","input":{"subagent_type":"Explore","prompt":"find all callers of Foo"}},` +
+		`{"type":"tool_use","name":"Read","input":{"file_path":"/x/y.go"}}` +
+		`]}}`
+	turn, _, _ := ParseLine([]byte(line), "t")
+	if len(turn.ToolUses) != 3 {
+		t.Fatalf("ToolUses = %d, want 3 (%+v)", len(turn.ToolUses), turn.ToolUses)
+	}
+	if got := turn.ToolUses[0].Input; got != "git status -s" {
+		t.Errorf("Bash Input = %q, want full command", got)
+	}
+	if got := turn.ToolUses[1].Input; got != "find all callers of Foo" {
+		t.Errorf("Agent Input = %q, want subagent prompt", got)
+	}
+	// Read has no high-value input snippet — Detail already covers it.
+	if got := turn.ToolUses[2].Input; got != "" {
+		t.Errorf("Read Input = %q, want empty", got)
+	}
+}
+
 func TestParseFile_StreamingNotInMemory(t *testing.T) {
 	// Smoke test that we use a Scanner (won't allocate the whole file).
 	// Verify by reading a moderately long synthetic input.

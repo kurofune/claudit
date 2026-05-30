@@ -2,10 +2,16 @@ package render
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
+
+// firstPromptPreviewChars caps the kickoff-prompt preview shipped on each
+// session row. Short enough to keep the list payload light; the full prompt
+// is still available via the per-session timeline endpoint.
+const firstPromptPreviewChars = 200
 
 // buildHotspotsForJSON resolves the aggregator's top hotspots into
 // the renderable HotspotForJSON shape — same data plus a baked-in
@@ -132,6 +138,13 @@ type SessionSummary struct {
 	EndedAt   time.Time `json:"ended_at"`
 	CostUSD   float64   `json:"cost_usd"`
 	Turns     int       `json:"turns"`
+	// Entrypoint is the session origin ("cli" interactive, "sdk-cli" headless)
+	// so the Sessions list can split interactive from SDK runs.
+	Entrypoint string `json:"entrypoint"`
+	// FirstPrompt is a short preview of the session's kickoff prompt so the
+	// list is scannable without fetching each per-session timeline. Capped to
+	// firstPromptPreviewChars; empty when the session has no recognized prompt.
+	FirstPrompt string `json:"first_prompt"`
 }
 
 // SessionsPayload backs /_claudit/api/sessions. The wrapper struct
@@ -261,13 +274,38 @@ func BuildSessions(timelines []aggregate.SessionTimeline, totalSessions int) Ses
 	out := make([]SessionSummary, 0, len(timelines))
 	for _, s := range timelines {
 		out = append(out, SessionSummary{
-			SessionID: s.SessionID,
-			CWD:       s.CWD,
-			StartedAt: s.StartedAt,
-			EndedAt:   s.EndedAt,
-			CostUSD:   s.CostUSD,
-			Turns:     s.Turns,
+			SessionID:   s.SessionID,
+			CWD:         s.CWD,
+			StartedAt:   s.StartedAt,
+			EndedAt:     s.EndedAt,
+			CostUSD:     s.CostUSD,
+			Turns:       s.Turns,
+			Entrypoint:  s.Entrypoint,
+			FirstPrompt: firstPromptPreview(s),
 		})
 	}
 	return SessionsPayload{Sessions: out, TotalSessions: totalSessions}
+}
+
+// firstPromptPreview returns a short, single-line preview of the session's
+// first real (non-orphan) prompt, capped to firstPromptPreviewChars. Returns
+// "" when the session has only orphan turns or empty prompt text. The prompt
+// Text is already redaction-aware from the timeline builder, so a redacted
+// session previews as "[redacted N chars]" rather than leaking content.
+func firstPromptPreview(s aggregate.SessionTimeline) string {
+	for _, p := range s.Prompts {
+		if p.UUID == "" { // orphan bucket — no originating prompt
+			continue
+		}
+		txt := strings.TrimSpace(p.Text)
+		if txt == "" {
+			continue
+		}
+		txt = strings.Join(strings.Fields(txt), " ") // collapse newlines/runs to one line
+		if r := []rune(txt); len(r) > firstPromptPreviewChars {
+			return string(r[:firstPromptPreviewChars]) + "…"
+		}
+		return txt
+	}
+	return ""
 }

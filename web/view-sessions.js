@@ -18,6 +18,7 @@
 import { fetchSessions, fetchSessionTimeline } from './api.js';
 import { fmtMoney, escHtml } from './format.js';
 import { sessionListSkeleton, timelineSkeleton } from './skeleton.js';
+import { classifyEntrypoint, splitSessionsRoute, filterSessionsByTab } from './sessions-logic.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -30,12 +31,20 @@ const SHELL = `
       <ul>
         <li><strong>Read top-down.</strong> The first session is your most expensive in this window — it's usually the most informative.</li>
         <li><strong>Look for prompt cost spikes.</strong> A single prompt that ran 30 turns and cost $5 is a prime target for tightening — fewer tool calls, narrower context, or a custom skill.</li>
+        <li><strong>All / Interactive / SDK tabs</strong> split sessions by origin. <em>SDK</em> sessions are headless runs (<code>claude -p</code> or the Agent SDK), tagged with an <code>SDK</code> badge; <em>Interactive</em> are normal terminal sessions. Each card's first line previews its kickoff prompt — the quickest way to tell what a run was about.</li>
         <li><strong>Each turn row</strong> packs: timestamp + the gap to the next turn within this prompt, the model, <code>in · out · cache</code> token counts, the dollar cost, and the tool chips that fired. Tool chips are color-coded by name — the same tool reads the same color across the whole report.</li>
+        <li><strong>Turns with a command or subagent prompt expand.</strong> A turn that ran <code>Bash</code>, an <code>Agent</code>/<code>Task</code> subagent, a <code>Skill</code>, or a <code>WebFetch</code> is clickable — open it to read the full input (the actual command, or the prompt handed to the subagent) the chip only summarizes.</li>
         <li><strong>Sidechain turns</strong> carry a <em>sidechain</em> label — those are subagent runs nested inside the parent session.</li>
         <li>The small <code>#</code> link in each session's summary copies a shareable URL that re-opens this exact card.</li>
       </ul>
     </div>
   </details>
+
+  <nav class="subtabs" aria-label="Session origin">
+    <a class="subtab is-active" href="#sessions/all"         data-subtab="all">All <span class="subtab-count" data-count="all"></span></a>
+    <a class="subtab"           href="#sessions/interactive" data-subtab="interactive">Interactive <span class="subtab-count" data-count="interactive"></span></a>
+    <a class="subtab"           href="#sessions/sdk"         data-subtab="sdk">SDK <span class="subtab-count" data-count="sdk"></span></a>
+  </nav>
 
   <div id="session-list" class="session-list"></div>
   <div id="session-empty" class="empty-note" hidden>No sessions in this window. Try widening <code>--since</code>/<code>--until</code>.</div>
@@ -49,7 +58,16 @@ const timelineCache = new Map();
 
 let painted = false;
 let navPainted = false;
-// Tracks the most-recently-applied deep-link sub so a hashchange
+// The full (cost-ranked) session list from the last fetch, retained so
+// switching origin tabs re-filters in memory without re-hitting the wire.
+let allSessions = [];
+// The currently-active origin tab (all | interactive | sdk).
+let activeTab = 'all';
+// The tab whose cards are currently rendered into #session-list. Lets
+// activateTab skip a re-render (which would close any open cards) when the
+// tab hasn't actually changed — e.g. a same-tab deep-link click.
+let renderedTab = null;
+// Tracks the most-recently-applied deep-link anchor so a hashchange
 // from the same value (no-op) doesn't re-trigger scroll/expand.
 let appliedSub = null;
 
@@ -69,8 +87,11 @@ export async function paint(route) {
   const container = document.getElementById('view-sessions');
   if (!container) return;
 
+  const { tab, anchor } = splitSessionsRoute(route.sub);
+
   if (painted) {
-    applyDeepLink(container, route.sub);
+    activateTab(container, tab);
+    applyDeepLink(container, anchor);
     return;
   }
 
@@ -87,48 +108,115 @@ export async function paint(route) {
     return;
   }
 
-  const sessions = (payload && payload.sessions) || [];
-  const list = container.querySelector('#session-list');
-  const empty = container.querySelector('#session-empty');
-  if (sessions.length === 0) {
-    if (empty) empty.hidden = false;
-  } else {
-    list.innerHTML = sessions.map((s, i) => sessionCardHTML(s, (i % 5) + 1)).join('');
-    wireCardOpens(list);
-  }
-
-  updateNavMetric(sessions, payload && payload.total_sessions);
+  allSessions = (payload && payload.sessions) || [];
+  updateTabCounts(container, allSessions);
+  activateTab(container, tab);
+  updateNavMetric(allSessions, payload && payload.total_sessions);
 
   painted = true;
   navPainted = true;
-  applyDeepLink(container, route.sub);
+  applyDeepLink(container, anchor);
 }
 
 export function reset() {
   painted = false;
   navPainted = false;
   appliedSub = null;
+  allSessions = [];
+  activeTab = 'all';
+  renderedTab = null;
   timelineCache.clear();
+}
+
+// activateTab toggles the subtab UI and (re)renders the session list
+// filtered to the chosen origin. Idempotent — clicking the active tab or a
+// no-op hashchange just re-renders the same filtered list.
+function activateTab(container, tab) {
+  const subs = container.querySelectorAll('.subtab[data-subtab]');
+  const wanted = container.querySelector(`.subtab[data-subtab="${tab}"]`) ? tab : 'all';
+  activeTab = wanted;
+  subs.forEach(t => t.classList.toggle('is-active', t.dataset.subtab === wanted));
+  // Only rebuild the list when the tab actually changed — re-rendering would
+  // close any cards the user opened. After a rebuild the prior deep-link
+  // anchor is gone, so clear appliedSub to let applyDeepLink re-open/scroll.
+  if (renderedTab !== wanted) {
+    renderList(container, wanted);
+    renderedTab = wanted;
+    appliedSub = null;
+  }
+}
+
+// renderList fills #session-list with the cards for the active tab and
+// wires their lazy-open handlers. Shows a per-tab empty note when the
+// filter leaves nothing (distinct from the no-sessions-at-all note).
+function renderList(container, tab) {
+  const list = container.querySelector('#session-list');
+  const empty = container.querySelector('#session-empty');
+  if (!list) return;
+  const shown = filterSessionsByTab(allSessions, tab);
+  if (allSessions.length === 0) {
+    list.innerHTML = '';
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+  if (shown.length === 0) {
+    list.innerHTML = `<div class="empty-note">No ${tab === 'sdk' ? 'SDK/headless' : tab} sessions in this window.</div>`;
+    return;
+  }
+  list.innerHTML = shown.map((s, i) => sessionCardHTML(s, (i % 5) + 1, tab)).join('');
+  wireCardOpens(list);
+}
+
+// updateTabCounts annotates each subtab with how many of the shown
+// (cost-capped) sessions fall under it, so the split is visible at a glance.
+function updateTabCounts(container, sessions) {
+  const counts = {
+    all: sessions.length,
+    interactive: sessions.filter(s => classifyEntrypoint(s.entrypoint) === 'interactive').length,
+    sdk: sessions.filter(s => classifyEntrypoint(s.entrypoint) === 'sdk').length,
+  };
+  for (const [tab, n] of Object.entries(counts)) {
+    const el = container.querySelector(`.subtab-count[data-count="${tab}"]`);
+    if (el) el.textContent = n === 0 ? '' : String(n);
+  }
 }
 
 // sessionCardHTML mirrors renderSessionCard in
 // internal/render/sessions_html.go. The session-body element starts
 // empty — populated only when the user opens the card.
-function sessionCardHTML(s, colorSlot) {
+function sessionCardHTML(s, colorSlot, tab) {
   const sid = escHtml(s.session_id || '');
   const cwd = s.cwd || '';
   const cwdEsc = escHtml(cwd);
   const turns = s.turns || 0;
+  const ep = s.entrypoint || '';
+  const kind = classifyEntrypoint(ep); // 'sdk' | 'interactive'
+  // SDK runs get a loud "SDK" chip; interactive runs echo their raw origin
+  // ("cli", an editor name) so the distinction is legible. No origin → no chip.
+  const badge = ep
+    ? `<span class="s-entry s-entry-${kind}" title="entrypoint: ${escHtml(ep)}">${kind === 'sdk' ? 'SDK' : escHtml(ep)}</span>`
+    : '';
+  const preview = s.first_prompt
+    ? `<div class="s-preview" title="${escHtml(s.first_prompt)}">${escHtml(s.first_prompt)}</div>`
+    : '';
+  // Copy-link carries the active tab so reopening lands on the right tab;
+  // splitSessionsRoute() round-trips #sessions/{tab}/session-{id}.
+  const linkTab = tab || 'all';
   return `<details class="session-card" id="session-${sid}" data-session="${sid}">
     <summary>
-      <span class="s-id" data-c="${colorSlot}" title="${sid}">${sid}</span>
+      <span class="s-head">
+        <span class="s-id" data-c="${colorSlot}" title="${sid}">${sid}</span>
+        ${badge}
+      </span>
       <span class="s-cwd" title="${cwdEsc}">${cwd === '' ? '&mdash;' : cwdEsc}</span>
       <span class="s-stats">
         <span>${turns} turn${turns === 1 ? '' : 's'}</span>
         <span class="s-cost">${escHtml(fmtMoney(s.cost_usd || 0))}</span>
-        <a class="anchor-link" href="#sessions/session-${sid}" title="Copy link to this session" aria-label="Copy link to session">#</a>
+        <a class="anchor-link" href="#sessions/${linkTab}/session-${sid}" title="Copy link to this session" aria-label="Copy link to session">#</a>
       </span>
       <span class="s-time">${escHtml(formatTimeRange(s.started_at, s.ended_at))}</span>
+      ${preview}
     </summary>
     <div class="session-body" data-loaded="0">
       ${timelineSkeleton(3)}
@@ -244,13 +332,37 @@ function turnRowHTML(t) {
   const sideChip = t.sidechain ? `<span class="t-side">sidechain</span>` : '';
   const toolChips = tools.map(toolChipHTML).join('');
 
-  return `<li class="turn-row">
-    <span class="t-time">${escHtml(formatHMS(t.timestamp))}${durChip}</span>
+  const line = `<span class="t-time">${escHtml(formatHMS(t.timestamp))}${durChip}</span>
     <span class="t-model" title="${modelEsc}">${model === '' ? '&mdash;' : modelEsc}</span>
     <span class="t-tokens">${formatTokens(tokens)}${cachePart}</span>
     <span class="t-cost">${escHtml(fmtMoney(t.cost_usd || 0))}</span>
-    <span class="t-tools">${toolChips}${sideChip}</span>
+    <span class="t-tools">${toolChips}${sideChip}</span>`;
+
+  // Turns whose tools captured an input (Bash command, subagent prompt, …)
+  // become expandable so the row stays compact but the actual work is one
+  // click away. Turns with nothing to show stay as plain grid rows.
+  const withInput = tools.filter(tt => tt.input);
+  if (withInput.length === 0) {
+    return `<li class="turn-row turn-grid">${line}</li>`;
+  }
+  const io = withInput.map(toolInputHTML).join('');
+  return `<li class="turn-row">
+    <details class="turn-io">
+      <summary class="turn-grid">${line}</summary>
+      <div class="turn-inputs">${io}</div>
+    </details>
   </li>`;
+}
+
+// toolInputHTML renders one captured tool input as a labeled monospace
+// block — the full Bash command, the prompt handed to a subagent, etc.
+function toolInputHTML(tool) {
+  const name = escHtml(tool.name || '');
+  const detail = tool.detail ? ` <span class="ti-detail">· ${escHtml(tool.detail)}</span>` : '';
+  return `<div class="tool-input">
+    <div class="ti-head">${name}${detail}</div>
+    <pre class="ti-body">${escHtml(tool.input)}</pre>
+  </div>`;
 }
 
 function toolChipHTML(t) {
