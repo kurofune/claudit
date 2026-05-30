@@ -25,14 +25,19 @@ import (
 //
 // Assertion is "< n" rather than "== 1" because Go's scheduler does
 // not guarantee all N goroutines reach singleflight.Do() before the
-// first build completes — especially with a small fixture where the
-// build is sub-ms. The collapse property is what matters: the
-// recorded count must be meaningfully less than n.
+// first build completes. To make that race reliably winnable on a
+// loaded macOS GitHub runner — where goroutine wake-up after a
+// barrier close can lag tens of ms — the fixture is sized so the
+// build dominates: a 5,000-turn corpus pushes the build well past
+// the scheduler's worst-case latency. With a sub-ms build (the
+// original 500-turn fixture) this test flaked on macos-latest CI
+// even though the singleflight wiring itself was correct.
 func TestServer_Singleflight_CollapsesConcurrentBuilds(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
-	lines := make([]string, 0, 500)
-	for i := 0; i < 500; i++ {
+	const corpusSize = 5_000
+	lines := make([]string, 0, corpusSize)
+	for i := 0; i < corpusSize; i++ {
 		lines = append(lines, mkAssistantLine(fmt.Sprintf("a%d", i), "", t0.Add(time.Duration(i)*time.Second)))
 	}
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), lines...)
