@@ -2,7 +2,7 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] — 2026-05-30
 
 ### Added
 
@@ -12,6 +12,7 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 ### Fixed
 
 - **`--redact` no longer leaks Bash commands and subagent prompts through tool inputs.** The new per-turn tool-input capture (above) retains the full command, the prompt handed to an `Agent`/`Task` subagent, the `WebFetch` URL, etc. — but `--redact` only ever masked the prompt body, so a report generated for sharing still embedded every captured `ToolInvocation.Input` verbatim in its data payload. Redaction now applies to tool inputs too: each non-empty `Input` becomes the same `[redacted N chars]` length-echoing marker used for prompt text (empty inputs stay empty, and the coarse `Detail` bucket like `Bash · git commit` is kept — it carries no content). Distinct inputs are still deduplicated on their real value *before* redaction, so two different commands of the same length don't collapse into one row. `first_prompt` was already safe (it reads the already-redacted prompt text).
+- **`claudit serve` no longer serves a stale cached section after a filter change.** The API ETag mixed only the snapshot generation and the section name, so two requests with different filters (`--project`, date window, `scope`) at the same generation produced an identical ETag. A browser holding one filter's section body would revalidate against another filter's URL, get a `304 Not Modified`, and render the wrong cached payload — e.g. an old unpriced-model warning surviving across a filter change. The canonical query string is now hashed into the ETag so distinct filters get distinct ETags; the render-cache keys already keyed on that same canonical query, so no other invalidation path shifts.
 - **`claudit serve` actually auto-reloads when new data arrives.** The SSE-driven silent reload promised in the v1.3.0 changelog never worked: the toast wiring set the `hidden` attribute on the toast element, but the CSS hard-coded `display: none` and only revealed via a `.is-visible` class, so the toast never appeared — and there was no silent reload path either. The page just went stale until a manual refresh. Replaced with a real silent-auto-reload loop that watches the `/events` stream and reloads the page as soon as new data lands, deferred while the tab is hidden, while any `<details>` is open, or within 10s of mouse / keyboard / scroll / touch input. After 5 minutes of unsafe-to-reload pile-up it gives up on silent reload and surfaces the toast (now correctly shown) for manual reload. The decision logic is factored into a pure `decideReload(state)` with per-branch jstest coverage.
 - **Auto-reload now floors at 15s between reloads.** Without a floor, the corpus poller's ~2s tick translated into the dashboard reloading every ~2s while any session was actively writing turns — distracting on a tab you're reading, wasteful on one you're not. The page must now have been on screen at least `MIN_RELOAD_INTERVAL_MS` (15s) before being replaced. The 5-minute pile-up toast still wins over the floor, so a pile-up-blocked tab still surfaces the toast on schedule. `claudit watch`'s ticker-tape cadence is unaffected — it has its own loop.
 
@@ -178,7 +179,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/kurofune/claudit/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/kurofune/claudit/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/kurofune/claudit/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/kurofune/claudit/compare/v1.4.0...v1.4.1
