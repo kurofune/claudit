@@ -106,6 +106,82 @@ func TestBuildSessionTimelines_CarriesEntrypointAndToolInput(t *testing.T) {
 	}
 }
 
+func TestBuildSessionTimelines_RedactsToolInput(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	users := []parse.UserMessage{chainUser("p1", "", "s1", "go", t0)}
+	turn := chainTurn("a1", "p1", "s1", t0.Add(time.Minute))
+	turn.ToolUses = []parse.ToolUse{
+		{Name: "Bash", Detail: "git status", Input: "git status -s"},               // len 13
+		{Name: "Agent", SubagentType: "Explore", Input: "find all callers of Foo"}, // len 23
+		{Name: "Read", Detail: ".go", Input: ""},                                   // empty input
+	}
+
+	out, err := BuildSessionTimelines(context.Background(), []parse.Turn{turn}, users, nil, prices, Filter{},
+		SessionTimelinesOptions{Redact: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 || len(out[0].Prompts) != 1 || len(out[0].Prompts[0].Turns) != 1 {
+		t.Fatalf("unexpected shape: %+v", out)
+	}
+	tools := out[0].Prompts[0].Turns[0].Tools
+	if len(tools) != 3 {
+		t.Fatalf("want 3 tool invocations, got %d (%+v)", len(tools), tools)
+	}
+	// Bash: Input redacted to marker, Detail (coarse bucket key) untouched.
+	if tools[0].Input != "[redacted 13 chars]" {
+		t.Errorf("Bash Input = %q, want [redacted 13 chars]", tools[0].Input)
+	}
+	if tools[0].Detail != "git status" {
+		t.Errorf("Bash Detail = %q, want git status (Detail must not be redacted)", tools[0].Detail)
+	}
+	// Agent: subagent prompt redacted, SubagentType bucket untouched.
+	if tools[1].Input != "[redacted 23 chars]" {
+		t.Errorf("Agent Input = %q, want [redacted 23 chars]", tools[1].Input)
+	}
+	if tools[1].Detail != "Explore" {
+		t.Errorf("Agent Detail = %q, want Explore (Detail must not be redacted)", tools[1].Detail)
+	}
+	// Empty input stays empty — redacting "" would add noise and leaks nothing.
+	if tools[2].Input != "" {
+		t.Errorf("Read Input = %q, want empty (empty input stays empty)", tools[2].Input)
+	}
+}
+
+func TestBuildSessionTimelines_RedactKeepsDistinctSameLengthInputs(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	users := []parse.UserMessage{chainUser("p1", "", "s1", "go", t0)}
+	turn := chainTurn("a1", "p1", "s1", t0.Add(time.Minute))
+	// Two distinct Bash commands of the SAME byte length (13 each) that also
+	// share the SAME coarse Detail bucket. Only the real Input distinguishes
+	// them, so dedup MUST run on the real input BEFORE redaction — otherwise
+	// they'd collapse into one once both inputs read "[redacted 13 chars]".
+	turn.ToolUses = []parse.ToolUse{
+		{Name: "Bash", Detail: "git status", Input: "git status -s"}, // len 13
+		{Name: "Bash", Detail: "git status", Input: "git statuses "}, // len 13
+	}
+
+	out, err := BuildSessionTimelines(context.Background(), []parse.Turn{turn}, users, nil, prices, Filter{},
+		SessionTimelinesOptions{Redact: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 || len(out[0].Prompts) != 1 || len(out[0].Prompts[0].Turns) != 1 {
+		t.Fatalf("unexpected shape: %+v", out)
+	}
+	tools := out[0].Prompts[0].Turns[0].Tools
+	if len(tools) != 2 {
+		t.Fatalf("want 2 distinct tool invocations (dedup before redact), got %d (%+v)", len(tools), tools)
+	}
+	if tools[0].Input != "[redacted 13 chars]" || tools[1].Input != "[redacted 13 chars]" {
+		t.Errorf("both inputs should redact to the 13-char marker, got %q and %q", tools[0].Input, tools[1].Input)
+	}
+}
+
 func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

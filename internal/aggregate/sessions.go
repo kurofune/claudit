@@ -281,7 +281,7 @@ func BuildSessionTimelines(
 			Model:     t.Model,
 			CostUSD:   cost,
 			Tokens:    tokens,
-			Tools:     distinctToolInvocations(t.ToolUses),
+			Tools:     distinctToolInvocations(t.ToolUses, opts.Redact),
 			Sidechain: t.Sidechain,
 		})
 	}
@@ -431,12 +431,18 @@ func matchesFilter(t parse.Turn, f Filter) bool {
 	return true
 }
 
+// redactMarker returns the parity redaction placeholder used for both prompt
+// bodies and tool inputs: a "[redacted N chars]" marker echoing the raw length.
+func redactMarker(s string) string {
+	return fmt.Sprintf("[redacted %d chars]", len(s))
+}
+
 // preparePromptText applies redact + truncation. Order matters: redact
 // first (so the [redacted N chars] count reflects the real length, not the
 // truncated length).
 func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) {
 	if opts.Redact {
-		return fmt.Sprintf("[redacted %d chars]", len(raw)), false
+		return redactMarker(raw), false
 	}
 	if opts.MaxPromptChars > 0 && len(raw) > opts.MaxPromptChars {
 		return raw[:opts.MaxPromptChars], true
@@ -450,7 +456,7 @@ func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) 
 // — same tool, different work. Detail comes from the per-tool field that
 // best identifies the call (SubagentType for Agent, SkillName for Skill,
 // SlashCommand for SlashCommand, ToolUse.Detail for everything else).
-func distinctToolInvocations(uses []parse.ToolUse) []ToolInvocation {
+func distinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation {
 	if len(uses) == 0 {
 		return nil
 	}
@@ -459,12 +465,23 @@ func distinctToolInvocations(uses []parse.ToolUse) []ToolInvocation {
 	out := make([]ToolInvocation, 0, len(uses))
 	for _, u := range uses {
 		d := toolDetailFor(u)
+		// Dedup on the REAL input so two distinct commands of the same
+		// length stay distinct even under --redact.
 		k := key{u.Name, d, u.Input}
 		if _, ok := seen[k]; ok {
 			continue
 		}
 		seen[k] = struct{}{}
-		out = append(out, ToolInvocation{Name: u.Name, Detail: d, Input: u.Input})
+		input := u.Input
+		// Redact the input snippet (full Bash command, subagent prompt, etc.)
+		// to a length-echoing marker so shared/static reports don't leak it.
+		// Detail is left alone — it's a coarse, low-cardinality bucket key,
+		// not a content leak. Empty input stays empty (nothing to leak, and
+		// "[redacted 0 chars]" would just add noise).
+		if redact && input != "" {
+			input = redactMarker(input)
+		}
+		out = append(out, ToolInvocation{Name: u.Name, Detail: d, Input: input})
 	}
 	return out
 }
