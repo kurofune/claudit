@@ -24,8 +24,57 @@ func TestBuildTokens_ShapeAndKeys(t *testing.T) {
 		"composition",
 		"trend",
 		"by_model",
+		"by_project",
+		"by_skill",
+		"by_prompt",
 		"period",
 	})
+}
+
+// TestBuildTokens_BreakdownRowsMatchAggregator: the by_project / by_skill
+// breakdown rows carry the full token split that matches their aggregator
+// buckets, and rows are ordered by total tokens descending.
+func TestBuildTokens_BreakdownRowsMatchAggregator(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := aggregate.New(prices)
+	t0 := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	a.Add(mkTurn("claude-opus-4-7", "/p/big", 1_000_000, 200_000, t0))
+	a.Add(mkTurn("claude-opus-4-7", "/p/small", 1_000, 200, t0))
+	a.Add(turnSkill("claude-opus-4-7", "/p/big", 5_000, 1_000, t0, "tdd"))
+
+	p := BuildTokens(a)
+
+	// by_project rows: one per project, matching bucket token fields,
+	// sorted by total desc.
+	if len(p.ByProject) != 2 {
+		t.Fatalf("by_project rows = %d, want 2", len(p.ByProject))
+	}
+	if p.ByProject[0].Total < p.ByProject[1].Total {
+		t.Errorf("by_project not sorted by total desc: %d then %d",
+			p.ByProject[0].Total, p.ByProject[1].Total)
+	}
+	byProj := map[string]aggregate.ProjectBucket{}
+	for _, b := range a.ByProject() {
+		byProj[b.Project] = b
+	}
+	for _, row := range p.ByProject {
+		b := byProj[row.Label]
+		if row.Input != b.InputTokens || row.Output != b.OutputTokens ||
+			row.CacheRead != b.CacheReadTokens || row.Total != b.Total() {
+			t.Errorf("project %q row mismatch: %+v vs bucket %+v", row.Label, row, b.Tokens)
+		}
+	}
+
+	// by_skill: the tdd skill row carries the full input/output split.
+	if len(p.BySkill) != 1 {
+		t.Fatalf("by_skill rows = %d, want 1", len(p.BySkill))
+	}
+	if got := p.BySkill[0]; got.Label != "skill:tdd" || got.Input != 5_000 || got.Output != 1_000 {
+		t.Errorf("by_skill[0] = %+v, want label=skill:tdd input=5000 output=1000", got)
+	}
 }
 
 // TestBuildTokens_CarriesPeriod: like the overview, the tokens payload

@@ -113,6 +113,31 @@ func TestAggregate_Skill(t *testing.T) {
 	}
 }
 
+// TestAggregate_SkillTokens: skill buckets carry the full token tuple
+// (not just output), so the Tokens tab can break a skill's spend into
+// input / output / cache categories the same way Cost does.
+func TestAggregate_SkillTokens(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	ts := time.Now()
+	// Two invocations of the same skill, each with input + output.
+	agg.Add(turn("claude-opus-4-7", 500, 100, false, "/p/foo", ts,
+		parse.ToolUse{Name: "Skill", SkillName: "tdd"}))
+	agg.Add(turn("claude-opus-4-7", 700, 300, false, "/p/foo", ts,
+		parse.ToolUse{Name: "Skill", SkillName: "tdd"}))
+
+	tdd := findSkill(agg.BySkill(), "skill:tdd")
+	if tdd == nil {
+		t.Fatal("missing skill:tdd entry")
+	}
+	if tdd.InputTokens != 1200 {
+		t.Errorf("tdd input tokens: %d, want 1200", tdd.InputTokens)
+	}
+	if tdd.OutputTokens != 400 {
+		t.Errorf("tdd output tokens: %d, want 400", tdd.OutputTokens)
+	}
+}
+
 func TestAggregate_DateFilter(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	since := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)

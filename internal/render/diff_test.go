@@ -18,6 +18,14 @@ func mkTurn(model, cwd string, in, out int, ts time.Time) parse.Turn {
 	}
 }
 
+// turnSkill is mkTurn plus a Skill tool_use, so the turn lands in the
+// by-skill bucket keyed "skill:<name>".
+func turnSkill(model, cwd string, in, out int, ts time.Time, skill string) parse.Turn {
+	t := mkTurn(model, cwd, in, out, ts)
+	t.ToolUses = []parse.ToolUse{{Name: "Skill", SkillName: skill}}
+	return t
+}
+
 func TestModelMovers_KeysOnEitherSide(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

@@ -72,13 +72,15 @@ type ToolBucket struct {
 	CostUSD      float64 // proportional cost of those turns (best-effort)
 }
 
-// SkillBucket: same as ToolBucket but keyed on skill or slash command name.
+// SkillBucket: same as ToolBucket but keyed on skill or slash command
+// name. Carries the full Tokens tuple (not just output) so the Tokens
+// tab can break a skill's spend into input / output / cache categories.
 type SkillBucket struct {
-	Key          string // "skill:<name>" or "command:</cmd>"
-	Count        int
-	TurnCount    int
-	OutputTokens int64
-	CostUSD      float64
+	Key       string // "skill:<name>" or "command:</cmd>"
+	Count     int
+	TurnCount int
+	Tokens
+	CostUSD float64
 }
 
 // DetailBucket is one row in the per-tool drill-down (e.g. for Bash:
@@ -549,7 +551,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			}
 			sb.Count++
 			if !seen["__skill__"+skillKey] {
-				sb.OutputTokens += int64(t.Usage.OutputTokens)
+				sb.addUsage(t.Usage)
 				sb.CostUSD += cost
 				sb.TurnCount++
 				seen["__skill__"+skillKey] = true

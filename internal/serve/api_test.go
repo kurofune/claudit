@@ -182,7 +182,7 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "tokens",
 			path:     "/_claudit/api/tokens",
-			wantKeys: []string{"total", "composition", "trend", "by_model", "period"},
+			wantKeys: []string{"total", "composition", "trend", "by_model", "by_project", "by_skill", "by_prompt", "period"},
 		},
 		{
 			name:     "tools",
