@@ -28,6 +28,7 @@ const (
 	apiPathTrends    = "/_claudit/api/trends"
 	apiPathAnomalies = "/_claudit/api/anomalies"
 	apiPathTheme     = "/_claudit/api/theme"
+	apiPathAgents    = "/_claudit/api/agents"
 
 	// sessionTimelineSuffix lives on a /api/sessions/{id}/timeline path.
 	// The dispatcher in handleAPISessionsTree splits the path and matches
@@ -48,6 +49,7 @@ const (
 	apiSectionSessions  = "api-sessions"
 	apiSectionAnomalies = "api-anomalies"
 	apiSectionTrends    = "api-trends"
+	apiSectionAgents    = "api-agents"
 )
 
 // sectionBuilder receives the aggregator and the lazily-built session
@@ -77,6 +79,11 @@ type apiSectionSpec struct {
 	// timelines (Cost, Cache, Tools, Subagents, Anomalies, Trends,
 	// Overview) shaves the multi-MB walk off the cold path.
 	needsTimelines bool
+	// buildFromSnapshot, when set, builds the payload straight from the
+	// snapshot + query and bypasses sharedAggregateData entirely (no
+	// Aggregator, no timeline pass). Used by sections like /agents that
+	// derive their own structure from raw turns. Takes precedence over build.
+	buildFromSnapshot func(snap *Snapshot, q Query) (any, error)
 }
 
 // serveAPISection is the shared body of every /_claudit/api/*
@@ -135,19 +142,25 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		return
 	}
 
-	agg, timelines, err := s.sharedAggregateData(r.Context(), snap, q)
-	if err != nil {
-		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: aggregate failed",
-			slog.Any("err", err),
-			slog.String("section", spec.section))
-		http.Error(w, "aggregate failed", http.StatusInternalServerError)
-		return
+	var payload any
+	if spec.buildFromSnapshot != nil {
+		// Snapshot-derived section (e.g. /agents): skip the Aggregator +
+		// timeline pass entirely and build straight from raw turns.
+		payload, err = spec.buildFromSnapshot(snap, q)
+	} else {
+		agg, timelines, aerr := s.sharedAggregateData(r.Context(), snap, q)
+		if aerr != nil {
+			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: aggregate failed",
+				slog.Any("err", aerr),
+				slog.String("section", spec.section))
+			http.Error(w, "aggregate failed", http.StatusInternalServerError)
+			return
+		}
+		if !spec.needsTimelines {
+			timelines = nil
+		}
+		payload, err = spec.build(agg, timelines)
 	}
-	if !spec.needsTimelines {
-		timelines = nil
-	}
-
-	payload, err := spec.build(agg, timelines)
 	if err != nil {
 		// Distinguish "user gave bad input" from "we screwed up":
 		// the Trends builder rejects unknown ?dim with an error,

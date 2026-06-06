@@ -411,6 +411,13 @@ func BuildSessionTimeline(
 	return &tls[0], nil
 }
 
+// MatchesFilter is the exported entry to the same since/until/project test
+// the rolled-up sections use, so other packages (e.g. agentflow) filter turns
+// identically instead of keeping their own divergent copy.
+func MatchesFilter(t parse.Turn, f Filter) bool {
+	return matchesFilter(t, f)
+}
+
 // matchesFilter is the same logic as Aggregator.match — duplicated here
 // because BuildSessionTimelines doesn't hold an Aggregator reference (it
 // runs as a standalone pass over the same corpus). If the two diverge,
@@ -448,6 +455,13 @@ func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) 
 		return raw[:opts.MaxPromptChars], true
 	}
 	return raw, false
+}
+
+// DistinctToolInvocations is the exported entry point to the same dedup +
+// detail-selection logic the session drill-down uses, so other packages
+// (e.g. agentflow) surface tool calls identically instead of drifting.
+func DistinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation {
+	return distinctToolInvocations(uses, redact)
 }
 
 // distinctToolInvocations returns (Name, Detail) pairs in first-occurrence

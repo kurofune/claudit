@@ -1893,3 +1893,148 @@
     font-size: var(--t-1); color: var(--ink-2);
     font-variant-numeric: tabular-nums;
   }
+
+  /* ─── Agents observability view ───────────────────────────────────────
+     One block per session: a header, a grid of agent cards, and a
+     swimlane SVG laying those agents on a shared timeline. Cards and the
+     swimlane both read from the /api/agents contract via agents-logic.js. */
+  .agents-container {
+    display: flex; flex-direction: column; gap: var(--s-5);
+  }
+  .agent-session {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--s-4);
+  }
+  .agent-session .as-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--s-3);
+    margin-bottom: var(--s-3);
+  }
+  /* Session-ID pill — same soft-tint rotation as the Sessions cards so a
+     session reads consistently across both tabs. data-c rotates 1..5. */
+  .agent-session .as-id {
+    font-family: var(--font-mono);
+    font-size: var(--t-2);
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    background: var(--surface-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 22ch;
+  }
+  .agent-session .as-id[data-c="1"] { background: color-mix(in oklch, var(--c-1) 14%, var(--surface)); border-color: color-mix(in oklch, var(--c-1) 30%, var(--border)); }
+  .agent-session .as-id[data-c="2"] { background: color-mix(in oklch, var(--c-2) 14%, var(--surface)); border-color: color-mix(in oklch, var(--c-2) 30%, var(--border)); }
+  .agent-session .as-id[data-c="3"] { background: color-mix(in oklch, var(--c-3) 14%, var(--surface)); border-color: color-mix(in oklch, var(--c-3) 30%, var(--border)); }
+  .agent-session .as-id[data-c="4"] { background: color-mix(in oklch, var(--c-4) 14%, var(--surface)); border-color: color-mix(in oklch, var(--c-4) 30%, var(--border)); }
+  .agent-session .as-id[data-c="5"] { background: color-mix(in oklch, var(--c-5) 14%, var(--surface)); border-color: color-mix(in oklch, var(--c-5) 30%, var(--border)); }
+  .agent-session .as-cwd {
+    color: var(--ink-2); font-size: var(--t-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .agent-session .as-stats {
+    display: flex; align-items: center; gap: var(--s-3);
+    font-size: var(--t-2); color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .agent-session .as-cost { color: var(--ink); font-weight: 600; }
+  .agent-session .as-time {
+    grid-column: 1 / -1;
+    font-size: var(--t-1); color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Status pill — shared by cards, swimlane legend, and the guide. */
+  .ag-pill {
+    flex: none;
+    font-size: var(--t-1); line-height: 1;
+    padding: 2px 7px; border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .ag-pill.ag-running {
+    color: var(--accent-2);
+    background: var(--accent-2-soft);
+    border-color: color-mix(in oklch, var(--accent-2) 30%, var(--border));
+  }
+  .ag-pill.ag-done {
+    color: var(--ink-2);
+    background: var(--surface-2);
+  }
+  .ag-pill .ac-cur { text-transform: none; letter-spacing: 0; opacity: 0.85; }
+
+  /* Agent cards grid. */
+  .agent-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: var(--s-2);
+    margin-bottom: var(--s-3);
+  }
+  .agent-card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    padding: var(--s-2) var(--s-3);
+    display: flex; flex-direction: column; gap: var(--s-1);
+  }
+  .agent-card.ac-main {
+    background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+  }
+  /* A live agent gets a soft pulsing border so the eye lands on it. */
+  .agent-card.is-running {
+    border-color: color-mix(in oklch, var(--accent-2) 45%, var(--border));
+    animation: ag-pulse 2s ease-in-out infinite;
+  }
+  @keyframes ag-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent-2) 30%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-2) 16%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-card.is-running { animation: none; }
+  }
+  .agent-card .ac-head {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+  }
+  .agent-card .ac-kind {
+    font-family: var(--font-mono); font-size: var(--t-2); font-weight: 600;
+    color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .agent-card .ac-desc {
+    font-size: var(--t-2); color: var(--ink-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .agent-card .ac-meta {
+    display: flex; align-items: center; gap: var(--s-3);
+    font-size: var(--t-1); color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .agent-card .ac-meta .ac-cost { margin-left: auto; color: var(--ink); }
+
+  /* Swimlane / Gantt. */
+  .agent-swimlane {
+    border-top: 1px solid var(--border);
+    padding-top: var(--s-2);
+  }
+  .agent-swimlane svg { display: block; }
+  .ag-bar { fill: var(--c-1); opacity: 0.85; }
+  .ag-bar-main { fill: var(--accent); opacity: 0.9; }
+  .ag-bar-sub  { fill: var(--c-2); }
+  .ag-bar.is-running { stroke: var(--accent-2); stroke-width: 1.5; }
+  .ag-bar-g:hover .ag-bar { opacity: 1; }
+  .ag-tick { stroke: var(--surface); stroke-width: 1; opacity: 0.5; }
+  .ag-bar-label {
+    font-family: var(--font-mono); font-size: 10px;
+    fill: var(--surface); pointer-events: none;
+  }
+  .ag-axis-tick {
+    font-size: 10px; fill: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }

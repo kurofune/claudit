@@ -14,6 +14,7 @@ import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js'
 import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
 import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
 import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
+import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
@@ -27,6 +28,7 @@ const VIEW_PAINTERS = {
   tools: paintTools,
   subagents: paintSubagents,
   sessions: paintSessions,
+  agents: paintAgents,
 };
 
 onChange(async (route) => {
@@ -83,6 +85,7 @@ paintNavSkeletons(parseHash().view === 'overview');
 const NAV_SKEL_IDS = [
   'nav-metric-cost', 'nav-metric-tokens', 'nav-metric-sessions',
   'nav-metric-cache', 'nav-metric-tools', 'nav-metric-subagents',
+  'nav-metric-agents',
 ];
 Promise.all([
   paintNavCost(),
@@ -91,6 +94,7 @@ Promise.all([
   paintNavTools(),
   paintNavSubagents(),
   paintNavSessions(),
+  paintNavAgents(),
 ])
   .catch(err => console.error('nav metric prefetch failed:', err))
   .finally(() => NAV_SKEL_IDS.forEach(skeletonResetIfPending));

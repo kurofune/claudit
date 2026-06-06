@@ -50,6 +50,7 @@ function offlineLookup(path) {
     case '/subagents': return data.subagents;
     case '/sessions':  return data.sessions;
     case '/anomalies': return data.anomalies;
+    case '/agents':    return data.agents;
   }
   // /trends?dim=X — the dim is in the original querystring, parsed
   // here from `path` rather than location.search so a caller that
@@ -93,6 +94,7 @@ export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');
 export const fetchSessions = () => getJSON('/sessions');
 export const fetchAnomalies = () => getJSON('/anomalies');
+export const fetchAgents = () => getJSON('/agents');
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));
 export const fetchSessionTimeline = (id) =>
   getJSON('/sessions/' + encodeURIComponent(id) + '/timeline');
