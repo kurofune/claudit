@@ -294,3 +294,20 @@ anywhere is always correct; live = the playhead at "now".
   JS **101/101**, Go all green, gofmt clean. **Known limitation** (deferred): for a *live*
   session the periodic drawer repaint reverts loaded-full content to the snippet on the next SSE
   tick — re-click to reload; a "sticky full" flag on the selection would fix it.
+  **[FIXED 2026-06-07 — see the sticky-full entry below.]**
+- 2026-06-07 — Sticky-full deferred pickup done (frontend-logic TDD + UI browser-verify). Closes
+  the Phase 5 known limitation: loaded-full tool I/O no longer reverts to the snippet on a live
+  SSE repaint. **Pure-logic core (TDD, +4 → 105 tests):** `buildDrawerPayload(graph, ref,
+  fullByTool=null)` gained an optional third arg — a map keyed by `tool_use id` →
+  `{ input?, output? }`; for a TOOL ref with a matching entry, a string `input`/`output` overrides
+  the truncated snippet (an absent field keeps its snippet; ignored for non-tool refs and when
+  null, so existing callers are unchanged). **UI wiring (`view-agents.js`):** a module-level
+  `fullCache` (keyed by tool id, cleared in `reset()`) is populated by `loadFull` on a successful
+  fetch and passed into `buildDrawerPayload` on EVERY drawer paint — so the next repaint re-applies
+  the full content instead of the snippet. Because the substituted content lacks the `…` marker,
+  `looksTruncated` naturally suppresses the now-redundant "show full" button on repaint too — no
+  extra flag needed. Browser-verified on a *done* session via the real repaint path (select →
+  expand → re-select, which runs `renderDrawer → buildDrawerPayload(…, fullCache)`, the same path
+  the live updater takes): Output went snippet→full (2001→6809 chars, "…" gone, button removed) and
+  **stayed full across the repaint** (still 6809, no "…", no button) where it previously reverted.
+  JS **105/105**, Go all green, gofmt clean.
