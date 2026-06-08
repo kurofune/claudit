@@ -6,7 +6,7 @@ Update the **Status** line and **Progress log** as each phase lands. Build one p
 time — each phase section below is self-contained so it can be picked up cold without
 re-reading the others.
 
-**Status:** Phases 1 ✅, 2 ✅ & 3 ✅ complete (tests green, browser-verified). Decisions locked (see below).
+**Status:** Phases 1 ✅, 2 ✅, 3 ✅ & 4 ✅ complete (tests green, browser-verified). Decisions locked (see below).
 
 ---
 
@@ -140,7 +140,7 @@ no unclickable rows remain; project name is the headline; browser-verified.
 **Done when.** Switching lenses keeps the same selection + drawer; the left pane is the only
 thing that changes.
 
-## Phase 4 — Timeline (Gantt) lens  *(geometry TDD'd already; UI browser-verify)*  — **Status: not started**
+## Phase 4 — Timeline (Gantt) lens  *(geometry TDD'd already; UI browser-verify)*  — **Status: ✅ complete**
 
 **Goal.** Replace the static flow graph with a horizontal, time-axis swimlane.
 
@@ -242,3 +242,30 @@ anywhere is always correct; live = the playhead at "now".
   Feed→Flow→Tree→Feed keeps the exact same drawer (`djinn:review-triage` / sub-agent /
   matching sid) every time, while the active lens content swaps correctly. JS suite 89/89,
   Go all green. Not yet committed — staging is the user's call.
+- 2026-06-07 — Phase 4 done (geometry TDD'd + UI browser-verified). The **Flow graph
+  lens is now the Timeline lens** (`#agents/flow`→`#agents/timeline`, label "Flow graph"→
+  "Timeline"; the old `buildFlowLayout` + its tests are kept as a deprecated peer, no
+  longer rendered). Two new pure helpers, TDD'd via a /tdd subagent (+10 tests → 99 total):
+  `timelineBounds(agents, nowMs)` (the [start,end] window; a running agent's effective end
+  is `nowMs`, so "now" is always the right edge) and `buildTimeline(session, opts)` (per-
+  session horizontal Gantt: one row per agent, main at depth 0 / sub-agents depth 1, bars
+  via the existing `makeTimeScale`+`agentBar`, plus axis ticks and the now-line x). Rows
+  stay **1:1 with flattenSession index** so a bar's refKey aligns with every other lens.
+  `view-agents.js` renders one SVG Gantt per session inside a horizontal-scroll wrapper:
+  bars click → the shared drawer (reusing the data-ref/select spine); a vertical dashed
+  **now-line** + pulsing dot mark the live edge; genuinely-new agents **fade in** (diffed
+  against `prevTimelineKeys`, so existing rows don't re-animate on each live tick). **Live-
+  edge follow**: a running session with horizontal overflow auto-scrolls to "now" *unless*
+  the user scrolled it into history, which **pins** it (module-level `timelinePinned` map)
+  and reveals a **"● now"** button to jump back — the #1 live-trace trap (auto-scroll
+  yanking the view mid-inspection) avoided. Live updates are **render-batched** (a burst of
+  SSE generation bumps coalesces into one refetch+render ~100ms later). Browser-verified
+  with playwright `eval` against the live DOM: 10 sessions → 29 agent rows = 29 bars, 2
+  now-lines for the 2 running sessions, those 2 auto-followed to the right edge while
+  historical sessions stayed at t₀; clicking a bar fills the drawer (general-purpose /
+  sub-agent / cost·dur·tokens·steps) and the selection round-trips Timeline↔Tree↔Feed
+  unchanged; scrolling a running session back revealed "● now", clicking it snapped to the
+  edge and hid the button. JS suite **99/99**, Go all green. **Known limitation** (deferred,
+  not a blocker): the left agent-label gutter scrolls with the chart, so a session followed
+  to the live edge scrolls its labels off — a frozen first-column is the natural follow-up.
+  Not yet committed — staging is the user's call.
