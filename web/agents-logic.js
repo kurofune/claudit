@@ -225,6 +225,112 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
   return limit > 0 ? events.slice(0, limit) : events;
 }
 
+// timelineBounds returns the [startMs, endMs] time window a Gantt timeline
+// should span over a set of agents. Each agent's effective end is "now" if
+// it's still running, else its parseable ended_at, else (NaN end) its own
+// start — so a malformed/instant agent collapses to a zero-width point
+// rather than poisoning the window. startMs is the earliest parseable
+// start; endMs is the latest of all starts and effective ends, clamped so
+// endMs >= startMs. Null when no agent has a parseable start.
+export function timelineBounds(agents, nowMs) {
+  let startMs = Infinity;
+  let endMs = -Infinity;
+  for (const a of agents || []) {
+    const start = parseTime(a && a.started_at);
+    if (Number.isNaN(start)) continue;
+    if (start < startMs) startMs = start;
+    if (start > endMs) endMs = start;
+    let effEnd;
+    if (a && a.status === 'running') {
+      effEnd = nowMs;
+    } else {
+      const end = parseTime(a && a.ended_at);
+      effEnd = Number.isNaN(end) ? start : end;
+    }
+    if (effEnd > endMs) endMs = effEnd;
+  }
+  if (startMs === Infinity) return null;
+  if (endMs < startMs) endMs = startMs;
+  return { startMs, endMs };
+}
+
+// buildTimeline computes a per-session horizontal Gantt layout: one row per
+// agent (main first at depth 0, each sub-agent at depth 1), each bar placed on
+// a real time axis spanning the session's lifetime, plus axis ticks and a
+// "now" line x. Pure geometry — no DOM and no Date.now(); the caller passes
+// nowMs so a running agent's bar (and the now-line) advance on refetch. The
+// chart floors to the host width but widens (→ horizontal scroll) for long
+// sessions via minPxPerMs. Rows stay 1:1 with flattenSession order/index so a
+// row's refKey index aligns with the rest of the tab; an agent with an
+// unparseable start just gets a left-edge sliver bar rather than being dropped.
+// Returns the empty layout when the session has no agents or no parseable times.
+export function buildTimeline(session, opts = {}) {
+  const {
+    hostW = 800, rowH = 24, axisH = 20, labelW = 130, pad = 8,
+    nowMs = 0, minBlock = 3, minPxPerMs = 0.0012, indent = 12, tickCount = 5,
+  } = opts;
+  const agents = flattenSession(session);
+  const sid = (session && session.session_id) || '';
+  const depth = a => (a && a.kind === 'main' ? 0 : 1);
+
+  const bounds = timelineBounds(agents, nowMs);
+  if (agents.length === 0 || bounds === null) {
+    return {
+      sessionId: sid, startMs: NaN, endMs: NaN, span: 0,
+      chartX: labelW, chartW: 0, contentW: hostW, width: hostW,
+      height: axisH + pad, nowX: null, rows: [], ticks: [],
+    };
+  }
+
+  const { startMs, endMs } = bounds;
+  const span = endMs - startMs;
+  const chartHostW = Math.max(minBlock, hostW - labelW - pad);
+  const chartW = Math.max(chartHostW, Math.ceil(span * minPxPerMs));
+  const scale = makeTimeScale({ startMs, endMs, width: chartW, minBlock });
+  const chartX = labelW;
+
+  const rows = agents.map((a, i) => {
+    const start = parseTime(a.started_at);
+    const effEnd = a.status === 'running'
+      ? nowMs
+      : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
+    const bar = agentBar({ start, end: effEnd }, scale);
+    const d = depth(a);
+    return {
+      key: `${sid}#${i}`, rowIndex: i, depth: d,
+      label: agentLabel(a), kind: a.kind || '', status: a.status || '',
+      running: a.status === 'running',
+      cost_usd: a.cost_usd || 0, steps: (a.steps || []).length,
+      x: chartX + bar.x, w: bar.width,
+      y: axisH + i * rowH, h: rowH,
+      labelX: pad + d * indent,
+    };
+  });
+
+  const nowInRange = nowMs >= startMs && nowMs <= endMs;
+  const nowX = nowInRange ? chartX + scale.x(nowMs) : null;
+
+  let ticks;
+  if (span <= 0) {
+    ticks = [{ x: chartX, t: startMs }];
+  } else {
+    ticks = [];
+    for (let k = 0; k < tickCount; k++) {
+      const t = startMs + span * k / (tickCount - 1);
+      ticks.push({ x: chartX + scale.x(t), t });
+    }
+  }
+
+  const contentW = chartX + chartW + pad;
+  const height = axisH + agents.length * rowH + pad;
+
+  return {
+    sessionId: sid, startMs, endMs, span,
+    chartX, chartW, contentW, width: contentW, height,
+    nowX, rows, ticks,
+  };
+}
+
 // buildFlowLayout computes node + edge geometry for the Flow graph view: the
 // main agent as a node centered at the top, its sub-agents in a centered grid
 // beneath it, and one edge from main down to each child. Pure geometry over a

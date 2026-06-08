@@ -22,6 +22,8 @@ import {
   defaultRef,
   resolveRef,
   buildDrawerPayload,
+  timelineBounds,
+  buildTimeline,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -625,4 +627,132 @@ test('buildDrawerPayload builds the step payload as "Turn N" with no tool I/O', 
 test('buildDrawerPayload returns null for a ref whose agent is missing', () => {
   assert.equal(buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 9 }), null);
   assert.equal(buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'nope', agentIndex: 0 }), null);
+});
+
+// ── timelineBounds ──────────────────────────────────────────────────
+test('timelineBounds: a single done agent bounds to its own span', () => {
+  const b = timelineBounds([{ started_at: 0, ended_at: 100, status: 'done' }], 500);
+  assert.deepEqual(b, { startMs: 0, endMs: 100 });
+});
+
+test('timelineBounds: a running agent extends the window to now', () => {
+  const b = timelineBounds([
+    { started_at: 0, ended_at: 100, status: 'done' },
+    { started_at: 50, status: 'running' },
+  ], 500);
+  assert.deepEqual(b, { startMs: 0, endMs: 500 });
+});
+
+test('timelineBounds: an empty array is null', () => {
+  assert.equal(timelineBounds([], 500), null);
+});
+
+test('timelineBounds: all unparseable starts is null', () => {
+  assert.equal(timelineBounds([{ started_at: 'x' }], 999), null);
+});
+
+test('timelineBounds: a NaN ended_at falls back to the agent start', () => {
+  const b = timelineBounds([{ started_at: 300, ended_at: null, status: 'done' }], 999);
+  assert.deepEqual(b, { startMs: 300, endMs: 300 });
+});
+
+// ── buildTimeline ───────────────────────────────────────────────────
+test('buildTimeline returns the empty layout for a session with no agents', () => {
+  const layout = buildTimeline({ session_id: 's1' }, { hostW: 400, labelW: 100, axisH: 20, pad: 8 });
+  assert.equal(layout.sessionId, 's1');
+  assert.ok(Number.isNaN(layout.startMs));
+  assert.ok(Number.isNaN(layout.endMs));
+  assert.equal(layout.span, 0);
+  assert.equal(layout.chartX, 100); // labelW
+  assert.equal(layout.chartW, 0);
+  assert.equal(layout.contentW, 400); // hostW
+  assert.equal(layout.width, 400); // hostW
+  assert.equal(layout.height, 28); // axisH + pad
+  assert.equal(layout.nowX, null);
+  assert.deepEqual(layout.rows, []);
+  assert.deepEqual(layout.ticks, []);
+});
+
+test('buildTimeline lays out main + two sub-agents on a real time axis', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done' },
+    children: [
+      { kind: 'subagent', started_at: 200, ended_at: 400, status: 'done' },
+      { kind: 'subagent', started_at: 500, status: 'running' },
+    ],
+  };
+  const layout = buildTimeline(session, {
+    hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+    minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+  });
+  assert.equal(layout.startMs, 0);
+  assert.equal(layout.endMs, 1000);
+  assert.equal(layout.span, 1000);
+  assert.equal(layout.chartX, 100);
+  assert.equal(layout.chartW, 300);
+  assert.equal(layout.contentW, 400);
+  assert.equal(layout.width, 400);
+  assert.equal(layout.height, 80);
+  assert.equal(layout.nowX, 400);
+  assert.equal(layout.rows.length, 3);
+
+  const [main, c0, c1] = layout.rows;
+  assert.equal(main.depth, 0);
+  assert.equal(main.x, 100);
+  assert.equal(main.w, 300);
+  assert.equal(main.y, 20);
+  assert.equal(main.labelX, 0);
+  assert.equal(main.key, 's1#0');
+
+  assert.equal(c0.depth, 1);
+  assert.equal(c0.x, 160);
+  assert.equal(c0.w, 60);
+  assert.equal(c0.y, 40);
+  assert.equal(c0.labelX, 12); // pad 0 + 1 * indent(default 12)
+
+  assert.equal(c1.depth, 1);
+  assert.equal(c1.x, 250);
+  assert.equal(c1.w, 150);
+  assert.equal(c1.y, 60);
+  assert.equal(c1.running, true);
+  assert.equal(c1.labelX, 12);
+
+  assert.deepEqual(layout.ticks, [{ x: 100, t: 0 }, { x: 400, t: 1000 }]);
+});
+
+test('buildTimeline widens the chart for a long session (horizontal scroll)', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done' },
+    children: [],
+  };
+  const layout = buildTimeline(session, {
+    hostW: 400, labelW: 100, pad: 0, minPxPerMs: 1, nowMs: 1000,
+  });
+  // chartHostW = 400 - 100 - 0 = 300; ceil(1000 * 1) = 1000 → widen to 1000.
+  assert.equal(layout.chartW, 1000);
+  assert.equal(layout.contentW, 1100); // chartX(100) + 1000 + pad(0)
+  assert.ok(layout.contentW > 400); // wider than hostW → scrolls
+});
+
+test('buildTimeline indents sub-agent labels by pad + depth*indent', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done' },
+    children: [{ kind: 'subagent', started_at: 200, ended_at: 400, status: 'done' }],
+  };
+  const layout = buildTimeline(session, { nowMs: 1000, pad: 8, indent: 12 });
+  assert.equal(layout.rows[0].labelX, 8); // main: pad
+  assert.equal(layout.rows[1].labelX, 20); // sub: pad + indent
+});
+
+test('buildTimeline nowX is null when now precedes the window', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 1000, ended_at: 2000, status: 'done' },
+    children: [],
+  };
+  const layout = buildTimeline(session, { nowMs: 0 });
+  assert.equal(layout.nowX, null);
 });

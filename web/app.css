@@ -2035,7 +2035,8 @@
     50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-2) 0%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mc-dot-live, .acard-pulse, .flow-node.is-running .fn-pulse, .insp-dot.is-running { animation: none; }
+    .mc-dot-live, .acard-pulse, .tl-row.is-running .tl-pulse, .insp-dot.is-running { animation: none; }
+    .timeline-sess .tl-row.is-new { animation: none; }
   }
 
   /* Active-now cards. */
@@ -2197,27 +2198,53 @@
   }
   .tr-io-out.is-err pre { border-color: color-mix(in oklch, var(--danger, #e5484d) 40%, var(--border)); }
 
-  /* ── Flow graph ── */
-  .flow-graphs { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-4); }
-  .flow-sess { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); padding: var(--s-2) var(--s-3) var(--s-3); }
-  .flow-sess-head {
+  /* ── Timeline (Gantt) lens ── */
+  .timeline-lens { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-4); }
+  .timeline-sess { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); padding: var(--s-2) var(--s-3) var(--s-3); }
+  .timeline-sess-head {
     display: flex; align-items: baseline; gap: var(--s-2);
     font-size: var(--t-2); color: var(--ink);
     border-left: 3px solid var(--cc, var(--border)); padding-left: 6px; margin-bottom: var(--s-2);
   }
-  .flow-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .flow-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
-  .flow-svg { display: block; }
-  .flow-edge { stroke: var(--border); stroke-width: 1.5; }
-  .flow-edge.is-running { stroke: var(--accent-2); stroke-dasharray: 4 3; }
-  .flow-node { cursor: pointer; }
-  .flow-node .fn-box { fill: var(--surface-2); stroke: var(--border); stroke-width: 1; transition: stroke 0.12s ease; }
-  .flow-node.fn-main .fn-box { fill: var(--accent-soft); stroke: color-mix(in oklch, var(--accent) 35%, var(--border)); }
-  .flow-node.is-running .fn-box { stroke: var(--accent-2); stroke-width: 2; }
-  .flow-node.is-selected .fn-box { stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 1px 4px color-mix(in oklch, var(--accent) 30%, transparent)); }
-  .flow-node:hover .fn-box { stroke: var(--ink-2); }
-  .flow-node:focus-visible { outline: none; }
-  .flow-node:focus-visible .fn-box { stroke: var(--accent); stroke-width: 2; }
-  .fn-label { font-family: var(--font-mono); font-size: 12px; font-weight: 600; fill: var(--ink); pointer-events: none; }
-  .fn-sub { font-size: 10px; fill: var(--ink-2); pointer-events: none; }
-  .fn-pulse { fill: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
+  .timeline-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .timeline-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
+  /* "● now" re-pin button — only shown (JS un-hides) when scrolled into history. */
+  .timeline-jump {
+    margin-left: var(--s-2); padding: 1px 8px; border-radius: 999px; cursor: pointer;
+    border: 1px solid color-mix(in oklch, var(--accent-2) 45%, var(--border));
+    background: color-mix(in oklch, var(--accent-2) 12%, var(--surface));
+    color: var(--accent-2); font-size: var(--t-1); font-weight: 600; line-height: 1.4;
+  }
+  .timeline-jump:hover { background: color-mix(in oklch, var(--accent-2) 20%, var(--surface)); }
+  .timeline-jump[hidden] { display: none; }
+
+  /* Horizontal scroll: a long session's Gantt overflows; short ones fit. */
+  .timeline-scroll { overflow-x: auto; overflow-y: hidden; }
+  .timeline-svg { display: block; }
+
+  .tl-tick line { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+  .tl-tick text { font-family: var(--font-mono); font-size: 9px; fill: var(--ink-2); }
+  .tl-now { stroke: var(--accent-2); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: 0.9; }
+
+  .tl-row { cursor: pointer; }
+  .tl-rowbg { fill: transparent; transition: fill 0.12s ease; }
+  .tl-row:hover .tl-rowbg { fill: color-mix(in oklch, var(--ink) 5%, transparent); }
+  .tl-row.is-selected .tl-rowbg { fill: color-mix(in oklch, var(--accent) 12%, transparent); }
+  .tl-row:focus-visible { outline: none; }
+  .tl-row:focus-visible .tl-rowbg { fill: color-mix(in oklch, var(--accent) 12%, transparent); }
+  .tl-label {
+    font-family: var(--font-mono); font-size: 11px; fill: var(--ink); pointer-events: none;
+    dominant-baseline: alphabetic;
+  }
+  .tl-bar { fill: var(--surface-3, var(--surface-2)); stroke: var(--border); stroke-width: 1; transition: stroke 0.12s ease; }
+  .tl-main .tl-bar { fill: var(--accent-soft); stroke: color-mix(in oklch, var(--accent) 35%, var(--border)); }
+  .tl-row.is-running .tl-bar { fill: color-mix(in oklch, var(--accent-2) 22%, var(--surface)); stroke: var(--accent-2); }
+  .tl-row.is-selected .tl-bar { stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent) 30%, transparent)); }
+  .tl-row:hover .tl-bar { stroke: var(--ink-2); }
+  .tl-pulse { fill: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
+  /* A genuinely new agent (not seen last render) fades + slides in. */
+  .tl-row.is-new { animation: tl-row-in 0.4s ease both; }
+  @keyframes tl-row-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }

@@ -8,8 +8,9 @@
 //     calls / spawns / completions). The second-monitor watch view.
 //   • Tree  (#agents/tree) — a session→agent tree on the left, the selected
 //     agent's step + tool log beside it; every step/tool row selectable.
-//   • Flow graph (#agents/flow) — main→sub-agent node graph, nodes pulsing
-//     while they run. (Becomes the Timeline lens in Phase 4.)
+//   • Timeline (#agents/timeline) — a horizontal Gantt on a real time axis:
+//     one row per agent (indented by spawn depth), bar = lifetime, overlap =
+//     concurrency. Live runs grow at the right edge ("now"). Bars click → drawer.
 // The sub-tab nav is a LENS SWITCH: picking a lens swaps ONLY the left pane;
 // the shared selection and the detail drawer on the right carry over unchanged.
 // Clicking ANY row / card / node / tree item in any lens sets the shared
@@ -31,7 +32,7 @@ import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
-  agentLabel, buildEventFeed, buildFlowLayout, parseTime,
+  agentLabel, buildEventFeed, buildTimeline, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
 } from './agents-logic.js';
 
@@ -47,7 +48,7 @@ const SHELL = `
       <ul>
         <li><strong>Feed</strong> pins the agents running <em>right now</em> at the top — ticking timer, current tool — over a live feed of every tool call, spawn, and completion as it happens. Best for keeping an eye on a run.</li>
         <li><strong>Tree</strong> is the drill-down: pick any agent from the tree and read its step-by-step tool log; click a turn for its reasoning, or a tool for the exact input it sent and the output it got back (✓/✗).</li>
-        <li><strong>Flow graph</strong> shows the shape — who spawned whom — with each node pulsing while it works.</li>
+        <li><strong>Timeline</strong> is the Gantt: one row per agent on a real time axis, indented by who spawned whom, bar width = how long it ran, and overlapping bars = agents that ran at the same time. A live run grows at the right edge ("now"); scroll back into history and a <em>● now</em> button brings you back.</li>
         <li><strong>Detail drawer.</strong> Whatever you click fills the right-hand panel: input, output, status, reasoning, tokens, cost, model, duration. Empty sections stay put (collapsed) so the layout never jumps, and the panel survives lens switches.</li>
         <li><strong>Live.</strong> On an active session this updates in place every couple of seconds — no page reload, your scroll, selection, and open panels stay put. The same <code>?since</code>/<code>?until</code>/<code>?project</code> filters scope this tab too.</li>
       </ul>
@@ -57,14 +58,14 @@ const SHELL = `
   <nav class="subtabs" aria-label="Agent view lenses">
     <a class="subtab is-active" href="#agents/feed" data-subtab="feed">Feed</a>
     <a class="subtab"           href="#agents/tree" data-subtab="tree">Tree</a>
-    <a class="subtab"           href="#agents/flow" data-subtab="flow">Flow graph</a>
+    <a class="subtab"           href="#agents/timeline" data-subtab="timeline">Timeline</a>
   </nav>
 
   <div class="agents-body">
     <div class="agents-lens">
       <div class="subview is-active" data-subview="feed"></div>
       <div class="subview" data-subview="tree"></div>
-      <div class="subview" data-subview="flow"></div>
+      <div class="subview" data-subview="timeline"></div>
     </div>
     <aside class="agents-drawer" data-drawer aria-label="Selection detail"></aside>
   </div>
@@ -72,7 +73,7 @@ const SHELL = `
   <div id="agents-empty" class="empty-note" hidden>No agents in this window. Try widening <code>--since</code>/<code>--until</code>, or open a session that spawned sub-agents.</div>
 `;
 
-const SUBS = ['feed', 'tree', 'flow'];
+const SUBS = ['feed', 'tree', 'timeline'];
 
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
@@ -86,6 +87,15 @@ let activeSub = 'feed';
 let tickerId = null;
 let selectedRef = null;
 
+// Timeline lens state. prevTimelineKeys tracks which agent rows existed on the
+// last render so a genuinely NEW agent fades in (and the rest don't re-animate
+// on every live re-render). timelinePinned[sid]=true means the user scrolled a
+// session's Gantt back into history, so live updates must NOT yank it to the
+// "now" edge — the #1 live-trace UX trap; the "● now" button clears it.
+let prevTimelineKeys = new Set();
+const timelinePinned = new Map();
+let liveScheduled = false;
+
 const colorSlot = i => ((i % 5) + 1);
 
 export function reset() {
@@ -93,6 +103,8 @@ export function reset() {
   navPainted = false;
   lastGraph = null;
   selectedRef = null;
+  prevTimelineKeys = new Set();
+  timelinePinned.clear();
 }
 
 // paintNav resolves the sidebar metric before the tab is first opened.
@@ -178,8 +190,11 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   const memo = preserve ? captureState(host) : null;
   if (activeSub === 'feed') host.innerHTML = renderControl(sessions);
   else if (activeSub === 'tree') host.innerHTML = renderInspector(sessions);
-  else if (activeSub === 'flow') host.innerHTML = renderFlow(sessions);
+  else if (activeSub === 'timeline') host.innerHTML = renderTimeline(sessions);
   if (memo) restoreState(host, memo);
+  // The Gantt's horizontal scroll (live-edge follow + restored history offset)
+  // can only be set on real DOM, so it runs after innerHTML is in place.
+  if (activeSub === 'timeline') syncTimelineScroll(container);
   if (paintDrawer) renderDrawer(container);
   tickTimers(container);
 }
@@ -203,6 +218,10 @@ function wireSelection(container) {
   const lens = container.querySelector('.agents-lens');
   if (lens) {
     lens.addEventListener('click', e => {
+      // The Timeline's "● now" button is not a selection — it re-pins the Gantt
+      // to the live edge; handle it before the data-ref selection delegate.
+      const jump = e.target.closest('[data-tljump]');
+      if (jump) { jumpToNow(container, jump.dataset.tljump); return; }
       const el = e.target.closest('[data-ref]');
       if (el) select(container, el.dataset.ref);
     });
@@ -211,6 +230,10 @@ function wireSelection(container) {
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
+    // Scroll doesn't bubble, so catch it in the capture phase: when the user
+    // drags a session's Gantt away from the right edge we "pin" it so a live
+    // update won't yank them back to now; returning to the edge un-pins.
+    lens.addEventListener('scroll', e => onTimelineScroll(e), true);
   }
   const drawer = container.querySelector('.agents-drawer');
   if (drawer) {
@@ -258,10 +281,19 @@ function copyText(text, btn) {
 
 // ── live update + timer ticker ──────────────────────────────────────────
 
-// liveUpdate is the SSE in-place handler: refetch, swap lastGraph, re-render
-// the active lens preserving the user's place. Errors are swallowed by the
-// SSE layer so a transient fetch failure doesn't tear down the stream.
-async function liveUpdate() {
+// liveUpdate is the SSE in-place handler. It RENDER-BATCHES: a burst of
+// generation bumps (e.g. a fan-out spawning many sub-agents at once) coalesces
+// into a single refetch + re-render ~100ms later, so the timeline doesn't
+// thrash. Errors are swallowed by the SSE layer so a transient fetch failure
+// doesn't tear down the stream.
+function liveUpdate() {
+  if (liveScheduled) return;
+  liveScheduled = true;
+  setTimeout(flushLiveUpdate, 100);
+}
+
+async function flushLiveUpdate() {
+  liveScheduled = false;
   const container = document.getElementById('view-agents');
   if (!container || !painted) return;
   let graph;
@@ -620,75 +652,153 @@ function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex) {
   </details>`;
 }
 
-// ── Flow graph ────────────────────────────────────────────────────────────
+// ── Timeline (Gantt) lens ───────────────────────────────────────────────────
 
-function renderFlow(sessions) {
-  if (sessions.length === 0) return `<div class="ac-idle">No agents to graph.</div>`;
-  const width = flowWidth();
-  // Payload is already newest-first (the backend orders by last activity), so
-  // an in-progress run sits on top without a client-side re-sort.
+// renderTimeline draws one horizontal Gantt per session: a real time axis with
+// one row per agent, bar = lifetime, overlap = concurrency. Geometry comes from
+// the pure, unit-tested buildTimeline; this layer only emits SVG + wires the
+// live-edge scroll behavior. prevTimelineKeys → an agent that's new this render
+// fades in (the rest don't re-animate).
+function renderTimeline(sessions) {
+  if (sessions.length === 0) return `<div class="ac-idle">No agents to plot.</div>`;
+  const hostW = timelineHostW();
+  const nowMs = Date.now();
   const sel = resolveRef(lastGraph, selectedRef);
   const selAgentKey = sel ? refKey({ sessionId: sel.session.session_id, agentIndex: sel.agentIndex }) : null;
-  const graphs = sessions.map((s, si) => flowSessionHTML(s, si, width, selAgentKey)).join('');
-  return `<div class="flow-graphs">${graphs}</div>`;
+  const seen = prevTimelineKeys;
+  const next = new Set();
+  const html = sessions.map((s, si) => timelineSessionHTML(s, si, hostW, nowMs, selAgentKey, seen, next)).join('');
+  prevTimelineKeys = next;
+  return `<div class="timeline-lens">${html}</div>`;
 }
 
-function flowSessionHTML(session, si, width, selAgentKey) {
-  const layout = buildFlowLayout(session, { width });
+function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next) {
   const sid = session.session_id || '';
-  const edges = layout.edges.map(ed =>
-    `<line class="flow-edge${ed.running ? ' is-running' : ''}" x1="${ed.x1.toFixed(1)}" y1="${ed.y1.toFixed(1)}" x2="${ed.x2.toFixed(1)}" y2="${ed.y2.toFixed(1)}"/>`).join('');
-  const nodes = layout.nodes.map(n => flowNodeHTML(n, selAgentKey)).join('');
-  return `<div class="flow-sess">
-    <div class="flow-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
-      <span class="flow-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
-      <span class="flow-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+  const tl = buildTimeline(session, { hostW, nowMs });
+  const running = tl.rows.some(r => r.running);
+  // The rows start at y = axisH (buildTimeline), so the first row's top is the
+  // axis baseline — tick labels sit above it, gridlines run from it down.
+  const axisY = tl.rows.length ? tl.rows[0].y : 20;
+
+  const ticks = tl.ticks.map(tk =>
+    `<g class="tl-tick"><line x1="${tk.x.toFixed(1)}" y1="${axisY}" x2="${tk.x.toFixed(1)}" y2="${tl.height}"/><text x="${(tk.x + 3).toFixed(1)}" y="${(axisY - 7).toFixed(1)}">${escHtml(clockTime(tk.t))}</text></g>`).join('');
+  const nowLine = running && tl.nowX != null
+    ? `<line class="tl-now" x1="${tl.nowX.toFixed(1)}" y1="0" x2="${tl.nowX.toFixed(1)}" y2="${tl.height}"/>` : '';
+  const rows = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next)).join('');
+
+  return `<div class="timeline-sess">
+    <div class="timeline-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
+      <span class="timeline-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
+      <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+      <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>
-    <svg class="flow-svg" viewBox="0 0 ${layout.width} ${layout.height}" width="100%" height="${layout.height}" role="img" aria-label="Agent flow graph">
-      <g class="flow-edges">${edges}</g>
-      <g class="flow-nodes">${nodes}</g>
-    </svg>
+    <div class="timeline-scroll" data-tlscroll="${escHtml(sid)}">
+      <svg class="timeline-svg" viewBox="0 0 ${tl.contentW} ${tl.height}" width="${tl.contentW}" height="${tl.height}" role="img" aria-label="Agent timeline">
+        <g class="tl-grid">${ticks}</g>
+        <g class="tl-rows">${rows}</g>
+        ${nowLine}
+      </svg>
+    </div>
   </div>`;
 }
 
-function flowNodeHTML(n, selAgentKey) {
-  // buildFlowLayout keys nodes `${sid}#${flattenIndex}` — exactly an agent ref.
-  const running = n.status === 'running';
-  const sel = n.key === selAgentKey ? ' is-selected' : '';
-  const cls = `flow-node ${n.kind === 'main' ? 'fn-main' : 'fn-sub'}${running ? ' is-running' : ''}${sel}`;
-  const sub = running ? 'running' : `${fmtNum(n.steps)} · ${fmtMoney(n.cost_usd || 0)}`;
-  return `<g class="${cls}" data-ref="${escHtml(n.key)}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})" tabindex="0" role="button">
-    <rect class="fn-box" width="${n.w}" height="${n.h}" rx="8"/>
-    ${running ? `<circle class="fn-pulse" cx="12" cy="12" r="4"/>` : ''}
-    <text class="fn-label" x="${n.w / 2}" y="20" text-anchor="middle">${escHtml(clip(n.label, 16))}</text>
-    <text class="fn-sub" x="${n.w / 2}" y="36" text-anchor="middle">${escHtml(sub)}</text>
+function timelineRowHTML(r, tl, selAgentKey, seen, next) {
+  next.add(r.key);
+  const isNew = !seen.has(r.key);
+  const sel = r.key === selAgentKey ? ' is-selected' : '';
+  const barH = Math.max(6, r.h - 10);
+  const barY = r.y + Math.round((r.h - barH) / 2);
+  const cx = (r.x + r.w).toFixed(1);
+  const cy = (barY + barH / 2).toFixed(1);
+  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}`;
+  const meta = r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
+  return `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">
+    <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.contentW}" height="${r.h}"/>
+    <text class="tl-label" x="${r.labelX}" y="${(r.y + r.h / 2 + 4).toFixed(1)}">${escHtml(clip(r.label, 16))}</text>
+    <rect class="tl-bar" x="${r.x.toFixed(1)}" y="${barY}" width="${r.w.toFixed(1)}" height="${barH}" rx="3">
+      <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
+    </rect>
+    ${r.running ? `<circle class="tl-pulse" cx="${cx}" cy="${cy}" r="3.5"/>` : ''}
   </g>`;
 }
 
-function flowWidth() {
-  const host = document.querySelector('#view-agents .subview[data-subview="flow"]');
+function timelineHostW() {
+  const host = document.querySelector('#view-agents .subview[data-subview="timeline"]');
   const w = host ? host.clientWidth : 0;
-  // The shared drawer is outside the lens now, so the flow lens gets its full
-  // width; clamp so a lone graph stays readable and a wide one stays bounded.
-  const graphW = (w > 0 ? w : 760) - 24;
-  return Math.max(420, Math.min(1100, graphW));
+  // Leave room for the session card's padding/border; clamp so the fit-width
+  // floor stays readable when the lens is narrow.
+  return Math.max(420, (w > 0 ? w : 760) - 28);
+}
+
+// syncTimelineScroll applies the live-edge follow after a (re)render: a session
+// with a running agent and horizontal overflow auto-scrolls to "now" UNLESS the
+// user pinned it by scrolling into history, in which case the "● now" button is
+// revealed instead. Runs on real DOM (scroll offsets need layout).
+function syncTimelineScroll(container) {
+  container.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
+    const sid = sc.dataset.tlscroll;
+    const sess = sc.closest('.timeline-sess');
+    const overflow = sc.scrollWidth - sc.clientWidth > 2;
+    const running = !!(sess && sess.querySelector('.tl-row.is-running'));
+    const pinned = timelinePinned.get(sid) === true;
+    if (overflow && running && !pinned) sc.scrollLeft = sc.scrollWidth;
+    const jump = sess && sess.querySelector('[data-tljump]');
+    if (jump) jump.hidden = !(overflow && running && pinned);
+  });
+}
+
+// onTimelineScroll pins/un-pins a session as the user drags its Gantt: scrolled
+// off the right edge → pinned (live updates won't yank it); back at the edge →
+// un-pinned (resumes following). Toggles the "● now" button to match.
+function onTimelineScroll(e) {
+  const sc = e.target.closest && e.target.closest('.timeline-scroll[data-tlscroll]');
+  if (!sc) return;
+  const sid = sc.dataset.tlscroll;
+  const overflow = sc.scrollWidth - sc.clientWidth > 2;
+  const atEdge = sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 2;
+  timelinePinned.set(sid, overflow && !atEdge);
+  const sess = sc.closest('.timeline-sess');
+  const running = !!(sess && sess.querySelector('.tl-row.is-running'));
+  const jump = sess && sess.querySelector('[data-tljump]');
+  if (jump) jump.hidden = !(overflow && running && !atEdge);
+}
+
+// jumpToNow re-pins a session to the live edge and snaps its Gantt there.
+function jumpToNow(container, sid) {
+  const sc = container.querySelector(`.timeline-scroll[data-tlscroll="${sid}"]`);
+  if (!sc) return;
+  timelinePinned.set(sid, false);
+  sc.scrollLeft = sc.scrollWidth;
+  const sess = sc.closest('.timeline-sess');
+  const jump = sess && sess.querySelector('[data-tljump]');
+  if (jump) jump.hidden = true;
 }
 
 // ── preserve scroll / open-rows across a live re-render ────────────────────
 
 function captureState(host) {
-  const m = { scrolls: {}, openTools: [] };
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .flow-graphs').forEach(el => {
+  const m = { scrolls: {}, openTools: [], tlScroll: {} };
+  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens').forEach(el => {
     m.scrolls[scrollKey(el)] = el.scrollTop;
+  });
+  // Per-session horizontal Gantt offset, so a live update that rebuilds the SVG
+  // doesn't reset a user who scrolled into history (syncTimelineScroll then
+  // overrides only the sessions still following the live edge).
+  host.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
+    m.tlScroll[sc.dataset.tlscroll] = sc.scrollLeft;
   });
   host.querySelectorAll('details.tr[open]').forEach(d => m.openTools.push(d.dataset.tkey));
   return m;
 }
 
 function restoreState(host, m) {
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .flow-graphs').forEach(el => {
+  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens').forEach(el => {
     const v = m.scrolls[scrollKey(el)];
     if (v != null) el.scrollTop = v;
+  });
+  host.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
+    const v = m.tlScroll[sc.dataset.tlscroll];
+    if (v != null) sc.scrollLeft = v;
   });
   if (m.openTools.length) {
     const want = new Set(m.openTools);
@@ -696,7 +806,7 @@ function restoreState(host, m) {
   }
 }
 
-const scrollKey = el => el.className.split(' ').find(c => /feed|tree|log|graphs/.test(c)) || el.className;
+const scrollKey = el => el.className.split(' ').find(c => /feed|tree|log|timeline-lens/.test(c)) || el.className;
 
 // ── nav metric + small formatters ────────────────────────────────────────
 
