@@ -256,6 +256,54 @@ func TestBuildAgentGraph_SubagentChildFromMeta(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_SubagentParentToolUseID(t *testing.T) {
+	// The exact reverse link: a sub-agent whose meta carries toolUseId X gets
+	// ParentToolUseID == X, while a sub-agent without meta gets an empty one.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	mainSrc := filepath.Join(root, "s1.jsonl")
+	linkedSrc := writeSubagent(t, root, "s1", "abc",
+		`{"agentType":"Explore","description":"e","toolUseId":"toolu_X"}`)
+	orphanSrc := writeSubagent(t, root, "s1", "def", "") // no meta.json
+
+	turns := []parse.Turn{
+		mkTurn("a1", "s1", mainSrc, t0),
+		mkTurn("b1", "s1", linkedSrc, t0.Add(time.Second)),
+		mkTurn("c1", "s1", orphanSrc, t0.Add(2*time.Second)),
+	}
+	turns[1].Sidechain = true
+	turns[2].Sidechain = true
+	snap := &corpus.Snapshot{Turns: turns}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := g.Sessions[0]
+	if len(s.Children) != 2 {
+		t.Fatalf("want 2 children, got %d", len(s.Children))
+	}
+	var linked, orphan *AgentNode
+	for i := range s.Children {
+		switch s.Children[i].AgentType {
+		case "Explore":
+			linked = &s.Children[i]
+		default:
+			orphan = &s.Children[i]
+		}
+	}
+	if linked == nil || orphan == nil {
+		t.Fatalf("missing child: linked=%v orphan=%v", linked, orphan)
+	}
+	if linked.ParentToolUseID != "toolu_X" {
+		t.Errorf("linked ParentToolUseID = %q, want %q", linked.ParentToolUseID, "toolu_X")
+	}
+	if orphan.ParentToolUseID != "" {
+		t.Errorf("orphan ParentToolUseID = %q, want empty", orphan.ParentToolUseID)
+	}
+}
+
 func TestBuildAgentGraph_SubagentWithoutMeta(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -462,6 +510,85 @@ func TestBuildAgentGraph_SessionErrorCountSumsNodes(t *testing.T) {
 	}
 	if g.Sessions[0].ErrorCount != 2 {
 		t.Errorf("session ErrorCount = %d, want 2", g.Sessions[0].ErrorCount)
+	}
+}
+
+func TestBuildAgentGraph_SpawnRollupOnAgentCall(t *testing.T) {
+	// The Agent tool_use that launched a sub-agent carries a Spawned rollup of
+	// that child's cost/tokens/errors/duration — the blast radius of one
+	// decision. A non-spawning tool call in the same turn has nil Spawned.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	mainSrc := filepath.Join(root, "s1.jsonl")
+	subSrc := writeSubagent(t, root, "s1", "abc",
+		`{"agentType":"Explore","description":"find callers","toolUseId":"toolu_X"}`)
+
+	mainTurn := mkTurn("a1", "s1", mainSrc, t0)
+	mainTurn.ToolUses = []parse.ToolUse{
+		{ID: "toolu_X", Name: "Agent", Detail: "Explore"},
+		{ID: "toolu_read", Name: "Read", Input: "main.go"},
+	}
+	// Sub-agent spans two turns (so EndedAt-StartedAt is a real duration) and
+	// errors on one tool call.
+	sub1 := mkTurn("b1", "s1", subSrc, t0.Add(time.Second))
+	sub1.Sidechain = true
+	sub1.ToolUses = []parse.ToolUse{{ID: "s_bad", Name: "Bash", Input: "go test"}}
+	sub2 := mkTurn("b2", "s1", subSrc, t0.Add(5*time.Second))
+	sub2.Sidechain = true
+
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{mainTurn, sub1, sub2},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "s_bad", IsError: true, Content: "FAIL"},
+		},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := g.Sessions[0]
+	if s.Main == nil || len(s.Children) != 1 {
+		t.Fatalf("want main + 1 child, got main=%v children=%d", s.Main, len(s.Children))
+	}
+	child := s.Children[0]
+
+	// Locate the Agent and Read invocations in the main agent's only step.
+	var agentInv, readInv *aggregate.ToolInvocation
+	for i := range s.Main.Steps[0].Tools {
+		switch s.Main.Steps[0].Tools[i].ID {
+		case "toolu_X":
+			agentInv = &s.Main.Steps[0].Tools[i]
+		case "toolu_read":
+			readInv = &s.Main.Steps[0].Tools[i]
+		}
+	}
+	if agentInv == nil || readInv == nil {
+		t.Fatalf("missing invocation: agent=%v read=%v", agentInv, readInv)
+	}
+	if readInv.Spawned != nil {
+		t.Errorf("Read call Spawned = %+v, want nil", readInv.Spawned)
+	}
+	if agentInv.Spawned == nil {
+		t.Fatalf("Agent call Spawned = nil, want a rollup")
+	}
+	sp := agentInv.Spawned
+	if sp.AgentRef != "toolu_X" {
+		t.Errorf("Spawned.AgentRef = %q, want %q", sp.AgentRef, "toolu_X")
+	}
+	if sp.CostUSD != child.CostUSD {
+		t.Errorf("Spawned.CostUSD = %v, want child cost %v", sp.CostUSD, child.CostUSD)
+	}
+	if sp.Tokens != child.Tokens {
+		t.Errorf("Spawned.Tokens = %+v, want child tokens %+v", sp.Tokens, child.Tokens)
+	}
+	if sp.ErrorCount != child.ErrorCount || sp.ErrorCount != 1 {
+		t.Errorf("Spawned.ErrorCount = %d, want child %d (==1)", sp.ErrorCount, child.ErrorCount)
+	}
+	wantDur := child.EndedAt.Sub(child.StartedAt).Milliseconds()
+	if sp.DurationMs != wantDur || wantDur != 4000 {
+		t.Errorf("Spawned.DurationMs = %d, want child elapsed %d (==4000)", sp.DurationMs, wantDur)
 	}
 }
 

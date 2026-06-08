@@ -44,12 +44,18 @@ type AgentNode struct {
 	Kind string `json:"kind"`
 	// AgentType and Description come from the sub-agent's sibling .meta.json
 	// (e.g. "Explore", "find callers of Foo"). Empty for the main agent.
-	AgentType   string           `json:"agent_type"`
-	Description string           `json:"description"`
-	StartedAt   time.Time        `json:"started_at"`
-	EndedAt     time.Time        `json:"ended_at"`
-	CostUSD     float64          `json:"cost_usd"`
-	Tokens      aggregate.Tokens `json:"tokens"`
+	AgentType   string `json:"agent_type"`
+	Description string `json:"description"`
+	// ParentToolUseID is the id of the Agent tool_use that spawned this
+	// sub-agent, read from the sibling .meta.json (toolUseId). It's the exact
+	// reverse link to the spawning call, so the tree can nest a sub-agent under
+	// the precise step that launched it. Empty for the main agent and for
+	// sub-agents whose meta predates the field.
+	ParentToolUseID string           `json:"parent_tool_use_id,omitempty"`
+	StartedAt       time.Time        `json:"started_at"`
+	EndedAt         time.Time        `json:"ended_at"`
+	CostUSD         float64          `json:"cost_usd"`
+	Tokens          aggregate.Tokens `json:"tokens"`
 	// Status is "running" if the agent's last step is within opts.ActiveWindow
 	// of the newest turn in the snapshot, else "done". CurrentTool is the last
 	// tool the agent invoked, surfaced only while running.
@@ -217,6 +223,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		sort.SliceStable(as.Children, func(i, j int) bool {
 			return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
 		})
+		attachSpawnRollups(&as)
 		out = append(out, as)
 	}
 	// Cap to the N most-recently-active sessions before the display sort, so
@@ -288,9 +295,55 @@ func finalizeNode(n *nodeAccum, opts Options) AgentNode {
 		if meta, ok := parse.ReadSubagentMeta(n.sourceFile); ok {
 			node.AgentType = meta.AgentType
 			node.Description = meta.Description
+			node.ParentToolUseID = meta.ToolUseID
 		}
 	}
 	return node
+}
+
+// attachSpawnRollups writes a SpawnRollup onto every Agent tool_use whose id
+// matches a sub-agent's ParentToolUseID — the exact reverse link from the
+// child's .meta.json. The rollup carries the child's own cumulative totals, so
+// each spawning call shows the blast radius of that one decision. It's
+// attribution, not double-counting: the same cost is still summed once at the
+// session level (AgentSession.CostUSD).
+func attachSpawnRollups(as *AgentSession) {
+	// Index children by the spawning tool_use id. A sub-agent can itself spawn
+	// sub-agents, so any agent's call — main or child — may be a parent.
+	childByParentID := make(map[string]*AgentNode, len(as.Children))
+	for i := range as.Children {
+		if id := as.Children[i].ParentToolUseID; id != "" {
+			childByParentID[id] = &as.Children[i]
+		}
+	}
+	if len(childByParentID) == 0 {
+		return
+	}
+	attach := func(n *AgentNode) {
+		if n == nil {
+			return
+		}
+		for si := range n.Steps {
+			for ti := range n.Steps[si].Tools {
+				inv := &n.Steps[si].Tools[ti]
+				child, ok := childByParentID[inv.ID]
+				if !ok {
+					continue
+				}
+				inv.Spawned = &aggregate.SpawnRollup{
+					AgentRef:   inv.ID,
+					CostUSD:    child.CostUSD,
+					Tokens:     child.Tokens,
+					DurationMs: child.EndedAt.Sub(child.StartedAt).Milliseconds(),
+					ErrorCount: child.ErrorCount,
+				}
+			}
+		}
+	}
+	attach(as.Main)
+	for i := range as.Children {
+		attach(&as.Children[i])
+	}
 }
 
 // lastToolName returns the name of the last tool invoked in an agent's most

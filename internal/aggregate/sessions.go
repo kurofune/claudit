@@ -97,6 +97,26 @@ type ToolInvocation struct {
 	// aware snippet of what the tool returned. Both empty when unjoined.
 	Status string `json:"status,omitempty"`
 	Output string `json:"output,omitempty"`
+	// Spawned is the rolled-up cost of the sub-agent this Agent call launched —
+	// nil for non-Agent calls and Agent calls whose sub-agent isn't in the
+	// snapshot. It surfaces one decision's full blast radius (the sub-agent's
+	// own cost/tokens/errors/duration) inline on the spawning call.
+	Spawned *SpawnRollup `json:"spawned,omitempty"`
+}
+
+// SpawnRollup is the cumulative cost of a single sub-agent, attributed to the
+// exact Agent tool_use that spawned it. It's attribution, not double-counting:
+// the figures here are the sub-agent's own totals, also counted once at the
+// session level.
+type SpawnRollup struct {
+	// AgentRef identifies the spawned sub-agent — the parent tool_use id, which
+	// is also the join key (child.ParentToolUseID == this) the UI uses to jump
+	// from the Agent call to its sub-agent.
+	AgentRef   string  `json:"agent_ref"`
+	CostUSD    float64 `json:"cost_usd"`
+	Tokens     Tokens  `json:"tokens"`
+	DurationMs int64   `json:"duration_ms"`
+	ErrorCount int     `json:"error_count"`
 }
 
 // SessionTimelinesOptions tunes BuildSessionTimelines. All zero values are
