@@ -35,7 +35,7 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
-  filterTrace, specActive, parseRefKey,
+  filterTrace, specActive, parseRefKey, detectRetries,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -293,7 +293,11 @@ function wireSelection(container) {
       const copy = e.target.closest('[data-copy]');
       if (copy) { copyText(copy.dataset.copy, copy); return; }
       const full = e.target.closest('[data-loadfull]');
-      if (full) loadFull(full);
+      if (full) { loadFull(full); return; }
+      // A data-ref inside the drawer (the retry "attempt N of M" link) jumps the
+      // shared selection — same delegate the lenses use.
+      const el = e.target.closest('[data-ref]');
+      if (el) select(container, el.dataset.ref);
     });
   }
   const bar = container.querySelector('[data-trace-filter]');
@@ -589,11 +593,39 @@ function kindBadge(kind) {
 function renderDrawer(container) {
   const drawer = container.querySelector('.agents-drawer');
   if (!drawer) return;
-  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache));
+  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache), retryInfoFor(selectedRef));
 }
 
-function drawerHTML(p) {
+// retryInfoFor reports whether the selected tool is a retry of an earlier
+// errored call of the same (kind,name,detail) — { attempt, total, ofRefKey } —
+// or null. `total` is the chain length (max attempt sharing the same first
+// call); ofRefKey is the full refKey of attempt 1 so the drawer can link back.
+// Pure lookup over detectRetries for the selected tool's agent.
+function retryInfoFor(ref) {
+  const parsed = parseRefKey(ref);
+  if (!parsed || parsed.type !== 'tool') return null;
+  const r = resolveRef(lastGraph, ref);
+  if (!r || r.type !== 'tool') return null;
+  const retries = detectRetries(r.agent);
+  const entry = retries.get(`${parsed.stepIndex}:${parsed.toolIndex}`);
+  if (!entry) return null;
+  let total = entry.attempt;
+  for (const v of retries.values()) {
+    if (v.ofRef === entry.ofRef && v.attempt > total) total = v.attempt;
+  }
+  return { attempt: entry.attempt, total, ofRefKey: `${r.session.session_id || ''}#${r.agentIndex}.${entry.ofRef}` };
+}
+
+function drawerHTML(p, retry = null) {
   if (!p) return `<div class="dr-empty-state">Select an agent, turn, or tool to inspect it here.</div>`;
+
+  // A retry chain: this tool repeats an earlier call that errored. Link back to
+  // the first attempt so the whole chain is one click apart.
+  const retryRow = retry
+    ? `<button type="button" class="dr-retry" data-ref="${escHtml(retry.ofRefKey)}" title="Jump to the first attempt">
+         <span class="dr-retry-icon" aria-hidden="true">↻</span> attempt ${retry.attempt} of ${retry.total}
+       </button>`
+    : '';
 
   const typeLabel = p.type === 'tool' ? 'tool' : p.type === 'step' ? 'turn' : (p.agentKind === 'main' ? 'main agent' : 'sub-agent');
   const desc = p.description ? `<p class="dr-desc">${escHtml(p.description)}</p>` : '';
@@ -624,6 +656,7 @@ function drawerHTML(p) {
       <span class="dr-type">${escHtml(typeLabel)}</span>
       ${statusPill(p.status)}
     </div>
+    ${retryRow}
     <div class="dr-project" title="${escHtml(p.cwd)}">${labelIcon('overview')}<span class="dr-proj-name">${escHtml(p.project || '—')}</span></div>
     <button type="button" class="dr-sid" data-copy="${escHtml(p.sessionId)}" title="Copy session id&#10;${escHtml(p.sessionId)}">
       <span class="dr-sid-id">${escHtml(p.sessionId || '—')}</span>
@@ -834,10 +867,14 @@ function inspectorSessionHTML(session, si, sel) {
     const running = a && a.status === 'running';
     const isSel = (sel && sel.session.session_id === sid && sel.agentIndex === i) ? ' is-selected' : '';
     const steps = (a.steps || []).length;
+    const errs = (a && a.error_count) || 0;
+    const errBadge = errs > 0
+      ? `<span class="insp-err" title="${errs} ${errs === 1 ? 'error' : 'errors'}">✗${fmtNum(errs)}</span>` : '';
     return `<button type="button" class="insp-agent${isSel}" data-ref="${escHtml(ref)}" data-c="${colorSlot(i)}">
       <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
       <span class="insp-name">${escHtml(agentLabel(a))}</span>
       <span class="insp-sub">${fmtNum(steps)} · ${elapsedSpan(a)}</span>
+      ${errBadge}
     </button>`;
   }).join('');
   return `<div class="insp-sess">
@@ -867,6 +904,7 @@ function inspectorLogHTML(session, agent, agentIndex) {
       <span class="ag-pill ${running ? 'ag-running' : 'ag-done'}">${running ? 'running' : 'done'}</span>
       <span class="insp-d-spacer"></span>
       <span class="insp-d-stat">${fmtNum(steps.length)} steps</span>
+      ${agent.error_count ? `<span class="insp-d-stat insp-d-err" title="tool calls that errored">✗ ${fmtNum(agent.error_count)} ${agent.error_count === 1 ? 'error' : 'errors'}</span>` : ''}
       ${tokens ? `<span class="insp-d-stat">${fmtCompact(tokens)} tok</span>` : ''}
       <span class="insp-d-stat">${elapsedSpan(agent)}</span>
       <span class="insp-d-stat insp-d-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
@@ -1002,7 +1040,8 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   const showHead = tl.playheadX != null && T <= tl.endMs;
   const playhead = showHead
     ? `<line class="tl-playhead" x1="${tl.playheadX.toFixed(1)}" y1="0" x2="${tl.playheadX.toFixed(1)}" y2="${tl.height}"/>` : '';
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next));
+  const agents = flattenSession(session);
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex]));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
@@ -1033,7 +1072,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
 // is-selected / is-new / tl-pending classes so state shows on both sides of the
 // freeze line. A row's phase comes from the playhead: 'active' draws the pulse
 // at the (clamped) bar end, 'pending' ghosts the label (the bar is zero-width).
-function timelineRowHTML(r, tl, selAgentKey, seen, next) {
+function timelineRowHTML(r, tl, selAgentKey, seen, next, agent) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
@@ -1042,6 +1081,14 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next) {
   const barY = r.y + Math.round((r.h - barH) / 2);
   const cx = (r.x + r.w).toFixed(1);
   const cy = (barY + barH / 2).toFixed(1);
+  // A red pip flags an agent that hit ≥1 tool error — but not while pending (it
+  // hasn't run at the playhead T yet, so it can't have errored). It lives in the
+  // frozen gutter (right edge of the label column), not on the bar: a live Gantt
+  // auto-scrolls to "now", which would carry a bar-start pip off-screen.
+  const errs = (agent && agent.error_count) || 0;
+  const errPip = errs > 0 && r.phase !== 'pending'
+    ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
+    : '';
   const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}`;
   const meta = r.phase === 'pending' ? 'not started yet'
     : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
@@ -1049,6 +1096,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next) {
   const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
     <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, 16))}</text>
+    ${errPip}
     <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
   </g>`;
   const chart = `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">

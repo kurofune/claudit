@@ -2070,6 +2070,17 @@
   .dr-title { font-weight: 700; color: var(--ink); font-size: var(--t-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dr-type { font-size: var(--t-1); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); white-space: nowrap; }
   .dr-head .ag-pill { margin-left: auto; }
+  /* Retry-chain affordance: a tool that repeats an earlier errored call. The
+     danger hue ties it to every other error mark (✗ pips, error pill). */
+  .dr-retry {
+    display: inline-flex; align-items: center; gap: var(--s-1); cursor: pointer;
+    font-size: var(--t-1); font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--danger, #e5484d); padding: 2px 8px; border-radius: var(--r-pill, 999px);
+    border: 1px solid color-mix(in oklch, var(--danger, #e5484d) 32%, transparent);
+    background: color-mix(in oklch, var(--danger, #e5484d) 10%, var(--surface));
+  }
+  .dr-retry:hover { background: color-mix(in oklch, var(--danger, #e5484d) 18%, var(--surface)); }
+  .dr-retry-icon { font-size: var(--t-3); line-height: 1; }
   .dr-project { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-4); font-weight: 700; color: var(--ink); }
   .dr-project .icon { width: 16px; height: 16px; color: var(--accent); flex: none; }
   .dr-proj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2263,6 +2274,14 @@
   .insp-dot.is-running { background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
   .insp-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .insp-sub { margin-left: auto; font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  /* Error count badge on an agent card / detail head — danger hue, same as the
+     timeline pip and the ✗ error pill. margin-left auto-yields to insp-sub. */
+  .insp-err {
+    flex: none; font-size: var(--t-1); font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--danger, #e5484d); padding: 0 6px; border-radius: var(--r-pill, 999px);
+    background: color-mix(in oklch, var(--danger, #e5484d) 12%, transparent);
+  }
+  .insp-d-err { color: var(--danger, #e5484d); font-weight: 600; }
   .insp-log { min-height: 0; overflow-y: auto; padding: var(--s-3); }
   .insp-d-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; cursor: pointer; border-radius: var(--r-sm); padding: 2px 4px; }
   .insp-d-head:hover { background: var(--surface-2); }
@@ -2398,6 +2417,9 @@
   .tl-row.is-selected .tl-bar { stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent) 30%, transparent)); }
   .tl-row:hover .tl-bar { stroke: var(--ink-2); }
   .tl-pulse { fill: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
+  /* Red error pip on a bar whose agent hit ≥1 tool error — a thin surface ring
+     keeps it legible on both the accent-soft (main) and plain (sub) bar fills. */
+  .tl-err-pip { fill: var(--danger, #e5484d); stroke: var(--surface); stroke-width: 1.5; }
   /* An agent that hasn't started yet at the playhead: its bar is zero-width, so
      ghost the label to show the lane is reserved for a not-yet-spawned agent. */
   .tl-row.tl-pending .tl-label { opacity: 0.4; }
