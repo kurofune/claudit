@@ -25,6 +25,10 @@ import {
   looksTruncated,
   timelineBounds,
   buildTimeline,
+  agentPhaseAt,
+  playheadBounds,
+  playheadStats,
+  timelineAtTime,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -814,4 +818,178 @@ test('buildTimeline nowX is null when now precedes the window', () => {
   };
   const layout = buildTimeline(session, { nowMs: 0 });
   assert.equal(layout.nowX, null);
+});
+
+// ── agentPhaseAt ────────────────────────────────────────────────────
+test('agentPhaseAt is pending when start > T', () => {
+  const a = { started_at: 500, ended_at: 1000, status: 'done' };
+  assert.equal(agentPhaseAt(a, 300), 'pending');
+});
+
+test('agentPhaseAt is active when start <= T < end', () => {
+  const a = { started_at: 100, ended_at: 1000, status: 'done' };
+  assert.equal(agentPhaseAt(a, 500), 'active');
+});
+
+test('agentPhaseAt is done when T >= ended_at', () => {
+  const a = { started_at: 100, ended_at: 1000, status: 'done' };
+  assert.equal(agentPhaseAt(a, 1500), 'done');
+});
+
+test('agentPhaseAt: a running agent is active for any T at/after start, incl far-future', () => {
+  const a = { started_at: 100, status: 'running' };
+  assert.equal(agentPhaseAt(a, 100), 'active');
+  assert.equal(agentPhaseAt(a, 9_999_999_999), 'active');
+});
+
+test('agentPhaseAt: an unparseable start is pending', () => {
+  const a = { started_at: 'nope', ended_at: 1000, status: 'done' };
+  assert.equal(agentPhaseAt(a, 5000), 'pending');
+});
+
+test('agentPhaseAt: done status with unparseable end is done at T >= start (zero-width)', () => {
+  const a = { started_at: 100, ended_at: 'nope', status: 'done' };
+  assert.equal(agentPhaseAt(a, 100), 'done');
+  assert.equal(agentPhaseAt(a, 500), 'done');
+});
+
+test('agentPhaseAt: boundaries are inclusive — T===start is active, T===end is done', () => {
+  const a = { started_at: 100, ended_at: 1000, status: 'done' };
+  assert.equal(agentPhaseAt(a, 100), 'active'); // T===start
+  assert.equal(agentPhaseAt(a, 1000), 'done');  // T===end
+});
+
+// ── playheadBounds ──────────────────────────────────────────────────
+test('playheadBounds spans min-start..max-effEnd across multiple sessions', () => {
+  const graph = {
+    sessions: [
+      { main: { started_at: 100, ended_at: 400, status: 'done' }, children: [] },
+      { main: { started_at: 50, ended_at: 900, status: 'done' }, children: [] },
+    ],
+  };
+  assert.deepEqual(playheadBounds(graph, 0), { startMs: 50, endMs: 900 });
+});
+
+test('playheadBounds: a running agent extends endMs to nowMs', () => {
+  const graph = {
+    sessions: [
+      { main: { started_at: 100, ended_at: 300, status: 'done' }, children: [
+        { started_at: 200, status: 'running' },
+      ] },
+    ],
+  };
+  assert.deepEqual(playheadBounds(graph, 5000), { startMs: 100, endMs: 5000 });
+});
+
+test('playheadBounds is null for an empty/agent-less/null graph', () => {
+  assert.equal(playheadBounds(null, 0), null);
+  assert.equal(playheadBounds({ sessions: [] }, 0), null);
+  assert.equal(playheadBounds({ sessions: [{ children: [] }] }, 0), null);
+});
+
+// ── playheadStats ───────────────────────────────────────────────────
+test('playheadStats counts mixed pending/active/done at a mid T', () => {
+  const graph = {
+    sessions: [
+      { main: { started_at: 0, ended_at: 1000, status: 'done' }, children: [
+        { started_at: 200, ended_at: 400, status: 'done' }, // done at T=500
+        { started_at: 600, status: 'running' },             // pending at T=500
+      ] },
+    ],
+  };
+  // T=500: main active, c0 done, c1 pending.
+  assert.deepEqual(playheadStats(graph, 500), { pending: 1, active: 1, done: 1 });
+});
+
+test('playheadStats: all-pending before first start, all-done after last end', () => {
+  const graph = {
+    sessions: [
+      { main: { started_at: 100, ended_at: 500, status: 'done' }, children: [
+        { started_at: 200, ended_at: 400, status: 'done' },
+      ] },
+    ],
+  };
+  assert.deepEqual(playheadStats(graph, 0), { pending: 2, active: 0, done: 0 });
+  assert.deepEqual(playheadStats(graph, 9999), { pending: 0, active: 0, done: 2 });
+});
+
+test('playheadStats is zeros for a null/empty graph', () => {
+  assert.deepEqual(playheadStats(null, 100), { pending: 0, active: 0, done: 0 });
+  assert.deepEqual(playheadStats({ sessions: [] }, 100), { pending: 0, active: 0, done: 0 });
+});
+
+// ── timelineAtTime ──────────────────────────────────────────────────
+const playheadSession = {
+  session_id: 's1',
+  main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done' },
+  children: [
+    { kind: 'subagent', started_at: 200, ended_at: 400, status: 'done' },
+    { kind: 'subagent', started_at: 500, status: 'running' },
+  ],
+};
+const playheadOpts = {
+  hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+  minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+};
+
+test('timelineAtTime: T=300 anchor — playheadX, axis, and per-row phase/w/running/x', () => {
+  const t = timelineAtTime(playheadSession, 300, playheadOpts);
+  assert.equal(t.chartX, 100);
+  assert.equal(t.contentW, 400);
+  assert.equal(t.playheadX, 190); // 100 + 300*300/1000
+  assert.equal(t.atMs, 300);
+  // rows[0] main: active (running up to playhead), bar 0..300 → w 90
+  assert.equal(t.rows[0].phase, 'active');
+  assert.equal(t.rows[0].w, 90);
+  assert.equal(t.rows[0].running, true);
+  assert.equal(t.rows[0].x, 100);
+  // rows[1] c0 200..400, T<400 → active, bar 200..300 → w 30
+  assert.equal(t.rows[1].phase, 'active');
+  assert.equal(t.rows[1].w, 30);
+  assert.equal(t.rows[1].running, true);
+  assert.equal(t.rows[1].x, 160);
+  // rows[2] c1 start 500 > 300 → pending
+  assert.equal(t.rows[2].phase, 'pending');
+  assert.equal(t.rows[2].w, 0);
+  assert.equal(t.rows[2].running, false);
+});
+
+test('timelineAtTime: T=450 anchor — c0 done full bar, c1 pending, playheadX', () => {
+  const t = timelineAtTime(playheadSession, 450, playheadOpts);
+  // rows[1] c0 200..400, end 400 <= 450 → done, full bar 200..400 → w 60
+  assert.equal(t.rows[1].phase, 'done');
+  assert.equal(t.rows[1].w, 60);
+  assert.equal(t.rows[1].running, false);
+  // rows[2] c1 start 500 > 450 → pending
+  assert.equal(t.rows[2].phase, 'pending');
+  assert.equal(t.rows[2].w, 0);
+  assert.equal(t.playheadX, 235); // 100 + 300*450/1000
+});
+
+test('timelineAtTime: playheadX is null when T < startMs (session not begun)', () => {
+  const t = timelineAtTime(playheadSession, -50, playheadOpts);
+  assert.equal(t.playheadX, null);
+  // all rows pending before the session starts
+  assert.equal(t.rows[0].phase, 'pending');
+  assert.equal(t.rows[0].w, 0);
+});
+
+test('timelineAtTime: an empty session yields rows:[] and playheadX null', () => {
+  const t = timelineAtTime({ session_id: 'e', main: null, children: [] }, 500, playheadOpts);
+  assert.deepEqual(t.rows, []);
+  assert.equal(t.playheadX, null);
+  assert.equal(t.atMs, 500);
+});
+
+test('timelineAtTime: axis (chartX/contentW/ticks) is identical to buildTimeline regardless of T', () => {
+  const base = buildTimeline(playheadSession, playheadOpts);
+  for (const T of [-100, 0, 300, 700, 5000]) {
+    const t = timelineAtTime(playheadSession, T, playheadOpts);
+    assert.equal(t.chartX, base.chartX);
+    assert.equal(t.contentW, base.contentW);
+    assert.equal(t.chartW, base.chartW);
+    assert.equal(t.startMs, base.startMs);
+    assert.equal(t.endMs, base.endMs);
+    assert.deepEqual(t.ticks, base.ticks);
+  }
 });

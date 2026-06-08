@@ -32,9 +32,9 @@ import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
-  agentLabel, buildEventFeed, buildTimeline, parseTime,
+  agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
-  looksTruncated,
+  looksTruncated, timelineAtTime, playheadBounds, playheadStats,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -112,6 +112,13 @@ let prevTimelineKeys = new Set();
 const timelinePinned = new Map();
 let liveScheduled = false;
 
+// Timeline scrubber state. playheadT is the instant the Gantt is rendered "as
+// of": null means LIVE (the playhead follows now and auto-advances on each
+// refetch); a number pauses it at that absolute epoch-ms, so the bars/counts
+// recompute from events ≤ T (a pure seek, never an incremental replay).
+let playheadT = null;
+let scrubRaf = 0;
+
 const colorSlot = i => ((i % 5) + 1);
 
 export function reset() {
@@ -122,6 +129,7 @@ export function reset() {
   fullCache = {};
   prevTimelineKeys = new Set();
   timelinePinned.clear();
+  playheadT = null;
 }
 
 // paintNav resolves the sidebar metric before the tab is first opened.
@@ -239,8 +247,17 @@ function wireSelection(container) {
       // to the live edge; handle it before the data-ref selection delegate.
       const jump = e.target.closest('[data-tljump]');
       if (jump) { jumpToNow(container, jump.dataset.tljump); return; }
+      // The scrubber's "● live" toggle resumes live playhead-follow.
+      const live = e.target.closest('[data-tllive]');
+      if (live) { setLive(container); return; }
       const el = e.target.closest('[data-ref]');
       if (el) select(container, el.dataset.ref);
+    });
+    // The playhead scrubber fires `input` as it's dragged — recompute the
+    // Gantt "as of" the new instant T (rAF-coalesced so the drag stays smooth).
+    lens.addEventListener('input', e => {
+      const range = e.target.closest('[data-tlrange]');
+      if (range) onScrub(container, range);
     });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -717,42 +734,88 @@ function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex) {
 
 // ── Timeline (Gantt) lens ───────────────────────────────────────────────────
 
-// renderTimeline draws one horizontal Gantt per session: a real time axis with
-// one row per agent, bar = lifetime, overlap = concurrency. Geometry comes from
-// the pure, unit-tested buildTimeline; this layer only emits SVG + wires the
-// live-edge scroll behavior. prevTimelineKeys → an agent that's new this render
-// fades in (the rest don't re-animate).
+// renderTimeline draws the Gantt lens: a scrubber bar on top, then one
+// horizontal Gantt per session (a real time axis, one row per agent, bar =
+// lifetime, overlap = concurrency). Everything is rendered "as of" the playhead
+// instant T (live → now); geometry comes from the pure, unit-tested
+// timelineAtTime. The scrubber is a separate sibling from the .timeline-sessions
+// container so a scrub re-renders ONLY the sessions, leaving the range input
+// (mid-drag) untouched.
 function renderTimeline(sessions) {
   if (sessions.length === 0) return `<div class="ac-idle">No agents to plot.</div>`;
-  const hostW = timelineHostW();
   const nowMs = Date.now();
+  const bounds = playheadBounds(lastGraph, nowMs);
+  const live = playheadT == null;
+  const T = playheadAt(bounds, nowMs);
+  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(lastGraph, T)) : '';
+  return `<div class="timeline-lens">${scrubber}<div class="timeline-sessions">${renderTimelineSessions(sessions, nowMs, T)}</div></div>`;
+}
+
+// playheadAt resolves the instant the Gantt renders at: the paused T, or — when
+// live — the right edge of the global window (now), falling back to nowMs when
+// there are no parseable agent times yet.
+function playheadAt(bounds, nowMs) {
+  if (playheadT != null) return playheadT;
+  return bounds ? bounds.endMs : nowMs;
+}
+
+// renderTimelineSessions emits just the per-session Gantts (the scrubber is
+// rendered/updated separately). prevTimelineKeys → a genuinely NEW agent fades
+// in; phase changes don't, because every agent always has a row (a pending one
+// is simply zero-width), so scrubbing never adds/removes keys.
+function renderTimelineSessions(sessions, nowMs, T) {
+  const hostW = timelineHostW();
   const sel = resolveRef(lastGraph, selectedRef);
   const selAgentKey = sel ? refKey({ sessionId: sel.session.session_id, agentIndex: sel.agentIndex }) : null;
   const seen = prevTimelineKeys;
   const next = new Set();
-  const html = sessions.map((s, si) => timelineSessionHTML(s, si, hostW, nowMs, selAgentKey, seen, next)).join('');
+  const html = sessions.map((s, si) => timelineSessionHTML(s, si, hostW, nowMs, T, selAgentKey, seen, next)).join('');
   prevTimelineKeys = next;
-  return `<div class="timeline-lens">${html}</div>`;
+  return html;
 }
 
-function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next) {
+// scrubberHTML is the sticky control strip: a "● live" toggle, a range input
+// spanning the whole trace window, and a clock + active/done/pending readout —
+// all "as of" the playhead T.
+function scrubberHTML(bounds, T, live, stats) {
+  const span = bounds.endMs - bounds.startMs;
+  const val = Math.max(0, Math.min(span, T - bounds.startMs));
+  return `<div class="tl-scrubber">
+    <button type="button" class="tl-live${live ? ' is-live' : ''}" data-tllive title="Resume live — the playhead follows now">● live</button>
+    <input class="tl-range" type="range" min="0" max="${span}" step="any" value="${val}"
+      data-tlrange data-tlstart="${bounds.startMs}" aria-label="Scrub the timeline to a point in time"/>
+    <span class="tl-clock" data-tlclock>${escHtml(clockTime(T))}</span>
+    <span class="tl-counts" data-tlcounts>${countsHTML(stats)}</span>
+  </div>`;
+}
+
+function countsHTML(s) {
+  return `<span class="tlc tlc-active" title="agents active at the playhead">▶ ${fmtNum(s.active)}</span>` +
+    `<span class="tlc tlc-done" title="agents finished by the playhead">✓ ${fmtNum(s.done)}</span>` +
+    `<span class="tlc tlc-pending" title="agents not yet started at the playhead">○ ${fmtNum(s.pending)}</span>`;
+}
+
+function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
   const sid = session.session_id || '';
-  const tl = buildTimeline(session, { hostW, nowMs });
-  const running = tl.rows.some(r => r.running);
+  const tl = timelineAtTime(session, T, { hostW, nowMs });
   // The rows start at y = axisH (buildTimeline), so the first row's top is the
   // axis baseline — tick labels sit above it, gridlines run from it down.
   const axisY = tl.rows.length ? tl.rows[0].y : 20;
 
   // The agent-label column (x: 0 → chartX) is frozen as its own SVG; the chart
-  // (ticks/bars/now-line) lives in a separate horizontally-scrolling SVG whose
+  // (ticks/bars/playhead) lives in a separate horizontally-scrolling SVG whose
   // viewBox starts at chartX, so panning the chart never carries the labels off.
   const gutterW = tl.chartX;
   const chartW = tl.contentW - tl.chartX;
 
   const ticks = tl.ticks.map(tk =>
     `<g class="tl-tick"><line x1="${tk.x.toFixed(1)}" y1="${axisY}" x2="${tk.x.toFixed(1)}" y2="${tl.height}"/><text x="${(tk.x + 3).toFixed(1)}" y="${(axisY - 7).toFixed(1)}">${escHtml(clockTime(tk.t))}</text></g>`).join('');
-  const nowLine = running && tl.nowX != null
-    ? `<line class="tl-now" x1="${tl.nowX.toFixed(1)}" y1="0" x2="${tl.nowX.toFixed(1)}" y2="${tl.height}"/>` : '';
+  // The playhead replaces the old now-line: one vertical line at T. Hidden when
+  // T precedes the session (playheadX null) or the session finished before T
+  // (T past its end → the line would just pin to the right edge, redundant).
+  const showHead = tl.playheadX != null && T <= tl.endMs;
+  const playhead = showHead
+    ? `<line class="tl-playhead" x1="${tl.playheadX.toFixed(1)}" y1="0" x2="${tl.playheadX.toFixed(1)}" y2="${tl.height}"/>` : '';
   const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
@@ -771,7 +834,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next)
         <svg class="timeline-svg" viewBox="${tl.chartX} 0 ${chartW} ${tl.height}" width="${chartW}" height="${tl.height}" role="img" aria-label="Agent timeline">
           <g class="tl-grid">${ticks}</g>
           <g class="tl-rows">${chartRows}</g>
-          ${nowLine}
+          ${playhead}
         </svg>
       </div>
     </div>
@@ -781,17 +844,21 @@ function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next)
 // timelineRowHTML splits one agent row into two synchronized <g>s: a `gutter`
 // piece (frozen label column) and a `chart` piece (the scrolling bar). Both
 // carry the same data-ref so a click in either selects the row, and both get the
-// is-selected / is-new classes so state shows on both sides of the freeze line.
+// is-selected / is-new / tl-pending classes so state shows on both sides of the
+// freeze line. A row's phase comes from the playhead: 'active' draws the pulse
+// at the (clamped) bar end, 'pending' ghosts the label (the bar is zero-width).
 function timelineRowHTML(r, tl, selAgentKey, seen, next) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
+  const pending = r.phase === 'pending' ? ' tl-pending' : '';
   const barH = Math.max(6, r.h - 10);
   const barY = r.y + Math.round((r.h - barH) / 2);
   const cx = (r.x + r.w).toFixed(1);
   const cy = (barY + barH / 2).toFixed(1);
-  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}`;
-  const meta = r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
+  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}`;
+  const meta = r.phase === 'pending' ? 'not started yet'
+    : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
   const labelY = (r.y + r.h / 2 + 4).toFixed(1);
   const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
@@ -858,6 +925,48 @@ function jumpToNow(container, sid) {
   const sess = sc.closest('.timeline-sess');
   const jump = sess && sess.querySelector('[data-tljump]');
   if (jump) jump.hidden = true;
+}
+
+// ── playhead scrubber ─────────────────────────────────────────────────────
+
+// setLive resumes live mode: the playhead follows "now" and auto-advances on
+// each refetch. A full re-render rebuilds the scrubber with the thumb at the
+// right edge and every bar grown to the present.
+function setLive(container) {
+  playheadT = null;
+  renderActive(container, true);
+}
+
+// onScrub handles a drag of the range input: it parks the playhead at the picked
+// absolute instant (T = window start + slider value), drops live mode, and
+// schedules a single rAF repaint so a fast drag coalesces to one frame.
+function onScrub(container, range) {
+  const start = Number(range.dataset.tlstart);
+  playheadT = start + Number(range.value);
+  const liveBtn = container.querySelector('.tl-live');
+  if (liveBtn) liveBtn.classList.remove('is-live');
+  if (scrubRaf) return;
+  scrubRaf = requestAnimationFrame(() => { scrubRaf = 0; renderScrub(container); });
+}
+
+// renderScrub repaints ONLY the session Gantts + the clock/counts readout for
+// the current playhead T — it deliberately leaves the scrubber's range input
+// alone so the in-progress drag isn't interrupted, and preserves each Gantt's
+// horizontal scroll so seeking through time never yanks the viewport sideways.
+function renderScrub(container) {
+  const sessions = (lastGraph && lastGraph.sessions) || [];
+  const T = playheadT;
+  const lensHost = container.querySelector('.subview[data-subview="timeline"]');
+  const host = container.querySelector('.timeline-sessions');
+  if (host && lensHost) {
+    const memo = captureState(lensHost);
+    host.innerHTML = renderTimelineSessions(sessions, Date.now(), T);
+    restoreState(lensHost, memo);
+  }
+  const clock = container.querySelector('[data-tlclock]');
+  if (clock) clock.textContent = clockTime(T);
+  const counts = container.querySelector('[data-tlcounts]');
+  if (counts) counts.innerHTML = countsHTML(playheadStats(lastGraph, T));
 }
 
 // ── preserve scroll / open-rows across a live re-render ────────────────────

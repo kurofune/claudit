@@ -254,6 +254,45 @@ export function timelineBounds(agents, nowMs) {
   return { startMs, endMs };
 }
 
+// agentPhaseAt classifies what phase an agent is in as of instant T, purely
+// from its own timestamps. 'pending' before it starts (or with an unparseable
+// start), 'active' while it runs, 'done' once it has ended. A running agent
+// (no end yet) is active for any T at or after its start. Boundaries are
+// inclusive: T === start is active, T === end is done.
+export function agentPhaseAt(agent, T) {
+  const start = parseTime(agent && agent.started_at);
+  if (Number.isNaN(start) || start > T) return 'pending';
+  if (agent && agent.status === 'running') return 'active';
+  let end = parseTime(agent && agent.ended_at);
+  if (Number.isNaN(end) || end < start) end = start;
+  return T >= end ? 'done' : 'active';
+}
+
+// playheadBounds returns the global scrub range [startMs, endMs] over every
+// agent of every session — the window the playhead slider spans. Flattens all
+// sessions into one agent array and delegates to timelineBounds (so a running
+// agent extends endMs to nowMs). Null for a null/empty/agent-less graph.
+export function playheadBounds(graph, nowMs) {
+  const sessions = (graph && graph.sessions) || [];
+  const allAgents = sessions.flatMap(flattenSession);
+  return timelineBounds(allAgents, nowMs);
+}
+
+// playheadStats counts how many agents across every session are pending /
+// active / done as of instant T, classifying each via agentPhaseAt. Zeros for
+// a null/empty graph. Before the earliest start everything is pending; after
+// the latest end everything is done.
+export function playheadStats(graph, T) {
+  const out = { pending: 0, active: 0, done: 0 };
+  const sessions = (graph && graph.sessions) || [];
+  for (const s of sessions) {
+    for (const a of flattenSession(s)) {
+      out[agentPhaseAt(a, T)]++;
+    }
+  }
+  return out;
+}
+
 // buildTimeline computes a per-session horizontal Gantt layout: one row per
 // agent (main first at depth 0, each sub-agent at depth 1), each bar placed on
 // a real time axis spanning the session's lifetime, plus axis ticks and a
@@ -329,6 +368,43 @@ export function buildTimeline(session, opts = {}) {
     chartX, chartW, contentW, width: contentW, height,
     nowX, rows, ticks,
   };
+}
+
+// timelineAtTime is buildTimeline scrubbed to an instant T: it reuses the same
+// time window/scale (so the axis and ticks never reflow as the playhead moves)
+// but recomputes each agent bar as of T — a not-yet-started agent collapses to
+// width 0, an in-flight agent's bar grows only up to the playhead, and a
+// finished agent keeps its real bar. Adds `playheadX` (the playhead line's x,
+// null when the session hasn't begun at T) and `atMs` (the T it was built for).
+// Rows stay 1:1 with flattenSession order so selection indices still line up.
+export function timelineAtTime(session, T, opts = {}) {
+  const base = buildTimeline(session, opts);
+  if (base.rows.length === 0) {
+    return { ...base, rows: [], playheadX: null, atMs: T };
+  }
+  const { minBlock = 3 } = opts;
+  const scale = makeTimeScale({
+    startMs: base.startMs, endMs: base.endMs, width: base.chartW, minBlock,
+  });
+  const agents = flattenSession(session);
+  const rows = agents.map((a, i) => {
+    const start = parseTime(a.started_at);
+    const phase = agentPhaseAt(a, T);
+    if (phase === 'pending') {
+      return { ...base.rows[i], w: 0, phase: 'pending', running: false };
+    }
+    let clampEnd;
+    if (phase === 'active') {
+      clampEnd = T;
+    } else {
+      const end = parseTime(a.ended_at);
+      clampEnd = (Number.isNaN(end) || end < start) ? start : end;
+    }
+    const bar = agentBar({ start, end: clampEnd, lane: 0 }, scale);
+    return { ...base.rows[i], w: bar.width, phase, running: phase === 'active' };
+  });
+  const playheadX = T < base.startMs ? null : base.chartX + scale.x(T);
+  return { ...base, rows, playheadX, atMs: T };
 }
 
 // buildFlowLayout computes node + edge geometry for the Flow graph view: the
