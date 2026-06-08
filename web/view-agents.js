@@ -35,7 +35,7 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
-  filterTrace, specActive, parseRefKey, detectRetries,
+  filterTrace, specActive, parseRefKey, detectRetries, spawnTargetIndex,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -630,6 +630,17 @@ function drawerHTML(p, retry = null) {
   const typeLabel = p.type === 'tool' ? 'tool' : p.type === 'step' ? 'turn' : (p.agentKind === 'main' ? 'main agent' : 'sub-agent');
   const desc = p.description ? `<p class="dr-desc">${escHtml(p.description)}</p>` : '';
 
+  // An Agent call links straight to the sub-agent it launched, with that
+  // sub-agent's rolled-up cost/errors — one decision's blast radius, one click
+  // away. Only a navigable child (in this window) gets a link.
+  const spawnRow = (p.spawned && p.spawned.childRef)
+    ? `<button type="button" class="dr-spawn" data-ref="${escHtml(p.spawned.childRef)}" title="Jump to the sub-agent this call launched">
+         <span class="dr-spawn-icon" aria-hidden="true">↳</span>
+         <span class="dr-spawn-label">sub-agent</span>
+         <span class="dr-spawn-stats">+${escHtml(fmtMoney(p.spawned.cost_usd || 0))}${p.spawned.error_count ? ` · ${fmtNum(p.spawned.error_count)} ${p.spawned.error_count === 1 ? 'error' : 'errors'}` : ''}</span>
+       </button>`
+    : '';
+
   // Compact metric chips — only the ones that apply to this kind.
   const metrics = [
     drMetric('cost', p.cost_usd ? fmtMoney(p.cost_usd) : ''),
@@ -657,6 +668,7 @@ function drawerHTML(p, retry = null) {
       ${statusPill(p.status)}
     </div>
     ${retryRow}
+    ${spawnRow}
     <div class="dr-project" title="${escHtml(p.cwd)}">${labelIcon('overview')}<span class="dr-proj-name">${escHtml(p.project || '—')}</span></div>
     <button type="button" class="dr-sid" data-copy="${escHtml(p.sessionId)}" title="Copy session id&#10;${escHtml(p.sessionId)}">
       <span class="dr-sid-id">${escHtml(p.sessionId || '—')}</span>
@@ -896,7 +908,7 @@ function inspectorLogHTML(session, agent, agentIndex) {
   const steps = (agent.steps || []);
   const stepHTML = steps.length === 0
     ? `<div class="ac-idle">No assistant turns recorded.</div>`
-    : steps.map((st, i) => inspectorStepHTML(st, i, steps.length, sid, agentIndex)).join('');
+    : steps.map((st, i) => inspectorStepHTML(st, i, steps.length, sid, agentIndex, session)).join('');
   return `<div class="insp-d">
     <div class="insp-d-head${agentRef === selectedRef ? ' is-selected' : ''}" data-ref="${escHtml(agentRef)}" tabindex="0" role="button">
       <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
@@ -914,12 +926,12 @@ function inspectorLogHTML(session, agent, agentIndex) {
   </div>`;
 }
 
-function inspectorStepHTML(step, i, total, sid, agentIndex) {
+function inspectorStepHTML(step, i, total, sid, agentIndex, session) {
   const time = clockTime(parseTime(step.timestamp));
   const ref = refKey({ sessionId: sid, agentIndex, stepIndex: i });
   const sel = ref === selectedRef ? ' is-selected' : '';
   const tools = (step.tools || []);
-  const toolHTML = tools.map((t, j) => toolRowHTML(t, sid, agentIndex, i, j)).join('');
+  const toolHTML = tools.map((t, j) => toolRowHTML(t, sid, agentIndex, i, j, session)).join('');
   const model = step.model ? `<span class="insp-step-model">${escHtml(shortModel(step.model))}</span>` : '';
   const reasoned = (step.thinking || step.text)
     ? `<span class="insp-step-reason" title="this turn has reasoning — click to read it">✦ reasoned</span>` : '';
@@ -935,7 +947,7 @@ function inspectorStepHTML(step, i, total, sid, agentIndex) {
   </div>`;
 }
 
-function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex) {
+function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex, session) {
   const name = tool.name || '';
   const ref = refKey({ sessionId: sid, agentIndex, stepIndex, toolIndex });
   const sel = ref === selectedRef ? ' is-selected' : '';
@@ -943,17 +955,58 @@ function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex) {
   const status = tool.status === 'error'
     ? '<span class="tr-status tr-err" title="errored">✗</span>'
     : tool.status === 'ok' ? '<span class="tr-status tr-ok" title="ok">✓</span>' : '';
+  // A spawning Agent call shows its sub-agent's cost inline (the blast radius
+  // of one decision), with the full clickable rollup nested directly beneath.
+  const costBadge = tool.spawned
+    ? `<span class="tr-spawn-cost" title="cost of the sub-agent this call launched">+${escHtml(fmtMoney(tool.spawned.cost_usd || 0))}</span>` : '';
+  const spawnRow = tool.spawned ? spawnRowHTML(tool, session) : '';
   const hasBody = (tool.input && tool.input !== '') || (tool.output && tool.output !== '');
   const tkey = `${name}:${tool.detail || ''}:${(tool.input || '').slice(0, 24)}`;
   if (!hasBody) {
-    return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</span></div>`;
+    return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</span></div>${spawnRow}`;
   }
   const input = tool.input ? `<div class="tr-io"><span class="tr-io-k">in</span><pre>${escHtml(tool.input)}</pre></div>` : '';
   const output = tool.output ? `<div class="tr-io tr-io-out${tool.status === 'error' ? ' is-err' : ''}"><span class="tr-io-k">out</span><pre>${escHtml(tool.output)}</pre></div>` : '';
   return `<details class="tr tr-exp${sel}" data-tkey="${escHtml(tkey)}" data-ref="${escHtml(ref)}">
-    <summary class="tr-row"><span class="tr-caret">▸</span>${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</summary>
+    <summary class="tr-row"><span class="tr-caret">▸</span>${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</summary>
     <div class="tr-body">${input}${output}</div>
-  </details>`;
+  </details>${spawnRow}`;
+}
+
+// spawnRowHTML renders the nested sub-agent affordance under a spawning Agent
+// call: the child's label plus the rolled-up "+$X · N tools · M errors across
+// sub-agent". When the sub-agent is in this window it's a button that jumps the
+// shared selection to it (data-ref = the child's agent refKey); otherwise it's
+// a static badge. This is the Tree lens's nesting — each sub-agent shown under
+// the exact step/tool that launched it.
+function spawnRowHTML(tool, session) {
+  const sp = tool.spawned;
+  if (!sp || !session) return '';
+  const idx = spawnTargetIndex(session, sp.agent_ref);
+  const child = idx == null ? null : flattenSession(session)[idx];
+  const parts = [`+${fmtMoney(sp.cost_usd || 0)}`];
+  if (child) {
+    const n = (child.steps || []).reduce((sum, st) => sum + (st.tools || []).length, 0);
+    parts.push(`${fmtNum(n)} ${n === 1 ? 'tool' : 'tools'}`);
+  }
+  const errs = sp.error_count || 0;
+  if (errs) parts.push(`${fmtNum(errs)} ${errs === 1 ? 'error' : 'errors'}`);
+  const stats = `${parts.join(' · ')} across sub-agent`;
+  const label = child ? agentLabel(child) : 'sub-agent';
+  if (idx == null) {
+    return `<div class="tr-spawn" title="This sub-agent isn't in the current window">
+      <span class="tr-spawn-arrow" aria-hidden="true">↳</span>
+      <span class="tr-spawn-label">${escHtml(label)}</span>
+      <span class="tr-spawn-stats">${escHtml(stats)}</span>
+    </div>`;
+  }
+  const childRef = refKey({ sessionId: session.session_id || '', agentIndex: idx });
+  const selCls = childRef === selectedRef ? ' is-selected' : '';
+  return `<button type="button" class="tr-spawn is-link${selCls}" data-ref="${escHtml(childRef)}" title="Jump to this sub-agent">
+    <span class="tr-spawn-arrow" aria-hidden="true">↳</span>
+    <span class="tr-spawn-label">${escHtml(label)}</span>
+    <span class="tr-spawn-stats">${escHtml(stats)}</span>
+  </button>`;
 }
 
 // ── Timeline (Gantt) lens ───────────────────────────────────────────────────
