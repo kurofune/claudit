@@ -743,11 +743,19 @@ function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next)
   // axis baseline — tick labels sit above it, gridlines run from it down.
   const axisY = tl.rows.length ? tl.rows[0].y : 20;
 
+  // The agent-label column (x: 0 → chartX) is frozen as its own SVG; the chart
+  // (ticks/bars/now-line) lives in a separate horizontally-scrolling SVG whose
+  // viewBox starts at chartX, so panning the chart never carries the labels off.
+  const gutterW = tl.chartX;
+  const chartW = tl.contentW - tl.chartX;
+
   const ticks = tl.ticks.map(tk =>
     `<g class="tl-tick"><line x1="${tk.x.toFixed(1)}" y1="${axisY}" x2="${tk.x.toFixed(1)}" y2="${tl.height}"/><text x="${(tk.x + 3).toFixed(1)}" y="${(axisY - 7).toFixed(1)}">${escHtml(clockTime(tk.t))}</text></g>`).join('');
   const nowLine = running && tl.nowX != null
     ? `<line class="tl-now" x1="${tl.nowX.toFixed(1)}" y1="0" x2="${tl.nowX.toFixed(1)}" y2="${tl.height}"/>` : '';
-  const rows = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next)).join('');
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next));
+  const gutterRows = parts.map(p => p.gutter).join('');
+  const chartRows = parts.map(p => p.chart).join('');
 
   return `<div class="timeline-sess">
     <div class="timeline-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
@@ -755,16 +763,25 @@ function timelineSessionHTML(session, si, hostW, nowMs, selAgentKey, seen, next)
       <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
       <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>
-    <div class="timeline-scroll" data-tlscroll="${escHtml(sid)}">
-      <svg class="timeline-svg" viewBox="0 0 ${tl.contentW} ${tl.height}" width="${tl.contentW}" height="${tl.height}" role="img" aria-label="Agent timeline">
-        <g class="tl-grid">${ticks}</g>
-        <g class="tl-rows">${rows}</g>
-        ${nowLine}
+    <div class="timeline-body">
+      <svg class="timeline-gutter" viewBox="0 0 ${gutterW} ${tl.height}" width="${gutterW}" height="${tl.height}" role="img" aria-label="Agent labels">
+        <g class="tl-rows">${gutterRows}</g>
       </svg>
+      <div class="timeline-scroll" data-tlscroll="${escHtml(sid)}">
+        <svg class="timeline-svg" viewBox="${tl.chartX} 0 ${chartW} ${tl.height}" width="${chartW}" height="${tl.height}" role="img" aria-label="Agent timeline">
+          <g class="tl-grid">${ticks}</g>
+          <g class="tl-rows">${chartRows}</g>
+          ${nowLine}
+        </svg>
+      </div>
     </div>
   </div>`;
 }
 
+// timelineRowHTML splits one agent row into two synchronized <g>s: a `gutter`
+// piece (frozen label column) and a `chart` piece (the scrolling bar). Both
+// carry the same data-ref so a click in either selects the row, and both get the
+// is-selected / is-new classes so state shows on both sides of the freeze line.
 function timelineRowHTML(r, tl, selAgentKey, seen, next) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
@@ -775,14 +792,20 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next) {
   const cy = (barY + barH / 2).toFixed(1);
   const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}`;
   const meta = r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
-  return `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">
-    <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.contentW}" height="${r.h}"/>
-    <text class="tl-label" x="${r.labelX}" y="${(r.y + r.h / 2 + 4).toFixed(1)}">${escHtml(clip(r.label, 16))}</text>
+  const labelY = (r.y + r.h / 2 + 4).toFixed(1);
+  const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
+    <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
+    <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, 16))}</text>
+    <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
+  </g>`;
+  const chart = `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">
+    <rect class="tl-rowbg" x="${tl.chartX}" y="${r.y}" width="${tl.contentW - tl.chartX}" height="${r.h}"/>
     <rect class="tl-bar" x="${r.x.toFixed(1)}" y="${barY}" width="${r.w.toFixed(1)}" height="${barH}" rx="3">
       <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
     </rect>
     ${r.running ? `<circle class="tl-pulse" cx="${cx}" cy="${cy}" r="3.5"/>` : ''}
   </g>`;
+  return { gutter, chart };
 }
 
 function timelineHostW() {

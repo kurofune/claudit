@@ -2228,8 +2228,15 @@
   .timeline-jump:hover { background: color-mix(in oklch, var(--accent-2) 20%, var(--surface)); }
   .timeline-jump[hidden] { display: none; }
 
-  /* Horizontal scroll: a long session's Gantt overflows; short ones fit. */
-  .timeline-scroll { overflow-x: auto; overflow-y: hidden; }
+  /* The agent-label column is frozen: the gutter SVG stays put while the chart
+     SVG beside it scrolls horizontally for long sessions (short ones fit). */
+  .timeline-body { display: flex; align-items: flex-start; }
+  .timeline-gutter {
+    display: block; flex: 0 0 auto;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .timeline-scroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; }
   .timeline-svg { display: block; }
 
   .tl-tick line { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
