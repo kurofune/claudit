@@ -28,11 +28,14 @@ type AgentSession struct {
 	CWD       string `json:"cwd"`
 	// StartedAt/EndedAt span every agent in the session; CostUSD is the sum
 	// across the main agent and all its sub-agents.
-	StartedAt time.Time   `json:"started_at"`
-	EndedAt   time.Time   `json:"ended_at"`
-	CostUSD   float64     `json:"cost_usd"`
-	Main      *AgentNode  `json:"main"`
-	Children  []AgentNode `json:"children"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	CostUSD   float64   `json:"cost_usd"`
+	// ErrorCount is the sum of every agent's ErrorCount in this session —
+	// the main agent plus all its sub-agents.
+	ErrorCount int         `json:"error_count"`
+	Main       *AgentNode  `json:"main"`
+	Children   []AgentNode `json:"children"`
 }
 
 // AgentNode is one agent — the main session agent, or a sub-agent. Kind is
@@ -50,9 +53,12 @@ type AgentNode struct {
 	// Status is "running" if the agent's last step is within opts.ActiveWindow
 	// of the newest turn in the snapshot, else "done". CurrentTool is the last
 	// tool the agent invoked, surfaced only while running.
-	Status      string      `json:"status"`
-	CurrentTool string      `json:"current_tool"`
-	Steps       []AgentStep `json:"steps"`
+	Status      string `json:"status"`
+	CurrentTool string `json:"current_tool"`
+	// ErrorCount is the number of this agent's tool calls whose Status is
+	// "error" — a heat signal for "where did it go wrong" across the trace.
+	ErrorCount int         `json:"error_count"`
+	Steps      []AgentStep `json:"steps"`
 }
 
 // AgentStep is one assistant turn within an agent's timeline.
@@ -198,6 +204,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			}
 			as.CostUSD += n.cost
 			node := finalizeNode(n, opts)
+			as.ErrorCount += node.ErrorCount
 			if node.Kind == "subagent" {
 				as.Children = append(as.Children, node)
 			} else {
@@ -252,14 +259,23 @@ func finalizeNode(n *nodeAccum, opts Options) AgentNode {
 			n.steps[i].DurationMs = d.Milliseconds()
 		}
 	}
+	errorCount := 0
+	for _, step := range n.steps {
+		for _, tool := range step.Tools {
+			if tool.Status == "error" {
+				errorCount++
+			}
+		}
+	}
 	node := AgentNode{
-		Kind:      "main",
-		StartedAt: n.started,
-		EndedAt:   n.ended,
-		CostUSD:   n.cost,
-		Tokens:    n.tokens,
-		Status:    "done",
-		Steps:     n.steps,
+		Kind:       "main",
+		StartedAt:  n.started,
+		EndedAt:    n.ended,
+		CostUSD:    n.cost,
+		Tokens:     n.tokens,
+		Status:     "done",
+		ErrorCount: errorCount,
+		Steps:      n.steps,
 	}
 	// Liveness: an agent whose last step is within ActiveWindow of Now is
 	// still "running"; surface its most recent tool as the current activity.

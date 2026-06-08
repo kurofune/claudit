@@ -398,6 +398,73 @@ func TestBuildAgentGraph_RedactsToolInput(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_NodeErrorCount(t *testing.T) {
+	// A node's ErrorCount counts only its tool calls whose Status is "error";
+	// an "ok" call alongside an errored one yields ErrorCount == 1.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.ToolUses = []parse.ToolUse{
+		{ID: "toolu_bad", Name: "Bash", Input: "go test"},
+		{ID: "toolu_ok", Name: "Read", Input: "main.go"},
+	}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "toolu_bad", IsError: true, Content: "FAIL"},
+			{ToolUseID: "toolu_ok", IsError: false, Content: "ok"},
+		},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m := g.Sessions[0].Main
+	if m == nil {
+		t.Fatalf("want a main node, got nil")
+	}
+	if m.ErrorCount != 1 {
+		t.Errorf("node ErrorCount = %d, want 1", m.ErrorCount)
+	}
+}
+
+func TestBuildAgentGraph_SessionErrorCountSumsNodes(t *testing.T) {
+	// The session-level ErrorCount totals errored tool calls across the main
+	// agent and every sub-agent — one error in main plus one in a sub-agent
+	// rolls up to 2.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	mainSrc := filepath.Join(root, "s1.jsonl")
+	subSrc := writeSubagent(t, root, "s1", "abc", `{"agentType":"Explore","description":"e"}`)
+
+	mainTurn := mkTurn("a1", "s1", mainSrc, t0)
+	mainTurn.ToolUses = []parse.ToolUse{{ID: "m_bad", Name: "Bash", Input: "go test"}}
+	subTurn := mkTurn("b1", "s1", subSrc, t0.Add(time.Second))
+	subTurn.Sidechain = true
+	subTurn.ToolUses = []parse.ToolUse{{ID: "s_bad", Name: "Read", Input: "x.go"}}
+
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{mainTurn, subTurn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "m_bad", IsError: true, Content: "boom"},
+			{ToolUseID: "s_bad", IsError: true, Content: "boom"},
+		},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(g.Sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(g.Sessions))
+	}
+	if g.Sessions[0].ErrorCount != 2 {
+		t.Errorf("session ErrorCount = %d, want 2", g.Sessions[0].ErrorCount)
+	}
+}
+
 func findSession(g AgentGraph, id string) *AgentSession {
 	for i := range g.Sessions {
 		if g.Sessions[i].SessionID == id {
