@@ -6,7 +6,7 @@ Update the **Status** line and **Progress log** as each phase lands. Build one p
 time — each phase section below is self-contained so it can be picked up cold without
 re-reading the others.
 
-**Status:** Phases 1 ✅, 2 ✅, 3 ✅ & 4 ✅ complete (tests green, browser-verified). Decisions locked (see below).
+**Status:** Phases 1 ✅, 2 ✅, 3 ✅, 4 ✅ & 5 ✅ complete (tests green, browser-verified). Decisions locked (see below).
 
 ---
 
@@ -158,7 +158,7 @@ thing that changes.
 **Done when.** The Timeline lens shows agents on a real time axis with correct overlap; live
 runs grow at the right edge without yanking the viewport; bars drill into the drawer.
 
-## Phase 5 — Load-full-on-demand  *(backend endpoint, TDD)*  — **Status: not started**
+## Phase 5 — Load-full-on-demand  *(backend endpoint, TDD)*  — **Status: ✅ complete**
 
 **Goal.** True "audit everything" without bloating the default payload.
 
@@ -269,3 +269,28 @@ anywhere is always correct; live = the playhead at "now".
   not a blocker): the left agent-label gutter scrolls with the chart, so a session followed
   to the live edge scrolls its labels off — a frozen first-column is the natural follow-up.
   Not yet committed — staging is the user's call.
+- 2026-06-07 — Phase 5 done (backend endpoint TDD + frontend-logic TDD + UI browser-verify).
+  **Finding that scoped the work:** reasoning (thinking/text) is *already* full in the payload
+  (`extractAssistantText` never capped it) — only tool **Input** and **Output** truncate
+  (`toolInputMaxChars`/`toolResultMaxChars` = 2000 runes). So load-full is precisely about tool
+  I/O. **Addressing:** by `session` + `tool_use id` — the id is the natural on-disk locator, so
+  it's now threaded to the wire (`aggregate.ToolInvocation.ID` json `id,omitempty`, set to the
+  first occurrence's id under dedup; +1 test) and into the drawer payload
+  (`buildDrawerPayload.toolId`; +2 jstest → 101 total). New pure reader
+  `parse.FindToolUseDetail(r, toolUseID)` streams a session JSONL and returns the UNtruncated
+  input/output/status (refactored `extractToolInput` → uncapped `extractToolInputFull` + capping
+  wrapper; +5 parse tests). New serve endpoint **`GET /_claudit/api/agents/full?session=&tool=`**
+  (`handleAPIAgentsFull`): resolves the source file from the *trusted snapshot* (matched by
+  session+tool_use id — never a user-supplied path, so no traversal surface), reads it back,
+  honors `?redact`; 405/400/404/redact/untruncated all tested (+5 serve tests). Frontend: a
+  **"show full"** toggle (`drIOSection` + `loadFull` in `view-agents.js`, `fetchAgentToolFull`
+  in `api.js`) appears on a tool's Input/Output **only when the snippet was truncated**
+  (`looksTruncated` — detects the "…" marker) **and** in serve mode; clicking fetches the full
+  content and swaps the `<pre>`, removing the button. **Static report degrades clearly, not
+  silently:** `isServeMode()` (absence of `window.__claudit_static_data`) swaps the button for a
+  dim **"snippet only"** label. Browser-verified with playwright `eval`: the toggle renders on a
+  truncated Output, clicking it grew the `<pre>` 2001→11508 chars (ellipsis gone, button
+  removed) on a done session; static-mode sim showed the "snippet only" note and no button.
+  JS **101/101**, Go all green, gofmt clean. **Known limitation** (deferred): for a *live*
+  session the periodic drawer repaint reverts loaded-full content to the snippet on the next SSE
+  tick — re-click to reload; a "sticky full" flag on the selection would fix it.
