@@ -134,7 +134,7 @@ func TestSubagentMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(subDir+"/agent-a4efdd2.meta.json",
-		[]byte(`{"agentType":"Explore","description":"find references"}`), 0o644); err != nil {
+		[]byte(`{"agentType":"Explore","description":"find references","toolUseId":"toolu_01N5q2"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,6 +144,9 @@ func TestSubagentMeta(t *testing.T) {
 	m, ok := ReadSubagentMeta(jsonl)
 	if !ok || m.AgentType != "Explore" || m.Description != "find references" {
 		t.Errorf("meta: %+v ok=%v", m, ok)
+	}
+	if m.ToolUseID != "toolu_01N5q2" {
+		t.Errorf("ToolUseID = %q, want %q", m.ToolUseID, "toolu_01N5q2")
 	}
 
 	noMeta := dir + "/abc/subagents/agent-zzz.jsonl"

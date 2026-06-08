@@ -525,6 +525,10 @@ func IsSubagentFile(path string) bool {
 type SubagentMeta struct {
 	AgentType   string
 	Description string
+	// ToolUseID is the id of the Agent tool_use in the parent session that
+	// launched this sub-agent — the exact reverse link from child to the
+	// spawning call. Empty for older metas that predate the field.
+	ToolUseID string
 }
 
 // ReadSubagentMeta loads the sibling .meta.json next to jsonlPath. Returns
@@ -538,11 +542,16 @@ func ReadSubagentMeta(jsonlPath string) (SubagentMeta, bool) {
 	var raw struct {
 		AgentType   string `json:"agentType"`
 		Description string `json:"description"`
+		ToolUseID   string `json:"toolUseId"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return SubagentMeta{}, false
 	}
-	return SubagentMeta{AgentType: raw.AgentType, Description: raw.Description}, true
+	return SubagentMeta{
+		AgentType:   raw.AgentType,
+		Description: raw.Description,
+		ToolUseID:   raw.ToolUseID,
+	}, true
 }
 
 // SubagentTypeFor returns the agentType from the sibling agent-*.meta.json,
