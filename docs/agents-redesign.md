@@ -6,7 +6,7 @@ Update the **Status** line and **Progress log** as each phase lands. Build one p
 time — each phase section below is self-contained so it can be picked up cold without
 re-reading the others.
 
-**Status:** Phase 1 not started. Decisions locked (see below).
+**Status:** Phases 1 ✅ & 2 ✅ complete (tests green, browser-verified). Decisions locked (see below).
 
 ---
 
@@ -89,7 +89,7 @@ Graph (https://arize.com/blog/new-in-arize-ax-experiment-comparisons-better-data
 
 ---
 
-## Phase 1 — Capture reasoning text  *(backend, TDD)*  — **Status: not started**
+## Phase 1 — Capture reasoning text  *(backend, TDD)*  — **Status: ✅ complete**
 
 **Goal.** Close the one real data gap so tool-less turns become auditable.
 
@@ -106,7 +106,7 @@ Graph (https://arize.com/blog/new-in-arize-ax-experiment-comparisons-better-data
 **Done when.** A turn with no tool call carries its reasoning text through to the
 `/_claudit/api/agents` payload; `--redact` masks it; tests green.
 
-## Phase 2 — Selection spine + detail drawer + project-first  *(frontend-logic TDD + UI browser-verify)*  — **Status: not started**
+## Phase 2 — Selection spine + detail drawer + project-first  *(frontend-logic TDD + UI browser-verify)*  — **Status: ✅ complete**
 
 **Goal.** The "I can finally drill in" win. Built directly in the unified shell so it's not
 throwaway.
@@ -201,3 +201,29 @@ anywhere is always correct; live = the playhead at "now".
 
 - 2026-06-07 — Roadmap captured. Research + data-model audit done; decisions locked
   (unify + drawer, capture reasoning, snippet+load-full, expert-sequenced).
+- 2026-06-07 — Phase 1 done (TDD, red-green-refactor). Real sessions carry distinct
+  `thinking` / `text` / `tool_use` blocks, so reasoning is captured as TWO fields
+  (not concatenated): `parse.Turn.Thinking` + `.Text` via new `extractAssistantText`,
+  threaded to `agentflow.AgentStep.Thinking` + `.Text` (json `omitempty`), redacted via
+  newly-exported `aggregate.RedactMarker` (empty fields stay empty). 5 new tests; full
+  suite green. Not yet committed — backend Phase 1 is entangled with pre-existing
+  tool-outcome work in the same files; staging deferred to the user.
+- 2026-06-07 — Phase 2 done (frontend-logic TDD + UI browser-verify). Built the unified
+  shell: a two-column body (`.agents-body`) with the three lenses sharing ONE selection
+  (`selectedRef`, a `refKey` string) and ONE persistent drawer. New pure helpers in
+  `agents-logic.js` (TDD, +26 tests → 89 total): `refKey`/`parseRefKey` (agent/step/tool
+  refs), `defaultRef`, `resolveRef` (stale-ref tolerant), `buildDrawerPayload` (flat
+  always-present audit record; a tool inherits its parent step's reasoning/model/cost),
+  `agentTokens` (reads the Go-marshalled `InputTokens…` names — **fixed a latent bug** where
+  the old `totalTokens` read non-existent `t.input/…` and always showed 0), `baseName`;
+  plus `buildEventFeed` tool events now carry `stepIndex`/`toolIndex`/`cost_usd`/`durationMs`.
+  `view-agents.js` rewritten: every feed row / active card / tree agent·step·tool / flow
+  node carries `data-ref` and is click+keyboard selectable via one delegated handler → the
+  drawer repaints with the full payload (input, output, status ✓/✗, reasoning, narration,
+  tokens, cost, model, duration; empty sections collapse to a dim header, never vanish). The
+  dead/unclickable feed row is gone. Project name (`baseName(cwd)`) leads every header; the
+  session UUID is demoted to a copy-on-click chip. Color+icon by kind via `.kind-badge`
+  monograms. Compact per-row cost·duration metric on the feed. Default-selects the root.
+  Browser-verified across all three lenses (selection persists across lens switches); full
+  JS + Go suites green. Not yet committed — same entanglement as Phase 1; staging is the
+  user's call.
