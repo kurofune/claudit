@@ -35,6 +35,7 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
+  filterTrace, specActive, parseRefKey,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -70,6 +71,8 @@ const SHELL = `
     <a class="subtab"           href="#agents/tree" data-subtab="tree">Tree</a>
     <a class="subtab"           href="#agents/timeline" data-subtab="timeline">Timeline</a>
   </nav>
+
+  <div class="trace-filter" data-trace-filter role="search" aria-label="Filter this trace"></div>
 
   <div class="agents-body">
     <div class="agents-lens">
@@ -119,6 +122,16 @@ let liveScheduled = false;
 let playheadT = null;
 let scrubRaf = 0;
 
+// Trace filter (Phase 2). filterSpec is the live filter over the loaded graph;
+// when specActive, filterTrace gives the Set of matching refKeys and every lens
+// dims the rest. filterBarBuilt guards the one-time bar build (kind chips depend
+// on the graph) so a live re-render never wipes the user's typing or focus.
+// hitIndex steps the selection through ordered matches via the ‹ › buttons.
+let filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
+let filterBarBuilt = false;
+let hitIndex = -1;
+let currentHits = [];
+
 const colorSlot = i => ((i % 5) + 1);
 
 export function reset() {
@@ -130,6 +143,9 @@ export function reset() {
   prevTimelineKeys = new Set();
   timelinePinned.clear();
   playheadT = null;
+  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
+  filterBarBuilt = false;
+  hitIndex = -1;
 }
 
 // paintNav resolves the sidebar metric before the tab is first opened.
@@ -180,6 +196,7 @@ export async function paint(route) {
   // the left pane — the shared selection + drawer carry over untouched, so we
   // skip the drawer repaint. The first paint (and live updates) repaint it.
   const lensSwitch = painted;
+  ensureFilterBar(container);
   activateSub(container, activeSub);
   renderActive(container, false, !lensSwitch);
   updateNavMetric(graphStats(lastGraph));
@@ -221,6 +238,7 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   // can only be set on real DOM, so it runs after innerHTML is in place.
   if (activeSub === 'timeline') syncTimelineScroll(container);
   if (paintDrawer) renderDrawer(container);
+  applyFilter(container);
   tickTimers(container);
 }
 
@@ -278,6 +296,11 @@ function wireSelection(container) {
       if (full) loadFull(full);
     });
   }
+  const bar = container.querySelector('[data-trace-filter]');
+  if (bar) {
+    bar.addEventListener('input', e => onFilterInput(container, e));
+    bar.addEventListener('click', e => onFilterClick(container, e));
+  }
 }
 
 // select sets the shared selection and repaints. The Tree lens's step log is
@@ -313,6 +336,168 @@ function copyText(text, btn) {
     btn.classList.add('is-copied');
     setTimeout(() => btn.classList.remove('is-copied'), 1200);
   }).catch(() => {});
+}
+
+// ── trace filter (Phase 2) ──────────────────────────────────────────────────
+// One bar above the lenses turns the trace from something you read into
+// something you interrogate: free text + kind chips + an errors toggle + slow/
+// expensive thresholds. Matching (filterTrace) is pure and runs against the
+// already-loaded graph, so it works in the offline static report with no
+// round-trip. Non-matching rows dim across ALL lenses via a post-render DOM
+// pass (no lens renderer needs to know about the filter); ‹ › step the shared
+// selection through the matches.
+
+const FILTER_KIND_ORDER = ['agent', 'edit', 'exec', 'read', 'web', 'skill', 'mcp', 'command', 'todo', 'other'];
+
+// presentKinds lists the kinds that actually occur in the graph, in canonical
+// order — the chip row only offers kinds the user can act on.
+function presentKinds(graph) {
+  const seen = new Set();
+  for (const s of (graph && graph.sessions) || []) {
+    for (const a of flattenSession(s)) {
+      for (const st of a.steps || []) {
+        for (const t of st.tools || []) if (t && t.kind) seen.add(t.kind);
+      }
+    }
+  }
+  return FILTER_KIND_ORDER.filter(k => seen.has(k));
+}
+
+// ensureFilterBar fills the (persistent) bar exactly once. Kind chips reflect
+// the loaded graph; rebuilding on every live update would wipe the user's
+// focus/typing, so this is strictly idempotent.
+function ensureFilterBar(container) {
+  if (filterBarBuilt) return;
+  const bar = container.querySelector('[data-trace-filter]');
+  if (!bar) return;
+  const chips = presentKinds(lastGraph).map(k =>
+    `<button type="button" class="tf-chip kind-${kindFamily(k)}" data-tf-kind="${k}" aria-pressed="false" title="Show only ${escHtml(k)} calls">${kindBadge(k)}<span class="tf-chip-label">${escHtml(k)}</span></button>`).join('');
+  bar.innerHTML = `
+    <input type="search" class="tf-text" data-tf-text placeholder="filter trace — name, path, input, reasoning…" aria-label="Filter trace by text">
+    <div class="tf-chips" role="group" aria-label="Tool kinds">${chips}</div>
+    <button type="button" class="tf-toggle" data-tf-errors aria-pressed="false" title="Only tool calls that errored">✗ errors</button>
+    <label class="tf-num" title="Turns at least this slow"><span aria-hidden="true">⏱</span> ≥<input type="number" data-tf-dur min="0" step="500" placeholder="0"><span class="tf-unit">ms</span></label>
+    <label class="tf-num" title="Turns or agents at least this costly"><span aria-hidden="true">$</span> ≥<input type="number" data-tf-cost min="0" step="0.01" placeholder="0"></label>
+    <div class="tf-result" data-tf-result hidden>
+      <span class="tf-count" data-tf-count></span>
+      <button type="button" class="tf-nav" data-tf-prev title="Previous match" aria-label="Previous match">‹</button>
+      <button type="button" class="tf-nav" data-tf-next title="Next match" aria-label="Next match">›</button>
+      <button type="button" class="tf-clear" data-tf-clear title="Clear the filter">clear</button>
+    </div>`;
+  filterBarBuilt = true;
+}
+
+// readSpec pulls the current spec out of the bar's controls.
+function readSpec(container) {
+  const bar = container.querySelector('[data-trace-filter]');
+  if (!bar) return filterSpec;
+  const val = sel => { const el = bar.querySelector(sel); return el ? el.value : ''; };
+  const pressed = sel => { const el = bar.querySelector(sel); return !!el && el.getAttribute('aria-pressed') === 'true'; };
+  return {
+    text: val('[data-tf-text]'),
+    kinds: [...bar.querySelectorAll('[data-tf-kind][aria-pressed="true"]')].map(b => b.dataset.tfKind),
+    errorsOnly: pressed('[data-tf-errors]'),
+    minDurationMs: Number(val('[data-tf-dur]')) || 0,
+    minCostUSD: Number(val('[data-tf-cost]')) || 0,
+  };
+}
+
+// applyFilter recomputes the match set and dims every non-matching lens row.
+// Called after each (re)render so live updates and lens switches keep dimming.
+function applyFilter(container) {
+  const active = specActive(filterSpec);
+  const matchSet = active ? filterTrace(lastGraph, filterSpec) : null;
+  const lens = container.querySelector('.agents-lens');
+  if (lens) {
+    lens.classList.toggle('is-filtering', active);
+    lens.querySelectorAll('[data-ref]').forEach(el => {
+      el.classList.toggle('is-dimmed', active && !(matchSet && matchSet.has(el.dataset.ref)));
+    });
+  }
+  currentHits = matchSet ? matchHits(matchSet) : [];
+  if (hitIndex >= currentHits.length) hitIndex = -1;
+  updateFilterResult(container);
+}
+
+// matchHits is the ordered list of "deepest" matched refs — a matched ref with
+// no matched descendant — which is what ‹ › steps through. Sorted in reading
+// order (session order, then agent/step/tool index).
+function matchHits(matchSet) {
+  const refs = [...matchSet];
+  const order = new Map(((lastGraph && lastGraph.sessions) || []).map((s, i) => [(s && s.session_id) || '', i]));
+  const leaves = refs.filter(r => !refs.some(o => o !== r && (o.startsWith(r + '.') || o.startsWith(r + ':'))));
+  const rank = r => {
+    const p = parseRefKey(r) || {};
+    return [order.has(p.sessionId) ? order.get(p.sessionId) : 1e9, p.agentIndex ?? 1e9, p.stepIndex ?? -1, p.toolIndex ?? -1];
+  };
+  return leaves.sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    return 0;
+  });
+}
+
+// updateFilterResult refreshes the "N matches" readout and prev/next state.
+function updateFilterResult(container) {
+  const bar = container.querySelector('[data-trace-filter]');
+  if (!bar) return;
+  const result = bar.querySelector('[data-tf-result]');
+  const countEl = bar.querySelector('[data-tf-count]');
+  if (!specActive(filterSpec)) { if (result) result.hidden = true; return; }
+  if (result) result.hidden = false;
+  const n = currentHits.length;
+  if (countEl) {
+    countEl.textContent = hitIndex >= 0 && n ? `${hitIndex + 1} / ${n} matches` : `${n} match${n === 1 ? '' : 'es'}`;
+    countEl.classList.toggle('is-empty', n === 0);
+  }
+  bar.querySelectorAll('[data-tf-prev],[data-tf-next]').forEach(b => { b.disabled = n === 0; });
+}
+
+// stepHit advances the shared selection to the next/prev match and scrolls it
+// into view in the current lens (the drawer still updates even if the active
+// lens has no row for that ref — e.g. a tool hit while on the Timeline).
+function stepHit(container, dir) {
+  if (!currentHits.length) return;
+  hitIndex = (hitIndex + dir + currentHits.length) % currentHits.length;
+  const ref = currentHits[hitIndex];
+  select(container, ref);
+  const el = container.querySelector(`.agents-lens [data-ref="${ref}"]`);
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  updateFilterResult(container);
+}
+
+// clearFilter resets the controls and removes all dimming.
+function clearFilter(container) {
+  const bar = container.querySelector('[data-trace-filter]');
+  if (bar) {
+    bar.querySelectorAll('[data-tf-text],[data-tf-dur],[data-tf-cost]').forEach(i => { i.value = ''; });
+    bar.querySelectorAll('[data-tf-kind],[data-tf-errors]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  }
+  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
+  hitIndex = -1;
+  applyFilter(container);
+}
+
+// onFilterInput/onFilterClick are the bar's delegated handlers (wired once).
+function onFilterInput(container, e) {
+  if (!e.target.closest('[data-tf-text],[data-tf-dur],[data-tf-cost]')) return;
+  filterSpec = readSpec(container);
+  hitIndex = -1;
+  applyFilter(container);
+}
+
+function onFilterClick(container, e) {
+  const toggle = e.target.closest('[data-tf-kind],[data-tf-errors]');
+  if (toggle) {
+    toggle.setAttribute('aria-pressed', toggle.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    filterSpec = readSpec(container);
+    hitIndex = -1;
+    applyFilter(container);
+    return;
+  }
+  if (e.target.closest('[data-tf-prev]')) { stepHit(container, -1); return; }
+  if (e.target.closest('[data-tf-next]')) { stepHit(container, +1); return; }
+  if (e.target.closest('[data-tf-clear]')) { clearFilter(container); }
 }
 
 // ── live update + timer ticker ──────────────────────────────────────────

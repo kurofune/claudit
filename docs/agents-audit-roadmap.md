@@ -10,7 +10,17 @@ Build one phase at a time. Each phase below is self-contained and ordered by dep
 later phases lean on the data introduced earlier. Backend and frontend-logic changes are
 TDD (red-green-refactor) per `.claude/rules/testing.md`; UI/styling is browser-verified.
 
-**Status:** Not started. Phases 1 → 5 in dependency order.
+**Status:** Phase 1 ✅ and Phase 2 ✅ complete (2026-06-08). Phases 3 → 5 remain,
+in dependency order.
+
+- **Phase 1** — `aggregate.ToolKind` enum + `ToolInvocation.kind` (commit 41cc525);
+  frontend colors every Feed/Tree row + drawer badge by kind, `agent` loudest
+  (commit cd01cc8).
+- **Phase 2** — pure `filterTrace(graph, spec)` / `specActive` + 12 jstest cases
+  (commit addcff6); filter bar above the lenses (kind chips, errors toggle,
+  slow/expensive thresholds, free text) with cross-lens dimming + `N matches`
+  prev/next. Follow-ups deferred: the query-DSL form, and intersecting the filter
+  with the playhead window.
 
 ---
 

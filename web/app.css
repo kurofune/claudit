@@ -1925,6 +1925,88 @@
   #view-agents [data-c="4"] { --cc: var(--c-4); }
   #view-agents [data-c="5"] { --cc: var(--c-5); }
 
+  /* ── Trace filter bar (Phase 2) ──────────────────────────────────────
+     One row above the lenses: free text + kind chips + errors toggle +
+     slow/expensive thresholds, with an "N matches" readout and ‹ › to step
+     the selection. Non-matching lens rows get .is-dimmed. */
+  .trace-filter {
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2);
+    margin-bottom: var(--s-3); padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface-2); font-size: var(--t-2);
+  }
+  .trace-filter:empty { display: none; }
+  .tf-text {
+    flex: 1 1 240px; min-width: 180px;
+    padding: 5px var(--s-2); border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface); color: var(--ink); font-size: var(--t-2);
+    font-family: var(--font-sans);
+  }
+  .tf-text:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .tf-chips { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+  /* A chip is a kind monogram + label; pressed = its hue fills in. --kc comes
+     from the kind-* class on the button. */
+  .tf-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px 2px 4px; border-radius: var(--r-pill);
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--ink-2); cursor: pointer; font-size: var(--t-1);
+    text-transform: uppercase; letter-spacing: 0.03em; line-height: 1.6;
+  }
+  .tf-chip .kind-badge { width: 15px; height: 15px; font-size: 10px; }
+  .tf-chip:hover { border-color: var(--kc, var(--border-strong)); }
+  .tf-chip[aria-pressed="true"] {
+    color: var(--ink); border-color: var(--kc, var(--accent));
+    background: color-mix(in oklch, var(--kc, var(--accent)) 16%, var(--surface));
+  }
+  .tf-toggle {
+    padding: 3px 10px; border-radius: var(--r-pill);
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--ink-2); cursor: pointer; font-size: var(--t-1);
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .tf-toggle:hover { border-color: var(--hot); }
+  .tf-toggle[aria-pressed="true"] {
+    color: var(--hot); border-color: var(--hot);
+    background: color-mix(in oklch, var(--hot) 16%, var(--surface));
+  }
+  .tf-num {
+    display: inline-flex; align-items: center; gap: 3px;
+    color: var(--ink-2); font-variant-numeric: tabular-nums;
+  }
+  .tf-num input {
+    width: 6ch; padding: 3px 4px; border: 1px solid var(--border);
+    border-radius: var(--r-sm); background: var(--surface); color: var(--ink);
+    font-family: var(--font-mono); font-size: var(--t-1);
+  }
+  .tf-num input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .tf-unit { color: var(--muted); }
+  .tf-result {
+    display: inline-flex; align-items: center; gap: var(--s-1);
+    margin-left: auto; padding-left: var(--s-2);
+  }
+  .tf-count { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tf-count.is-empty { color: var(--hot); }
+  .tf-nav {
+    width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface); color: var(--ink); cursor: pointer; font-size: var(--t-3);
+  }
+  .tf-nav:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .tf-nav:disabled { opacity: 0.4; cursor: default; }
+  .tf-clear {
+    border: none; background: none; color: var(--muted); cursor: pointer;
+    font-size: var(--t-1); text-decoration: underline; padding: 2px 4px;
+  }
+  .tf-clear:hover { color: var(--ink); }
+
+  /* Dimming: while a filter is active, non-matching rows recede so the hits
+     stand out. Kept subtle (opacity, not display:none) so structure/context
+     stay legible and the tree stays navigable. Selected rows never dim. */
+  .agents-lens.is-filtering [data-ref].is-dimmed:not(.is-selected) {
+    opacity: 0.32; transition: opacity var(--motion-fast) ease;
+  }
+
   /* ── Unified shell: left lens + one persistent detail drawer ──────────
      Every lens (Feed / Tree / Flow) renders into .agents-lens;
      .agents-drawer is the single shared master-detail panel — clicking any
