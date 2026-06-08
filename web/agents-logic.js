@@ -759,3 +759,33 @@ export function filterTrace(graph, spec) {
   }
   return out;
 }
+
+// detectRetries finds repeated tool calls where an earlier attempt errored,
+// returning a Map from each retry's agent-relative coord ("si:ti") to
+// { attempt, ofRef } — attempt is the 1-based ordinal of the call within its
+// group, ofRef the coord of the group's first call. Tool calls are grouped by
+// (kind, name, detail) and walked in step-then-tool order (steps are already
+// chronological). A call is a retry only when some earlier call in its group
+// had status "error", so a clean repeat (ok → ok) is never flagged. Coords are
+// the suffix of the full tool refKey, composable via `${sid}#${ai}.${coord}`.
+export function detectRetries(agent) {
+  const out = new Map();
+  const groups = new Map(); // groupKey -> { firstRef, count, sawError }
+  const steps = (agent && agent.steps) || [];
+  steps.forEach((step, si) => {
+    (step.tools || []).forEach((tool, ti) => {
+      if (!tool) return;
+      const coord = `${si}:${ti}`;
+      const groupKey = `${tool.kind || ''} ${tool.name || ''} ${tool.detail || ''}`;
+      let g = groups.get(groupKey);
+      if (!g) {
+        g = { firstRef: coord, count: 0, sawError: false };
+        groups.set(groupKey, g);
+      }
+      g.count += 1;
+      if (g.sawError) out.set(coord, { attempt: g.count, ofRef: g.firstRef });
+      if (tool.status === 'error') g.sawError = true;
+    });
+  });
+  return out;
+}

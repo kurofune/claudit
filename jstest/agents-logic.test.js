@@ -31,6 +31,7 @@ import {
   timelineAtTime,
   specActive,
   filterTrace,
+  detectRetries,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -1117,4 +1118,56 @@ test('filterTrace includes the step and agent ref for every matched tool', () =>
     assert.ok(got.has(stepRef), `missing step ref ${stepRef} for tool ${key}`);
     assert.ok(got.has(agentRef), `missing agent ref ${agentRef} for tool ${key}`);
   }
+});
+
+// ── detectRetries (Phase 3 — retry detection) ───────────────────────
+// Keys/ofRef are agent-relative tool coords "si:ti" (the suffix of the full
+// tool refKey), composable into a full refKey via `${sid}#${ai}.${coord}`.
+
+test('detectRetries: an errored call followed by the same call marks the retry as attempt 2 linked to the first', () => {
+  const agent = {
+    steps: [
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },
+    ],
+  };
+  const got = detectRetries(agent);
+  assert.equal(got.has('0:0'), false); // the first attempt is not itself a retry
+  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0' });
+});
+
+test('detectRetries: a successful call followed by the same call is not a retry', () => {
+  const agent = {
+    steps: [
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },
+    ],
+  };
+  assert.equal(detectRetries(agent).size, 0);
+});
+
+test('detectRetries: a chain of two errors then a repeat marks attempts 2 and 3, both linked to the first', () => {
+  const agent = {
+    steps: [
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },
+      { tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },
+    ],
+  };
+  const got = detectRetries(agent);
+  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0' });
+  assert.deepEqual(got.get('2:0'), { attempt: 3, ofRef: '0:0' });
+});
+
+test('detectRetries: calls with a different (kind,name,detail) key are not grouped', () => {
+  const agent = {
+    steps: [{
+      tools: [
+        { kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' },
+        { kind: 'exec', name: 'Bash', detail: 'go build', status: 'ok' }, // different detail
+        { kind: 'read', name: 'Read', detail: 'go test', status: 'ok' },  // different kind/name
+      ],
+    }],
+  };
+  assert.equal(detectRetries(agent).size, 0);
 });
