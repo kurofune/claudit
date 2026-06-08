@@ -36,6 +36,21 @@ export function flattenSession(session) {
   return out;
 }
 
+// spawnTargetIndex maps a spawn rollup's agent_ref (the parent tool_use id) to
+// the flattenSession index of the sub-agent it launched — the child whose
+// parent_tool_use_id matches. Returns null when nothing matches or the ref is
+// empty, so the caller can fall back to a non-navigable rollup badge. The
+// index lines up with flattenSession order (main=0, children 1..), which every
+// other lens keys selection off, so the result drops straight into a refKey.
+export function spawnTargetIndex(session, agentRef) {
+  if (!session || !agentRef) return null;
+  const flat = flattenSession(session);
+  for (let i = 0; i < flat.length; i++) {
+    if (flat[i] && flat[i].parent_tool_use_id === agentRef) return i;
+  }
+  return null;
+}
+
 // packLanes assigns each agent to a swimlane via greedy interval
 // packing: agents whose [start, end] spans don't overlap can share a
 // lane, so a session's main agent (spanning everything) takes lane 0
@@ -653,10 +668,26 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
     toolId: type === 'tool' ? (tool.id || '') : '',
     input: type === 'tool' ? toolInput : '',
     output: type === 'tool' ? toolOutput : '',
+    // spawned: the sub-agent rollup on an Agent tool_use, enriched with a
+    // childRef — the navigable refKey of the sub-agent it launched — so the
+    // drawer can link straight to it. null for non-tool refs, plain tools, and
+    // spawns whose sub-agent isn't in the snapshot (childRef '').
+    spawned: spawnDrawerInfo(type, tool, session),
     thinking, text, model,
     tokens, cost_usd, durationMs,
     stepCount: (agent.steps || []).length,
   };
+}
+
+// spawnDrawerInfo builds the drawer's spawn rollup for a tool ref: the
+// backend SpawnRollup plus childRef, the navigable refKey of the sub-agent it
+// launched (resolved via spawnTargetIndex). Returns null unless this is a tool
+// ref that actually spawned a sub-agent.
+function spawnDrawerInfo(type, tool, session) {
+  if (type !== 'tool' || !tool || !tool.spawned) return null;
+  const idx = spawnTargetIndex(session, tool.spawned.agent_ref);
+  const childRef = idx == null ? '' : refKey({ sessionId: session.session_id, agentIndex: idx });
+  return { ...tool.spawned, childRef };
 }
 
 // looksTruncated reports whether a bounded snippet was cut short — the parse

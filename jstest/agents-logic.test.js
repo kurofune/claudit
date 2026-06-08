@@ -32,6 +32,7 @@ import {
   specActive,
   filterTrace,
   detectRetries,
+  spawnTargetIndex,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -79,6 +80,30 @@ test('flattenSession tolerates a missing main or children', () => {
   assert.deepEqual(flattenSession({}), []);
   assert.deepEqual(flattenSession({ main: { kind: 'main' } }).length, 1);
   assert.deepEqual(flattenSession(null), []);
+});
+
+// ── spawnTargetIndex ────────────────────────────────────────────────
+test('spawnTargetIndex finds the child whose parent_tool_use_id matches', () => {
+  const session = {
+    main: { kind: 'main' },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 'toolu_A' },
+      { kind: 'subagent', parent_tool_use_id: 'toolu_B' },
+    ],
+  };
+  // flattenSession index: main=0, first child=1, second child=2.
+  assert.equal(spawnTargetIndex(session, 'toolu_B'), 2);
+  assert.equal(spawnTargetIndex(session, 'toolu_A'), 1);
+});
+
+test('spawnTargetIndex returns null for no match or empty ref', () => {
+  const session = {
+    main: { kind: 'main' },
+    children: [{ kind: 'subagent', parent_tool_use_id: 'toolu_A' }],
+  };
+  assert.equal(spawnTargetIndex(session, 'toolu_Z'), null);
+  assert.equal(spawnTargetIndex(session, ''), null);
+  assert.equal(spawnTargetIndex(null, 'toolu_A'), null);
 });
 
 // ── packLanes ───────────────────────────────────────────────────────
@@ -693,6 +718,51 @@ test('looksTruncated detects the bounded-snippet ellipsis marker', () => {
   assert.equal(looksTruncated(''), false);
   assert.equal(looksTruncated(null), false);
   assert.equal(looksTruncated(undefined), false);
+});
+
+// A main agent whose step 0 spawned a sub-agent via an Agent tool_use, plus a
+// plain tool with no spawn — exercises the drawer's spawn-link branch.
+const SPAWN_GRAPH = {
+  sessions: [{
+    session_id: 'sess-spawn',
+    cwd: '/Users/x/Projects/claudit',
+    main: {
+      kind: 'main', status: 'done',
+      started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:01:00Z',
+      cost_usd: 1, steps: [{
+        timestamp: '2026-05-01T12:00:10Z', model: 'claude-opus-4', cost_usd: 0.1,
+        tools: [
+          {
+            name: 'Agent', kind: 'agent', detail: 'Explore', id: 'toolu_spawn',
+            input: 'go find callers', status: 'ok',
+            spawned: { agent_ref: 'toolu_spawn', cost_usd: 0.05, error_count: 2, duration_ms: 4000, tokens: { InputTokens: 9 } },
+          },
+          { name: 'Read', kind: 'read', detail: 'x.go', id: 'toolu_read', input: 'x.go', status: 'ok' },
+        ],
+      }],
+    },
+    children: [{
+      kind: 'subagent', agent_type: 'Explore', description: 'find callers',
+      parent_tool_use_id: 'toolu_spawn', status: 'done',
+      started_at: '2026-05-01T12:00:11Z', ended_at: '2026-05-01T12:00:15Z',
+      cost_usd: 0.05, steps: [],
+    }],
+  }],
+};
+
+test('buildDrawerPayload exposes a spawn rollup with a navigable child ref for an Agent tool', () => {
+  const p = buildDrawerPayload(SPAWN_GRAPH, { sessionId: 'sess-spawn', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.ok(p.spawned, 'expected a spawned rollup on the Agent tool');
+  assert.equal(p.spawned.cost_usd, 0.05);
+  assert.equal(p.spawned.error_count, 2);
+  // childRef resolves to the sub-agent whose parent_tool_use_id matches — the
+  // first child, flattenSession index 1.
+  assert.equal(p.spawned.childRef, 'sess-spawn#1');
+});
+
+test('buildDrawerPayload leaves spawned null for a tool that launched nothing', () => {
+  const p = buildDrawerPayload(SPAWN_GRAPH, { sessionId: 'sess-spawn', agentIndex: 0, stepIndex: 0, toolIndex: 1 });
+  assert.equal(p.spawned, null);
 });
 
 test('buildDrawerPayload returns null for a ref whose agent is missing', () => {
