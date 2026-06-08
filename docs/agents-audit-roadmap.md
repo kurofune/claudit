@@ -10,8 +10,7 @@ Build one phase at a time. Each phase below is self-contained and ordered by dep
 later phases lean on the data introduced earlier. Backend and frontend-logic changes are
 TDD (red-green-refactor) per `.claude/rules/testing.md`; UI/styling is browser-verified.
 
-**Status:** Phases 1 ✅, 2 ✅, and 3 ✅ complete (2026-06-08). Phases 4 → 5 remain,
-in dependency order.
+**Status:** Phases 1 ✅, 2 ✅, 3 ✅, and 4 ✅ complete (2026-06-08). Phase 5 remains.
 
 - **Phase 1** — `aggregate.ToolKind` enum + `ToolInvocation.kind` (commit 41cc525);
   frontend colors every Feed/Tree row + drawer badge by kind, `agent` loudest
@@ -28,6 +27,16 @@ in dependency order.
   `✗N` badge on agent cards + detail head, and a drawer `↻ attempt N of M`
   affordance that links back to the first attempt. The Phase-2 `errorsOnly`
   toggle reads the same per-tool `status`.
+- **Phase 4** — `parse.SubagentMeta.ToolUseID` from the sibling `.meta.json`
+  `toolUseId` (commit 9b5b8eb); `AgentNode.ParentToolUseID` + a `SpawnRollup`
+  (`aggregate.ToolInvocation.Spawned`) attached to the Agent call whose id ==
+  the child's `ParentToolUseID`, carrying the sub-agent's cost/tokens/errors/
+  duration (commit 001de2e). Frontend: pure `spawnTargetIndex` + a `spawned`
+  drawer payload with a navigable `childRef` (commit fd591ff); the Tree lens
+  nests each sub-agent under its exact spawning step/tool — inline `+$X` badge,
+  a clickable "+$X · N tools · M errors across sub-agent" row, and a drawer
+  link, all jumping to the child (commit ba327fe). Attribution, not double-
+  count: session totals are unchanged (browser-verified, 2026-06-08).
 
 ---
 
