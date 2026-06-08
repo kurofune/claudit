@@ -1926,7 +1926,7 @@
   #view-agents [data-c="5"] { --cc: var(--c-5); }
 
   /* ── Unified shell: left lens + one persistent detail drawer ──────────
-     Every lens (Mission Control / Inspector / Flow) renders into .agents-lens;
+     Every lens (Feed / Tree / Flow) renders into .agents-lens;
      .agents-drawer is the single shared master-detail panel — clicking any
      row/card/node in any lens repaints it. The drawer sticks while the lens
      scrolls. Desktop-only, so a fixed-width drawer beside a wide lens is fine. */

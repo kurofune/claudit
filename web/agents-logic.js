@@ -161,7 +161,7 @@ export function agentLabel(a) {
 }
 
 // buildEventFeed flattens the whole graph into a single reverse-chronological
-// stream of discrete events — the "tail -f" the Mission Control view renders.
+// stream of discrete events — the "tail -f" the Feed lens renders.
 // Three kinds:
 //   tool  — an agent invoked a tool (carries name/detail/input/status, the
 //           stepIndex/toolIndex that locate it for selection, and the parent

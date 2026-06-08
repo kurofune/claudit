@@ -3,18 +3,19 @@
 // One trace you can audit. The same /_claudit/api/agents payload is shown
 // through three LENSES that share ONE selection and ONE persistent detail
 // drawer (master-detail, like every serious trace viewer):
-//   • Mission Control (#agents/control)   — running agents pinned up top with
-//     live ticking timers + current tool, over a reverse-chronological event
-//     feed (tool calls / spawns / completions). The second-monitor watch view.
-//   • Inspector       (#agents/inspector) — a session→agent tree on the left,
-//     the selected agent's step + tool log beside it; every step/tool row
-//     selectable.
-//   • Flow graph      (#agents/flow)      — main→sub-agent node graph, nodes
-//     pulsing while they run.
+//   • Feed  (#agents/feed) — running agents pinned up top with live ticking
+//     timers + current tool, over a reverse-chronological event feed (tool
+//     calls / spawns / completions). The second-monitor watch view.
+//   • Tree  (#agents/tree) — a session→agent tree on the left, the selected
+//     agent's step + tool log beside it; every step/tool row selectable.
+//   • Flow graph (#agents/flow) — main→sub-agent node graph, nodes pulsing
+//     while they run. (Becomes the Timeline lens in Phase 4.)
+// The sub-tab nav is a LENS SWITCH: picking a lens swaps ONLY the left pane;
+// the shared selection and the detail drawer on the right carry over unchanged.
 // Clicking ANY row / card / node / tree item in any lens sets the shared
-// selection and repaints the drawer on the right with the full audit payload
-// of that agent / step / tool: input, output, status, reasoning, tokens,
-// cost, model, duration. Nothing is a dead end.
+// selection and repaints the drawer with the full audit payload of that
+// agent / step / tool: input, output, status, reasoning, tokens, cost, model,
+// duration. Nothing is a dead end.
 //
 // Liveness is in-place, not a page reload: while this view is active it
 // registers an SSE live handler (web/sse.js) that refetches and re-renders
@@ -42,27 +43,27 @@ const SHELL = `
   <details class="guide">
     <summary>Watching agents work</summary>
     <div class="body">
-      <p>Three ways to watch the same live data — every Claude Code session expanded into its <em>agent tree</em> (the main agent plus every sub-agent it spawned) — sharing one <strong>detail drawer</strong> on the right. Click any row, card, or node in any lens to inspect exactly what that agent, turn, or tool did.</p>
+      <p>Three <em>lenses</em> on the same live data — every Claude Code session expanded into its <em>agent tree</em> (the main agent plus every sub-agent it spawned) — over one shared <strong>selection</strong> and one <strong>detail drawer</strong> on the right. Switching lens swaps only the left pane; what you've selected and the drawer stay put. Click any row, card, or node in any lens to inspect exactly what that agent, turn, or tool did.</p>
       <ul>
-        <li><strong>Mission Control</strong> pins the agents running <em>right now</em> at the top — ticking timer, current tool — over a live feed of every tool call, spawn, and completion as it happens. Best for keeping an eye on a run.</li>
-        <li><strong>Inspector</strong> is the drill-down: pick any agent from the tree and read its step-by-step tool log; click a turn for its reasoning, or a tool for the exact input it sent and the output it got back (✓/✗).</li>
+        <li><strong>Feed</strong> pins the agents running <em>right now</em> at the top — ticking timer, current tool — over a live feed of every tool call, spawn, and completion as it happens. Best for keeping an eye on a run.</li>
+        <li><strong>Tree</strong> is the drill-down: pick any agent from the tree and read its step-by-step tool log; click a turn for its reasoning, or a tool for the exact input it sent and the output it got back (✓/✗).</li>
         <li><strong>Flow graph</strong> shows the shape — who spawned whom — with each node pulsing while it works.</li>
-        <li><strong>Detail drawer.</strong> Whatever you click fills the right-hand panel: input, output, status, reasoning, tokens, cost, model, duration. Empty sections stay put (collapsed) so the layout never jumps.</li>
+        <li><strong>Detail drawer.</strong> Whatever you click fills the right-hand panel: input, output, status, reasoning, tokens, cost, model, duration. Empty sections stay put (collapsed) so the layout never jumps, and the panel survives lens switches.</li>
         <li><strong>Live.</strong> On an active session this updates in place every couple of seconds — no page reload, your scroll, selection, and open panels stay put. The same <code>?since</code>/<code>?until</code>/<code>?project</code> filters scope this tab too.</li>
       </ul>
     </div>
   </details>
 
   <nav class="subtabs" aria-label="Agent view lenses">
-    <a class="subtab is-active" href="#agents/control"   data-subtab="control">Mission Control</a>
-    <a class="subtab"           href="#agents/inspector" data-subtab="inspector">Inspector</a>
-    <a class="subtab"           href="#agents/flow"       data-subtab="flow">Flow graph</a>
+    <a class="subtab is-active" href="#agents/feed" data-subtab="feed">Feed</a>
+    <a class="subtab"           href="#agents/tree" data-subtab="tree">Tree</a>
+    <a class="subtab"           href="#agents/flow" data-subtab="flow">Flow graph</a>
   </nav>
 
   <div class="agents-body">
     <div class="agents-lens">
-      <div class="subview is-active" data-subview="control"></div>
-      <div class="subview" data-subview="inspector"></div>
+      <div class="subview is-active" data-subview="feed"></div>
+      <div class="subview" data-subview="tree"></div>
       <div class="subview" data-subview="flow"></div>
     </div>
     <aside class="agents-drawer" data-drawer aria-label="Selection detail"></aside>
@@ -71,7 +72,7 @@ const SHELL = `
   <div id="agents-empty" class="empty-note" hidden>No agents in this window. Try widening <code>--since</code>/<code>--until</code>, or open a session that spawned sub-agents.</div>
 `;
 
-const SUBS = ['control', 'inspector', 'flow'];
+const SUBS = ['feed', 'tree', 'flow'];
 
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
@@ -81,7 +82,7 @@ const SUBS = ['control', 'inspector', 'flow'];
 let painted = false;
 let navPainted = false;
 let lastGraph = null;
-let activeSub = 'control';
+let activeSub = 'feed';
 let tickerId = null;
 let selectedRef = null;
 
@@ -114,7 +115,7 @@ export async function paint(route) {
   if (!painted) {
     container.innerHTML = SHELL;
     wireSelection(container);
-    const sv = container.querySelector('.subview[data-subview="control"]');
+    const sv = container.querySelector('.subview[data-subview="feed"]');
     if (sv) sv.innerHTML = sessionListSkeleton(3);
     setLiveHandler(liveUpdate);
     startTicker();
@@ -138,15 +139,19 @@ export async function paint(route) {
     container.innerHTML = SHELL;
     wireSelection(container);
   }
+  // A lens switch (paint re-runs on the same already-built shell) swaps only
+  // the left pane — the shared selection + drawer carry over untouched, so we
+  // skip the drawer repaint. The first paint (and live updates) repaint it.
+  const lensSwitch = painted;
   activateSub(container, activeSub);
-  renderActive(container);
+  renderActive(container, false, !lensSwitch);
   updateNavMetric(graphStats(lastGraph));
   painted = true;
   navPainted = true;
 }
 
 function wantedSub(sub) {
-  return SUBS.includes(sub) ? sub : 'control';
+  return SUBS.includes(sub) ? sub : 'feed';
 }
 
 // activateSub toggles the active lens tab + subview, like view-tokens.js.
@@ -157,10 +162,11 @@ function activateSub(container, sub) {
     s.classList.toggle('is-active', s.dataset.subview === sub));
 }
 
-// renderActive draws the active lens from lastGraph and repaints the shared
-// drawer. preserve=true keeps scroll positions / open tool rows across a live
-// re-render.
-function renderActive(container, preserve = false) {
+// renderActive draws the active lens from lastGraph. preserve=true keeps
+// scroll positions / open tool rows across a live re-render. paintDrawer=true
+// (the default) repaints the shared drawer; a pure lens switch passes false so
+// the drawer — already showing the unchanged selection — is left intact.
+function renderActive(container, preserve = false, paintDrawer = true) {
   const sessions = (lastGraph && lastGraph.sessions) || [];
   ensureSelection(lastGraph);
   const empty = container.querySelector('#agents-empty');
@@ -170,11 +176,11 @@ function renderActive(container, preserve = false) {
   if (!host) return;
 
   const memo = preserve ? captureState(host) : null;
-  if (activeSub === 'control') host.innerHTML = renderControl(sessions);
-  else if (activeSub === 'inspector') host.innerHTML = renderInspector(sessions);
+  if (activeSub === 'feed') host.innerHTML = renderControl(sessions);
+  else if (activeSub === 'tree') host.innerHTML = renderInspector(sessions);
   else if (activeSub === 'flow') host.innerHTML = renderFlow(sessions);
   if (memo) restoreState(host, memo);
-  renderDrawer(container);
+  if (paintDrawer) renderDrawer(container);
   tickTimers(container);
 }
 
@@ -215,14 +221,14 @@ function wireSelection(container) {
   }
 }
 
-// select sets the shared selection and repaints. The inspector's step log is
+// select sets the shared selection and repaints. The Tree lens's step log is
 // agent-dependent, so switching selection there re-renders the lens (cheap,
 // and preserves open rows via captureState); the other lenses just restyle
 // the highlight in place and repaint the drawer.
 function select(container, ref) {
   if (!ref) return;
   selectedRef = ref;
-  if (activeSub === 'inspector') {
+  if (activeSub === 'tree') {
     renderActive(container, true);
   } else {
     updateHighlights(container);
@@ -405,7 +411,7 @@ function drTokens(t) {
   </section>`;
 }
 
-// ── Mission Control ───────────────────────────────────────────────────────
+// ── Feed lens (formerly Mission Control) ────────────────────────────────────
 
 function renderControl(sessions) {
   // Flatten to (session, agent, index) tuples so we can pull the live ones.
@@ -507,7 +513,7 @@ function feMetric(cost, ms) {
   return parts.length ? `<span class="fe-metric">${escHtml(parts.join(' · '))}</span>` : '';
 }
 
-// ── Inspector ─────────────────────────────────────────────────────────────
+// ── Tree lens (formerly Inspector) ──────────────────────────────────────────
 
 function renderInspector(sessions) {
   const sel = resolveRef(lastGraph, selectedRef);
