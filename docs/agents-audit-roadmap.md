@@ -10,7 +10,7 @@ Build one phase at a time. Each phase below is self-contained and ordered by dep
 later phases lean on the data introduced earlier. Backend and frontend-logic changes are
 TDD (red-green-refactor) per `.claude/rules/testing.md`; UI/styling is browser-verified.
 
-**Status:** Phase 1 ✅ and Phase 2 ✅ complete (2026-06-08). Phases 3 → 5 remain,
+**Status:** Phases 1 ✅, 2 ✅, and 3 ✅ complete (2026-06-08). Phases 4 → 5 remain,
 in dependency order.
 
 - **Phase 1** — `aggregate.ToolKind` enum + `ToolInvocation.kind` (commit 41cc525);
@@ -21,6 +21,13 @@ in dependency order.
   slow/expensive thresholds, free text) with cross-lens dimming + `N matches`
   prev/next. Follow-ups deferred: the query-DSL form, and intersecting the filter
   with the playhead window.
+- **Phase 3** — `AgentNode.ErrorCount` + session-level total, rolled up in
+  `finalizeNode` / the session loop (commit bd92b72); pure `detectRetries(agent)`
+  → `Map<"si:ti", {attempt, ofRef}>` + 4 jstest cases (commit 0637936); UI
+  (commit edda57d): red error pip in the timeline gutter (scroll-independent),
+  `✗N` badge on agent cards + detail head, and a drawer `↻ attempt N of M`
+  affordance that links back to the first attempt. The Phase-2 `errorsOnly`
+  toggle reads the same per-tool `status`.
 
 ---
 
