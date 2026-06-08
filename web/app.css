@@ -1952,15 +1952,34 @@
     background: color-mix(in oklch, var(--kc, var(--ink-2)) 16%, transparent);
     border: 1px solid color-mix(in oklch, var(--kc, var(--ink-2)) 30%, transparent);
   }
-  .kind-read   { --kc: var(--c-1); }
-  .kind-edit   { --kc: var(--c-2); }
-  .kind-bash   { --kc: var(--c-3); }
-  .kind-search { --kc: var(--c-4); }
-  .kind-web    { --kc: var(--c-5); }
-  .kind-task   { --kc: var(--accent); }
-  .kind-agent  { --kc: var(--accent); }
-  .kind-step   { --kc: var(--accent-2); }
-  .kind-other  { --kc: var(--ink-2); }
+  /* Semantic-by-action palette keyed off the ToolKind enum (Phase 1): the
+     reviewer reads "class of action" at a glance. Mutations run hot (edit
+     coral, exec amber), inputs cool (read blue, web rose), capabilities green
+     (skill/mcp), procedural muted (command/todo/other). agent is loudest —
+     it's the spawn edge cost rolls up across (Phase 4). --kc carries the hue. */
+  .kind-read    { --kc: var(--c-1); }   /* blue — passive input */
+  .kind-web     { --kc: var(--c-2); }   /* rose — external fetch */
+  .kind-exec    { --kc: var(--c-4); }   /* amber — shell side-effects */
+  .kind-edit    { --kc: var(--c-5); }   /* coral — mutates the workspace (2nd loudest) */
+  .kind-skill   { --kc: var(--c-3); }   /* green — capability */
+  .kind-mcp     { --kc: var(--c-3); }   /* green — capability (external tool) */
+  .kind-command { --kc: var(--ink-2); } /* muted — procedural */
+  .kind-todo    { --kc: var(--ink-2); } /* muted — procedural */
+  .kind-other   { --kc: var(--ink-2); } /* muted — uncategorized */
+  .kind-step    { --kc: var(--accent-2); }
+  .kind-agent   { --kc: var(--accent); } /* teal — the audit-critical spawn edge */
+
+  /* agent is loudest: a FILLED badge (solid hue, surface-colored glyph) so a
+     sub-agent spawn is unmistakable among the soft-tinted tool badges. */
+  .kind-badge.kind-agent {
+    color: var(--surface); background: var(--kc); border-color: var(--kc);
+    font-weight: 800;
+  }
+  /* edit is second-loudest: a heavier tint than the rest, short of agent's fill. */
+  .kind-badge.kind-edit {
+    background: color-mix(in oklch, var(--kc) 26%, transparent);
+    border-color: color-mix(in oklch, var(--kc) 48%, transparent);
+  }
 
   /* ── The shared drawer ── */
   .dr { display: flex; flex-direction: column; gap: var(--s-2); }
@@ -2122,7 +2141,10 @@
   .fe-arrow, .fe-spawn { color: var(--ink-2); }
   .fe-done { color: var(--ink-2); }
   .fe-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fe-tool { color: var(--accent); font-weight: 600; }
+  /* The kind badge rides inline before the tool name; shrink + nudge it onto
+     the mono text baseline so it doesn't bloat the dense feed row. */
+  .fe-body .kind-badge { width: 16px; height: 16px; vertical-align: -3px; margin-right: var(--s-1); }
+  .fe-tool { color: var(--kc, var(--accent)); font-weight: 600; }
   .fe-arg { color: var(--ink-2); }
   .fe-strong { color: var(--ink); font-weight: 600; }
   .fe-dim { color: var(--ink-2); }

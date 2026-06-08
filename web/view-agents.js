@@ -374,28 +374,29 @@ function elapsedSpan(agent, extraCls = '') {
 
 // ── kind → color/icon lens (presentational; pure styling) ──────────────────
 
-// toolFamily buckets a tool name (or the synthetic 'agent'/'step' kinds) into
-// a color family so the same kind reads identically in every lens and the
-// drawer. Unknown tools fall to 'other'.
-function toolFamily(name) {
-  const n = String(name || '').toLowerCase();
-  if (n === 'agent') return 'agent';
-  if (n === 'step') return 'step';
-  if (n === 'task') return 'task';
-  if (n === 'read') return 'read';
-  if (n === 'edit' || n === 'write' || n === 'multiedit' || n === 'notebookedit') return 'edit';
-  if (n === 'bash') return 'bash';
-  if (n === 'grep' || n === 'glob') return 'search';
-  if (n === 'webfetch' || n === 'websearch' || n.startsWith('web')) return 'web';
-  return 'other';
+// KIND_GLYPH is the monogram for each normalized ToolKind (Phase 1), plus the
+// 'agent'/'step' pseudo-kinds. Picked to be visually distinct — the old
+// "first letter" rule collided edit/exec → "E". The loud kinds (agent/edit/
+// exec) get iconic glyphs; the rest get a clear monogram.
+const KIND_GLYPH = {
+  agent: '◆', edit: '✎', exec: '❯', read: 'R', web: 'W',
+  skill: 'S', mcp: 'M', command: '/', todo: '☑', other: '•', step: '✦',
+};
+
+// kindFamily maps a normalized ToolKind (or an 'agent'/'step' pseudo-kind) to
+// its CSS color-family class so the same kind reads identically in every lens
+// and the drawer. The enum values are the class names 1:1; anything unknown
+// (e.g. legacy data with no kind) falls to 'other'.
+function kindFamily(kind) {
+  return Object.prototype.hasOwnProperty.call(KIND_GLYPH, kind) ? kind : 'other';
 }
 
-// kindBadge is the small colored monogram that marks a kind: a glyph for the
-// agent/step pseudo-kinds, else the tool's initial.
+// kindBadge is the small colored monogram that marks a kind. Takes a normalized
+// ToolKind ("exec"/"read"/…) or a pseudo-kind ("agent"/"step") — NOT a raw tool
+// name (that mapping now lives in the backend's aggregate.ToolKind).
 function kindBadge(kind) {
-  const fam = toolFamily(kind);
-  const glyph = kind === 'agent' ? '◆' : kind === 'step' ? '✦' : (String(kind || '?')[0] || '?').toUpperCase();
-  return `<span class="kind-badge kind-${fam}" aria-hidden="true">${escHtml(glyph)}</span>`;
+  const fam = kindFamily(kind);
+  return `<span class="kind-badge kind-${fam}" aria-hidden="true">${escHtml(KIND_GLYPH[fam])}</span>`;
 }
 
 // ── shared detail drawer ────────────────────────────────────────────────────
@@ -604,7 +605,7 @@ function feedRowHTML(e) {
     if (e.status === 'error') glyph = '<span class="fe-glyph fe-err">✗</span>';
     else if (e.status === 'ok') glyph = '<span class="fe-glyph fe-ok">✓</span>';
     const arg = e.input || e.detail;
-    body = `<span class="fe-tool">${escHtml(e.tool)}</span>${arg ? ` <span class="fe-arg" title="${escHtml(e.input || e.detail)}">${escHtml(clip(arg, 72))}</span>` : ''}`;
+    body = `${kindBadge(e.toolKind)}<span class="fe-tool kind-${kindFamily(e.toolKind)}">${escHtml(e.tool)}</span>${arg ? ` <span class="fe-arg" title="${escHtml(e.input || e.detail)}">${escHtml(clip(arg, 72))}</span>` : ''}`;
     metric = feMetric(e.cost_usd, e.durationMs);
   }
   return `<div class="fe-row fe-${e.kind}${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
@@ -722,12 +723,12 @@ function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex) {
   const hasBody = (tool.input && tool.input !== '') || (tool.output && tool.output !== '');
   const tkey = `${name}:${tool.detail || ''}:${(tool.input || '').slice(0, 24)}`;
   if (!hasBody) {
-    return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(name)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</span></div>`;
+    return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</span></div>`;
   }
   const input = tool.input ? `<div class="tr-io"><span class="tr-io-k">in</span><pre>${escHtml(tool.input)}</pre></div>` : '';
   const output = tool.output ? `<div class="tr-io tr-io-out${tool.status === 'error' ? ' is-err' : ''}"><span class="tr-io-k">out</span><pre>${escHtml(tool.output)}</pre></div>` : '';
   return `<details class="tr tr-exp${sel}" data-tkey="${escHtml(tkey)}" data-ref="${escHtml(ref)}">
-    <summary class="tr-row"><span class="tr-caret">▸</span>${kindBadge(name)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</summary>
+    <summary class="tr-row"><span class="tr-caret">▸</span>${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}</summary>
     <div class="tr-body">${input}${output}</div>
   </details>`;
 }

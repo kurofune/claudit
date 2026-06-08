@@ -198,7 +198,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
           if (!tool) return;
           events.push({
             kind: 'tool', t, sessionId: sid, agentIndex: idx, agentLabel: label,
-            tool: tool.name || '', detail: tool.detail || '',
+            tool: tool.name || '', toolKind: tool.kind || '', detail: tool.detail || '',
             input: tool.input || '', status: tool.status || '',
             output: tool.output || '',
             stepIndex, toolIndex,
@@ -642,7 +642,10 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
     agentKind: agent.kind || '',
     description: agent.kind !== 'main' ? (agent.description || '') : '',
     title,
-    kind: type === 'tool' ? (tool.name || '') : (type === 'step' ? 'step' : 'agent'),
+    // kind is the normalized ToolKind enum (Phase 1) for tools, driving the
+    // colored kind badge; 'step'/'agent' are pseudo-kinds for turns/agents.
+    // The raw tool name lives in `title`, not here.
+    kind: type === 'tool' ? (tool.kind || 'other') : (type === 'step' ? 'step' : 'agent'),
     status,
     detail: type === 'tool' ? (tool.detail || '') : '',
     // toolId lets the drawer's "show full" action fetch the untruncated I/O

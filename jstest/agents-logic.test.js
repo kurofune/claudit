@@ -228,15 +228,15 @@ const FEED_GRAPH = {
       kind: 'main', status: 'done',
       started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:05Z',
       steps: [
-        { timestamp: '2026-05-01T12:00:00Z', tools: [{ name: 'Bash', input: 'ls', status: 'ok' }] },
-        { timestamp: '2026-05-01T12:00:05Z', tools: [{ name: 'Agent', detail: 'Explore' }] },
+        { timestamp: '2026-05-01T12:00:00Z', tools: [{ name: 'Bash', kind: 'exec', input: 'ls', status: 'ok' }] },
+        { timestamp: '2026-05-01T12:00:05Z', tools: [{ name: 'Agent', kind: 'agent', detail: 'Explore' }] },
       ],
     },
     children: [{
       kind: 'subagent', agent_type: 'Explore', description: 'map the code', status: 'running',
       started_at: '2026-05-01T12:00:06Z', ended_at: '2026-05-01T12:00:08Z',
       steps: [
-        { timestamp: '2026-05-01T12:00:08Z', tools: [{ name: 'Read', detail: '.go', input: 'g.go', status: 'ok' }] },
+        { timestamp: '2026-05-01T12:00:08Z', tools: [{ name: 'Read', kind: 'read', detail: '.go', input: 'g.go', status: 'ok' }] },
       ],
     }],
   }],
@@ -252,6 +252,9 @@ test('buildEventFeed emits tool, spawn and done events sorted newest-first', () 
   const top = feed[0];
   assert.equal(top.kind, 'tool');
   assert.equal(top.tool, 'Read');
+  // toolKind carries the normalized ToolKind enum (Phase 1) so the feed row
+  // can color its kind badge without re-matching the raw tool name.
+  assert.equal(top.toolKind, 'read');
   assert.equal(top.status, 'ok');
   assert.equal(top.agentLabel, 'Explore');
   assert.equal(top.agentIndex, 1);
@@ -506,7 +509,7 @@ const DRAWER_GRAPH = {
           cost_usd: 0.10, duration_ms: 4200,
           thinking: 'plan the work', text: 'Listing files',
           tools: [
-            { name: 'Bash', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n', id: 'toolu_x' },
+            { name: 'Bash', kind: 'exec', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n', id: 'toolu_x' },
           ],
         },
         {
@@ -597,7 +600,9 @@ test('buildDrawerPayload builds the tool payload, inheriting the parent step', (
   assert.equal(p.type, 'tool');
   assert.equal(p.refKey, 'sess-uuid-1#0.0:0');
   assert.equal(p.title, 'Bash');
-  assert.equal(p.kind, 'Bash');
+  // kind is the normalized ToolKind enum (Phase 1), not the raw tool name —
+  // it drives the drawer's colored kind badge. Title still shows the raw name.
+  assert.equal(p.kind, 'exec');
   assert.equal(p.status, 'ok');
   assert.equal(p.detail, 'ls -la');
   assert.equal(p.input, 'ls -la');
