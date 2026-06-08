@@ -6,7 +6,7 @@ Update the **Status** line and **Progress log** as each phase lands. Build one p
 time — each phase section below is self-contained so it can be picked up cold without
 re-reading the others.
 
-**Status:** Phases 1 ✅ & 2 ✅ complete (tests green, browser-verified). Decisions locked (see below).
+**Status:** Phases 1 ✅, 2 ✅ & 3 ✅ complete (tests green, browser-verified). Decisions locked (see below).
 
 ---
 
@@ -126,7 +126,7 @@ throwaway.
 **Done when.** Clicking any row/card/node anywhere fills one shared drawer with full detail;
 no unclickable rows remain; project name is the headline; browser-verified.
 
-## Phase 3 — Unify the IA into lenses  *(UI)*  — **Status: not started**
+## Phase 3 — Unify the IA into lenses  *(UI)*  — **Status: ✅ complete**
 
 **Goal.** Realize the "unify" decision: lenses over one selection.
 
@@ -227,3 +227,18 @@ anywhere is always correct; live = the playhead at "now".
   Browser-verified across all three lenses (selection persists across lens switches); full
   JS + Go suites green. Not yet committed — same entanglement as Phase 1; staging is the
   user's call.
+- 2026-06-07 — Phase 3 done (UI/IA, browser-verified). The sub-tab nav is now a LENS
+  SWITCH: **Mission Control → Feed**, **Inspector → Tree** (Flow graph kept as the Phase 4
+  Timeline precursor). Renamed the user-facing labels AND the URL hash segments to match
+  the lens names (`#agents/control`→`#agents/feed`, `#agents/inspector`→`#agents/tree`;
+  `flow` unchanged) — the router is generic (`sub` = rest-of-hash) and the agents view
+  shipped on this same redesign branch, so there were no external bookmarks to preserve.
+  Internal helper/CSS names (`renderInspector`, `insp-*`) deliberately left alone to keep
+  the diff IA-only and low-risk. Made the persistence **intentional**: a pure lens switch
+  now passes `paintDrawer=false` to `renderActive`, so the right pane is left physically
+  untouched (no flicker, no loss of drawer scroll / copy-button state) while only the left
+  pane swaps; first paint + live updates still repaint it. Browser-verified with
+  playwright `eval` (immune to the live-feed ref churn): selecting a sub-agent then cycling
+  Feed→Flow→Tree→Feed keeps the exact same drawer (`djinn:review-triage` / sub-agent /
+  matching sid) every time, while the active lens content swaps correctly. JS suite 89/89,
+  Go all green. Not yet committed — staging is the user's call.
