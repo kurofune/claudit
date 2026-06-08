@@ -82,6 +82,12 @@ type ToolInvocation struct {
 	// already says everything. Distinct inputs are NOT collapsed (the dedup
 	// key includes Input), so two different Bash commands in one turn both show.
 	Input string `json:"input"`
+	// Status is the tool's outcome, joined from the matching tool_result:
+	// "ok", "error", or "" when no result was captured (still running, or an
+	// older session that didn't record one). Output is a bounded, redaction-
+	// aware snippet of what the tool returned. Both empty when unjoined.
+	Status string `json:"status,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 // SessionTimelinesOptions tunes BuildSessionTimelines. All zero values are
@@ -281,7 +287,7 @@ func BuildSessionTimelines(
 			Model:     t.Model,
 			CostUSD:   cost,
 			Tokens:    tokens,
-			Tools:     distinctToolInvocations(t.ToolUses, opts.Redact),
+			Tools:     distinctToolInvocations(t.ToolUses, nil, opts.Redact),
 			Sidechain: t.Sidechain,
 		})
 	}
@@ -444,6 +450,13 @@ func redactMarker(s string) string {
 	return fmt.Sprintf("[redacted %d chars]", len(s))
 }
 
+// RedactMarker is the exported wrapper around redactMarker so other packages
+// (e.g. agentflow) redact reasoning/narration text with identical parity
+// rather than reimplementing the marker format.
+func RedactMarker(s string) string {
+	return redactMarker(s)
+}
+
 // preparePromptText applies redact + truncation. Order matters: redact
 // first (so the [redacted N chars] count reflects the real length, not the
 // truncated length).
@@ -460,8 +473,8 @@ func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) 
 // DistinctToolInvocations is the exported entry point to the same dedup +
 // detail-selection logic the session drill-down uses, so other packages
 // (e.g. agentflow) surface tool calls identically instead of drifting.
-func DistinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation {
-	return distinctToolInvocations(uses, redact)
+func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool) []ToolInvocation {
+	return distinctToolInvocations(uses, results, redact)
 }
 
 // distinctToolInvocations returns (Name, Detail) pairs in first-occurrence
@@ -470,7 +483,7 @@ func DistinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation
 // — same tool, different work. Detail comes from the per-tool field that
 // best identifies the call (SubagentType for Agent, SkillName for Skill,
 // SlashCommand for SlashCommand, ToolUse.Detail for everything else).
-func distinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation {
+func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool) []ToolInvocation {
 	if len(uses) == 0 {
 		return nil
 	}
@@ -495,7 +508,22 @@ func distinctToolInvocations(uses []parse.ToolUse, redact bool) []ToolInvocation
 		if redact && input != "" {
 			input = redactMarker(input)
 		}
-		out = append(out, ToolInvocation{Name: u.Name, Detail: d, Input: input})
+		inv := ToolInvocation{Name: u.Name, Detail: d, Input: input}
+		// Join the outcome from the matching tool_result (by tool_use id).
+		// Status is content-free so it survives redaction; Output is masked
+		// the same way Input is.
+		if res, ok := results[u.ID]; ok && u.ID != "" {
+			if res.IsError {
+				inv.Status = "error"
+			} else {
+				inv.Status = "ok"
+			}
+			inv.Output = res.Content
+			if redact && inv.Output != "" {
+				inv.Output = redactMarker(inv.Output)
+			}
+		}
+		out = append(out, inv)
 	}
 	return out
 }

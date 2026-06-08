@@ -84,6 +84,37 @@ func TestBuildAgentGraph_SingleMainTurn(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_JoinsToolResults(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.ToolUses = []parse.ToolUse{
+		{ID: "toolu_1", Name: "Bash", Input: "go test"},
+	}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "toolu_1", IsError: true, Content: "FAIL"},
+		},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(g.Sessions) != 1 || g.Sessions[0].Main == nil {
+		t.Fatalf("want 1 session with a main node, got %+v", g.Sessions)
+	}
+	steps := g.Sessions[0].Main.Steps
+	if len(steps) != 1 || len(steps[0].Tools) != 1 {
+		t.Fatalf("want 1 step with 1 tool, got %+v", steps)
+	}
+	tool := steps[0].Tools[0]
+	if tool.Status != "error" || tool.Output != "FAIL" {
+		t.Errorf("tool outcome = %+v, want error/FAIL", tool)
+	}
+}
+
 func TestBuildAgentGraph_MainNodeRollsUp(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -290,6 +321,53 @@ func TestBuildAgentGraph_MultipleSubagentsOrderedByStart(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_StepCarriesThinkingAndText(t *testing.T) {
+	// A turn's assistant reasoning and narration flow onto its step so
+	// tool-less turns become auditable in the Agents view.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.Thinking = "let me reason"
+	turn.Text = "here is the plan"
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	step := g.Sessions[0].Main.Steps[0]
+	if step.Thinking != "let me reason" {
+		t.Errorf("Thinking = %q, want %q", step.Thinking, "let me reason")
+	}
+	if step.Text != "here is the plan" {
+		t.Errorf("Text = %q, want %q", step.Text, "here is the plan")
+	}
+}
+
+func TestBuildAgentGraph_RedactsThinkingAndText(t *testing.T) {
+	// Under Redact, reasoning/narration become length-echoing markers — but
+	// an empty field stays empty (no "[redacted 0 chars]" noise), matching
+	// how tool-input redaction is gated on non-empty.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.Thinking = "secret reasoning"
+	turn.Text = "" // empty narration must stay empty
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Redact: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	step := g.Sessions[0].Main.Steps[0]
+	if want := aggregate.RedactMarker("secret reasoning"); step.Thinking != want {
+		t.Errorf("Thinking = %q, want %q", step.Thinking, want)
+	}
+	if step.Text != "" {
+		t.Errorf("Text = %q, want empty (not a redacted-0 marker)", step.Text)
+	}
+}
+
 func TestBuildAgentGraph_RedactsToolInput(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -397,19 +475,21 @@ func TestBuildAgentGraph_FilterExcludesTurns(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_TopNCapsByCost(t *testing.T) {
+func TestBuildAgentGraph_TopNCapsByRecency(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	// Three sessions of ascending cost (more input tokens → more cost).
-	cheap := mkTurn("a1", "cheap", "/root/-p/cheap.jsonl", t0)
-	cheap.Usage = parse.Usage{InputTokens: 1_000}
+	// Cost and recency deliberately DISAGREE: the oldest session is the
+	// costliest. A recency cap must keep the two most recent and drop the
+	// old-but-expensive one — proving it's not selecting by cost.
+	oldRich := mkTurn("a1", "old-rich", "/root/-p/old.jsonl", t0)
+	oldRich.Usage = parse.Usage{InputTokens: 500_000}
 	mid := mkTurn("b1", "mid", "/root/-p/mid.jsonl", t0.Add(time.Minute))
 	mid.Usage = parse.Usage{InputTokens: 50_000}
-	rich := mkTurn("c1", "rich", "/root/-p/rich.jsonl", t0.Add(2*time.Minute))
-	rich.Usage = parse.Usage{InputTokens: 500_000}
+	newCheap := mkTurn("c1", "new-cheap", "/root/-p/new.jsonl", t0.Add(2*time.Minute))
+	newCheap.Usage = parse.Usage{InputTokens: 1_000}
 
-	snap := &corpus.Snapshot{Turns: []parse.Turn{cheap, mid, rich}}
+	snap := &corpus.Snapshot{Turns: []parse.Turn{oldRich, mid, newCheap}}
 
 	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{TopN: 2})
 	if err != nil {
@@ -418,11 +498,11 @@ func TestBuildAgentGraph_TopNCapsByCost(t *testing.T) {
 	if len(g.Sessions) != 2 {
 		t.Fatalf("want 2 sessions after TopN cap, got %d", len(g.Sessions))
 	}
-	if findSession(g, "cheap") != nil {
-		t.Errorf("cheapest session should be dropped by TopN=2 cap")
+	if findSession(g, "old-rich") != nil {
+		t.Errorf("oldest session should be dropped by TopN=2 recency cap, even though it's costliest")
 	}
-	if findSession(g, "mid") == nil || findSession(g, "rich") == nil {
-		t.Errorf("the two costliest sessions (mid, rich) must survive the cap")
+	if findSession(g, "mid") == nil || findSession(g, "new-cheap") == nil {
+		t.Errorf("the two most recent sessions (mid, new-cheap) must survive the cap")
 	}
 }
 
@@ -443,14 +523,16 @@ func TestBuildAgentGraph_TopNZeroIsUnlimited(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SessionsSortedByStart(t *testing.T) {
+func TestBuildAgentGraph_SessionsSortedNewestFirst(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	// Input order reversed (late first) to prove sorting by StartedAt.
-	late := mkTurn("b1", "late", "/root/-p/late.jsonl", t0.Add(time.Hour))
+	// Input order (early first) is the opposite of what we expect out: the
+	// Agents view leads with the most recently active session so a live run
+	// sits on top.
 	early := mkTurn("a1", "early", "/root/-p/early.jsonl", t0.Add(time.Minute))
-	snap := &corpus.Snapshot{Turns: []parse.Turn{late, early}}
+	late := mkTurn("b1", "late", "/root/-p/late.jsonl", t0.Add(time.Hour))
+	snap := &corpus.Snapshot{Turns: []parse.Turn{early, late}}
 
 	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
 	if err != nil {
@@ -459,13 +541,10 @@ func TestBuildAgentGraph_SessionsSortedByStart(t *testing.T) {
 	if len(g.Sessions) != 2 {
 		t.Fatalf("want 2 sessions, got %d", len(g.Sessions))
 	}
-	if g.Sessions[0].SessionID != "early" {
-		t.Errorf("Sessions[0] = %q, want %q (earlier start first)", g.Sessions[0].SessionID, "early")
+	if g.Sessions[0].SessionID != "late" {
+		t.Errorf("Sessions[0] = %q, want %q (most recent first)", g.Sessions[0].SessionID, "late")
 	}
-	if g.Sessions[1].SessionID != "late" {
-		t.Errorf("Sessions[1] = %q, want %q", g.Sessions[1].SessionID, "late")
-	}
-	if !g.Sessions[0].StartedAt.Equal(t0.Add(time.Minute)) {
-		t.Errorf("Sessions[0].StartedAt = %v, want %v", g.Sessions[0].StartedAt, t0.Add(time.Minute))
+	if g.Sessions[1].SessionID != "early" {
+		t.Errorf("Sessions[1] = %q, want %q", g.Sessions[1].SessionID, "early")
 	}
 }

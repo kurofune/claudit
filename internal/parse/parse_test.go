@@ -298,6 +298,106 @@ func TestExtractToolUses_CapturesInput(t *testing.T) {
 	}
 }
 
+func TestExtractToolUses_CapturesID(t *testing.T) {
+	// The tool_use `id` ties an assistant tool call to its tool_result in
+	// the following user turn — load-bearing for the Agents view's result
+	// join, so we must retain it on the parsed ToolUse.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"tool_use","id":"toolu_abc","name":"Bash","input":{"command":"ls"}}` +
+		`]}}`
+	turn, _, _ := ParseLine([]byte(line), "t")
+	if len(turn.ToolUses) != 1 {
+		t.Fatalf("ToolUses = %d, want 1", len(turn.ToolUses))
+	}
+	if got := turn.ToolUses[0].ID; got != "toolu_abc" {
+		t.Errorf("ToolUse.ID = %q, want toolu_abc", got)
+	}
+}
+
+func TestExtractAssistantText_CapturesThinkingAndText(t *testing.T) {
+	// Assistant messages carry distinct `thinking` (extended-thinking
+	// reasoning) and `text` (narration) blocks. We surface them as two
+	// separate fields so a tool-less turn is auditable.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"thinking","thinking":"Let me reason","signature":"abc"},` +
+		`{"type":"text","text":"Here is the answer"}` +
+		`]}}`
+	turn, _, _ := ParseLine([]byte(line), "t")
+	if got := turn.Thinking; got != "Let me reason" {
+		t.Errorf("Thinking = %q, want %q", got, "Let me reason")
+	}
+	if got := turn.Text; got != "Here is the answer" {
+		t.Errorf("Text = %q, want %q", got, "Here is the answer")
+	}
+}
+
+func TestExtractAssistantText_OnlyThinking(t *testing.T) {
+	// A pure-reasoning turn — only a thinking block, no text, no tool_use —
+	// must now carry its reasoning. This is the core gap the feature closes.
+	// It is still a chargeable assistant turn.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"thinking","thinking":"Just thinking","signature":"abc"}` +
+		`]}}`
+	turn, _, kind := ParseLine([]byte(line), "t")
+	if kind != LineAssistant {
+		t.Fatalf("kind = %v, want LineAssistant", kind)
+	}
+	if got := turn.Thinking; got != "Just thinking" {
+		t.Errorf("Thinking = %q, want %q", got, "Just thinking")
+	}
+	if got := turn.Text; got != "" {
+		t.Errorf("Text = %q, want empty", got)
+	}
+}
+
+func TestExtractAssistantText_JoinsMultipleBlocks(t *testing.T) {
+	// Multiple blocks of the same kind join with a newline, per kind.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"thinking","thinking":"first","signature":"s1"},` +
+		`{"type":"thinking","thinking":"second","signature":"s2"},` +
+		`{"type":"text","text":"narr one"},` +
+		`{"type":"text","text":"narr two"}` +
+		`]}}`
+	turn, _, _ := ParseLine([]byte(line), "t")
+	if got := turn.Thinking; got != "first\nsecond" {
+		t.Errorf("Thinking = %q, want %q", got, "first\nsecond")
+	}
+	if got := turn.Text; got != "narr one\nnarr two" {
+		t.Errorf("Text = %q, want %q", got, "narr one\nnarr two")
+	}
+}
+
+func TestParseFile_ToolResults(t *testing.T) {
+	// tool_result blocks live in user turns that we otherwise filter out;
+	// ParseFile must still surface them (keyed by tool_use_id) so the
+	// aggregator can join each call to its outcome. content may be a bare
+	// string or an array of text blocks, and is_error flags a failure.
+	f, err := os.Open("testdata/user_messages.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	res, err := ParseFile(f, "testdata/user_messages.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.ToolResults) != 2 {
+		t.Fatalf("ToolResults = %d, want 2 (%+v)", len(res.ToolResults), res.ToolResults)
+	}
+	byID := map[string]ToolResult{}
+	for _, r := range res.ToolResults {
+		byID[r.ToolUseID] = r
+	}
+	ok := byID["toolu_1"]
+	if ok.Content != "output of bash" || ok.IsError {
+		t.Errorf("toolu_1 result = %+v, want content/ok", ok)
+	}
+	bad := byID["toolu_2"]
+	if bad.Content != "boom" || !bad.IsError {
+		t.Errorf("toolu_2 result = %+v, want boom/error", bad)
+	}
+}
+
 func TestParseFile_StreamingNotInMemory(t *testing.T) {
 	// Smoke test that we use a Scanner (won't allocate the whole file).
 	// Verify by reading a moderately long synthetic input.

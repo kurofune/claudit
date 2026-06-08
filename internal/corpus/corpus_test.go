@@ -29,6 +29,30 @@ func writeJSONL(t *testing.T, path string, lines ...string) {
 	}
 }
 
+func TestCache_SnapshotCarriesToolResults(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir)
+
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	// An assistant turn with a tool_use, then the user turn carrying its
+	// tool_result. The snapshot must surface the result for the join.
+	assistant := `{"type":"assistant","uuid":"a1","parentUuid":"","timestamp":"2026-05-01T10:00:00Z","sessionId":"s1","cwd":"/p","message":{"model":"claude-opus-4-7","role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":1,"output_tokens":1}}}`
+	result := `{"type":"user","uuid":"u1","parentUuid":"a1","timestamp":"2026-05-01T10:00:01Z","sessionId":"s1","cwd":"/p","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"file listing","is_error":false}]}}`
+	writeJSONL(t, filepath.Join(dir, "s.jsonl"), assistant, result)
+	_ = t0
+
+	if _, err := c.Refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	snap := c.Snapshot()
+	if len(snap.ToolResults) != 1 {
+		t.Fatalf("snapshot ToolResults = %d, want 1", len(snap.ToolResults))
+	}
+	if r := snap.ToolResults[0]; r.ToolUseID != "toolu_9" || r.Content != "file listing" {
+		t.Errorf("ToolResult = %+v, want toolu_9/file listing", r)
+	}
+}
+
 func TestCache_RefreshDetectsAddedFile(t *testing.T) {
 	dir := t.TempDir()
 	c := New(dir)

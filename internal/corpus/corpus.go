@@ -41,25 +41,27 @@ import (
 // cache map; ParseFile produces fresh slices on every call so there's
 // no aliasing concern.
 type fileEntry struct {
-	mtime     time.Time
-	size      int64
-	turns     []parse.Turn
-	users     []parse.UserMessage
-	links     []parse.ParentLink
-	malformed int
+	mtime       time.Time
+	size        int64
+	turns       []parse.Turn
+	users       []parse.UserMessage
+	links       []parse.ParentLink
+	toolResults []parse.ToolResult
+	malformed   int
 }
 
 // Snapshot is an immutable view of the parsed corpus at one moment.
 // Handlers read it via an atomic.Pointer so the poller can swap a new
 // one in without blocking concurrent readers. Treat it as read-only.
 type Snapshot struct {
-	Turns      []parse.Turn
-	Users      []parse.UserMessage
-	Links      []parse.ParentLink
-	Generation int64
-	LastUpdate time.Time
-	FileCount  int
-	Malformed  int
+	Turns       []parse.Turn
+	Users       []parse.UserMessage
+	Links       []parse.ParentLink
+	ToolResults []parse.ToolResult
+	Generation  int64
+	LastUpdate  time.Time
+	FileCount   int
+	Malformed   int
 	// FileErrors holds non-fatal per-file open/parse errors. Populated
 	// by LoadConcurrent (the one-shot path surfaces them as a warning);
 	// the polled Cache leaves it nil since the daemon tolerates broken
@@ -159,12 +161,13 @@ func (c *Cache) Refresh() (changed bool, err error) {
 	if len(toParse) > 0 {
 		for _, pr := range parseFiles(toParse) {
 			entry := fileEntry{
-				turns:     pr.turns,
-				users:     pr.users,
-				links:     pr.links,
-				malformed: pr.malformed,
-				mtime:     mods[pr.path],
-				size:      sizes[pr.path],
+				turns:       pr.turns,
+				users:       pr.users,
+				links:       pr.links,
+				toolResults: pr.toolResults,
+				malformed:   pr.malformed,
+				mtime:       mods[pr.path],
+				size:        sizes[pr.path],
 			}
 			// On a parse error we still persist whatever we managed to
 			// read plus the new (mtime, size) so we don't re-parse the
@@ -193,26 +196,29 @@ func (c *Cache) Refresh() (changed bool, err error) {
 // publishSnapshot concatenates every cached fileEntry into fresh slices
 // and atomically swaps in a new Snapshot. Called with mu held.
 func (c *Cache) publishSnapshot() {
-	var totalTurns, totalUsers, totalLinks, malformed int
+	var totalTurns, totalUsers, totalLinks, totalResults, malformed int
 	for _, e := range c.files {
 		totalTurns += len(e.turns)
 		totalUsers += len(e.users)
 		totalLinks += len(e.links)
+		totalResults += len(e.toolResults)
 		malformed += e.malformed
 	}
 	snap := &Snapshot{
-		Turns:      make([]parse.Turn, 0, totalTurns),
-		Users:      make([]parse.UserMessage, 0, totalUsers),
-		Links:      make([]parse.ParentLink, 0, totalLinks),
-		Generation: atomic.AddInt64(&c.generation, 1),
-		LastUpdate: time.Now(),
-		FileCount:  len(c.files),
-		Malformed:  malformed,
+		Turns:       make([]parse.Turn, 0, totalTurns),
+		Users:       make([]parse.UserMessage, 0, totalUsers),
+		Links:       make([]parse.ParentLink, 0, totalLinks),
+		ToolResults: make([]parse.ToolResult, 0, totalResults),
+		Generation:  atomic.AddInt64(&c.generation, 1),
+		LastUpdate:  time.Now(),
+		FileCount:   len(c.files),
+		Malformed:   malformed,
 	}
 	for _, e := range c.files {
 		snap.Turns = append(snap.Turns, e.turns...)
 		snap.Users = append(snap.Users, e.users...)
 		snap.Links = append(snap.Links, e.links...)
+		snap.ToolResults = append(snap.ToolResults, e.toolResults...)
 	}
 	c.snapshot.Store(snap)
 	c.notifySubscribers(snap.Generation)
@@ -324,6 +330,7 @@ func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
 		snap.Turns = append(snap.Turns, pr.turns...)
 		snap.Users = append(snap.Users, pr.users...)
 		snap.Links = append(snap.Links, pr.links...)
+		snap.ToolResults = append(snap.ToolResults, pr.toolResults...)
 		snap.Malformed += pr.malformed
 		if pr.err != nil {
 			snap.FileErrors = append(snap.FileErrors, pr.err)
@@ -335,12 +342,13 @@ func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
 // parseResult is one file's parsed payload, tagged with its path so the
 // Cache can fold it back into the right map slot.
 type parseResult struct {
-	path      string
-	turns     []parse.Turn
-	users     []parse.UserMessage
-	links     []parse.ParentLink
-	malformed int
-	err       error
+	path        string
+	turns       []parse.Turn
+	users       []parse.UserMessage
+	links       []parse.ParentLink
+	toolResults []parse.ToolResult
+	malformed   int
+	err         error
 }
 
 // parseFiles fans parsing of paths out across GOMAXPROCS workers and
@@ -401,6 +409,7 @@ func parseOne(path string) parseResult {
 	pr.turns = r.Turns
 	pr.users = r.UserMessages
 	pr.links = r.ParentLinks
+	pr.toolResults = r.ToolResults
 	pr.malformed = r.Malformed
 	if perr != nil {
 		pr.err = fmt.Errorf("parse %s: %w", path, perr)

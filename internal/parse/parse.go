@@ -27,6 +27,10 @@ type Usage struct {
 
 // ToolUse is one tool_use entry inside an assistant turn.
 type ToolUse struct {
+	// ID is the tool_use block's id (e.g. "toolu_01..."). It ties this call
+	// to its tool_result in the following user turn so the aggregator can
+	// join a call to its outcome. Empty for older sessions that omit it.
+	ID           string
 	Name         string
 	SkillName    string // when Name == "Skill"
 	SlashCommand string // when Name == "SlashCommand"
@@ -42,6 +46,19 @@ type ToolUse struct {
 	Input string
 }
 
+// ToolResult is one tool_result block from a user turn — the outcome of a
+// prior assistant tool_use, linked by ToolUseID. We surface these (despite
+// dropping the user turns that carry them) so the Agents view can show
+// whether a tool call succeeded and a snippet of what it returned.
+type ToolResult struct {
+	ToolUseID string
+	IsError   bool
+	// Content is a bounded snippet of the result text. The wire `content`
+	// is either a bare string or an array of {type:"text",text} blocks; both
+	// collapse to plain text here. Capped to bound payload size.
+	Content string
+}
+
 // Turn is one assistant message — the only event type that costs money.
 type Turn struct {
 	SessionID  string
@@ -53,6 +70,12 @@ type Turn struct {
 	Model      string
 	Usage      Usage
 	ToolUses   []ToolUse
+	// Thinking is the joined text of the assistant message's `thinking`
+	// blocks — the model's extended-thinking reasoning. Empty when none.
+	Thinking string
+	// Text is the joined text of the assistant message's `text` narration
+	// blocks. Empty when none.
+	Text string
 	// Entrypoint is the session origin from the JSONL line: "cli" for an
 	// interactive session, "sdk-cli" for a headless/SDK run. Constant
 	// across a session; the aggregator lifts it to the session level.
@@ -87,6 +110,10 @@ type ParentLink struct {
 type Result struct {
 	Turns        []Turn
 	UserMessages []UserMessage
+	// ToolResults are the tool_result blocks from this file's user turns,
+	// keyed for join by ToolUseID. Surfaced even though the carrying user
+	// turns are filtered out of UserMessages.
+	ToolResults []ToolResult
 	// ParentLinks contains uuid → parentUuid edges from every line that
 	// has both fields, including non-content message types. The chain
 	// walk needs these to bridge over hooks and snapshots.
@@ -129,9 +156,22 @@ type cacheCreation struct {
 }
 
 type rawContentEntry struct {
-	Type  string          `json:"type"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+	Type     string          `json:"type"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+}
+
+// rawToolResultEntry decodes a tool_result block from a user message.
+// `content` is either a JSON string or an array of {type:"text",text}
+// blocks, so it's held raw and flattened by toolResultText.
+type rawToolResultEntry struct {
+	Type      string          `json:"type"`
+	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // rawUserContentEntry decodes the `{"type":"text","text":"..."}` blocks
@@ -186,6 +226,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			return Turn{}, UserMessage{}, LineUnknown
 		}
 		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+		thinking, text := extractAssistantText(msg.Content)
 		return Turn{
 			SessionID:  raw.SessionID,
 			UUID:       raw.UUID,
@@ -196,6 +237,8 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			Model:      msg.Model,
 			Usage:      convertUsage(msg.Usage),
 			ToolUses:   extractToolUses(msg.Content),
+			Thinking:   thinking,
+			Text:       text,
 			Entrypoint: raw.Entrypoint,
 			SourceFile: path,
 		}, UserMessage{}, LineAssistant
@@ -249,6 +292,9 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 		if uuid, parentUUID := peekParentLink(line); uuid != "" && parentUUID != "" {
 			res.ParentLinks = append(res.ParentLinks, ParentLink{UUID: uuid, ParentUUID: parentUUID})
 		}
+		// Tool results ride in user turns that ParseLine filters out, so
+		// pull them off the raw line separately (keyed by tool_use_id).
+		res.ToolResults = append(res.ToolResults, peekToolResults(line)...)
 	}
 	if err := sc.Err(); err != nil {
 		return res, err
@@ -327,6 +373,113 @@ func extractUserText(content json.RawMessage) (text string, hasToolResult bool) 
 	return b.String(), false
 }
 
+// extractAssistantText pulls the assistant message's reasoning and narration
+// out of its content array as two distinct strings: thinking joins the
+// `thinking` blocks (extended-thinking reasoning), text joins the `text`
+// narration blocks. Multiple blocks of each kind join with newlines.
+// tool_use and other block types are ignored.
+//
+// Content may be a bare JSON string (older sessions) which carries no typed
+// blocks, so we return "","" for that case the way other extractors do.
+func extractAssistantText(content json.RawMessage) (thinking, text string) {
+	if len(content) == 0 || content[0] == '"' {
+		return "", ""
+	}
+	var entries []rawContentEntry
+	if err := json.Unmarshal(content, &entries); err != nil {
+		return "", ""
+	}
+	var tb, xb strings.Builder
+	for _, e := range entries {
+		switch e.Type {
+		case "thinking":
+			if e.Thinking != "" {
+				if tb.Len() > 0 {
+					tb.WriteByte('\n')
+				}
+				tb.WriteString(e.Thinking)
+			}
+		case "text":
+			if e.Text != "" {
+				if xb.Len() > 0 {
+					xb.WriteByte('\n')
+				}
+				xb.WriteString(e.Text)
+			}
+		}
+	}
+	return tb.String(), xb.String()
+}
+
+// toolResultMaxChars bounds the per-result snippet we retain — enough to
+// see an error message or short stdout without ballooning the payload.
+const toolResultMaxChars = 2000
+
+// peekToolResults decodes a raw line and returns any tool_result blocks in
+// its user-message content. Separate from ParseLine (which drops the
+// carrying user turn) so streaming consumers keep their existing contract
+// while the corpus path still captures outcomes. Returns nil for any line
+// that isn't a user message with tool_result blocks.
+func peekToolResults(line []byte) []ToolResult {
+	if len(line) == 0 {
+		return nil
+	}
+	var raw rawLine
+	if err := json.Unmarshal(line, &raw); err != nil || raw.Type != "user" || len(raw.Message) == 0 {
+		return nil
+	}
+	var msg rawMessage
+	if err := json.Unmarshal(raw.Message, &msg); err != nil || len(msg.Content) == 0 || msg.Content[0] != '[' {
+		return nil
+	}
+	var entries []rawToolResultEntry
+	if err := json.Unmarshal(msg.Content, &entries); err != nil {
+		return nil
+	}
+	var out []ToolResult
+	for _, e := range entries {
+		if e.Type != "tool_result" {
+			continue
+		}
+		out = append(out, ToolResult{
+			ToolUseID: e.ToolUseID,
+			IsError:   e.IsError,
+			Content:   truncateRunes(toolResultText(e.Content), toolResultMaxChars),
+		})
+	}
+	return out
+}
+
+// toolResultText flattens a tool_result `content` — a bare JSON string or
+// an array of {type:"text",text} blocks — to plain text. Joins multiple
+// text blocks with newlines; ignores non-text blocks (e.g. images).
+func toolResultText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+		return ""
+	}
+	var entries []rawUserContentEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.Type == "text" && e.Text != "" {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(e.Text)
+		}
+	}
+	return b.String()
+}
+
 func extractToolUses(content json.RawMessage) []ToolUse {
 	if len(content) == 0 {
 		return nil
@@ -340,7 +493,7 @@ func extractToolUses(content json.RawMessage) []ToolUse {
 		if e.Type != "tool_use" {
 			continue
 		}
-		tu := ToolUse{Name: e.Name}
+		tu := ToolUse{ID: e.ID, Name: e.Name}
 		if len(e.Input) > 0 && (e.Name == "Skill" || e.Name == "SlashCommand" || e.Name == "Agent") {
 			var in rawSkillInput
 			if err := json.Unmarshal(e.Input, &in); err == nil {

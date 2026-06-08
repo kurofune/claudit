@@ -328,6 +328,49 @@ func TestBuildSessionTimelines_DistinctToolInvocations(t *testing.T) {
 	}
 }
 
+func TestDistinctToolInvocations_JoinsResults(t *testing.T) {
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: "go test"},
+		{ID: "t2", Name: "Read", Detail: ".go"},
+		{ID: "t3", Name: "Edit"}, // no matching result — status stays empty
+	}
+	results := map[string]parse.ToolResult{
+		"t1": {ToolUseID: "t1", IsError: true, Content: "FAIL: boom"},
+		"t2": {ToolUseID: "t2", IsError: false, Content: "package main"},
+	}
+	got := DistinctToolInvocations(uses, results, false)
+	if len(got) != 3 {
+		t.Fatalf("got %d invocations, want 3 (%+v)", len(got), got)
+	}
+	if got[0].Status != "error" || got[0].Output != "FAIL: boom" {
+		t.Errorf("t1 = %+v, want error/FAIL: boom", got[0])
+	}
+	if got[1].Status != "ok" || got[1].Output != "package main" {
+		t.Errorf("t2 = %+v, want ok/package main", got[1])
+	}
+	if got[2].Status != "" || got[2].Output != "" {
+		t.Errorf("t3 = %+v, want empty status/output (no result)", got[2])
+	}
+}
+
+func TestDistinctToolInvocations_RedactsOutput(t *testing.T) {
+	uses := []parse.ToolUse{{ID: "t1", Name: "Bash", Input: "secret cmd"}}
+	results := map[string]parse.ToolResult{
+		"t1": {ToolUseID: "t1", IsError: false, Content: "sensitive output"},
+	}
+	got := DistinctToolInvocations(uses, results, true)
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1", len(got))
+	}
+	// Status survives redaction (it's not content); Output is masked.
+	if got[0].Status != "ok" {
+		t.Errorf("status = %q, want ok", got[0].Status)
+	}
+	if got[0].Output != redactMarker("sensitive output") {
+		t.Errorf("output = %q, want redaction marker", got[0].Output)
+	}
+}
+
 func TestBuildSessionTimelines_TurnDuration(t *testing.T) {
 	// Inter-turn duration measures the wall-clock gap from one turn to the
 	// next within the same prompt. The last turn has no successor, so its

@@ -64,6 +64,11 @@ type AgentStep struct {
 	// in milliseconds. Zero for the last step (no next).
 	DurationMs int64                      `json:"duration_ms"`
 	Tools      []aggregate.ToolInvocation `json:"tools"`
+	// Thinking is the turn's extended-thinking reasoning; Text is its
+	// narration. Redacted to a length marker when Options.Redact is set.
+	// Omitted from JSON when empty so tool-only turns stay lean.
+	Thinking string `json:"thinking,omitempty"`
+	Text     string `json:"text,omitempty"`
 }
 
 // Options tunes graph construction. Zero values are sensible defaults.
@@ -80,10 +85,10 @@ type Options struct {
 	// length-echoing "[redacted N chars]" marker so a shared report doesn't
 	// leak command text or sub-agent prompts. Mirrors aggregate's --redact.
 	Redact bool
-	// TopN caps the result to the N costliest sessions (the meatiest agent
-	// trees), mirroring the Sessions tab's --sessions cap so a busy corpus
-	// doesn't ship thousands of sessions. 0 means unlimited. The surviving
-	// sessions are still returned in chronological order.
+	// TopN caps the result to the N most-recently-active sessions, mirroring
+	// the Sessions tab's --sessions cap so a busy corpus doesn't ship
+	// thousands of sessions. Recency (not cost) so a running session is never
+	// capped out. 0 means unlimited. Survivors are returned newest-first.
 	TopN int
 }
 
@@ -115,6 +120,17 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		nodes map[string]*nodeAccum
 	}
 	sessions := map[string]*sessionAccum{}
+
+	// Index tool results by tool_use id so each step's tool calls can be
+	// joined to their outcome (status + output). Built once over the whole
+	// snapshot; ids are unique per session file so cross-file collision is
+	// not a concern in practice.
+	results := make(map[string]parse.ToolResult, len(snap.ToolResults))
+	for _, r := range snap.ToolResults {
+		if r.ToolUseID != "" {
+			results[r.ToolUseID] = r
+		}
+	}
 
 	for _, t := range snap.Turns {
 		if !aggregate.MatchesFilter(t, f) {
@@ -150,11 +166,22 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			t.Usage.CacheReadTokens)
 		n.cost += cost
 		addUsage(&n.tokens, t.Usage)
+		thinking, text := t.Thinking, t.Text
+		if opts.Redact {
+			if thinking != "" {
+				thinking = aggregate.RedactMarker(thinking)
+			}
+			if text != "" {
+				text = aggregate.RedactMarker(text)
+			}
+		}
 		n.steps = append(n.steps, AgentStep{
 			Timestamp: t.Timestamp,
 			Model:     t.Model,
 			CostUSD:   cost,
-			Tools:     aggregate.DistinctToolInvocations(t.ToolUses, opts.Redact),
+			Tools:     aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact),
+			Thinking:  thinking,
+			Text:      text,
 		})
 	}
 
@@ -185,23 +212,26 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		})
 		out = append(out, as)
 	}
-	// Cap to the N costliest sessions before the display sort, so a busy
-	// corpus (thousands of sessions in the window) ships only the meatiest
-	// trees — mirrors the Sessions tab's --sessions cap. The survivors are
-	// still presented chronologically below.
+	// Cap to the N most-recently-active sessions before the display sort, so
+	// a busy corpus (thousands of sessions in the window) ships only what
+	// you're likely watching. Recency, not cost: a currently-running session
+	// is by definition recent, so — unlike the old cost cap — it's never
+	// dropped just because it hasn't spent much yet. EndedAt is the session's
+	// last turn, the best "did something lately" signal.
 	if opts.TopN > 0 && len(out) > opts.TopN {
 		sort.SliceStable(out, func(i, j int) bool {
-			if out[i].CostUSD != out[j].CostUSD {
-				return out[i].CostUSD > out[j].CostUSD
+			if !out[i].EndedAt.Equal(out[j].EndedAt) {
+				return out[i].EndedAt.After(out[j].EndedAt)
 			}
 			return out[i].SessionID < out[j].SessionID
 		})
 		out = out[:opts.TopN]
 	}
-	// Deterministic session order: earliest first, tiebreak on SessionID.
+	// Deterministic session order: most recently active first, so a live (or
+	// the freshest) session leads the view. Tiebreak on SessionID.
 	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].StartedAt.Equal(out[j].StartedAt) {
-			return out[i].StartedAt.Before(out[j].StartedAt)
+		if !out[i].EndedAt.Equal(out[j].EndedAt) {
+			return out[i].EndedAt.After(out[j].EndedAt)
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
