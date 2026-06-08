@@ -81,6 +81,11 @@ type ToolInvocation struct {
 	ID     string `json:"id,omitempty"`
 	Name   string `json:"name"`
 	Detail string `json:"detail"`
+	// Kind is the normalized tool category — "agent", "exec", "read", "edit",
+	// "web", "skill", "command", "mcp", "todo", "other" — derived from Name by
+	// ToolKind. Lets the frontend filter and color by category without matching
+	// raw tool names. Distinct from AgentNode.Kind ("main"/"subagent").
+	Kind string `json:"kind"`
 	// Input is the bounded input snippet from parse.ToolUse.Input — the full
 	// Bash command, the subagent prompt, etc. Empty for tools where Detail
 	// already says everything. Distinct inputs are NOT collapsed (the dedup
@@ -512,7 +517,7 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		if redact && input != "" {
 			input = redactMarker(input)
 		}
-		inv := ToolInvocation{ID: u.ID, Name: u.Name, Detail: d, Input: input}
+		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: input}
 		// Join the outcome from the matching tool_result (by tool_use id).
 		// Status is content-free so it survives redaction; Output is masked
 		// the same way Input is.

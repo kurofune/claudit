@@ -310,13 +310,13 @@ func TestBuildSessionTimelines_DistinctToolInvocations(t *testing.T) {
 	}
 	got := out[0].Prompts[0].Turns[0].Tools
 	want := []ToolInvocation{
-		{Name: "Bash", Detail: "git status"},
-		{Name: "Read", Detail: ".go"},
-		{Name: "Bash", Detail: "go test"},
-		{Name: "Agent", Detail: "Explore"},
-		{Name: "Skill", Detail: "handoff"},
-		{Name: "SlashCommand", Detail: "/review"},
-		{Name: "Edit", Detail: ""},
+		{Name: "Bash", Kind: "exec", Detail: "git status"},
+		{Name: "Read", Kind: "read", Detail: ".go"},
+		{Name: "Bash", Kind: "exec", Detail: "go test"},
+		{Name: "Agent", Kind: "agent", Detail: "Explore"},
+		{Name: "Skill", Kind: "skill", Detail: "handoff"},
+		{Name: "SlashCommand", Kind: "command", Detail: "/review"},
+		{Name: "Edit", Kind: "edit", Detail: ""},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
@@ -371,6 +371,24 @@ func TestDistinctToolInvocations_CarriesToolUseID(t *testing.T) {
 	}
 	if got[1].ID != "t3" {
 		t.Errorf("Read ID = %q, want t3", got[1].ID)
+	}
+}
+
+func TestDistinctToolInvocations_PopulatesKind(t *testing.T) {
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Agent", SubagentType: "review-triage"},
+		{ID: "t2", Name: "Bash", Input: "go test"},
+		{ID: "t3", Name: "mcp__github__create_issue"},
+	}
+	got := DistinctToolInvocations(uses, nil, false)
+	if len(got) != 3 {
+		t.Fatalf("got %d invocations, want 3", len(got))
+	}
+	want := []string{"agent", "exec", "mcp"}
+	for i, w := range want {
+		if got[i].Kind != w {
+			t.Errorf("invocation[%d] (%s) Kind = %q, want %q", i, got[i].Name, got[i].Kind, w)
+		}
 	}
 }
 
