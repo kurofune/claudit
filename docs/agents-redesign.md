@@ -268,6 +268,7 @@ anywhere is always correct; live = the playhead at "now".
   edge and hid the button. JS suite **99/99**, Go all green. **Known limitation** (deferred,
   not a blocker): the left agent-label gutter scrolls with the chart, so a session followed
   to the live edge scrolls its labels off — a frozen first-column is the natural follow-up.
+  **[FIXED 2026-06-07 — see the frozen-gutter entry below.]**
   Not yet committed — staging is the user's call.
 - 2026-06-07 — Phase 5 done (backend endpoint TDD + frontend-logic TDD + UI browser-verify).
   **Finding that scoped the work:** reasoning (thinking/text) is *already* full in the payload
@@ -311,3 +312,19 @@ anywhere is always correct; live = the playhead at "now".
   the live updater takes): Output went snippet→full (2001→6809 chars, "…" gone, button removed) and
   **stayed full across the repaint** (still 6809, no "…", no button) where it previously reverted.
   JS **105/105**, Go all green, gofmt clean.
+- 2026-06-07 — Frozen Timeline gutter done (pure UI, browser-verified). Closes the Phase 4
+  known limitation: the agent-label column no longer scrolls off when a session is followed
+  to the live edge. Each session's Gantt is now **two synchronized SVGs** in a flex
+  `.timeline-body`: a frozen `svg.timeline-gutter` (width = `buildTimeline`'s `chartX`/labelW,
+  holding the row backgrounds + labels) beside the existing horizontally-scrolling
+  `.timeline-scroll` whose `svg.timeline-svg` now uses a viewBox that **starts at `chartX`**
+  (`${chartX} 0 ${contentW-chartX} ${height}`) so it shows only ticks/bars/now-line and the
+  label column can't pan into it. `timelineRowHTML` returns `{ gutter, chart }` — both pieces
+  carry the same `data-ref` and the same `is-selected`/`is-new` classes, so a click in either
+  selects the row and selection shows on both sides of the freeze line. **No geometry change**
+  (`agents-logic.js`/`buildTimeline` untouched) — the split is purely a render/CSS concern.
+  Browser-verified with playwright `eval` on the live DOM: every session shows a 130px gutter,
+  `gutterLabels == chartBars` with zero bars leaking into the gutter; scrolling an overflowing
+  session's chart by 600px moved its bar −600px while the gutter label stayed put (Δx = 0);
+  clicking a gutter label selected the row on **both** layers and filled the drawer with the
+  right sub-agent. JS **105/105**, Go all green (no Go touched).
