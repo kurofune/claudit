@@ -6,7 +6,7 @@ Update the **Status** line and **Progress log** as each phase lands. Build one p
 time — each phase section below is self-contained so it can be picked up cold without
 re-reading the others.
 
-**Status:** Phases 1 ✅, 2 ✅, 3 ✅, 4 ✅ & 5 ✅ complete (tests green, browser-verified). Decisions locked (see below).
+**Status:** Phases 1 ✅, 2 ✅, 3 ✅, 4 ✅, 5 ✅ & 6 ✅ complete (tests green, browser-verified). Redesign done. Decisions locked (see below).
 
 ---
 
@@ -174,7 +174,7 @@ runs grow at the right edge without yanking the viewport; bars drill into the dr
 **Done when.** The drawer can expand any truncated field to its full on-disk content in serve
 mode; static report degrades gracefully.
 
-## Phase 6 *(optional fast-follow)* — Scrubber / playhead  *(frontend-logic TDD + UI)*  — **Status: not started**
+## Phase 6 *(optional fast-follow)* — Scrubber / playhead  *(frontend-logic TDD + UI)*  — **Status: ✅ complete**
 
 **Goal.** "Press play and watch the graph build itself."
 
@@ -328,3 +328,28 @@ anywhere is always correct; live = the playhead at "now".
   session's chart by 600px moved its bar −600px while the gutter label stayed put (Δx = 0);
   clicking a gutter label selected the row on **both** layers and filled the drawer with the
   right sub-agent. JS **105/105**, Go all green (no Go touched).
+- 2026-06-07 — Phase 6 done (frontend-logic TDD + UI browser-verify) — **the redesign is
+  complete.** The Timeline lens gained a **playhead scrubber**: a sticky control strip (a
+  "● live" toggle, a range input spanning the whole trace window, a clock + active/done/pending
+  readout) over every session's Gantt rendered *as of* an instant T. **Pure logic (TDD via a
+  /tdd subagent, +18 → 123 tests):** the playhead is a **pure recompute from events ≤ T**, never
+  an incremental seek. Four new exports in `agents-logic.js`: `agentPhaseAt(agent, T)` — the
+  atomic 'pending'|'active'|'done' classifier (shared by the next two, so bars and counts can
+  never disagree); `playheadBounds(graph, nowMs)` — the global scrub window across all sessions
+  (running agents extend it to now); `playheadStats(graph, T)` — the readout counts; and
+  `timelineAtTime(session, T, opts)` — **composes on `buildTimeline`** (reusing its window/scale
+  so the axis never reflows as you scrub) but clamps each bar to T (active bars grow only to the
+  playhead, finished bars keep their real width, not-yet-started agents collapse to width 0) and
+  adds `playheadX`. **UI (`view-agents.js` + `app.css`):** `playheadT` module state (null = live
+  & auto-advancing; a number = paused at that absolute ms). The scrubber is a sibling of the
+  `.timeline-sessions` container, so a drag re-renders **only** the Gantts (rAF-coalesced, scroll
+  preserved) and leaves the range input untouched mid-drag; the clock/counts update in place.
+  Each session draws a dashed **playhead line** at T (hidden when T precedes the session or it
+  finished before T); pending rows ghost their label; an active (clamped) bar keeps its running
+  pulse at the playhead end. The old `tl-now` line is subsumed by the playhead. Browser-verified
+  with playwright on the live DOM: live mode showed ▶1 ✓49 ○0 with one playhead (the running
+  session at its edge); dragging to 25% disengaged live, moved the clock back, recomputed to
+  ▶2 ✓0 ○48, grew playheads 1→2, and retracted a sample bar 5392→0; clicking "● live" restored
+  ▶1 ✓49 ○0 with the thumb at max; a bar click still round-tripped to the drawer. A screenshot at
+  the live edge confirmed the running session's `main` bar truncated exactly at the dashed
+  playhead line. JS **123/123**, Go all green (no Go touched), gofmt clean.
