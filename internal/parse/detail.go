@@ -1,7 +1,9 @@
 package parse
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -109,6 +111,14 @@ const toolInputMaxChars = 2000
 // the actual input so the Sessions view can show what the agent did. Returns
 // "" for tools whose Detail already captures everything useful.
 func extractToolInput(name string, raw json.RawMessage) string {
+	return truncateRunes(extractToolInputFull(name, raw), toolInputMaxChars)
+}
+
+// extractToolInputFull is extractToolInput without the length cap — the
+// untruncated representation the drawer's "show full" action reads back from
+// disk. Returns "" for tools whose input we don't surface (same set as the
+// snippet) and for empty/unparseable input.
+func extractToolInputFull(name string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -165,7 +175,88 @@ func extractToolInput(name string, raw json.RawMessage) string {
 	default:
 		return ""
 	}
-	return truncateRunes(strings.TrimSpace(s), toolInputMaxChars)
+	return strings.TrimSpace(s)
+}
+
+// ToolUseDetail is the untruncated record for a single tool call, read back
+// from a session JSONL on demand (the drawer's "show full" action). Fields
+// mirror their bounded counterparts on ToolUse / ToolResult but without the
+// snippet caps.
+type ToolUseDetail struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Input  string `json:"input"`  // untruncated, same representation as ToolUse.Input
+	Output string `json:"output"` // untruncated tool_result text
+	Status string `json:"status"` // "ok" | "error" | "" when no result line
+}
+
+// FindToolUseDetail streams r (one session's JSONL) and returns the
+// untruncated input/output for the tool_use whose id == toolUseID. found is
+// false when no assistant line in r carried that id. Output/Status come from
+// the matching tool_result (a later user line) and stay empty when no result
+// was recorded — the tool is still running, or it's an older session.
+//
+// Reuses the same raw schema and content extractors as ParseFile, so the
+// "full" representation matches the bounded snippet exactly minus the cap.
+func FindToolUseDetail(r io.Reader, toolUseID string) (ToolUseDetail, bool) {
+	out := ToolUseDetail{ID: toolUseID}
+	found := false
+	sc := bufio.NewScanner(r)
+	// Match ParseFile's buffer: a single tool_use input or result can be large.
+	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var raw rawLine
+		if err := json.Unmarshal(line, &raw); err != nil || len(raw.Message) == 0 {
+			continue
+		}
+		switch raw.Type {
+		case "assistant":
+			if found {
+				continue
+			}
+			var msg rawMessage
+			if err := json.Unmarshal(raw.Message, &msg); err != nil {
+				continue
+			}
+			var entries []rawContentEntry
+			if err := json.Unmarshal(msg.Content, &entries); err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.Type == "tool_use" && e.ID == toolUseID {
+					out.Name = e.Name
+					out.Input = extractToolInputFull(e.Name, e.Input)
+					found = true
+					break
+				}
+			}
+		case "user":
+			var msg rawMessage
+			if err := json.Unmarshal(raw.Message, &msg); err != nil || len(msg.Content) == 0 || msg.Content[0] != '[' {
+				continue
+			}
+			var entries []rawToolResultEntry
+			if err := json.Unmarshal(msg.Content, &entries); err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.Type == "tool_result" && e.ToolUseID == toolUseID {
+					out.Output = toolResultText(e.Content)
+					if e.IsError {
+						out.Status = "error"
+					} else {
+						out.Status = "ok"
+					}
+					break
+				}
+			}
+		}
+	}
+	return out, found
 }
 
 // truncateRunes shortens s to at most max runes, appending an ellipsis when

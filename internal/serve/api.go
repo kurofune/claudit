@@ -29,6 +29,9 @@ const (
 	apiPathAnomalies = "/_claudit/api/anomalies"
 	apiPathTheme     = "/_claudit/api/theme"
 	apiPathAgents    = "/_claudit/api/agents"
+	// apiPathAgentsFull is an exact subpath of apiPathAgents; http.ServeMux
+	// matches the longer exact pattern first, so /agents stays unaffected.
+	apiPathAgentsFull = "/_claudit/api/agents/full"
 
 	// sessionTimelineSuffix lives on a /api/sessions/{id}/timeline path.
 	// The dispatcher in handleAPISessionsTree splits the path and matches

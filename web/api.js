@@ -95,6 +95,13 @@ export const fetchSubagents = () => getJSON('/subagents');
 export const fetchSessions = () => getJSON('/sessions');
 export const fetchAnomalies = () => getJSON('/anomalies');
 export const fetchAgents = () => getJSON('/agents');
+// fetchAgentToolFull pulls the untruncated input/output for one tool_use back
+// from disk (the drawer's "show full" action). Serve-mode only — in static
+// mode offlineLookup has no inline payload for this and throws; the drawer
+// guards on serve mode so it never calls this offline.
+export const fetchAgentToolFull = (sessionId, toolId) =>
+  getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
+    '&tool=' + encodeURIComponent(toolId));
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));
 export const fetchSessionTimeline = (id) =>
   getJSON('/sessions/' + encodeURIComponent(id) + '/timeline');

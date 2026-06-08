@@ -220,6 +220,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(apiPathAnomalies, s.handleAPIAnomalies)
 	s.mux.HandleFunc(apiPathTheme, s.handleAPITheme)
 	s.mux.HandleFunc(apiPathAgents, s.handleAPIAgents)
+	s.mux.HandleFunc(apiPathAgentsFull, s.handleAPIAgentsFull)
 	// /_claudit/api/sessions and /_claudit/api/sessions/{id}/timeline
 	// share a dispatcher because ServeMux can't pattern-match {id}.
 	s.mux.HandleFunc(apiPathSessions, s.handleAPISessions)

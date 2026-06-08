@@ -556,12 +556,23 @@ export function buildDrawerPayload(graph, ref) {
     kind: type === 'tool' ? (tool.name || '') : (type === 'step' ? 'step' : 'agent'),
     status,
     detail: type === 'tool' ? (tool.detail || '') : '',
+    // toolId lets the drawer's "show full" action fetch the untruncated I/O
+    // back from disk (serve mode). Only a tool ref has one.
+    toolId: type === 'tool' ? (tool.id || '') : '',
     input: type === 'tool' ? (tool.input || '') : '',
     output: type === 'tool' ? (tool.output || '') : '',
     thinking, text, model,
     tokens, cost_usd, durationMs,
     stepCount: (agent.steps || []).length,
   };
+}
+
+// looksTruncated reports whether a bounded snippet was cut short — the parse
+// layer appends a "…" (U+2026) marker when it truncates a tool input/output
+// to its rune cap. The drawer uses this to decide whether to offer a "show
+// full" toggle, so it doesn't promise more content than exists.
+export function looksTruncated(s) {
+  return typeof s === 'string' && s.endsWith('…');
 }
 
 // nodeOf builds one flow-graph node rect from an agent payload.

@@ -75,6 +75,10 @@ type TurnSummary struct {
 // Read extension, Agent subagent type, Skill name, etc.) — empty when the
 // tool has nothing useful to qualify it.
 type ToolInvocation struct {
+	// ID is the tool_use id of the (first, when deduped) call this row
+	// represents. Lets the drawer fetch the untruncated input/output back
+	// from disk on demand. Omitted for older sessions that lack tool_use ids.
+	ID     string `json:"id,omitempty"`
 	Name   string `json:"name"`
 	Detail string `json:"detail"`
 	// Input is the bounded input snippet from parse.ToolUse.Input — the full
@@ -508,7 +512,7 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		if redact && input != "" {
 			input = redactMarker(input)
 		}
-		inv := ToolInvocation{Name: u.Name, Detail: d, Input: input}
+		inv := ToolInvocation{ID: u.ID, Name: u.Name, Detail: d, Input: input}
 		// Join the outcome from the matching tool_result (by tool_use id).
 		// Status is content-free so it survives redaction; Output is masked
 		// the same way Input is.

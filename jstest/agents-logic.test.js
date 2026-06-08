@@ -22,6 +22,7 @@ import {
   defaultRef,
   resolveRef,
   buildDrawerPayload,
+  looksTruncated,
   timelineBounds,
   buildTimeline,
 } from '../web/agents-logic.js';
@@ -501,7 +502,7 @@ const DRAWER_GRAPH = {
           cost_usd: 0.10, duration_ms: 4200,
           thinking: 'plan the work', text: 'Listing files',
           tools: [
-            { name: 'Bash', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n' },
+            { name: 'Bash', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n', id: 'toolu_x' },
           ],
         },
         {
@@ -622,6 +623,24 @@ test('buildDrawerPayload builds the step payload as "Turn N" with no tool I/O', 
   assert.equal(p.input, '');
   assert.equal(p.output, '');
   assert.equal(p.detail, '');
+});
+
+test('buildDrawerPayload carries the tool_use id so the drawer can load full I/O', () => {
+  const tool = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.equal(tool.toolId, 'toolu_x');
+  // Non-tool refs have nothing to load full → empty toolId.
+  const agent = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 });
+  assert.equal(agent.toolId, '');
+  const step = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(step.toolId, '');
+});
+
+test('looksTruncated detects the bounded-snippet ellipsis marker', () => {
+  assert.equal(looksTruncated('a long snippet…'), true);
+  assert.equal(looksTruncated('complete'), false);
+  assert.equal(looksTruncated(''), false);
+  assert.equal(looksTruncated(null), false);
+  assert.equal(looksTruncated(undefined), false);
 });
 
 test('buildDrawerPayload returns null for a ref whose agent is missing', () => {

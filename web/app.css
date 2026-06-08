@@ -1995,6 +1995,16 @@
   .dr-sec.is-empty .dr-sec-h { opacity: 0.5; }
   .dr-none { color: var(--ink-2); font-weight: 400; }
   .dr-sec-sum { margin-left: auto; color: var(--ink-2); font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .dr-full-btn {
+    margin-left: auto; padding: 1px 8px; font: inherit; font-size: var(--t-1);
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700;
+    color: var(--accent); background: var(--accent-soft, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-radius: var(--r-sm); cursor: pointer;
+  }
+  .dr-full-btn:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 14%, transparent); }
+  .dr-full-btn:disabled { opacity: 0.6; cursor: default; }
+  .dr-full-note { margin-left: auto; color: var(--ink-2); font-weight: 400; text-transform: none; letter-spacing: 0; font-style: italic; }
   .dr-pre {
     margin: 0; padding: var(--s-2); background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--r-sm); white-space: pre-wrap; word-break: break-word;

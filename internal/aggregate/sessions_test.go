@@ -353,6 +353,27 @@ func TestDistinctToolInvocations_JoinsResults(t *testing.T) {
 	}
 }
 
+// The tool_use id rides on each invocation so the drawer can load the full,
+// untruncated input/output back from disk on demand. Deduped invocations keep
+// the FIRST occurrence's id (a representative call for the collapsed group).
+func TestDistinctToolInvocations_CarriesToolUseID(t *testing.T) {
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: "go test"},
+		{ID: "t2", Name: "Bash", Input: "go test"}, // dup of t1 → collapses
+		{ID: "t3", Name: "Read", Detail: ".go"},
+	}
+	got := DistinctToolInvocations(uses, nil, false)
+	if len(got) != 2 {
+		t.Fatalf("got %d invocations, want 2 (dedup)", len(got))
+	}
+	if got[0].ID != "t1" {
+		t.Errorf("collapsed Bash ID = %q, want t1 (first occurrence)", got[0].ID)
+	}
+	if got[1].ID != "t3" {
+		t.Errorf("Read ID = %q, want t3", got[1].ID)
+	}
+}
+
 func TestDistinctToolInvocations_RedactsOutput(t *testing.T) {
 	uses := []parse.ToolUse{{ID: "t1", Name: "Bash", Input: "secret cmd"}}
 	results := map[string]parse.ToolResult{

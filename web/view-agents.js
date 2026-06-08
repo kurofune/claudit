@@ -34,9 +34,19 @@ import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
   agentLabel, buildEventFeed, buildTimeline, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
+  looksTruncated,
 } from './agents-logic.js';
+import { fetchAgentToolFull } from './api.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
+
+// isServeMode is true when a live claudit server is backing the page. The
+// static HTML report inlines its data into window.__claudit_static_data and
+// has no disk to read at view time, so the drawer's "show full" affordance
+// (which fetches untruncated tool I/O from disk) is serve-only.
+function isServeMode() {
+  return !(typeof window !== 'undefined' && window.__claudit_static_data);
+}
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('agents')}Agents</h1></header>
@@ -238,8 +248,10 @@ function wireSelection(container) {
   const drawer = container.querySelector('.agents-drawer');
   if (drawer) {
     drawer.addEventListener('click', e => {
-      const btn = e.target.closest('[data-copy]');
-      if (btn) copyText(btn.dataset.copy, btn);
+      const copy = e.target.closest('[data-copy]');
+      if (copy) { copyText(copy.dataset.copy, copy); return; }
+      const full = e.target.closest('[data-loadfull]');
+      if (full) loadFull(full);
     });
   }
 }
@@ -390,8 +402,8 @@ function drawerHTML(p) {
   const sections = [
     drSection('Reasoning', p.thinking, true),
     drSection('Narration', p.text, true),
-    drSection('Input', p.input, true),
-    drSection('Output', p.output, true),
+    drIOSection('Input', p.input, 'input', p),
+    drIOSection('Output', p.output, 'output', p),
     p.type === 'agent' ? drTokens(p.tokens) : '',
   ].join('');
 
@@ -433,6 +445,46 @@ function drSection(label, content, pre) {
     ? `<pre class="dr-pre">${escHtml(content)}</pre>`
     : `<div class="dr-text">${escHtml(content)}</div>`;
   return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}</h4>${body}</section>`;
+}
+
+// drIOSection renders a tool's Input/Output as a <pre>, with a "show full"
+// affordance when the snippet was truncated (looksTruncated). In serve mode
+// that's a button that loads the untruncated content from disk; in static
+// mode there's no disk, so it degrades to a clear "snippet only" label rather
+// than a dead button.
+function drIOSection(label, content, field, p) {
+  const empty = content == null || content === '';
+  if (empty) {
+    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">${escHtml(label)} <span class="dr-none">—</span></h4></section>`;
+  }
+  let affordance = '';
+  if (p.type === 'tool' && p.toolId && looksTruncated(content)) {
+    affordance = isServeMode()
+      ? `<button type="button" class="dr-full-btn" data-loadfull="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-tool="${escHtml(p.toolId)}">show full</button>`
+      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
+  }
+  return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
+}
+
+// loadFull handles a "show full" click: fetch the untruncated tool I/O from
+// the server and swap it into the section's <pre>. The button is removed once
+// the full content is in (there's nothing more to load); a failure re-enables
+// it so the user can retry.
+async function loadFull(btn) {
+  const sec = btn.closest('.dr-sec');
+  const pre = sec && sec.querySelector('.dr-pre');
+  const { session, tool, loadfull: field } = btn.dataset;
+  if (!pre || !session || !tool) return;
+  btn.disabled = true;
+  btn.textContent = 'loading…';
+  try {
+    const d = await fetchAgentToolFull(session, tool);
+    pre.textContent = (field === 'output' ? d.output : d.input) || '';
+    btn.remove();
+  } catch {
+    btn.textContent = 'failed — retry';
+    btn.disabled = false;
+  }
 }
 
 function drTokens(t) {
