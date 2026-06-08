@@ -67,6 +67,24 @@ export function decideReload(state) {
   return 'reload';
 }
 
+// liveHandler lets a view opt OUT of the full-page reload and instead
+// patch itself in place on each generation bump. The Agents tab registers
+// one while it's active (see view-agents.js) so a live session streams in
+// without the jarring reload — scroll position, open panels, and ticking
+// timers all survive. When no handler is set (every other view), the
+// classic decideReload path below runs unchanged.
+let liveHandler = null;
+
+// setLiveHandler installs the in-place updater for the active view.
+export function setLiveHandler(fn) { liveHandler = fn; }
+
+// clearLiveHandler removes the updater (call when leaving the view). With
+// no argument it always clears; with one it clears only if it still owns
+// the slot, so a stale view can't unregister its successor.
+export function clearLiveHandler(fn) {
+  if (!fn || liveHandler === fn) liveHandler = null;
+}
+
 // start opens the EventSource and wires up the silent-auto-reload
 // loop. Returns the EventSource so the caller can close it if needed.
 // toastEl/btnEl may be null — if so, no toast fallback (the loop
@@ -153,6 +171,13 @@ export function start({ toastEl = null, btnEl = null } = {}) {
       return;
     }
     if (gen > loadedGeneration) {
+      // In-place path: the active view patches itself instead of reloading.
+      // Mark this generation consumed and hand off — no pending/toast.
+      if (liveHandler) {
+        loadedGeneration = gen;
+        try { liveHandler(gen); } catch { /* a render error must not kill the stream */ }
+        return;
+      }
       // Track the OLDEST pending generation so the pile-up timer
       // measures from first-signal, not latest-signal. Later bumps
       // (gen 43 → 44 → 45) all collapse into "there's something new."

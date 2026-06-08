@@ -15,7 +15,7 @@ import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js'
 import { paint as paintSubagents, paintNav as paintNavSubagents } from './view-subagents.js';
 import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
-import { start as startSSE } from './sse.js';
+import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 import { init as initThemes } from './themes.js';
@@ -33,6 +33,9 @@ const VIEW_PAINTERS = {
 
 onChange(async (route) => {
   activate(route);
+  // The Agents view registers an in-place SSE updater while it's active;
+  // any other route must release it so the classic full-reload path runs.
+  if (route.view !== 'agents') clearLiveHandler();
   const painter = VIEW_PAINTERS[route.view];
   if (painter) {
     try { await painter(route); }

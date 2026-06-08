@@ -12,6 +12,16 @@ import {
   agentElapsedMs,
   formatElapsed,
   graphStats,
+  agentLabel,
+  buildEventFeed,
+  buildFlowLayout,
+  baseName,
+  agentTokens,
+  refKey,
+  parseRefKey,
+  defaultRef,
+  resolveRef,
+  buildDrawerPayload,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -193,4 +203,426 @@ test('graphStats counts sessions, agents, and running agents', () => {
 test('graphStats on an empty graph is all zeros', () => {
   assert.deepEqual(graphStats({ sessions: [] }), { sessions: 0, agents: 0, running: 0 });
   assert.deepEqual(graphStats(null), { sessions: 0, agents: 0, running: 0 });
+});
+
+// ── agentLabel ──────────────────────────────────────────────────────
+test('agentLabel is "main" for the main agent, else the agent_type', () => {
+  assert.equal(agentLabel({ kind: 'main' }), 'main');
+  assert.equal(agentLabel({ kind: 'subagent', agent_type: 'Explore' }), 'Explore');
+  assert.equal(agentLabel({ kind: 'subagent' }), 'subagent');
+  assert.equal(agentLabel(null), '');
+});
+
+// ── buildEventFeed ──────────────────────────────────────────────────
+const FEED_GRAPH = {
+  sessions: [{
+    session_id: 's1',
+    main: {
+      kind: 'main', status: 'done',
+      started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:05Z',
+      steps: [
+        { timestamp: '2026-05-01T12:00:00Z', tools: [{ name: 'Bash', input: 'ls', status: 'ok' }] },
+        { timestamp: '2026-05-01T12:00:05Z', tools: [{ name: 'Agent', detail: 'Explore' }] },
+      ],
+    },
+    children: [{
+      kind: 'subagent', agent_type: 'Explore', description: 'map the code', status: 'running',
+      started_at: '2026-05-01T12:00:06Z', ended_at: '2026-05-01T12:00:08Z',
+      steps: [
+        { timestamp: '2026-05-01T12:00:08Z', tools: [{ name: 'Read', detail: '.go', input: 'g.go', status: 'ok' }] },
+      ],
+    }],
+  }],
+};
+
+test('buildEventFeed emits tool, spawn and done events sorted newest-first', () => {
+  const feed = buildEventFeed(FEED_GRAPH);
+  // Non-increasing timestamps (newest first).
+  for (let i = 1; i < feed.length; i++) {
+    assert.ok(feed[i - 1].t >= feed[i].t, `feed not sorted desc at ${i}`);
+  }
+  // Newest event is the Explore sub-agent's Read tool call.
+  const top = feed[0];
+  assert.equal(top.kind, 'tool');
+  assert.equal(top.tool, 'Read');
+  assert.equal(top.status, 'ok');
+  assert.equal(top.agentLabel, 'Explore');
+  assert.equal(top.agentIndex, 1);
+  assert.equal(top.sessionId, 's1');
+});
+
+test('buildEventFeed carries a spawn event for each sub-agent', () => {
+  const feed = buildEventFeed(FEED_GRAPH);
+  const spawns = feed.filter(e => e.kind === 'spawn');
+  assert.equal(spawns.length, 1);
+  assert.equal(spawns[0].agentLabel, 'Explore');
+  assert.equal(spawns[0].description, 'map the code');
+  assert.equal(spawns[0].t, Date.parse('2026-05-01T12:00:06Z'));
+});
+
+test('buildEventFeed emits a done event only for finished agents', () => {
+  const feed = buildEventFeed(FEED_GRAPH);
+  const dones = feed.filter(e => e.kind === 'done');
+  // main is done; the Explore child is running → no done event for it.
+  assert.equal(dones.length, 1);
+  assert.equal(dones[0].agentLabel, 'main');
+});
+
+test('buildEventFeed respects a limit and tolerates an empty graph', () => {
+  assert.deepEqual(buildEventFeed({ sessions: [] }), []);
+  assert.deepEqual(buildEventFeed(null), []);
+  const limited = buildEventFeed(FEED_GRAPH, { limit: 2 });
+  assert.equal(limited.length, 2);
+});
+
+test('buildEventFeed tool events carry stepIndex/toolIndex locating the exact tool', () => {
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: {
+        kind: 'main', status: 'running',
+        started_at: '2026-05-01T12:00:00Z',
+        steps: [
+          { timestamp: '2026-05-01T12:00:00Z', tools: [{ name: 'Bash' }] },
+          { timestamp: '2026-05-01T12:00:05Z', tools: [{ name: 'Read' }, { name: 'Edit' }] },
+        ],
+      },
+      children: [],
+    }],
+  };
+  const feed = buildEventFeed(graph);
+  const edit = feed.find(e => e.kind === 'tool' && e.tool === 'Edit');
+  assert.ok(edit, 'expected an Edit tool event');
+  assert.equal(edit.stepIndex, 1);
+  assert.equal(edit.toolIndex, 1);
+  assert.equal(edit.tool, 'Edit');
+});
+
+test('buildEventFeed tool events inherit the PARENT step cost_usd/duration_ms', () => {
+  const graph = {
+    sessions: [{
+      session_id: 'sY',
+      main: {
+        kind: 'main', status: 'running', cost_usd: 9.99,
+        started_at: '2026-05-01T12:00:00Z',
+        steps: [
+          { timestamp: '2026-05-01T12:00:00Z', cost_usd: 0.01, duration_ms: 100, tools: [{ name: 'Bash' }] },
+          { timestamp: '2026-05-01T12:00:05Z', cost_usd: 0.04, duration_ms: 1200, tools: [{ name: 'Read' }] },
+        ],
+      },
+      children: [],
+    }],
+  };
+  const feed = buildEventFeed(graph);
+  const read = feed.find(e => e.kind === 'tool' && e.tool === 'Read');
+  assert.ok(read, 'expected a Read tool event');
+  // Parent step's values, not the agent's (9.99) nor the sibling step's (0.01/100).
+  assert.equal(read.cost_usd, 0.04);
+  assert.equal(read.durationMs, 1200);
+});
+
+// ── buildFlowLayout ─────────────────────────────────────────────────
+test('buildFlowLayout centers the main node and links each child', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', status: 'running' },
+    children: [
+      { kind: 'subagent', agent_type: 'Explore', status: 'done' },
+      { kind: 'subagent', agent_type: 'review', status: 'running' },
+    ],
+  };
+  const layout = buildFlowLayout(session, { width: 800, nodeW: 120, nodeH: 48 });
+  assert.equal(layout.nodes.length, 3);
+  const main = layout.nodes.find(n => n.kind === 'main');
+  // Main horizontally centered.
+  assert.equal(main.x + main.w / 2, 400);
+  assert.equal(main.key, 's1#0');
+  // One edge per child, from main down to each child.
+  assert.equal(layout.edges.length, 2);
+  for (const e of layout.edges) {
+    assert.equal(e.x1, main.x + main.w / 2);
+    assert.equal(e.y1, main.y + main.h);
+  }
+  // Children keyed by flatten order; height encloses both rows.
+  const childKeys = layout.nodes.filter(n => n.kind === 'subagent').map(n => n.key).sort();
+  assert.deepEqual(childKeys, ['s1#1', 's1#2']);
+  assert.ok(layout.height > main.y + main.h);
+});
+
+test('buildFlowLayout handles a main with no children', () => {
+  const layout = buildFlowLayout({ session_id: 's1', main: { kind: 'main' }, children: [] }, { width: 400 });
+  assert.equal(layout.nodes.length, 1);
+  assert.equal(layout.edges.length, 0);
+});
+
+// ── baseName ────────────────────────────────────────────────────────
+test('baseName returns the last segment of an absolute path', () => {
+  assert.equal(baseName('/Users/x/Projects/claudit'), 'claudit');
+});
+
+test('baseName ignores a trailing slash', () => {
+  assert.equal(baseName('/a/b/'), 'b');
+});
+
+test('baseName returns a bare name unchanged', () => {
+  assert.equal(baseName('foo'), 'foo');
+});
+
+test('baseName returns "" for empty / null / undefined', () => {
+  assert.equal(baseName(''), '');
+  assert.equal(baseName(null), '');
+  assert.equal(baseName(undefined), '');
+});
+
+// ── agentTokens ─────────────────────────────────────────────────────
+test('agentTokens sums the Go-named token fields, combining 5m+1h cache writes', () => {
+  const agent = {
+    tokens: {
+      InputTokens: 100, OutputTokens: 50,
+      CacheCreate5mTokens: 10, CacheCreate1hTokens: 5,
+      CacheReadTokens: 200,
+    },
+  };
+  const t = agentTokens(agent);
+  assert.equal(t.input, 100);
+  assert.equal(t.output, 50);
+  assert.equal(t.cacheWrite, 15); // 10 + 5
+  assert.equal(t.cacheRead, 200);
+  assert.equal(t.total, 365); // 100 + 50 + 15 + 200
+});
+
+test('agentTokens is all zeros for a null agent or missing tokens', () => {
+  const zero = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
+  assert.deepEqual(agentTokens(null), zero);
+  assert.deepEqual(agentTokens({}), zero);
+});
+
+// ── refKey / parseRefKey ────────────────────────────────────────────
+test('refKey/parseRefKey round-trip agent, step and tool refs', () => {
+  // agent
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 0 }), 's1#0');
+  assert.deepEqual(parseRefKey('s1#0'), {
+    sessionId: 's1', agentIndex: 0, stepIndex: null, toolIndex: null, type: 'agent',
+  });
+  // step
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 2, stepIndex: 3 }), 's1#2.3');
+  assert.deepEqual(parseRefKey('s1#2.3'), {
+    sessionId: 's1', agentIndex: 2, stepIndex: 3, toolIndex: null, type: 'step',
+  });
+  // tool
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 2, stepIndex: 3, toolIndex: 1 }), 's1#2.3:1');
+  assert.deepEqual(parseRefKey('s1#2.3:1'), {
+    sessionId: 's1', agentIndex: 2, stepIndex: 3, toolIndex: 1, type: 'tool',
+  });
+});
+
+test('refKey returns "" for empty / garbage refs', () => {
+  assert.equal(refKey(null), '');
+  assert.equal(refKey({}), '');
+  assert.equal(refKey({ sessionId: 's1' }), ''); // no agentIndex
+  assert.equal(refKey({ agentIndex: 0 }), ''); // no sessionId
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 'x' }), ''); // non-numeric
+});
+
+test('parseRefKey returns null for empty / null / non-string / malformed', () => {
+  assert.equal(parseRefKey(''), null);
+  assert.equal(parseRefKey(null), null);
+  assert.equal(parseRefKey(42), null);
+  assert.equal(parseRefKey('no-hash'), null);
+  assert.equal(parseRefKey('s1#x'), null); // non-numeric agent index
+  assert.equal(parseRefKey('s1#0.y'), null); // non-numeric step index
+});
+
+test('refKey drops a dangling toolIndex when stepIndex is missing', () => {
+  // A tool ref always nests a step; without a step there is nothing to
+  // hang the tool on, so it degrades to the agent form.
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 0, toolIndex: 2 }), 's1#0');
+  assert.equal(refKey({ sessionId: 's1', agentIndex: 0, stepIndex: null, toolIndex: 2 }), 's1#0');
+});
+
+test('refKey/parseRefKey round-trip a UUID sessionId with hyphens', () => {
+  const sid = '0a1b2c3d-4e5f-6789-abcd-ef0123456789';
+  const key = refKey({ sessionId: sid, agentIndex: 1, stepIndex: 2, toolIndex: 0 });
+  assert.equal(key, `${sid}#1.2:0`);
+  assert.deepEqual(parseRefKey(key), {
+    sessionId: sid, agentIndex: 1, stepIndex: 2, toolIndex: 0, type: 'tool',
+  });
+});
+
+// ── defaultRef ──────────────────────────────────────────────────────
+test('defaultRef points at the first session that has an agent', () => {
+  const graph = {
+    sessions: [
+      { session_id: 's1', main: { kind: 'main' }, children: [] },
+      { session_id: 's2', main: { kind: 'main' }, children: [] },
+    ],
+  };
+  assert.deepEqual(defaultRef(graph), { sessionId: 's1', agentIndex: 0 });
+});
+
+test('defaultRef skips a leading agent-less session', () => {
+  const graph = {
+    sessions: [
+      { session_id: 'empty', main: null, children: [] },
+      { session_id: 's2', main: { kind: 'main' }, children: [] },
+    ],
+  };
+  assert.deepEqual(defaultRef(graph), { sessionId: 's2', agentIndex: 0 });
+});
+
+test('defaultRef is null on an empty / null graph', () => {
+  assert.equal(defaultRef({ sessions: [] }), null);
+  assert.equal(defaultRef(null), null);
+  assert.equal(defaultRef({ sessions: [{ main: null, children: [] }] }), null);
+});
+
+// ── resolveRef / buildDrawerPayload fixture ─────────────────────────
+// One session, a main agent with real tokens and two steps; step 0
+// carries thinking/text/model/cost/duration and a single tool with
+// input/output/status/detail. Mirrors the /_claudit/api/agents shape.
+const DRAWER_GRAPH = {
+  sessions: [{
+    session_id: 'sess-uuid-1',
+    cwd: '/Users/x/Projects/claudit',
+    main: {
+      kind: 'main', agent_type: '', description: '', status: 'done',
+      started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:01:00Z',
+      cost_usd: 0.42,
+      tokens: {
+        InputTokens: 100, OutputTokens: 50,
+        CacheCreate5mTokens: 10, CacheCreate1hTokens: 5,
+        CacheReadTokens: 200,
+      },
+      steps: [
+        {
+          timestamp: '2026-05-01T12:00:10Z', model: 'claude-opus-4',
+          cost_usd: 0.10, duration_ms: 4200,
+          thinking: 'plan the work', text: 'Listing files',
+          tools: [
+            { name: 'Bash', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n' },
+          ],
+        },
+        {
+          timestamp: '2026-05-01T12:00:40Z', model: 'claude-opus-4',
+          cost_usd: 0.32, duration_ms: 3000, tools: [],
+        },
+      ],
+    },
+    children: [],
+  }],
+};
+
+test('resolveRef resolves an agent ref to type "agent"', () => {
+  const r = resolveRef(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 });
+  assert.equal(r.type, 'agent');
+  assert.equal(r.agent.kind, 'main');
+  assert.equal(r.agentIndex, 0);
+  assert.equal(r.stepIndex, null);
+  assert.equal(r.step, null);
+  assert.equal(r.tool, null);
+  assert.equal(r.toolIndex, null);
+  assert.equal(r.session.session_id, 'sess-uuid-1');
+});
+
+test('resolveRef resolves a step ref to type "step"', () => {
+  const r = resolveRef(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(r.type, 'step');
+  assert.equal(r.stepIndex, 0);
+  assert.equal(r.step.model, 'claude-opus-4');
+  assert.equal(r.tool, null);
+});
+
+test('resolveRef resolves a tool ref to type "tool"', () => {
+  const r = resolveRef(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.equal(r.type, 'tool');
+  assert.equal(r.toolIndex, 0);
+  assert.equal(r.tool.name, 'Bash');
+  assert.equal(r.step.model, 'claude-opus-4');
+});
+
+test('resolveRef accepts a refKey string', () => {
+  const r = resolveRef(DRAWER_GRAPH, 'sess-uuid-1#0.0:0');
+  assert.equal(r.type, 'tool');
+  assert.equal(r.tool.name, 'Bash');
+});
+
+test('resolveRef degrades an out-of-range stepIndex to type "agent"', () => {
+  const r = resolveRef(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 99 });
+  assert.equal(r.type, 'agent');
+  assert.equal(r.step, null);
+  assert.equal(r.stepIndex, null);
+});
+
+test('resolveRef returns null for a missing session or agent', () => {
+  assert.equal(resolveRef(DRAWER_GRAPH, { sessionId: 'nope', agentIndex: 0 }), null);
+  assert.equal(resolveRef(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 9 }), null);
+});
+
+// ── buildDrawerPayload ──────────────────────────────────────────────
+test('buildDrawerPayload builds the agent payload', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 });
+  assert.equal(p.type, 'agent');
+  assert.equal(p.refKey, 'sess-uuid-1#0');
+  assert.equal(p.project, 'claudit');
+  assert.equal(p.cwd, '/Users/x/Projects/claudit');
+  assert.equal(p.sessionId, 'sess-uuid-1');
+  assert.equal(p.title, 'main');
+  assert.equal(p.agentLabel, 'main');
+  assert.equal(p.agentKind, 'main');
+  assert.equal(p.kind, 'agent');
+  assert.equal(p.description, ''); // main → no description
+  assert.equal(p.status, 'done');
+  assert.equal(p.tokens.total, 365);
+  assert.equal(p.cost_usd, 0.42);
+  assert.equal(p.durationMs, 60_000); // started/ended a minute apart
+  assert.equal(p.stepCount, 2);
+  // Agent has no tool/step detail.
+  assert.equal(p.detail, '');
+  assert.equal(p.input, '');
+  assert.equal(p.output, '');
+  assert.equal(p.thinking, '');
+  assert.equal(p.text, '');
+  assert.equal(p.model, '');
+});
+
+test('buildDrawerPayload builds the tool payload, inheriting the parent step', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.equal(p.type, 'tool');
+  assert.equal(p.refKey, 'sess-uuid-1#0.0:0');
+  assert.equal(p.title, 'Bash');
+  assert.equal(p.kind, 'Bash');
+  assert.equal(p.status, 'ok');
+  assert.equal(p.detail, 'ls -la');
+  assert.equal(p.input, 'ls -la');
+  assert.equal(p.output, 'file.go\n');
+  // Turn-level fields inherited from the parent step.
+  assert.equal(p.thinking, 'plan the work');
+  assert.equal(p.text, 'Listing files');
+  assert.equal(p.model, 'claude-opus-4');
+  assert.equal(p.cost_usd, 0.10);
+  assert.equal(p.durationMs, 4200);
+  // Tool/step do not carry agent token rollups.
+  assert.equal(p.tokens.total, 0);
+});
+
+test('buildDrawerPayload builds the step payload as "Turn N" with no tool I/O', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(p.type, 'step');
+  assert.equal(p.title, 'Turn 1'); // stepIndex 0 → "Turn 1"
+  assert.equal(p.kind, 'step');
+  assert.equal(p.status, '');
+  assert.equal(p.thinking, 'plan the work');
+  assert.equal(p.text, 'Listing files');
+  assert.equal(p.model, 'claude-opus-4');
+  assert.equal(p.cost_usd, 0.10);
+  assert.equal(p.durationMs, 4200);
+  // A step aggregates tools — it carries no single tool's I/O.
+  assert.equal(p.input, '');
+  assert.equal(p.output, '');
+  assert.equal(p.detail, '');
+});
+
+test('buildDrawerPayload returns null for a ref whose agent is missing', () => {
+  assert.equal(buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 9 }), null);
+  assert.equal(buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'nope', agentIndex: 0 }), null);
 });
