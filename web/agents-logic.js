@@ -513,10 +513,23 @@ export function resolveRef(graph, ref) {
 // collapse empty sections without conditionals. For a tool the turn's
 // reasoning (thinking/text/model/cost/duration) is inherited from its
 // PARENT step. Null when the ref can't resolve.
-export function buildDrawerPayload(graph, ref) {
+//
+// `fullByTool` (optional) keys loaded-full I/O by tool id (the same value
+// exposed as payload `toolId`); each value is `{ input?, output? }`. For a
+// TOOL ref with a matching entry, a string `input`/`output` overrides the
+// truncated snippet so the drawer keeps expanded content sticky across live
+// re-renders; a field absent from the entry keeps its snippet. Ignored for
+// non-tool refs and when null/undefined (the default — existing callers).
+export function buildDrawerPayload(graph, ref, fullByTool = null) {
   const r = resolveRef(graph, ref);
   if (!r) return null;
   const { type, session, agent, agentIndex, step, stepIndex, tool, toolIndex } = r;
+
+  // A tool's snippet I/O can be overridden by a previously loaded-full
+  // entry so the drawer keeps expanded content sticky across re-renders.
+  const full = (type === 'tool' && fullByTool) ? fullByTool[tool.id] : null;
+  const toolInput = typeof (full && full.input) === 'string' ? full.input : (tool && tool.input) || '';
+  const toolOutput = typeof (full && full.output) === 'string' ? full.output : (tool && tool.output) || '';
 
   // Title/status vary by level.
   let title = '', status = '';
@@ -559,8 +572,8 @@ export function buildDrawerPayload(graph, ref) {
     // toolId lets the drawer's "show full" action fetch the untruncated I/O
     // back from disk (serve mode). Only a tool ref has one.
     toolId: type === 'tool' ? (tool.id || '') : '',
-    input: type === 'tool' ? (tool.input || '') : '',
-    output: type === 'tool' ? (tool.output || '') : '',
+    input: type === 'tool' ? toolInput : '',
+    output: type === 'tool' ? toolOutput : '',
     thinking, text, model,
     tokens, cost_usd, durationMs,
     stepCount: (agent.steps || []).length,

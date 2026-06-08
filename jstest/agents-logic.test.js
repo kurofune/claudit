@@ -635,6 +635,46 @@ test('buildDrawerPayload carries the tool_use id so the drawer can load full I/O
   assert.equal(step.toolId, '');
 });
 
+test('buildDrawerPayload: fullByTool output substitutes the tool output, input stays the snippet', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 },
+    { 'toolu_x': { output: 'FULL OUTPUT...' } },
+  );
+  assert.equal(p.output, 'FULL OUTPUT...');
+  assert.equal(p.input, 'ls -la');
+});
+
+test('buildDrawerPayload: fullByTool substitutes both input and output', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 },
+    { 'toolu_x': { input: 'FULL INPUT...', output: 'FULL OUTPUT...' } },
+  );
+  assert.equal(p.input, 'FULL INPUT...');
+  assert.equal(p.output, 'FULL OUTPUT...');
+});
+
+test('buildDrawerPayload: fullByTool with no entry for this tool id keeps both snippets', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 },
+    { 'some_other_tool': { output: 'UNRELATED' } },
+  );
+  assert.equal(p.input, 'ls -la');
+  assert.equal(p.output, 'file.go\n');
+});
+
+test('buildDrawerPayload: fullByTool is ignored for agent and step refs', () => {
+  const full = { 'toolu_x': { input: 'FULL INPUT...', output: 'FULL OUTPUT...' } };
+  const agent = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 }, full);
+  assert.equal(agent.input, '');
+  assert.equal(agent.output, '');
+  const step = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 }, full);
+  assert.equal(step.input, '');
+  assert.equal(step.output, '');
+});
+
 test('looksTruncated detects the bounded-snippet ellipsis marker', () => {
   assert.equal(looksTruncated('a long snippet…'), true);
   assert.equal(looksTruncated('complete'), false);

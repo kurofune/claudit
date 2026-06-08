@@ -97,6 +97,12 @@ let activeSub = 'feed';
 let tickerId = null;
 let selectedRef = null;
 
+// fullCache keys loaded-full tool I/O by tool_use id → { input?, output? }.
+// When the user clicks "show full", the untruncated content is cached here and
+// fed into buildDrawerPayload on EVERY drawer paint, so a live SSE re-render
+// keeps the expanded content sticky instead of reverting to the snippet.
+let fullCache = {};
+
 // Timeline lens state. prevTimelineKeys tracks which agent rows existed on the
 // last render so a genuinely NEW agent fades in (and the rest don't re-animate
 // on every live re-render). timelinePinned[sid]=true means the user scrolled a
@@ -113,6 +119,7 @@ export function reset() {
   navPainted = false;
   lastGraph = null;
   selectedRef = null;
+  fullCache = {};
   prevTimelineKeys = new Set();
   timelinePinned.clear();
 }
@@ -379,7 +386,7 @@ function kindBadge(kind) {
 function renderDrawer(container) {
   const drawer = container.querySelector('.agents-drawer');
   if (!drawer) return;
-  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef));
+  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache));
 }
 
 function drawerHTML(p) {
@@ -479,7 +486,11 @@ async function loadFull(btn) {
   btn.textContent = 'loading…';
   try {
     const d = await fetchAgentToolFull(session, tool);
-    pre.textContent = (field === 'output' ? d.output : d.input) || '';
+    const fullText = (field === 'output' ? d.output : d.input) || '';
+    // Cache by tool_use id so the next drawer paint (e.g. a live SSE tick)
+    // re-applies the full content instead of reverting to the snippet.
+    fullCache[tool] = { ...(fullCache[tool] || {}), [field]: fullText };
+    pre.textContent = fullText;
     btn.remove();
   } catch {
     btn.textContent = 'failed — retry';
