@@ -51,6 +51,38 @@ export function spawnTargetIndex(session, agentRef) {
   return null;
 }
 
+// conversationSegments groups the main agent's step timeline by originating
+// user prompt for the Conversation lens. Each segment is one prompt marker
+// (uuid/text/timestamp from session.prompts) plus the contiguous slice of
+// main.steps it produced, bounded by the next marker's first_step_index. The
+// slice's first absolute index is firstStepIndex, so the renderer can address
+// each step with the SAME refKey the other lenses use (main = agentIndex 0).
+// Returns [] when the main agent has no steps; a session with steps but no
+// markers degrades to one prompt-less segment over all of them.
+export function conversationSegments(session) {
+  const main = session && session.main;
+  const steps = (main && main.steps) || [];
+  if (steps.length === 0) return [];
+  const markers = ((session && session.prompts) || [])
+    .filter(m => m && Number.isInteger(m.first_step_index));
+  if (markers.length === 0) {
+    return [{ uuid: '', text: '', timestamp: '', firstStepIndex: 0, steps: steps.slice() }];
+  }
+  const out = [];
+  for (let i = 0; i < markers.length; i++) {
+    const start = markers[i].first_step_index;
+    const end = i + 1 < markers.length ? markers[i + 1].first_step_index : steps.length;
+    out.push({
+      uuid: markers[i].uuid || '',
+      text: markers[i].text || '',
+      timestamp: markers[i].timestamp || '',
+      firstStepIndex: start,
+      steps: steps.slice(start, end),
+    });
+  }
+  return out;
+}
+
 // packLanes assigns each agent to a swimlane via greedy interval
 // packing: agents whose [start, end] spans don't overlap can share a
 // lane, so a session's main agent (spanning everything) takes lane 0

@@ -36,6 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
   filterTrace, specActive, parseRefKey, detectRetries, spawnTargetIndex,
+  conversationSegments,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -70,6 +71,7 @@ const SHELL = `
     <a class="subtab is-active" href="#agents/feed" data-subtab="feed">Feed</a>
     <a class="subtab"           href="#agents/tree" data-subtab="tree">Tree</a>
     <a class="subtab"           href="#agents/timeline" data-subtab="timeline">Timeline</a>
+    <a class="subtab"           href="#agents/conversation" data-subtab="conversation">Conversation</a>
   </nav>
 
   <div class="trace-filter" data-trace-filter role="search" aria-label="Filter this trace"></div>
@@ -79,6 +81,7 @@ const SHELL = `
       <div class="subview is-active" data-subview="feed"></div>
       <div class="subview" data-subview="tree"></div>
       <div class="subview" data-subview="timeline"></div>
+      <div class="subview" data-subview="conversation"></div>
     </div>
     <aside class="agents-drawer" data-drawer aria-label="Selection detail"></aside>
   </div>
@@ -86,7 +89,7 @@ const SHELL = `
   <div id="agents-empty" class="empty-note" hidden>No agents in this window. Try widening <code>--since</code>/<code>--until</code>, or open a session that spawned sub-agents.</div>
 `;
 
-const SUBS = ['feed', 'tree', 'timeline'];
+const SUBS = ['feed', 'tree', 'timeline', 'conversation'];
 
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
@@ -233,6 +236,7 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   if (activeSub === 'feed') host.innerHTML = renderControl(sessions);
   else if (activeSub === 'tree') host.innerHTML = renderInspector(sessions);
   else if (activeSub === 'timeline') host.innerHTML = renderTimeline(sessions);
+  else if (activeSub === 'conversation') host.innerHTML = renderConversation(sessions);
   if (memo) restoreState(host, memo);
   // The Gantt's horizontal scroll (live-edge follow + restored history offset)
   // can only be set on real DOM, so it runs after innerHTML is in place.
@@ -1007,6 +1011,58 @@ function spawnRowHTML(tool, session) {
     <span class="tr-spawn-label">${escHtml(label)}</span>
     <span class="tr-spawn-stats">${escHtml(stats)}</span>
   </button>`;
+}
+
+// ── Conversation lens ────────────────────────────────────────────────────────
+//
+// "What did I ask, and how did it respond?" — the main agent's timeline read as
+// a chat thread: each user-prompt bubble followed by exactly the assistant turn
+// cards it produced (conversationSegments slices main.steps by prompt marker).
+// The turn cards ARE the Tree lens's inspectorStepHTML, addressed by the SAME
+// refKey (main = agentIndex 0), so a click opens the shared drawer and the
+// selection survives a lens switch. Sub-agents are out of frame here — this is
+// deliberately the human↔main-agent dialogue.
+function renderConversation(sessions) {
+  const withMain = sessions.filter(s => s && s.main);
+  if (withMain.length === 0) {
+    return `<div class="ac-idle">No conversation in this window.</div>`;
+  }
+  return `<div class="conv">${withMain.map((s, si) => conversationSessionHTML(s, si)).join('')}</div>`;
+}
+
+function conversationSessionHTML(session, si) {
+  const sid = session.session_id || '';
+  const c = colorSlot(si);
+  const segs = conversationSegments(session);
+  const body = segs.length === 0
+    ? `<div class="ac-idle">No assistant turns recorded.</div>`
+    : segs.map(seg => conversationSegmentHTML(seg, sid, session)).join('');
+  return `<section class="conv-sess">
+    <div class="conv-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
+      <span class="conv-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
+      <span class="conv-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+    </div>
+    ${body}
+  </section>`;
+}
+
+// conversationSegmentHTML renders one prompt + its turns. The turn cards use
+// the segment's absolute step indices (firstStepIndex + k) so their refKeys —
+// and the "N/total" numbering — line up with every other lens. An orphan
+// segment (empty uuid) renders no bubble, just its turns.
+function conversationSegmentHTML(seg, sid, session) {
+  const total = (session.main.steps || []).length;
+  const bubble = seg.uuid
+    ? `<div class="conv-prompt">
+        <span class="conv-prompt-icon" aria-hidden="true">${labelIcon('agents')}</span>
+        <div class="conv-prompt-text">${escHtml(seg.text || '')}</div>
+        <span class="conv-prompt-time">${escHtml(clockTime(parseTime(seg.timestamp)))}</span>
+      </div>`
+    : '';
+  const turns = seg.steps
+    .map((st, k) => inspectorStepHTML(st, seg.firstStepIndex + k, total, sid, 0, session))
+    .join('');
+  return `${bubble}<div class="conv-turns">${turns}</div>`;
 }
 
 // ── Timeline (Gantt) lens ───────────────────────────────────────────────────

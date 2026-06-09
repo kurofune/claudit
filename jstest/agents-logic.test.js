@@ -33,6 +33,7 @@ import {
   filterTrace,
   detectRetries,
   spawnTargetIndex,
+  conversationSegments,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -1240,4 +1241,50 @@ test('detectRetries: calls with a different (kind,name,detail) key are not group
     }],
   };
   assert.equal(detectRetries(agent).size, 0);
+});
+
+// ── conversationSegments ────────────────────────────────────────────
+test('conversationSegments splits main steps into one segment per prompt marker', () => {
+  // Two prompts: A produced steps 0 and 1, B produced step 2. Each segment
+  // carries its marker fields and exactly the steps it owns, sliced by the
+  // markers' first_step_index boundaries.
+  const session = {
+    main: {
+      steps: [
+        { timestamp: 't0', model: 'm' },
+        { timestamp: 't1', model: 'm' },
+        { timestamp: 't2', model: 'm' },
+      ],
+    },
+    prompts: [
+      { uuid: 'uA', text: 'first', timestamp: 'ta', first_step_index: 0 },
+      { uuid: 'uB', text: 'second', timestamp: 'tb', first_step_index: 2 },
+    ],
+  };
+  const segs = conversationSegments(session);
+  assert.equal(segs.length, 2);
+  assert.equal(segs[0].uuid, 'uA');
+  assert.equal(segs[0].text, 'first');
+  assert.equal(segs[0].firstStepIndex, 0);
+  assert.deepEqual(segs[0].steps.map(s => s.timestamp), ['t0', 't1']);
+  assert.equal(segs[1].uuid, 'uB');
+  assert.equal(segs[1].firstStepIndex, 2);
+  assert.deepEqual(segs[1].steps.map(s => s.timestamp), ['t2']);
+});
+
+test('conversationSegments returns [] when the main agent has no steps', () => {
+  assert.deepEqual(conversationSegments(null), []);
+  assert.deepEqual(conversationSegments({}), []);
+  assert.deepEqual(conversationSegments({ main: { steps: [] }, prompts: [] }), []);
+});
+
+test('conversationSegments degrades to one prompt-less segment when markers are missing', () => {
+  // A session with turns but no prompt markers (older payload / unresolved
+  // chain) still renders every step — under a single empty-uuid segment.
+  const session = { main: { steps: [{ timestamp: 't0' }, { timestamp: 't1' }] } };
+  const segs = conversationSegments(session);
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].uuid, '');
+  assert.equal(segs[0].firstStepIndex, 0);
+  assert.deepEqual(segs[0].steps.map(s => s.timestamp), ['t0', 't1']);
 });

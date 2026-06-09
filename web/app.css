@@ -2367,6 +2367,37 @@
   .tr-spawn-label { font-family: var(--font-mono); font-weight: 600; color: var(--ink); }
   .tr-spawn-stats { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 
+  /* ── Conversation lens ── */
+  /* The main agent's timeline as a chat thread: prompt bubbles interleaved with
+     assistant turn cards (the SAME .insp-step cards the Tree lens renders, so
+     their refKeys/selection/drawer all carry over). Centered single column so
+     it reads top-to-bottom like a transcript. */
+  .conv { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-5); padding: var(--s-2) 0; }
+  .conv-sess { display: flex; flex-direction: column; gap: var(--s-3); max-width: 900px; width: 100%; margin: 0 auto; }
+  .conv-sess-head {
+    display: flex; align-items: baseline; gap: var(--s-2);
+    font-size: var(--t-2); color: var(--ink);
+    border-left: 3px solid var(--cc, var(--border)); padding-left: 6px;
+    position: sticky; top: 0; background: var(--bg); z-index: 1; padding-bottom: var(--s-1);
+  }
+  .conv-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
+  /* A user-prompt bubble: aligned right (the human side), accent-tinted, with
+     the prompt text and the time it was sent. */
+  .conv-prompt {
+    align-self: flex-end; max-width: 80%;
+    display: flex; align-items: flex-start; gap: var(--s-2);
+    background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-radius: var(--r-lg); padding: var(--s-2) var(--s-3);
+  }
+  .conv-prompt-icon { flex: none; color: var(--accent); opacity: 0.8; margin-top: 2px; }
+  .conv-prompt-icon .icon { width: 14px; height: 14px; }
+  .conv-prompt-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-2); color: var(--ink); line-height: 1.45; }
+  .conv-prompt-time { flex: none; margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; align-self: flex-end; }
+  /* The assistant's reply: its turn cards stacked, slightly inset from the left
+     so the dialogue reads human-right / agent-left. */
+  .conv-turns { display: flex; flex-direction: column; gap: var(--s-2); margin-right: var(--s-5); }
+
   /* ── Timeline (Gantt) lens ── */
   .timeline-lens { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-4); }
 
