@@ -32,7 +32,7 @@ func runReport(args []string) error {
 	by := fs.String("by", "day", "trend mode: bucket spend over time — one of day|week|month (empty disables)")
 	cacheTop := fs.Int("cache-top", 10, "show top-N cache-miss offenders per dimension in the cache efficiency section (0 disables)")
 	promptTop := fs.Int("prompt-top", 15, "show top-N most expensive user prompts (0 disables)")
-	sessionsTop := fs.Int("sessions", 50, "show top-N most expensive sessions in the drill-down view (0 disables the Sessions section; HTML only)")
+	sessionsTop := fs.Int("sessions", 50, "bake the N most-recently-active sessions into the drill-down view, newest first, paged 10 at a time (0 disables the Sessions section; HTML only)")
 	redact := fs.Bool("redact", false, "replace prompt text in the Sessions view with '[redacted N chars]' (HTML only)")
 	fs.Usage = func() {
 		ew := &errWriter{w: fs.Output()}

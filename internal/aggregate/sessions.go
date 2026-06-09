@@ -123,10 +123,11 @@ type SpawnRollup struct {
 // sensible: no cap, no truncation, no redaction. The caller (typically
 // cmd/claudit) plumbs CLI flag values into this struct.
 type SessionTimelinesOptions struct {
-	// TopN caps the returned slice to the top-N sessions by cost. 0 means
-	// no cap — return every session that passed the filter. The HTML
-	// renderer defaults to 50 because the per-session prompt+turn payload
-	// can grow large for active users.
+	// TopN caps the returned slice to the N most-recently-active sessions.
+	// 0 means no cap — return every session that passed the filter, which
+	// is what the served Sessions view uses (the time-range filter is the
+	// only bound; the UI paginates client-side). The static HTML report
+	// still sets a positive cap to bound the self-contained file's size.
 	TopN int
 
 	// Redact replaces every prompt's Text with "[redacted N chars]" so a
@@ -151,9 +152,10 @@ type SessionTimelinesOptions struct {
 // parentLinks supplies extra parent edges so the chain walker can climb
 // through non-content lines (system events, file-history snapshots).
 //
-// The returned slice is sorted by total cost descending and capped to
-// opts.TopN if set. Synthetic / zero-cost turns are still included — they
-// contribute to the turn list but not to ranking.
+// The returned slice is sorted by last activity (EndedAt) descending —
+// most recent session first — and capped to opts.TopN if set. Synthetic /
+// zero-cost turns are still included; they contribute to the turn list and,
+// via their timestamps, to a session's StartedAt/EndedAt span.
 func BuildSessionTimelines(
 	ctx context.Context,
 	turns []parse.Turn,
@@ -330,8 +332,11 @@ func BuildSessionTimelines(
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].CostUSD != out[j].CostUSD {
-			return out[i].CostUSD > out[j].CostUSD
+		// Most-recent-activity first: rank by last turn timestamp (EndedAt)
+		// descending so the freshest sessions lead the drill-down. The view
+		// pages this 10-at-a-time, bounded only by the filter window.
+		if !out[i].EndedAt.Equal(out[j].EndedAt) {
+			return out[i].EndedAt.After(out[j].EndedAt)
 		}
 		// Stable tiebreak on SessionID so the output is deterministic.
 		return out[i].SessionID < out[j].SessionID

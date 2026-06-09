@@ -40,3 +40,43 @@ export function filterSessionsByTab(sessions, tab) {
   if (tab !== 'sdk' && tab !== 'interactive') return sessions;
   return sessions.filter(s => classifyEntrypoint(s.entrypoint) === tab);
 }
+
+// SESSIONS_PAGE_SIZE is how many session cards render per page. The list is
+// no longer capped server-side (it ships every session in the time window,
+// newest-first); the view pages it instead so the DOM stays small.
+export const SESSIONS_PAGE_SIZE = 10;
+
+// pageCount is how many pages of `size` items `total` needs. Zero items →
+// zero pages (the empty state replaces the list and pager entirely).
+export function pageCount(total, size) {
+  if (total <= 0) return 0;
+  return Math.ceil(total / size);
+}
+
+// clampPage forces a (1-based) page request into the valid range for a list
+// of `total` items. Anything below 1 → 1; anything past the last page → the
+// last page; an empty list → 1 (page 1 hosts the empty state).
+export function clampPage(page, total, size) {
+  const pages = pageCount(total, size);
+  if (pages <= 0) return 1;
+  if (page < 1) return 1;
+  if (page > pages) return pages;
+  return page;
+}
+
+// paginate returns the slice of `list` for the (1-based, clamped) page. An
+// out-of-range page clamps rather than returning an empty slice, so a stale
+// page index can never blank the view.
+export function paginate(list, page, size) {
+  const p = clampPage(page, list.length, size);
+  const start = (p - 1) * size;
+  return list.slice(start, start + size);
+}
+
+// pageForIndex returns the 1-based page that holds the 0-based `index`. A
+// negative index (e.g. a deep-link target not present in the list) maps to
+// page 1 so the caller still lands somewhere valid.
+export function pageForIndex(index, size) {
+  if (index < 0) return 1;
+  return Math.floor(index / size) + 1;
+}

@@ -18,7 +18,16 @@
 import { fetchSessions, fetchSessionTimeline } from './api.js';
 import { fmtMoney, escHtml } from './format.js';
 import { sessionListSkeleton, timelineSkeleton } from './skeleton.js';
-import { classifyEntrypoint, splitSessionsRoute, filterSessionsByTab } from './sessions-logic.js';
+import {
+  classifyEntrypoint,
+  splitSessionsRoute,
+  filterSessionsByTab,
+  SESSIONS_PAGE_SIZE,
+  pageCount,
+  clampPage,
+  paginate,
+  pageForIndex,
+} from './sessions-logic.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -27,9 +36,9 @@ const SHELL = `
   <details class="guide">
     <summary>Drilling into a session</summary>
     <div class="body">
-      <p>Each card below is one Claude Code session, ranked by total cost. Open a session to load and view its user prompts in order; open a prompt to see the assistant turns it produced. Per-session timelines load on demand — clicking a closed card is what fetches the data, so unused sessions never touch the wire.</p>
+      <p>Each card below is one Claude Code session, newest first (by last activity), scoped to the selected time range and paged ${SESSIONS_PAGE_SIZE} at a time. Open a session to load and view its user prompts in order; open a prompt to see the assistant turns it produced. Per-session timelines load on demand — clicking a closed card is what fetches the data, so unused sessions never touch the wire.</p>
       <ul>
-        <li><strong>Read top-down.</strong> The first session is your most expensive in this window — it's usually the most informative.</li>
+        <li><strong>Read top-down.</strong> The first session is your most recent in this window; page back through the controls below the list for older ones.</li>
         <li><strong>Look for prompt cost spikes.</strong> A single prompt that ran 30 turns and cost $5 is a prime target for tightening — fewer tool calls, narrower context, or a custom skill.</li>
         <li><strong>All / Interactive / SDK tabs</strong> split sessions by origin. <em>SDK</em> sessions are headless runs (<code>claude -p</code> or the Agent SDK), tagged with an <code>SDK</code> badge; <em>Interactive</em> are normal terminal sessions. Each card's first line previews its kickoff prompt — the quickest way to tell what a run was about.</li>
         <li><strong>Each turn row</strong> packs: timestamp + the gap to the next turn within this prompt, the model, <code>in · out · cache</code> token counts, the dollar cost, and the tool chips that fired. Tool chips are color-coded by name — the same tool reads the same color across the whole report.</li>
@@ -47,6 +56,7 @@ const SHELL = `
   </nav>
 
   <div id="session-list" class="session-list"></div>
+  <nav id="session-pager" class="session-pager" aria-label="Session pages" hidden></nav>
   <div id="session-empty" class="empty-note" hidden>No sessions in this window. Try widening <code>--since</code>/<code>--until</code>.</div>
 `;
 
@@ -70,6 +80,10 @@ let renderedTab = null;
 // Tracks the most-recently-applied deep-link anchor so a hashchange
 // from the same value (no-op) doesn't re-trigger scroll/expand.
 let appliedSub = null;
+// The 1-based page currently shown within the active tab. Reset to 1 on a
+// fresh paint or a tab switch; advanced by the pager controls and by a
+// deep-link that targets a session on a later page.
+let currentPage = 1;
 
 // paintNav fetches /sessions just to derive the sidebar metric (count
 // · top cost). Called at startup so the metric resolves before the
@@ -125,6 +139,7 @@ export function reset() {
   allSessions = [];
   activeTab = 'all';
   renderedTab = null;
+  currentPage = 1;
   timelineCache.clear();
 }
 
@@ -139,16 +154,20 @@ function activateTab(container, tab) {
   // Only rebuild the list when the tab actually changed — re-rendering would
   // close any cards the user opened. After a rebuild the prior deep-link
   // anchor is gone, so clear appliedSub to let applyDeepLink re-open/scroll.
+  // A new tab starts at page 1; a deep-link may bump it forward afterward.
   if (renderedTab !== wanted) {
+    currentPage = 1;
     renderList(container, wanted);
     renderedTab = wanted;
     appliedSub = null;
   }
 }
 
-// renderList fills #session-list with the cards for the active tab and
-// wires their lazy-open handlers. Shows a per-tab empty note when the
-// filter leaves nothing (distinct from the no-sessions-at-all note).
+// renderList fills #session-list with the cards for the active tab's current
+// page and wires their lazy-open handlers. Shows a per-tab empty note when
+// the filter leaves nothing (distinct from the no-sessions-at-all note). The
+// full in-window list arrives newest-first from the server; this slices it to
+// SESSIONS_PAGE_SIZE so the DOM only ever holds one page of cards.
 function renderList(container, tab) {
   const list = container.querySelector('#session-list');
   const empty = container.querySelector('#session-empty');
@@ -157,15 +176,64 @@ function renderList(container, tab) {
   if (allSessions.length === 0) {
     list.innerHTML = '';
     if (empty) empty.hidden = false;
+    renderPager(container, 0);
     return;
   }
   if (empty) empty.hidden = true;
   if (shown.length === 0) {
     list.innerHTML = `<div class="empty-note">No ${tab === 'sdk' ? 'SDK/headless' : tab} sessions in this window.</div>`;
+    renderPager(container, 0);
     return;
   }
-  list.innerHTML = shown.map((s, i) => sessionCardHTML(s, (i % 5) + 1, tab)).join('');
+  // Clamp the page in case the active tab has fewer sessions than the last
+  // rendered tab (e.g. switching from All to SDK while on a high page).
+  currentPage = clampPage(currentPage, shown.length, SESSIONS_PAGE_SIZE);
+  const startIdx = (currentPage - 1) * SESSIONS_PAGE_SIZE;
+  const pageItems = paginate(shown, currentPage, SESSIONS_PAGE_SIZE);
+  // Color slot keys off each card's absolute position in the list (not its
+  // page-local index) so a session keeps its color across page changes.
+  list.innerHTML = pageItems.map((s, i) => sessionCardHTML(s, ((startIdx + i) % 5) + 1, tab)).join('');
   wireCardOpens(list);
+  renderPager(container, shown.length);
+}
+
+// renderPager draws the prev/next controls and "Page X of Y" status below
+// the list. Hidden entirely when the active tab fits on a single page.
+function renderPager(container, totalShown) {
+  const pager = container.querySelector('#session-pager');
+  if (!pager) return;
+  const pages = pageCount(totalShown, SESSIONS_PAGE_SIZE);
+  if (pages <= 1) {
+    pager.innerHTML = '';
+    pager.hidden = true;
+    return;
+  }
+  pager.hidden = false;
+  const atFirst = currentPage <= 1;
+  const atLast = currentPage >= pages;
+  pager.innerHTML = `
+    <button type="button" class="pager-btn" data-page-prev ${atFirst ? 'disabled' : ''} aria-label="Previous page">&lsaquo; Prev</button>
+    <span class="pager-status" aria-live="polite">Page ${currentPage} of ${pages}</span>
+    <button type="button" class="pager-btn" data-page-next ${atLast ? 'disabled' : ''} aria-label="Next page">Next &rsaquo;</button>`;
+  const prev = pager.querySelector('[data-page-prev]');
+  const next = pager.querySelector('[data-page-next]');
+  if (prev) prev.addEventListener('click', () => goToPage(container, currentPage - 1));
+  if (next) next.addEventListener('click', () => goToPage(container, currentPage + 1));
+}
+
+// goToPage moves to a (clamped) page within the active tab, re-renders the
+// card list, and scrolls the list back into view so the user sees the new
+// page from its top. A no-op when the clamped page is unchanged.
+function goToPage(container, page) {
+  const shown = filterSessionsByTab(allSessions, activeTab);
+  const clamped = clampPage(page, shown.length, SESSIONS_PAGE_SIZE);
+  if (clamped === currentPage) return;
+  currentPage = clamped;
+  // The cards just changed; a prior deep-link anchor no longer applies.
+  appliedSub = null;
+  renderList(container, activeTab);
+  const list = container.querySelector('#session-list');
+  if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // updateTabCounts annotates each subtab with how many of the shown
@@ -493,6 +561,20 @@ function applyDeepLink(container, sub) {
   // first; fall back to prefixing "session-" if the bare id was
   // passed in.
   const targetId = sub.startsWith('session-') ? sub : `session-${sub}`;
+  const rawId = sub.startsWith('session-') ? sub.slice('session-'.length) : sub;
+
+  // The target may live on a later page; find its position in the active
+  // tab's list and page to it before looking for the card in the DOM.
+  const shown = filterSessionsByTab(allSessions, activeTab);
+  const idx = shown.findIndex(s => (s.session_id || '') === rawId);
+  if (idx >= 0) {
+    const targetPage = pageForIndex(idx, SESSIONS_PAGE_SIZE);
+    if (targetPage !== currentPage) {
+      currentPage = targetPage;
+      renderList(container, activeTab);
+    }
+  }
+
   const card = container.querySelector(`#${cssEscape(targetId)}`);
   if (!card) return;
   if (!card.open) card.open = true; // triggers loadTimeline
@@ -520,18 +602,20 @@ function updateNavMetric(sessions, total) {
     el.removeAttribute('title');
     return;
   }
-  // Server-side sort is by cost desc, so sessions[0] is the top.
-  const top = sessions[0];
+  // The list is sorted newest-first now, so sessions[0] is the most recent,
+  // not the priciest. Compute the real max cost across the loaded sessions
+  // so the "top $" metric stays meaningful regardless of sort order.
+  const maxCost = sessions.reduce((m, s) => Math.max(m, s.cost_usd || 0), 0);
   const shown = sessions.length;
-  const cost = `top ${fmtMoney(top.cost_usd || 0)}`;
+  const cost = `top ${fmtMoney(maxCost)}`;
   if (total != null && total > shown) {
-    // The list is capped (server --sessions / ?sessions). Show "N of M"
-    // so this metric doesn't read as contradicting the Overview tile,
-    // which counts ALL M sessions in the window. total_sessions ships
-    // from Go (aggregate.Totals().Sessions) — the same source the tile
-    // reads, so the two numbers reconcile.
+    // The loaded list is capped (static report --sessions, or ?sessions=N).
+    // Show "N of M" so this metric doesn't read as contradicting the
+    // Overview tile, which counts ALL M sessions in the window.
+    // total_sessions ships from Go (aggregate.Totals().Sessions) — the same
+    // source the tile reads, so the two numbers reconcile.
     el.textContent = `${shown} of ${total} · ${cost}`;
-    el.title = `Showing the top ${shown} sessions by cost; ${total} sessions ran in this window. Raise the --sessions cap (or open with ?scope=all) to list more.`;
+    el.title = `Loaded ${shown} of ${total} sessions in this window. Raise the --sessions cap (or open with ?scope=all) to load more.`;
   } else {
     // Not capped — the shown count is the full count.
     el.textContent = `${total != null ? total : shown} · ${cost}`;

@@ -182,25 +182,28 @@ func TestBuildSessionTimelines_RedactKeepsDistinctSameLengthInputs(t *testing.T)
 	}
 }
 
-func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
+func TestBuildSessionTimelines_RanksSessionsByRecencyAndCaps(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 
-	// Three sessions. s_cheap < s_mid < s_expensive by token volume.
-	mkSession := func(sid string, inputMtok int) (parse.UserMessage, parse.Turn) {
+	// Three sessions whose last activity (EndedAt = newest turn) differs.
+	// s_old ended first, s_new ended last — ordering must be by last
+	// activity descending, independent of cost (so we make the OLDEST the
+	// most expensive to prove cost no longer drives the rank).
+	mkSession := func(sid string, endOffset time.Duration, inputMtok int) (parse.UserMessage, parse.Turn) {
 		u := chainUser("u-"+sid, "", sid, "prompt for "+sid, t0)
-		t := chainTurn("a-"+sid, "u-"+sid, sid, t0.Add(time.Second))
-		t.Usage = parse.Usage{InputTokens: inputMtok * 1_000_000}
-		return u, t
+		tn := chainTurn("a-"+sid, "u-"+sid, sid, t0.Add(endOffset))
+		tn.Usage = parse.Usage{InputTokens: inputMtok * 1_000_000}
+		return u, tn
 	}
-	uCh, tCh := mkSession("s_cheap", 1)
-	uMid, tMid := mkSession("s_mid", 10)
-	uExp, tExp := mkSession("s_expensive", 100)
+	uOld, tOld := mkSession("s_old", 1*time.Hour, 100) // oldest, priciest
+	uMid, tMid := mkSession("s_mid", 2*time.Hour, 10)
+	uNew, tNew := mkSession("s_new", 3*time.Hour, 1) // newest, cheapest
 
 	out, err := BuildSessionTimelines(
 		context.Background(),
-		[]parse.Turn{tCh, tMid, tExp},
-		[]parse.UserMessage{uCh, uMid, uExp},
+		[]parse.Turn{tOld, tMid, tNew},
+		[]parse.UserMessage{uOld, uMid, uNew},
 		nil, prices, Filter{},
 		SessionTimelinesOptions{TopN: 2},
 	)
@@ -210,11 +213,42 @@ func TestBuildSessionTimelines_RanksSessionsByCostAndCaps(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("TopN=2 should cap to 2, got %d", len(out))
 	}
-	if out[0].SessionID != "s_expensive" || out[1].SessionID != "s_mid" {
-		t.Errorf("sessions not ranked by cost desc: got %v", []string{out[0].SessionID, out[1].SessionID})
+	// Newest-ended first, regardless of cost. s_new (cheapest) leads.
+	if out[0].SessionID != "s_new" || out[1].SessionID != "s_mid" {
+		t.Errorf("sessions not ranked by last activity desc: got %v", []string{out[0].SessionID, out[1].SessionID})
 	}
-	if out[0].CostUSD <= out[1].CostUSD {
-		t.Errorf("expected out[0].cost > out[1].cost; got %f vs %f", out[0].CostUSD, out[1].CostUSD)
+	if !out[0].EndedAt.After(out[1].EndedAt) {
+		t.Errorf("expected out[0].EndedAt after out[1].EndedAt; got %v vs %v", out[0].EndedAt, out[1].EndedAt)
+	}
+}
+
+func TestBuildSessionTimelines_NoCapReturnsAllInWindow(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	// Five sessions, no TopN cap (0). All five must come back, newest first.
+	var turns []parse.Turn
+	var users []parse.UserMessage
+	for i := 0; i < 5; i++ {
+		sid := string(rune('a' + i))
+		users = append(users, chainUser("u-"+sid, "", sid, "p", t0))
+		users[i].SessionID = sid
+		turns = append(turns, chainTurn("a-"+sid, "u-"+sid, sid, t0.Add(time.Duration(i)*time.Hour)))
+	}
+
+	out, err := BuildSessionTimelines(context.Background(), turns, users, nil, prices, Filter{},
+		SessionTimelinesOptions{TopN: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 5 {
+		t.Fatalf("TopN=0 should return all 5 sessions, got %d", len(out))
+	}
+	// Strictly descending by last activity.
+	for i := 1; i < len(out); i++ {
+		if out[i-1].EndedAt.Before(out[i].EndedAt) {
+			t.Errorf("not sorted newest-first at %d: %v before %v", i, out[i-1].EndedAt, out[i].EndedAt)
+		}
 	}
 }
 

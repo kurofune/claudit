@@ -8,9 +8,11 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
-// newTestServerWithDefaults builds a Server with the same defaults
-// the CLI ships (last=7d, sessions=10). The cache is empty by default;
-// pass a seed dir via newTestServer when you want real data.
+// newTestServerWithDefaults builds a Server with a positive sessions cap
+// (10) so the plumbing tests can assert the configured cap is applied. The
+// CLI itself now ships sessions=0 (no cap — the Sessions view paginates),
+// but a positive value here exercises the capping path. The cache is empty
+// by default; pass a seed dir via newTestServer when you want real data.
 func newTestServerWithDefaults(t *testing.T, dir string) *Server {
 	t.Helper()
 	cache := NewCache(dir)
@@ -83,10 +85,10 @@ func TestApplyDefaults_ScopeAll_LiftsEverything(t *testing.T) {
 	if !q.Filter.Since.IsZero() {
 		t.Errorf("scope=all should leave Since zero; got %s", q.Filter.Since)
 	}
-	if q.SessionsTop < 50 {
-		// scope=all lifts the cap to a generous explicit number so
-		// the view is still rendered, just much more permissive.
-		t.Errorf("SessionsTop = %d, want a generous cap (>=50)", q.SessionsTop)
+	if q.SessionsTop != 0 {
+		// scope=all lifts the cap entirely (0 = no cap) — the most
+		// permissive scope can't be more restrictive than the default.
+		t.Errorf("SessionsTop = %d, want 0 (uncapped)", q.SessionsTop)
 	}
 }
 

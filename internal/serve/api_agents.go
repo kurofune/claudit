@@ -26,8 +26,10 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 		section: apiSectionAgents,
 		buildFromSnapshot: func(snap *Snapshot, q Query) (any, error) {
 			// TopN honors the same --sessions cap the Sessions tab uses (set
-			// by applyDefaults); without it a busy corpus would ship every
-			// session in the window. A non-positive cap means unlimited.
+			// by applyDefaults). It defaults to 0 (no cap — every session in
+			// the window, both views recency-sorted); a positive --sessions
+			// bounds both to the N most-recently-active sessions. A negative
+			// value (unset sentinel) is normalized to 0.
 			topN := q.SessionsTop
 			if topN < 0 {
 				topN = 0

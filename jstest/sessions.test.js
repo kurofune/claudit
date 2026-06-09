@@ -5,6 +5,11 @@ import {
   classifyEntrypoint,
   splitSessionsRoute,
   filterSessionsByTab,
+  SESSIONS_PAGE_SIZE,
+  pageCount,
+  clampPage,
+  paginate,
+  pageForIndex,
 } from '../web/sessions-logic.js';
 
 test('classifyEntrypoint treats sdk-prefixed origins as sdk', () => {
@@ -59,4 +64,49 @@ test('filterSessionsByTab splits sessions by entrypoint', () => {
 test('filterSessionsByTab is defensive: unknown tab returns all', () => {
   const sessions = [{ session_id: '1', entrypoint: 'cli' }];
   assert.deepEqual(filterSessionsByTab(sessions, 'bogus'), sessions);
+});
+
+test('SESSIONS_PAGE_SIZE is 10', () => {
+  assert.equal(SESSIONS_PAGE_SIZE, 10);
+});
+
+test('pageCount divides items into pages, rounding up', () => {
+  assert.equal(pageCount(0, 10), 0);
+  assert.equal(pageCount(1, 10), 1);
+  assert.equal(pageCount(10, 10), 1);
+  assert.equal(pageCount(11, 10), 2);
+  assert.equal(pageCount(25, 10), 3);
+});
+
+test('clampPage keeps the page within [1, pageCount]', () => {
+  // 25 items, size 10 → 3 pages.
+  assert.equal(clampPage(0, 25, 10), 1);
+  assert.equal(clampPage(1, 25, 10), 1);
+  assert.equal(clampPage(2, 25, 10), 2);
+  assert.equal(clampPage(99, 25, 10), 3);
+  // No items → clamp to page 1 (the empty state still lives on page 1).
+  assert.equal(clampPage(5, 0, 10), 1);
+});
+
+test('paginate returns the clamped page slice', () => {
+  const list = Array.from({ length: 25 }, (_, i) => i);
+  assert.deepEqual(paginate(list, 1, 10), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(paginate(list, 3, 10), [20, 21, 22, 23, 24]);
+  // Out-of-range page clamps to the last page rather than returning empty.
+  assert.deepEqual(paginate(list, 99, 10), [20, 21, 22, 23, 24]);
+  // Under-range clamps to the first page.
+  assert.deepEqual(paginate(list, 0, 10), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test('paginate on an empty list yields an empty page', () => {
+  assert.deepEqual(paginate([], 1, 10), []);
+});
+
+test('pageForIndex maps a 0-based index to its 1-based page', () => {
+  assert.equal(pageForIndex(0, 10), 1);
+  assert.equal(pageForIndex(9, 10), 1);
+  assert.equal(pageForIndex(10, 10), 2);
+  assert.equal(pageForIndex(24, 10), 3);
+  // Defensive: a not-found index (-1) maps to page 1.
+  assert.equal(pageForIndex(-1, 10), 1);
 });

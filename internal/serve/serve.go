@@ -444,12 +444,11 @@ func (s *Server) applyDefaults(q *Query, now time.Time) {
 			q.SessionsTop = s.opts.DefaultSessionsTop
 		}
 	} else if q.SessionsTop < 0 {
-		// URL didn't specify sessions but did pass scope=all — lift
-		// the cap (0 = unlimited, matching the report --sessions=0
-		// semantic of "disable view" vs the server-default behavior).
-		// Use a generous explicit cap rather than 0 so the view is
-		// still rendered.
-		q.SessionsTop = 200
+		// URL didn't specify sessions but did pass scope=all — lift the
+		// cap entirely (0 = no cap). scope=all is the most permissive
+		// scope, so it must not be more restrictive than the plain
+		// default, which is itself uncapped.
+		q.SessionsTop = 0
 	}
 	if q.Hotspots < 0 {
 		q.Hotspots = s.opts.DefaultHotspots

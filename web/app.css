@@ -1217,9 +1217,46 @@
 
   /* ─── Sessions drill-down view ─────────────────────────────────────
      Nested <details>: outer = session card, inner = prompt. Each prompt
-     reveals a turn-row list. No fancy virtualization yet — the backend
-     caps at --sessions=N (default 50) which keeps the payload bounded. */
+     reveals a turn-row list. The served list ships every session in the
+     window (newest first); the view pages it 10 at a time so the DOM only
+     holds one page of cards. The static report still bakes a bounded set
+     (--sessions=N, default 50). */
   .session-list { display: flex; flex-direction: column; gap: var(--s-3); }
+
+  /* Pager strip below the card list. Centered prev/next around a tabular
+     "Page X of Y" status. Hidden (via [hidden]) when one page suffices. */
+  .session-pager {
+    display: flex; align-items: center; justify-content: center;
+    gap: var(--s-3);
+    margin-top: var(--s-4);
+  }
+  .session-pager[hidden] { display: none; }
+  .session-pager .pager-status {
+    font-size: var(--t-2); color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 8ch; text-align: center;
+  }
+  .session-pager .pager-btn {
+    font: inherit; font-size: var(--t-2); font-weight: 500;
+    color: var(--ink); cursor: pointer;
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-2, 6px);
+    transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .session-pager .pager-btn:hover:not(:disabled) {
+    background: var(--surface-2); border-color: var(--accent);
+  }
+  .session-pager .pager-btn:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .session-pager .pager-btn:disabled {
+    opacity: 0.4; cursor: default;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .session-pager .pager-btn { transition: none; }
+  }
   .session-card {
     background: var(--surface);
     border: 1px solid var(--border);

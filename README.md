@@ -67,7 +67,7 @@ Date filters (`--since` / `--until`, `diff`'s `--a` / `--b` ranges, and serve's 
 - **Per-prompt cost.** Every user prompt's downstream cost, computed by walking the conversation's parent links.
 - **Cache efficiency.** Hit ratio overall plus the worst-offender prompts and tools driving cache misses.
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.
-- **Sessions drill-down (HTML only).** Top sessions by cost, each expandable to show the ordered user prompts and the assistant turns each one produced — per-turn model, tokens, cost, and which tools fired. Capped via `--sessions=N` (default 50; `--sessions=0` disables the view). Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing a report.
+- **Sessions drill-down (HTML only).** Every session in the time window, newest first (by last activity) and paged 10 at a time, each expandable to show the ordered user prompts and the assistant turns each one produced — per-turn model, tokens, cost, and which tools fired. In a generated report the baked set is bounded via `--sessions=N` (default 50; `--sessions=0` disables the view); `claudit serve` is uncapped by default, so the time range is the only bound. Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing a report.
 - **Trends.** Day/week/month buckets with sparklines.
 - **Anomalies.** Trend buckets with abnormal cost spikes or cache hit-ratio drops are flagged inline — coral dots in the HTML chart, an `## Anomalies` section in markdown, and an `anomalies` field in JSON.
 

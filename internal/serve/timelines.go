@@ -8,11 +8,13 @@ import (
 
 // buildTimelines runs the per-session timeline pipeline used by the
 // sessions API list and the per-session timeline endpoint. q.SessionsTop
-// caps the number of sessions returned; <=0 short-circuits to nil so the
-// expensive pass is skipped entirely for API endpoints that don't need
-// timelines (every API section but /sessions and /sessions/{id}/timeline).
+// caps the number of sessions returned; 0 means "no cap" — return every
+// session in the time window (the default, since the view paginates
+// client-side). A negative value never reaches here in normal flow
+// (applyDefaults resolves the -1 unset sentinel first) but is treated
+// defensively as "skip the pass entirely".
 func (s *Server) buildTimelines(ctx context.Context, snap *Snapshot, q Query) ([]aggregate.SessionTimeline, error) {
-	if q.SessionsTop <= 0 {
+	if q.SessionsTop < 0 {
 		return nil, nil
 	}
 	return aggregate.BuildSessionTimelines(
