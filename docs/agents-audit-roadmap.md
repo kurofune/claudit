@@ -10,7 +10,20 @@ Build one phase at a time. Each phase below is self-contained and ordered by dep
 later phases lean on the data introduced earlier. Backend and frontend-logic changes are
 TDD (red-green-refactor) per `.claude/rules/testing.md`; UI/styling is browser-verified.
 
-**Status:** Phases 1 ✅, 2 ✅, 3 ✅, and 4 ✅ complete (2026-06-08). Phase 5 remains.
+**Status:** All phases complete — 1 ✅, 2 ✅, 3 ✅, 4 ✅, 5 ✅ (2026-06-08). The
+roadmap is fully shipped; only the two explicitly-deferred Phase-2 follow-ups
+(query-DSL filter form, filter∩playhead window) and the deferred annotations
+phase remain as future work.
+
+- **Phase 5** — `aggregate.PromptResolver` extracts the parentUuid chain walk
+  shared with `BuildSessionTimelines`; `AgentSession.Prompts []PromptMarker`
+  (uuid/text/timestamp/first_step_index) segments the main agent's timeline by
+  originating prompt, `--redact`-aware (commit 3850a22). Frontend: pure
+  `conversationSegments(session)` slices `main.steps` by marker boundary (jstest)
+  + a fourth "Conversation" lens rendering prompt bubbles interleaved with the
+  Tree lens's own `inspectorStepHTML` turn cards under the SAME `sid#0.si`
+  refKey — one click opens the shared drawer, selection survives lens switches
+  (commit 62b722b). Browser-verified against live serve, 2026-06-08.
 
 - **Phase 1** — `aggregate.ToolKind` enum + `ToolInvocation.kind` (commit 41cc525);
   frontend colors every Feed/Tree row + drawer badge by kind, `agent` loudest
