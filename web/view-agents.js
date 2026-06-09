@@ -37,6 +37,7 @@ import {
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
   filterTrace, specActive, parseRefKey, detectRetries, spawnTargetIndex,
   conversationSegments,
+  conversationReplies,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -281,6 +282,12 @@ function wireSelection(container) {
       const range = e.target.closest('[data-tlrange]');
       if (range) onScrub(container, range);
     });
+    // The Conversation lens's session picker switches which conversation shows
+    // by re-pointing the shared selection at the chosen session's main agent.
+    lens.addEventListener('change', e => {
+      const pick = e.target.closest('[data-conv-pick]');
+      if (pick) pickConversation(container, pick.value);
+    });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const el = e.target.closest('[data-ref]');
@@ -324,6 +331,16 @@ function select(container, ref) {
     updateHighlights(container);
     renderDrawer(container);
   }
+}
+
+// pickConversation switches the Conversation lens to another session by pointing
+// the shared selection at that session's main agent (agentIndex 0), then doing a
+// full re-render so the lens shows the new dialogue and the drawer follows. No
+// scroll preserve — a new conversation opens at its top, as you'd expect.
+function pickConversation(container, sessionId) {
+  if (!sessionId) return;
+  selectedRef = refKey({ sessionId, agentIndex: 0 });
+  renderActive(container, false);
 }
 
 // updateHighlights toggles .is-selected on lens elements without a re-render:
@@ -1015,43 +1032,67 @@ function spawnRowHTML(tool, session) {
 
 // ── Conversation lens ────────────────────────────────────────────────────────
 //
-// "What did I ask, and how did it respond?" — the main agent's timeline read as
-// a chat thread: each user-prompt bubble followed by exactly the assistant turn
-// cards it produced (conversationSegments slices main.steps by prompt marker).
-// The turn cards ARE the Tree lens's inspectorStepHTML, addressed by the SAME
-// refKey (main = agentIndex 0), so a click opens the shared drawer and the
-// selection survives a lens switch. Sub-agents are out of frame here — this is
-// deliberately the human↔main-agent dialogue.
+// "What did I ask, and how did it respond?" — the SELECTED session's main agent
+// read as a chat thread: each user-prompt bubble followed by the assistant's
+// spoken replies (conversationSegments slices main.steps by prompt marker;
+// conversationReplies keeps only the steps that produced text). Tool calls are
+// deliberately absent — this lens is the dialogue, not the trace; the tools and
+// reasoning are a click away in the shared drawer (each bubble carries the SAME
+// refKey the other lenses use, main = agentIndex 0) and in the Tree/Timeline
+// lenses. Sub-agents are out of frame too — this is the human↔main-agent talk.
+//
+// ONE session at a time, keyed off the shared selection: a "conversation"
+// stacking thousands of sessions is neither readable nor renderable (full
+// inline prose across every session is megabytes of DOM rebuilt on each live
+// tick). Selecting any turn/agent in another lens, then switching here, scopes
+// the thread to that session; the sticky header names which one.
 function renderConversation(sessions) {
   const withMain = sessions.filter(s => s && s.main);
   if (withMain.length === 0) {
     return `<div class="ac-idle">No conversation in this window.</div>`;
   }
-  return `<div class="conv">${withMain.map((s, si) => conversationSessionHTML(s, si)).join('')}</div>`;
+  const sel = resolveRef(lastGraph, selectedRef);
+  const session = (sel && sel.session && sel.session.main) ? sel.session : withMain[0];
+  const si = sessions.findIndex(s => s && s.session_id === session.session_id);
+  return `<div class="conv">${conversationSessionHTML(session, si < 0 ? 0 : si, withMain)}</div>`;
 }
 
-function conversationSessionHTML(session, si) {
+// conversationSessionHTML renders the chosen session's header + dialogue. When
+// more than one session is in the window the header is a <select> picker (the
+// in-lens way to switch which conversation you're reading — selection elsewhere
+// still scopes it too); with a single session it's just the project + short id.
+function conversationSessionHTML(session, si, candidates) {
   const sid = session.session_id || '';
   const c = colorSlot(si);
   const segs = conversationSegments(session);
   const body = segs.length === 0
     ? `<div class="ac-idle">No assistant turns recorded.</div>`
     : segs.map(seg => conversationSegmentHTML(seg, sid, session)).join('');
+  const head = (candidates && candidates.length > 1)
+    ? `<select class="conv-sess-pick" data-conv-pick aria-label="Choose which conversation to read">
+        ${candidates.map(cd => {
+          const cid = cd.session_id || '';
+          const label = `${baseName(cd.cwd) || '—'} · ${shortId(cid)}`;
+          return `<option value="${escHtml(cid)}"${cid === sid ? ' selected' : ''}>${escHtml(label)}</option>`;
+        }).join('')}
+      </select>
+      <span class="conv-sess-count">${candidates.length} sessions</span>`
+    : `<span class="conv-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
+       <span class="conv-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>`;
   return `<section class="conv-sess">
     <div class="conv-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
-      <span class="conv-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
-      <span class="conv-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+      ${head}
     </div>
     ${body}
   </section>`;
 }
 
-// conversationSegmentHTML renders one prompt + its turns. The turn cards use
-// the segment's absolute step indices (firstStepIndex + k) so their refKeys —
-// and the "N/total" numbering — line up with every other lens. An orphan
-// segment (empty uuid) renders no bubble, just its turns.
+// conversationSegmentHTML renders one prompt + the assistant's spoken replies.
+// Each reply bubble carries its absolute step index's refKey (main = agentIndex
+// 0) so a click opens that turn — tools and reasoning included — in the shared
+// drawer. An orphan segment (empty uuid) renders no prompt bubble, just the
+// replies; a segment whose every step was tool-only renders no reply bubbles.
 function conversationSegmentHTML(seg, sid, session) {
-  const total = (session.main.steps || []).length;
   const bubble = seg.uuid
     ? `<div class="conv-prompt">
         <span class="conv-prompt-icon" aria-hidden="true">${labelIcon('agents')}</span>
@@ -1059,10 +1100,28 @@ function conversationSegmentHTML(seg, sid, session) {
         <span class="conv-prompt-time">${escHtml(clockTime(parseTime(seg.timestamp)))}</span>
       </div>`
     : '';
-  const turns = seg.steps
-    .map((st, k) => inspectorStepHTML(st, seg.firstStepIndex + k, total, sid, 0, session))
+  const replies = conversationReplies(seg)
+    .map(r => conversationReplyHTML(r, sid))
     .join('');
-  return `${bubble}<div class="conv-turns">${turns}</div>`;
+  return `${bubble}<div class="conv-turns">${replies}</div>`;
+}
+
+// conversationReplyHTML renders one assistant reply bubble: aligned left (the
+// agent side), the spoken text, and a footer with the time and — claudit being
+// spend-aware — the turn's cost. It is a selectable affordance (data-ref), so a
+// click pulls the full turn into the shared drawer.
+function conversationReplyHTML(reply, sid) {
+  const ref = refKey({ sessionId: sid, agentIndex: 0, stepIndex: reply.stepIndex });
+  const sel = ref === selectedRef ? ' is-selected' : '';
+  const cost = reply.cost_usd
+    ? `<span class="conv-reply-cost">${escHtml(fmtMoney(reply.cost_usd))}</span>` : '';
+  return `<div class="conv-reply${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
+    <div class="conv-reply-text">${escHtml(reply.text)}</div>
+    <div class="conv-reply-foot">
+      <span class="conv-reply-time">${escHtml(clockTime(parseTime(reply.timestamp)))}</span>
+      ${cost}
+    </div>
+  </div>`;
 }
 
 // ── Timeline (Gantt) lens ───────────────────────────────────────────────────
@@ -1316,7 +1375,7 @@ function renderScrub(container) {
 
 function captureState(host) {
   const m = { scrolls: {}, openTools: [], tlScroll: {} };
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens').forEach(el => {
+  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens, .conv').forEach(el => {
     m.scrolls[scrollKey(el)] = el.scrollTop;
   });
   // Per-session horizontal Gantt offset, so a live update that rebuilds the SVG
@@ -1330,7 +1389,7 @@ function captureState(host) {
 }
 
 function restoreState(host, m) {
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens').forEach(el => {
+  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens, .conv').forEach(el => {
     const v = m.scrolls[scrollKey(el)];
     if (v != null) el.scrollTop = v;
   });
@@ -1344,7 +1403,7 @@ function restoreState(host, m) {
   }
 }
 
-const scrollKey = el => el.className.split(' ').find(c => /feed|tree|log|timeline-lens/.test(c)) || el.className;
+const scrollKey = el => el.className.split(' ').find(c => /feed|tree|log|timeline-lens|conv/.test(c)) || el.className;
 
 // ── nav metric + small formatters ────────────────────────────────────────
 

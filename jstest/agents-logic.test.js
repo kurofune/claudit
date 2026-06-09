@@ -34,6 +34,7 @@ import {
   detectRetries,
   spawnTargetIndex,
   conversationSegments,
+  conversationReplies,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -1287,4 +1288,37 @@ test('conversationSegments degrades to one prompt-less segment when markers are 
   assert.equal(segs[0].uuid, '');
   assert.equal(segs[0].firstStepIndex, 0);
   assert.deepEqual(segs[0].steps.map(s => s.timestamp), ['t0', 't1']);
+});
+
+// ── conversationReplies ─────────────────────────────────────────────
+test('conversationReplies keeps only the steps that spoke, with absolute indices', () => {
+  // A segment of three steps: step 0 is tool-only (no text), step 1 replies,
+  // step 2 is whitespace-only (still silent). Only step 1 becomes a reply, and
+  // its stepIndex is absolute (firstStepIndex + local k) so the bubble keeps
+  // the shared refKey.
+  const seg = {
+    firstStepIndex: 4,
+    steps: [
+      { timestamp: 't0', text: '', model: 'm', cost_usd: 0.01 },
+      { timestamp: 't1', text: 'Done — fixed it.', model: 'claude', cost_usd: 0.02 },
+      { timestamp: 't2', text: '   ', model: 'm', cost_usd: 0.03 },
+    ],
+  };
+  const replies = conversationReplies(seg);
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].stepIndex, 5);
+  assert.equal(replies[0].text, 'Done — fixed it.');
+  assert.equal(replies[0].timestamp, 't1');
+  assert.equal(replies[0].model, 'claude');
+  assert.equal(replies[0].cost_usd, 0.02);
+});
+
+test('conversationReplies returns [] for an empty or missing segment', () => {
+  assert.deepEqual(conversationReplies(null), []);
+  assert.deepEqual(conversationReplies({}), []);
+  assert.deepEqual(conversationReplies({ firstStepIndex: 0, steps: [] }), []);
+  assert.deepEqual(
+    conversationReplies({ firstStepIndex: 0, steps: [{ text: '' }, { text: '  ' }] }),
+    [],
+  );
 });

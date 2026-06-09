@@ -2382,6 +2382,18 @@
   }
   .conv-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
+  /* The in-lens conversation picker: a native select dressed to sit in the
+     sticky header, so you can jump between the window's sessions without
+     leaving the lens. */
+  .conv-sess-pick {
+    font: inherit; font-weight: 700; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 2px 6px; cursor: pointer;
+    max-width: 70%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .conv-sess-pick:hover { border-color: color-mix(in oklch, var(--ink-2) 30%, var(--border)); }
+  .conv-sess-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .conv-sess-count { margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
   /* A user-prompt bubble: aligned right (the human side), accent-tinted, with
      the prompt text and the time it was sent. */
   .conv-prompt {
@@ -2394,9 +2406,28 @@
   .conv-prompt-icon .icon { width: 14px; height: 14px; }
   .conv-prompt-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-2); color: var(--ink); line-height: 1.45; }
   .conv-prompt-time { flex: none; margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; align-self: flex-end; }
-  /* The assistant's reply: its turn cards stacked, slightly inset from the left
-     so the dialogue reads human-right / agent-left. */
+  /* The assistant's replies: spoken-text bubbles stacked, slightly inset from
+     the left so the dialogue reads human-right / agent-left. */
   .conv-turns { display: flex; flex-direction: column; gap: var(--s-2); margin-right: var(--s-5); }
+  /* A reply bubble: aligned left (the agent side), neutral surface, the spoken
+     text with a time + cost footer. Clickable — opens the full turn (tools,
+     reasoning) in the shared drawer; selection mirrors the other lenses. */
+  .conv-reply {
+    align-self: flex-start; max-width: 80%;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-2) var(--s-3); cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .conv-reply:hover { border-color: color-mix(in oklch, var(--ink-2) 30%, var(--border)); }
+  .conv-reply:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .conv-reply.is-selected {
+    border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
+    background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
+  }
+  .conv-reply-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-2); color: var(--ink); line-height: 1.45; }
+  .conv-reply-foot { display: flex; align-items: baseline; gap: var(--s-2); margin-top: var(--s-1); }
+  .conv-reply-time { color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
+  .conv-reply-cost { margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
 
   /* ── Timeline (Gantt) lens ── */
   .timeline-lens { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-4); }

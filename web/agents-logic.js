@@ -83,6 +83,30 @@ export function conversationSegments(session) {
   return out;
 }
 
+// conversationReplies distills a segment down to the assistant's spoken turns —
+// the steps that actually produced text — for the text-only Conversation lens.
+// Tool-only steps (no prose) are dropped so the thread reads as a dialogue, not
+// a trace. Each reply keeps its absolute stepIndex (firstStepIndex + local k) so
+// the rendered bubble carries the SAME refKey the other lenses use and a click
+// still opens the full turn (tools, reasoning) in the shared drawer.
+export function conversationReplies(seg) {
+  const steps = (seg && seg.steps) || [];
+  const base = (seg && seg.firstStepIndex) || 0;
+  const out = [];
+  for (let k = 0; k < steps.length; k++) {
+    const st = steps[k] || {};
+    if (!(st.text || '').trim()) continue;
+    out.push({
+      stepIndex: base + k,
+      text: st.text,
+      timestamp: st.timestamp || '',
+      model: st.model || '',
+      cost_usd: st.cost_usd || 0,
+    });
+  }
+  return out;
+}
+
 // packLanes assigns each agent to a swimlane via greedy interval
 // packing: agents whose [start, end] spans don't overlap can share a
 // lane, so a session's main agent (spanning everything) takes lane 0
