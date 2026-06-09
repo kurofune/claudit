@@ -36,6 +36,24 @@ type AgentSession struct {
 	ErrorCount int         `json:"error_count"`
 	Main       *AgentNode  `json:"main"`
 	Children   []AgentNode `json:"children"`
+	// Prompts segments the main agent's timeline by originating user prompt,
+	// in order, so the Conversation lens can interleave "what was asked" with
+	// the turns it produced. Each marker points at the first Main.Steps index
+	// belonging to that prompt.
+	Prompts []PromptMarker `json:"prompts"`
+}
+
+// PromptMarker is one user prompt anchored to where its turns begin in the
+// main agent's step timeline. Text is redaction-aware (a "[redacted N chars]"
+// marker when Options.Redact is set); UUID/Timestamp come from the originating
+// parse.UserMessage. An empty UUID marks a run of steps with no resolvable
+// originating prompt (orphan turns) — the lens renders no bubble for it.
+type PromptMarker struct {
+	UUID      string    `json:"uuid"`
+	Text      string    `json:"text"`
+	Timestamp time.Time `json:"timestamp"`
+	// FirstStepIndex is the index into Main.Steps of this prompt's first turn.
+	FirstStepIndex int `json:"first_step_index"`
 }
 
 // AgentNode is one agent — the main session agent, or a sub-agent. Kind is
@@ -81,6 +99,10 @@ type AgentStep struct {
 	// Omitted from JSON when empty so tool-only turns stay lean.
 	Thinking string `json:"thinking,omitempty"`
 	Text     string `json:"text,omitempty"`
+	// parentUUID is the turn's parentUuid, kept unexported (not serialized) so
+	// prompt segmentation can resolve each main step back to its originating
+	// user prompt after steps are sorted. Travels with the struct through sort.
+	parentUUID string
 }
 
 // Options tunes graph construction. Zero values are sensible defaults.
@@ -188,14 +210,21 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			}
 		}
 		n.steps = append(n.steps, AgentStep{
-			Timestamp: t.Timestamp,
-			Model:     t.Model,
-			CostUSD:   cost,
-			Tools:     aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact),
-			Thinking:  thinking,
-			Text:      text,
+			Timestamp:  t.Timestamp,
+			Model:      t.Model,
+			CostUSD:    cost,
+			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact),
+			Thinking:   thinking,
+			Text:       text,
+			parentUUID: t.ParentUUID,
 		})
 	}
+
+	// Resolver for prompt segmentation (the Conversation lens): maps each main
+	// step's parentUuid back to the user prompt that originated it. Built once
+	// over the whole snapshot; parentUuids are globally unique so cross-session
+	// lookups don't collide.
+	resolver := aggregate.NewPromptResolver(snap.Turns, snap.Users, snap.Links)
 
 	out := make([]AgentSession, 0, len(sessions))
 	for _, s := range sessions {
@@ -224,6 +253,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
 		})
 		attachSpawnRollups(&as)
+		as.Prompts = segmentPrompts(as.Main, resolver, opts.Redact)
 		out = append(out, as)
 	}
 	// Cap to the N most-recently-active sessions before the display sort, so
@@ -344,6 +374,39 @@ func attachSpawnRollups(as *AgentSession) {
 	for i := range as.Children {
 		attach(&as.Children[i])
 	}
+}
+
+// segmentPrompts walks the main agent's (sorted) step timeline and emits one
+// PromptMarker per contiguous run of steps sharing an originating user prompt.
+// A new marker starts whenever the resolved prompt UUID changes from the
+// previous step, so every step belongs to exactly one marker and the markers
+// read in conversation order. Text is redacted when redact is set; the empty
+// "" UUID (orphan steps with no resolvable prompt) yields a text-less marker.
+func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver, redact bool) []PromptMarker {
+	if main == nil || len(main.Steps) == 0 {
+		return nil
+	}
+	var markers []PromptMarker
+	const sentinel = "\x00" // matches no real UUID, not even ""
+	prev := sentinel
+	for i := range main.Steps {
+		uuid := r.Resolve(main.Steps[i].parentUUID)
+		if uuid == prev {
+			continue
+		}
+		prev = uuid
+		text := r.Text(uuid)
+		if redact && text != "" {
+			text = aggregate.RedactMarker(text)
+		}
+		markers = append(markers, PromptMarker{
+			UUID:           uuid,
+			Text:           text,
+			Timestamp:      r.Timestamp(uuid),
+			FirstStepIndex: i,
+		})
+	}
+	return markers
 }
 
 // lastToolName returns the name of the last tool invoked in an agent's most

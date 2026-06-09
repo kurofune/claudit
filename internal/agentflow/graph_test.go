@@ -416,6 +416,112 @@ func TestBuildAgentGraph_RedactsThinkingAndText(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_PromptMarkersSegmentMainTimeline(t *testing.T) {
+	// Two user prompts in one session: prompt A produced two turns, prompt B
+	// produced one. The main timeline (sorted by time) should segment into two
+	// PromptMarkers in order, the second starting at the step index where
+	// prompt B's first turn lands.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	src := "/root/-p-x/s1.jsonl"
+
+	userA := parse.UserMessage{UUID: "uA", SessionID: "s1", Text: "first prompt", Timestamp: t0}
+	userB := parse.UserMessage{UUID: "uB", SessionID: "s1", Text: "second prompt", Timestamp: t0.Add(2 * time.Minute)}
+
+	turn1 := mkTurn("t1", "s1", src, t0.Add(10*time.Second))
+	turn1.ParentUUID = "uA"
+	turn2 := mkTurn("t2", "s1", src, t0.Add(20*time.Second))
+	turn2.ParentUUID = "uA"
+	turn3 := mkTurn("t3", "s1", src, t0.Add(2*time.Minute+10*time.Second))
+	turn3.ParentUUID = "uB"
+
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn1, turn2, turn3},
+		Users: []parse.UserMessage{userA, userB},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prompts := g.Sessions[0].Prompts
+	if len(prompts) != 2 {
+		t.Fatalf("want 2 prompt markers, got %d: %+v", len(prompts), prompts)
+	}
+	if prompts[0].UUID != "uA" || prompts[0].FirstStepIndex != 0 {
+		t.Errorf("marker[0] = {UUID:%q, FirstStepIndex:%d}, want {uA, 0}", prompts[0].UUID, prompts[0].FirstStepIndex)
+	}
+	if prompts[1].UUID != "uB" || prompts[1].FirstStepIndex != 2 {
+		t.Errorf("marker[1] = {UUID:%q, FirstStepIndex:%d}, want {uB, 2}", prompts[1].UUID, prompts[1].FirstStepIndex)
+	}
+}
+
+func TestBuildAgentGraph_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
+	// A marker surfaces its originating prompt's text and timestamp so the
+	// Conversation lens can render the prompt bubble without a second lookup.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	src := "/root/-p-x/s1.jsonl"
+	promptTS := t0.Add(5 * time.Second)
+
+	user := parse.UserMessage{UUID: "uA", SessionID: "s1", Text: "audit the parser", Timestamp: promptTS}
+	turn := mkTurn("t1", "s1", src, t0.Add(10*time.Second))
+	turn.ParentUUID = "uA"
+
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		Users: []parse.UserMessage{user},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prompts := g.Sessions[0].Prompts
+	if len(prompts) != 1 {
+		t.Fatalf("want 1 prompt marker, got %d", len(prompts))
+	}
+	if prompts[0].Text != "audit the parser" {
+		t.Errorf("Text = %q, want %q", prompts[0].Text, "audit the parser")
+	}
+	if !prompts[0].Timestamp.Equal(promptTS) {
+		t.Errorf("Timestamp = %v, want %v", prompts[0].Timestamp, promptTS)
+	}
+}
+
+func TestBuildAgentGraph_RedactsPromptMarkerText(t *testing.T) {
+	// Under Redact the prompt body becomes a length-echoing marker so a shared
+	// report doesn't leak the conversation — mirroring tool-input/thinking
+	// redaction. UUID and timestamp still flow (they're not secret).
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	src := "/root/-p-x/s1.jsonl"
+
+	user := parse.UserMessage{UUID: "uA", SessionID: "s1", Text: "secret prompt body", Timestamp: t0}
+	turn := mkTurn("t1", "s1", src, t0.Add(10*time.Second))
+	turn.ParentUUID = "uA"
+
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		Users: []parse.UserMessage{user},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Redact: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prompts := g.Sessions[0].Prompts
+	if len(prompts) != 1 {
+		t.Fatalf("want 1 prompt marker, got %d", len(prompts))
+	}
+	if want := aggregate.RedactMarker("secret prompt body"); prompts[0].Text != want {
+		t.Errorf("Text = %q, want %q", prompts[0].Text, want)
+	}
+	if prompts[0].UUID != "uA" {
+		t.Errorf("UUID = %q, want uA (redaction must not hide the id)", prompts[0].UUID)
+	}
+}
+
 func TestBuildAgentGraph_RedactsToolInput(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

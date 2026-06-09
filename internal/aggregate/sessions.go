@@ -167,66 +167,13 @@ func BuildSessionTimelines(
 		return nil, nil
 	}
 
-	// Build the same parent + userText maps BuildPromptIndex uses. Kept
-	// local rather than reused from PromptIndex so this function doesn't
-	// require callers to construct one — the drill-down is opt-in.
-	parent := make(map[string]string, len(turns)+len(msgs)+len(parentLinks))
-	userText := make(map[string]string, len(msgs))
-	userTS := make(map[string]time.Time, len(msgs))
-	for _, l := range parentLinks {
-		if _, exists := parent[l.UUID]; !exists {
-			parent[l.UUID] = l.ParentUUID
-		}
-	}
-	for _, t := range turns {
-		parent[t.UUID] = t.ParentUUID
-	}
-	for _, m := range msgs {
-		parent[m.UUID] = m.ParentUUID
-		userText[m.UUID] = m.Text
-		userTS[m.UUID] = m.Timestamp
-	}
-
-	// Iterative chain walk → originating user UUID. Same algorithm as
-	// BuildPromptIndex but we keep the UUID itself rather than the
-	// normalized bucket key.
-	cache := make(map[string]string, len(turns))
-	resolveUserUUID := func(start string) string {
-		if start == "" {
-			return ""
-		}
-		if v, ok := cache[start]; ok {
-			return v
-		}
-		chain := []string{start}
-		seen := map[string]struct{}{start: {}}
-		var found string
-		cur := start
-		for {
-			if _, ok := userText[cur]; ok {
-				found = cur
-				break
-			}
-			p, ok := parent[cur]
-			if !ok || p == "" {
-				break
-			}
-			if v, ok := cache[p]; ok {
-				found = v
-				break
-			}
-			if _, loop := seen[p]; loop {
-				break
-			}
-			seen[p] = struct{}{}
-			chain = append(chain, p)
-			cur = p
-		}
-		for _, u := range chain {
-			cache[u] = found
-		}
-		return found
-	}
+	// Chain walker: any turn's parentUuid → its originating user prompt UUID.
+	// Shared with the Agents Conversation lens (agentflow.BuildAgentGraph) so
+	// the two drill-downs attribute turns to prompts identically. Kept local
+	// to this call (not reused from PromptIndex) so the drill-down stays
+	// opt-in — callers needn't construct an index.
+	resolver := NewPromptResolver(turns, msgs, parentLinks)
+	resolveUserUUID := resolver.Resolve
 
 	// sessionAccum holds in-progress per-session state. We use a stable
 	// secondary key (orphan "" bucket) so turns whose chain doesn't reach
@@ -303,7 +250,7 @@ func BuildSessionTimelines(
 		if !ok {
 			pa = &promptAccum{
 				UUID:      userUUID,
-				Timestamp: userTS[userUUID], // zero for orphan ""
+				Timestamp: resolver.Timestamp(userUUID), // zero for orphan ""
 			}
 			s.Prompts[userUUID] = pa
 		}
@@ -334,7 +281,7 @@ func BuildSessionTimelines(
 			Entrypoint: s.Entrypoint,
 		}
 		for _, pa := range s.Prompts {
-			raw := userText[pa.UUID]
+			raw := resolver.Text(pa.UUID)
 			text, truncated := preparePromptText(raw, opts)
 			// Key is computed from the raw text — never from the
 			// possibly-redacted display text — so cross-links from
