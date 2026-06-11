@@ -1221,6 +1221,7 @@ function inspectorStepHTML(step, i, total, sid, agentIndex, session) {
       ${model}
       ${reasoned}
       ${step.cost_usd ? `<span class="insp-step-cost">${escHtml(fmtMoney(step.cost_usd))}</span>` : ''}
+      ${(() => { const tk = agentTokens(step).total; return tk ? `<span class="insp-step-toks" title="tokens this turn">${escHtml(fmtCompact(tk))}</span>` : ''; })()}
     </div>
     ${tools.length ? `<div class="insp-tools">${toolHTML}</div>` : ''}
   </div>`;

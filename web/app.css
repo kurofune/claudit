@@ -2391,6 +2391,12 @@
   .insp-step-model { font-family: var(--font-mono); }
   .insp-step-reason { color: var(--accent-2); font-weight: 600; }
   .insp-step-cost { margin-left: auto; color: var(--ink); flex: none; }
+  /* Compact per-turn token figure, sitting just after the cost as secondary
+     ink so it reads as a companion to the dollar amount, not a competing one. */
+  .insp-step-toks { flex: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .insp-step-cost + .insp-step-toks::before { content: "·"; margin: 0 4px 0 2px; color: var(--ink-2); }
+  /* When a turn has no cost, the token cell still needs to be pushed right. */
+  .insp-step-head > .insp-step-toks:not(.insp-step-cost + .insp-step-toks) { margin-left: auto; }
   .insp-tools { display: flex; flex-direction: column; gap: 1px; margin: 0 0 2px 12px; padding-left: 8px; border-left: 1px solid var(--border); }
   .tr { font-size: var(--t-2); cursor: pointer; border-radius: var(--r-sm); }
   .tr-row { display: flex; align-items: center; gap: var(--s-2); padding: 2px 4px; }
