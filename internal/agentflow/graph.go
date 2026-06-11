@@ -90,6 +90,9 @@ type AgentStep struct {
 	Timestamp time.Time `json:"timestamp"`
 	Model     string    `json:"model"`
 	CostUSD   float64   `json:"cost_usd"`
+	// Tokens is this turn's usage (counted once for a coalesced message), so the
+	// drawer can show per-turn input/output/cache without re-deriving it.
+	Tokens aggregate.Tokens `json:"tokens"`
 	// DurationMs is the wall-clock gap to the next step within the same agent,
 	// in milliseconds. Zero for the last step (no next).
 	DurationMs int64                      `json:"duration_ms"`
@@ -209,10 +212,13 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 				text = aggregate.RedactMarker(text)
 			}
 		}
+		var stepTokens aggregate.Tokens
+		addUsage(&stepTokens, t.Usage)
 		n.steps = append(n.steps, AgentStep{
 			Timestamp:  t.Timestamp,
 			Model:      t.Model,
 			CostUSD:    cost,
+			Tokens:     stepTokens,
 			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact),
 			Thinking:   thinking,
 			Text:       text,

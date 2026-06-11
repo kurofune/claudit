@@ -599,6 +599,11 @@ const DRAWER_GRAPH = {
           timestamp: '2026-05-01T12:00:10Z', model: 'claude-opus-4',
           cost_usd: 0.10, duration_ms: 4200,
           thinking: 'plan the work', text: 'Listing files',
+          tokens: {
+            InputTokens: 80, OutputTokens: 40,
+            CacheCreate5mTokens: 8, CacheCreate1hTokens: 2,
+            CacheReadTokens: 120,
+          },
           tools: [
             { name: 'Bash', kind: 'exec', detail: 'ls -la', input: 'ls -la', status: 'ok', output: 'file.go\n', id: 'toolu_x' },
           ],
@@ -606,6 +611,11 @@ const DRAWER_GRAPH = {
         {
           timestamp: '2026-05-01T12:00:40Z', model: 'claude-opus-4',
           cost_usd: 0.32, duration_ms: 3000, tools: [],
+          tokens: {
+            InputTokens: 0, OutputTokens: 5,
+            CacheCreate5mTokens: 0, CacheCreate1hTokens: 0,
+            CacheReadTokens: 0,
+          },
         },
       ],
     },
@@ -723,6 +733,39 @@ test('buildDrawerPayload builds the step payload as "Turn N" with no tool I/O', 
   assert.equal(p.input, '');
   assert.equal(p.output, '');
   assert.equal(p.detail, '');
+});
+
+test('buildDrawerPayload: a step carries its own per-turn tokens', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(p.type, 'step');
+  // 80 + 40 + (8 + 2) + 120 = 250
+  assert.equal(p.tokens.input, 80);
+  assert.equal(p.tokens.output, 40);
+  assert.equal(p.tokens.cacheWrite, 10);
+  assert.equal(p.tokens.cacheRead, 120);
+  assert.equal(p.tokens.total, 250);
+});
+
+test('buildDrawerPayload: a step carries a navigable list of its tool calls', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(p.type, 'step');
+  assert.equal(p.tools.length, 1);
+  const row = p.tools[0];
+  assert.equal(row.name, 'Bash');
+  assert.equal(row.kind, 'exec');
+  assert.equal(row.detail, 'ls -la');
+  assert.equal(row.status, 'ok');
+  // refKey points at the exact tool so the drawer row can click through to it.
+  assert.equal(row.refKey, 'sess-uuid-1#0.0:0');
+});
+
+test('buildDrawerPayload: a tool-less step has an empty tools list, and non-steps have none', () => {
+  const step1 = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 1 });
+  assert.deepEqual(step1.tools, []);
+  const agent = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 });
+  assert.deepEqual(agent.tools, []);
+  const tool = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.deepEqual(tool.tools, []);
 });
 
 test('buildDrawerPayload carries the tool_use id so the drawer can load full I/O', () => {

@@ -238,6 +238,38 @@ func TestBuildAgentGraph_StepCarriesModelCostAndTools(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_StepCarriesTokens(t *testing.T) {
+	// The turn drawer shows per-turn token counts, so each AgentStep must carry
+	// its turn's usage (counted once for a coalesced message). Two cache tiers
+	// plus input/output cover the whole tuple.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.Usage = parse.Usage{
+		InputTokens:         111,
+		OutputTokens:        222,
+		CacheCreate5mTokens: 333,
+		CacheCreate1hTokens: 44,
+		CacheReadTokens:     555,
+	}
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	steps := g.Sessions[0].Main.Steps
+	if len(steps) != 1 {
+		t.Fatalf("want 1 step, got %d", len(steps))
+	}
+	got := steps[0].Tokens
+	if got.InputTokens != 111 || got.OutputTokens != 222 ||
+		got.CacheCreate5mTokens != 333 || got.CacheCreate1hTokens != 44 ||
+		got.CacheReadTokens != 555 {
+		t.Errorf("step.Tokens = %+v, want the turn's usage (111/222/333/44/555)", got)
+	}
+}
+
 func TestBuildAgentGraph_InterStepDuration(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

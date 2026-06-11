@@ -830,15 +830,36 @@ function drawerHTML(p, retry = null) {
     drMetric('steps', p.type === 'agent' && p.stepCount ? fmtNum(p.stepCount) : ''),
   ].filter(Boolean).join('');
 
-  // The same audit skeleton every time so the layout never jumps; empty
-  // sections collapse to a dim header rather than disappearing.
-  const sections = [
-    drSection('Reasoning', p.thinking, true),
-    drSection('Narration', p.text, true),
-    drIOSection('Input', p.input, 'input', p),
-    drIOSection('Output', p.output, 'output', p),
-    p.type === 'agent' ? drTokens(p.tokens) : '',
-  ].join('');
+  // Sections vary by level so no row is dead weight:
+  //  - tool: Reasoning, Narration, then its own Input/Output (the only level
+  //    that has real tool I/O).
+  //  - step (turn): Reasoning, Narration, a Tools list (each row clicks through
+  //    to that tool's I/O), and the per-turn token breakdown — never the
+  //    always-empty I/O rows a turn would otherwise show.
+  //  - agent: Reasoning/Narration (usually empty) plus the rolled-up tokens.
+  // The skeleton order is stable so the layout never jumps between selections.
+  let sections;
+  if (p.type === 'tool') {
+    sections = [
+      drSection('Reasoning', p.thinking, true),
+      drSection('Narration', p.text, true),
+      drIOSection('Input', p.input, 'input', p),
+      drIOSection('Output', p.output, 'output', p),
+    ].join('');
+  } else if (p.type === 'step') {
+    sections = [
+      drSection('Reasoning', p.thinking, true),
+      drSection('Narration', p.text, true),
+      drToolList(p.tools),
+      drTokens(p.tokens),
+    ].join('');
+  } else {
+    sections = [
+      drSection('Reasoning', p.thinking, true),
+      drSection('Narration', p.text, true),
+      drTokens(p.tokens),
+    ].join('');
+  }
 
   return `<div class="dr">
     <div class="dr-head">
@@ -921,6 +942,26 @@ async function loadFull(btn) {
     btn.textContent = 'failed — retry';
     btn.disabled = false;
   }
+}
+
+// drToolList renders a turn's tool calls as a list of click-through rows
+// (kind badge · name · detail · status pill). Each row carries the tool's
+// data-ref so the shared drawer delegate jumps the selection straight to that
+// tool's Input/Output. Empty turns collapse to a dim "—" header like any other
+// section, so a tool-only turn never renders as an empty slab.
+function drToolList(tools) {
+  if (!tools || !tools.length) {
+    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">Tools <span class="dr-none">—</span></h4></section>`;
+  }
+  const rows = tools.map(t => {
+    const detail = t.detail ? `<span class="dr-tool-detail" title="${escHtml(t.detail)}">${escHtml(t.detail)}</span>` : '';
+    const pill = t.status ? statusPill(t.status) : '';
+    return `<button type="button" class="dr-tool-row" data-ref="${escHtml(t.refKey)}" title="${escHtml(t.name)}">
+      ${kindBadge(t.kind)}<span class="dr-tool-name">${escHtml(t.name)}</span>${detail}${pill}
+    </button>`;
+  }).join('');
+  return `<section class="dr-sec"><h4 class="dr-sec-h">Tools <span class="dr-sec-sum">${tools.length}</span></h4>
+    <div class="dr-tools">${rows}</div></section>`;
 }
 
 function drTokens(t) {

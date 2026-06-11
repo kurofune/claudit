@@ -2188,6 +2188,18 @@
   .dr-tok { display: flex; justify-content: space-between; gap: var(--s-2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 3px 8px; font-size: var(--t-1); }
   .dr-tok-k { color: var(--ink-2); }
   .dr-tok-v { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* Tools list inside a turn drawer: one click-through row per tool call. */
+  .dr-tools { display: flex; flex-direction: column; gap: var(--s-1); }
+  .dr-tool-row {
+    display: flex; align-items: center; gap: var(--s-2); width: 100%;
+    text-align: left; cursor: pointer; font: inherit; font-size: var(--t-1);
+    color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 4px 8px;
+  }
+  .dr-tool-row:hover { background: color-mix(in oklch, var(--accent) 8%, var(--surface)); border-color: color-mix(in oklch, var(--accent) 28%, var(--border)); }
+  .dr-tool-name { font-weight: 600; }
+  .dr-tool-detail { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .dr-tool-row .ag-pill { margin-left: auto; flex: none; }
   .ag-pill.ag-ok { color: var(--ok, var(--accent-2)); background: var(--accent-2-soft); border-color: color-mix(in oklch, var(--accent-2) 30%, var(--border)); }
   .ag-pill.ag-err { color: var(--danger, #e5484d); background: color-mix(in oklch, var(--danger, #e5484d) 12%, transparent); border-color: color-mix(in oklch, var(--danger, #e5484d) 30%, var(--border)); }
 

@@ -773,11 +773,14 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
   const text = step ? (step.text || '') : '';
   const model = step ? (step.model || '') : '';
 
-  // Tokens/cost/duration roll up to the agent for an agent ref, else to
-  // the step (tool inherits the step's).
+  // Tokens roll up to the agent for an agent ref and to the turn for a step
+  // ref (agentTokens just reads a `.tokens` tuple, so it works on a step too).
+  // A tool ref carries no per-call tokens — usage is a turn-level total.
   const tokens = type === 'agent'
     ? agentTokens(agent)
-    : { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
+    : type === 'step'
+      ? agentTokens(step)
+      : { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
   const cost_usd = type === 'agent' ? (agent.cost_usd || 0) : (step ? (step.cost_usd || 0) : 0);
   let durationMs;
   if (type === 'agent') {
@@ -813,10 +816,27 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
     // drawer can link straight to it. null for non-tool refs, plain tools, and
     // spawns whose sub-agent isn't in the snapshot (childRef '').
     spawned: spawnDrawerInfo(type, tool, session),
+    // tools: the turn's tool calls as navigable rows, so a turn drawer lists
+    // every tool (and never renders as an empty slab). Empty for non-steps.
+    tools: stepToolRows(type, step, session, agentIndex, stepIndex),
     thinking, text, model,
     tokens, cost_usd, durationMs,
     stepCount: (agent.steps || []).length,
   };
+}
+
+// stepToolRows builds the navigable tool-call rows for a step (turn) ref: one
+// per tool_use, each carrying the refKey of the exact tool so the drawer can
+// click through to its Input/Output. Empty for any non-step ref.
+function stepToolRows(type, step, session, agentIndex, stepIndex) {
+  if (type !== 'step' || !step || !Array.isArray(step.tools)) return [];
+  return step.tools.map((tu, i) => ({
+    name: tu.name || '',
+    kind: tu.kind || 'other',
+    detail: tu.detail || '',
+    status: tu.status || '',
+    refKey: refKey({ sessionId: session.session_id, agentIndex, stepIndex, toolIndex: i }),
+  }));
 }
 
 // spawnDrawerInfo builds the drawer's spawn rollup for a tool ref: the
