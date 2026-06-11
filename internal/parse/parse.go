@@ -61,7 +61,13 @@ type ToolResult struct {
 
 // Turn is one assistant message — the only event type that costs money.
 type Turn struct {
-	SessionID  string
+	SessionID string
+	// MessageID is `message.id` — the wire id shared by every JSONL line of
+	// one streamed assistant turn (Claude Code writes one line per content
+	// block, all repeating this id and the same cumulative usage). It's the
+	// key the coalescer groups on so a multi-block turn counts once. Empty
+	// for older single-line-per-message transcripts.
+	MessageID  string
 	UUID       string
 	ParentUUID string
 	Sidechain  bool
@@ -136,6 +142,7 @@ type rawLine struct {
 }
 
 type rawMessage struct {
+	ID      string          `json:"id"`
 	Model   string          `json:"model"`
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
@@ -229,6 +236,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 		thinking, text := extractAssistantText(msg.Content)
 		return Turn{
 			SessionID:  raw.SessionID,
+			MessageID:  msg.ID,
 			UUID:       raw.UUID,
 			ParentUUID: raw.ParentUUID,
 			Sidechain:  raw.Sidechain,
@@ -299,7 +307,126 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 	if err := sc.Err(); err != nil {
 		return res, err
 	}
+	// Coalesce the per-line assistant turns: every JSONL line of one streamed
+	// message repeats the same message.id and the same cumulative usage, so
+	// counting per-line inflates cost. Collapse each message to one Turn.
+	res.Turns = coalesceTurns(res.Turns)
 	return res, nil
+}
+
+// coalesceTurns groups assistant turns by MessageID and emits one merged Turn
+// per group, preserving first-appearance order. A turn with an empty MessageID
+// (older single-line-per-message transcripts, or malformed lines that lost the
+// id) stands alone — so the result is a no-op for the legacy format. Grouping
+// is by id, not merely consecutive, so an interleaved id still collapses to one.
+func coalesceTurns(turns []Turn) []Turn {
+	if len(turns) == 0 {
+		return turns
+	}
+	out := make([]Turn, 0, len(turns))
+	index := make(map[string]int, len(turns)) // MessageID -> position in out
+	for _, t := range turns {
+		if t.MessageID == "" {
+			out = append(out, t)
+			continue
+		}
+		if pos, ok := index[t.MessageID]; ok {
+			out[pos] = mergeTurn(out[pos], t)
+			continue
+		}
+		index[t.MessageID] = len(out)
+		out = append(out, t)
+	}
+	return out
+}
+
+// mergeTurn folds a continuation line b into the in-progress turn a (same
+// message.id). Identity/timing come from a (the first line): UUID, ParentUUID,
+// Timestamp, SessionID, etc. are left untouched. Content accumulates in order —
+// thinking and text blocks join with newlines, tool_uses concatenate. Usage is
+// taken as the per-field max: the lines repeat one identical cumulative total,
+// so max counts it once while tolerating a malformed line that lost a field.
+func mergeTurn(a, b Turn) Turn {
+	a.Thinking = joinBlocks(a.Thinking, b.Thinking)
+	a.Text = joinBlocks(a.Text, b.Text)
+	a.ToolUses = append(a.ToolUses, b.ToolUses...)
+	a.Usage.InputTokens = maxInt(a.Usage.InputTokens, b.Usage.InputTokens)
+	a.Usage.OutputTokens = maxInt(a.Usage.OutputTokens, b.Usage.OutputTokens)
+	a.Usage.CacheCreate5mTokens = maxInt(a.Usage.CacheCreate5mTokens, b.Usage.CacheCreate5mTokens)
+	a.Usage.CacheCreate1hTokens = maxInt(a.Usage.CacheCreate1hTokens, b.Usage.CacheCreate1hTokens)
+	a.Usage.CacheReadTokens = maxInt(a.Usage.CacheReadTokens, b.Usage.CacheReadTokens)
+	return a
+}
+
+// joinBlocks concatenates two block strings with a newline, skipping the
+// separator when either side is empty so a turn with no thinking (or no text)
+// doesn't gain a leading/trailing blank line.
+func joinBlocks(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "\n" + b
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Coalescer is the streaming counterpart of coalesceTurns: it merges the
+// content-block lines of one assistant message into a single Turn for consumers
+// that see one parsed line at a time (e.g. `claudit watch`). Feed each assistant
+// Turn through Push in arrival order; call Flush when a non-assistant line or
+// end-of-stream signals the in-progress message is done. The zero value is ready
+// to use.
+//
+// Unlike the batch coalesceTurns, this merges only the consecutive run sharing a
+// message.id — a stream can't look ahead to regroup interleaved ids — which
+// matches how Claude Code writes a message's blocks contiguously.
+type Coalescer struct {
+	cur    *Turn
+	hasCur bool
+	curID  string
+}
+
+// Push feeds the next assistant Turn. When t continues the in-progress message
+// (same non-empty MessageID), it is merged and Push returns (zero, false). When
+// t starts a new message, the previous in-progress message is completed and
+// returned (turn, true) and t becomes the new in-progress message. A turn with
+// an empty MessageID never merges: it flushes any pending message and is itself
+// held as a standalone in-progress turn (so legacy lines stay one-per-line).
+func (c *Coalescer) Push(t Turn) (Turn, bool) {
+	if c.hasCur && t.MessageID != "" && t.MessageID == c.curID {
+		merged := mergeTurn(*c.cur, t)
+		c.cur = &merged
+		return Turn{}, false
+	}
+	done, ok := c.Flush()
+	tc := t
+	c.cur = &tc
+	c.hasCur = true
+	c.curID = t.MessageID
+	return done, ok
+}
+
+// Flush completes and returns the in-progress message, if any, and clears it.
+// Returns (zero, false) when nothing is pending. Call at end-of-stream (or on a
+// non-assistant line) so the final message isn't left uncounted.
+func (c *Coalescer) Flush() (Turn, bool) {
+	if !c.hasCur {
+		return Turn{}, false
+	}
+	out := *c.cur
+	c.cur = nil
+	c.hasCur = false
+	c.curID = ""
+	return out, true
 }
 
 func convertUsage(u *rawUsage) Usage {

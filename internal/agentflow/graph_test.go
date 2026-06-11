@@ -3,6 +3,7 @@ package agentflow
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,56 @@ import (
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
+
+func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
+	// A multi-block message (5 JSONL lines, one message.id) followed by a second
+	// one-line message. After ParseFile coalesces, the main agent must show ONE
+	// step per message — merged thinking/text/tools, cost counted once — and the
+	// first step's duration must be the gap to the NEXT MESSAGE (9s), not the
+	// gap to the next line within the same message (1s).
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","parentUuid":"u0","timestamp":"2026-04-10T10:00:01Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"thinking","thinking":"reason"}]}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-04-10T10:00:02Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"text","text":"narration"}]}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-04-10T10:00:03Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"assistant","uuid":"a4","parentUuid":"a3","timestamp":"2026-04-10T10:00:04Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/x"}}]}}`,
+		`{"type":"assistant","uuid":"a5","parentUuid":"a4","timestamp":"2026-04-10T10:00:05Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"/y"}}]}}`,
+		`{"type":"assistant","uuid":"a6","parentUuid":"a5","timestamp":"2026-04-10T10:00:10Z","sessionId":"s1","message":{"id":"msg_2","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"done"}]}}`,
+	}
+	res, err := parse.ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "/p/s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prices, _ := pricing.LoadDefault()
+	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks}
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Sessions) != 1 || g.Sessions[0].Main == nil {
+		t.Fatalf("expected 1 session with a main agent, got %+v", g.Sessions)
+	}
+	main := g.Sessions[0].Main
+	if len(main.Steps) != 2 {
+		t.Fatalf("main steps = %d, want 2 (one per message, not per line)", len(main.Steps))
+	}
+	s0 := main.Steps[0]
+	if s0.Thinking != "reason" || s0.Text != "narration" {
+		t.Errorf("step0 content not merged: thinking=%q text=%q", s0.Thinking, s0.Text)
+	}
+	if len(s0.Tools) != 3 {
+		t.Errorf("step0 tools = %d, want 3 merged", len(s0.Tools))
+	}
+	if s0.CostUSD < 4.99 || s0.CostUSD > 5.01 {
+		t.Errorf("step0 cost = %v, want ~$5 once (not ~$25)", s0.CostUSD)
+	}
+	if s0.DurationMs != 9000 {
+		t.Errorf("step0 duration = %dms, want 9000 (gap to next message, not next line)", s0.DurationMs)
+	}
+	if g.Sessions[0].CostUSD < 4.99 || g.Sessions[0].CostUSD > 5.01 {
+		t.Errorf("session cost = %v, want ~$5 (message counted once)", g.Sessions[0].CostUSD)
+	}
+}
 
 // writeSubagent creates a subagents/agent-<id>.jsonl path (the file itself is
 // not needed — the graph reads turns from the snapshot) plus its sibling

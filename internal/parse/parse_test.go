@@ -276,6 +276,188 @@ func TestParseLine_CapturesEntrypoint(t *testing.T) {
 	}
 }
 
+func TestParseFile_CoalescesMessageBlocks(t *testing.T) {
+	// One streamed assistant turn = 3 JSONL lines sharing message.id, each a
+	// different content block, all repeating the SAME cumulative usage. They
+	// must collapse to ONE Turn: merged thinking/text/tool_uses, usage once.
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","parentUuid":"u0","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":5026,"output_tokens":593,"cache_creation_input_tokens":34743},"content":[{"type":"thinking","thinking":"reason here"}]}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-04-10T10:00:02Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":5026,"output_tokens":593,"cache_creation_input_tokens":34743},"content":[{"type":"text","text":"narration"}]}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-04-10T10:00:03Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":5026,"output_tokens":593,"cache_creation_input_tokens":34743},"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`,
+	}
+	res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("Turns = %d, want 1 (the 3 blocks of one message coalesced)", len(res.Turns))
+	}
+	turn := res.Turns[0]
+	if turn.Thinking != "reason here" {
+		t.Errorf("Thinking = %q, want merged thinking block", turn.Thinking)
+	}
+	if turn.Text != "narration" {
+		t.Errorf("Text = %q, want merged text block", turn.Text)
+	}
+	if len(turn.ToolUses) != 1 || turn.ToolUses[0].Name != "Bash" {
+		t.Errorf("ToolUses = %+v, want the single Bash call", turn.ToolUses)
+	}
+	if turn.Usage.InputTokens != 5026 || turn.Usage.OutputTokens != 593 || turn.Usage.CacheCreate5mTokens != 34743 {
+		t.Errorf("usage = %+v, want counted ONCE (5026/593/34743)", turn.Usage)
+	}
+}
+
+func TestParseFile_CoalescedTurnKeepsFirstLineIdentityAndAllLinks(t *testing.T) {
+	// The coalesced Turn must keep the FIRST line's identity/timing (UUID,
+	// ParentUUID, Timestamp) so prompt attribution still anchors correctly.
+	// Every per-line parentUuid edge must survive in ParentLinks so the
+	// chain walk can still climb intra-message lines to the originating prompt.
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","parentUuid":"u0","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"x"}]}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-04-10T10:00:02Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-04-10T10:00:03Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/x"}}]}}`,
+	}
+	res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("Turns = %d, want 1", len(res.Turns))
+	}
+	turn := res.Turns[0]
+	if turn.UUID != "a1" {
+		t.Errorf("UUID = %q, want first line's a1", turn.UUID)
+	}
+	if turn.ParentUUID != "u0" {
+		t.Errorf("ParentUUID = %q, want first line's u0", turn.ParentUUID)
+	}
+	wantTS, _ := time.Parse(time.RFC3339, "2026-04-10T10:00:01Z")
+	if !turn.Timestamp.Equal(wantTS) {
+		t.Errorf("Timestamp = %v, want first line's %v", turn.Timestamp, wantTS)
+	}
+	// All three per-line edges must be present for the chain walk.
+	edges := map[string]string{}
+	for _, l := range res.ParentLinks {
+		edges[l.UUID] = l.ParentUUID
+	}
+	for child, parent := range map[string]string{"a1": "u0", "a2": "a1", "a3": "a2"} {
+		if edges[child] != parent {
+			t.Errorf("ParentLinks[%q] = %q, want %q", child, edges[child], parent)
+		}
+	}
+}
+
+func TestParseFile_NoMessageIDStaysOneTurnPerLine(t *testing.T) {
+	// Older transcripts (and any line that lost its message.id) carry no
+	// message.id. The fix must be a no-op there: each assistant line stays its
+	// own Turn, with usage intact, so legacy single-line-per-message accounting
+	// is unchanged.
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-04-10T10:00:01Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":10,"output_tokens":20},"content":[{"type":"text","text":"one"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-04-10T10:00:02Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":30,"output_tokens":40},"content":[{"type":"text","text":"two"}]}}`,
+	}
+	res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 2 {
+		t.Fatalf("Turns = %d, want 2 (no coalescing without message.id)", len(res.Turns))
+	}
+	if res.Turns[0].Text != "one" || res.Turns[1].Text != "two" {
+		t.Errorf("turns merged unexpectedly: %q / %q", res.Turns[0].Text, res.Turns[1].Text)
+	}
+	if res.Turns[0].Usage.InputTokens != 10 || res.Turns[1].Usage.InputTokens != 30 {
+		t.Errorf("usage altered: %+v / %+v", res.Turns[0].Usage, res.Turns[1].Usage)
+	}
+}
+
+func TestCoalescer_StreamingMergeAndFlush(t *testing.T) {
+	// The streaming path (claudit watch) feeds one parsed Turn at a time. The
+	// Coalescer holds an in-progress message and only emits it once a new
+	// message.id (or an explicit Flush) signals the message is complete.
+	mk := func(line string) Turn {
+		tn, _, kind := ParseLine([]byte(line), "p")
+		if kind != LineAssistant {
+			t.Fatalf("setup: line not assistant: %s", line)
+		}
+		return tn
+	}
+	l1 := mk(`{"type":"assistant","uuid":"a1","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":5,"output_tokens":6},"content":[{"type":"thinking","thinking":"reason"}]}}`)
+	l2 := mk(`{"type":"assistant","uuid":"a2","timestamp":"2026-04-10T10:00:02Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":5,"output_tokens":6},"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`)
+	l3 := mk(`{"type":"assistant","uuid":"a3","timestamp":"2026-04-10T10:00:05Z","message":{"id":"msg_2","model":"m","role":"assistant","usage":{"input_tokens":7,"output_tokens":8},"content":[{"type":"text","text":"answer"}]}}`)
+
+	var c Coalescer
+	if done, ok := c.Push(l1); ok {
+		t.Fatalf("first line of a message must not flush yet, got %+v", done)
+	}
+	if done, ok := c.Push(l2); ok {
+		t.Fatalf("same-id continuation must not flush, got %+v", done)
+	}
+	done, ok := c.Push(l3)
+	if !ok {
+		t.Fatalf("a new message.id must flush the prior message")
+	}
+	if done.MessageID != "msg_1" {
+		t.Errorf("flushed MessageID = %q, want msg_1", done.MessageID)
+	}
+	if done.Thinking != "reason" || len(done.ToolUses) != 1 || done.ToolUses[0].Name != "Bash" {
+		t.Errorf("flushed turn not merged: thinking=%q tools=%+v", done.Thinking, done.ToolUses)
+	}
+	if done.Usage.InputTokens != 5 || done.Usage.OutputTokens != 6 {
+		t.Errorf("flushed usage = %+v, want counted once (5/6)", done.Usage)
+	}
+	// Flush emits the last in-progress message (msg_2).
+	last, ok := c.Flush()
+	if !ok || last.MessageID != "msg_2" || last.Text != "answer" {
+		t.Errorf("Flush() = %+v ok=%v, want msg_2/answer", last, ok)
+	}
+	// A second Flush has nothing left.
+	if _, ok := c.Flush(); ok {
+		t.Errorf("second Flush should report nothing pending")
+	}
+}
+
+func TestCoalescer_EmptyMessageIDStaysStandalone(t *testing.T) {
+	// Legacy lines carry no message.id. In the stream, each must stand alone:
+	// pushing a second empty-id turn flushes the first unchanged.
+	mk := func(line string) Turn {
+		tn, _, _ := ParseLine([]byte(line), "p")
+		return tn
+	}
+	l1 := mk(`{"type":"assistant","uuid":"a1","timestamp":"2026-04-10T10:00:01Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"one"}]}}`)
+	l2 := mk(`{"type":"assistant","uuid":"a2","timestamp":"2026-04-10T10:00:02Z","message":{"model":"m","role":"assistant","usage":{"input_tokens":2,"output_tokens":2},"content":[{"type":"text","text":"two"}]}}`)
+
+	var c Coalescer
+	if _, ok := c.Push(l1); ok {
+		t.Fatalf("first empty-id push should not flush")
+	}
+	done, ok := c.Push(l2)
+	if !ok {
+		t.Fatalf("second empty-id push should flush the first")
+	}
+	if done.Text != "one" || done.Usage.InputTokens != 1 {
+		t.Errorf("flushed standalone turn altered: text=%q usage=%+v", done.Text, done.Usage)
+	}
+	last, ok := c.Flush()
+	if !ok || last.Text != "two" {
+		t.Errorf("Flush() = %+v ok=%v, want standalone 'two'", last, ok)
+	}
+}
+
+func TestParseLine_CapturesMessageID(t *testing.T) {
+	// Claude Code writes one JSONL line per content block, each repeating the
+	// same message.id. We must surface that id so consecutive blocks of one
+	// assistant turn can be coalesced into a single logical turn.
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","message":{"id":"msg_abc","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1}}}`
+	turn, _, kind := ParseLine([]byte(line), "t")
+	if kind != LineAssistant {
+		t.Fatalf("kind = %v, want LineAssistant", kind)
+	}
+	if turn.MessageID != "msg_abc" {
+		t.Errorf("MessageID = %q, want %q", turn.MessageID, "msg_abc")
+	}
+}
+
 func TestExtractToolUses_CapturesInput(t *testing.T) {
 	// We retain a bounded snippet of high-value tool inputs — the full
 	// Bash command and the prompt handed to a subagent — so the Sessions

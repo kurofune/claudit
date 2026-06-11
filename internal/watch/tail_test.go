@@ -357,6 +357,65 @@ func TestTail_LiveFlag_FalseDuringInitialDrain(t *testing.T) {
 	<-done
 }
 
+func mkAssistantBlockLine(uuid, parent, msgID, block string, ts time.Time) string {
+	return fmt.Sprintf(`{"type":"assistant","uuid":%q,"parentUuid":%q,"timestamp":%q,"sessionId":"s1","cwd":"/p","message":{"id":%q,"model":"claude-opus-4-7","role":"assistant","content":[%s],"usage":{"input_tokens":100,"output_tokens":200}}}`,
+		uuid, parent, ts.Format(time.RFC3339), msgID, block)
+}
+
+func TestTail_CoalescesMessageBlocks(t *testing.T) {
+	// A modern streamed message is many JSONL lines sharing one message.id.
+	// The tailer must surface ONE assistant Event per message — merged content,
+	// usage counted once — flushing it when the following (non-assistant) user
+	// line signals the message is complete.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "live.jsonl")
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	content := mkAssistantBlockLine("a1", "u1", "msg_1", `{"type":"thinking","thinking":"reason"}`, t0.Add(time.Second)) + "\n" +
+		mkAssistantBlockLine("a2", "a1", "msg_1", `{"type":"text","text":"answer"}`, t0.Add(2*time.Second)) + "\n" +
+		mkAssistantBlockLine("a3", "a2", "msg_1", `{"type":"tool_use","id":"x","name":"Bash","input":{"command":"ls"}}`, t0.Add(3*time.Second)) + "\n" +
+		mkUserLine("u2", "a3", "next prompt", t0.Add(4*time.Second)) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &blockingCollector{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Tail(ctx, path, TailOptions{Interval: 25 * time.Millisecond, FromBeginning: true},
+			c.Add, nil)
+	}()
+
+	waitForCount(t, c, 2, 2*time.Second)
+	cancel()
+	<-done
+
+	got := c.Snapshot()
+	var asst []Event
+	for _, e := range got {
+		if e.Kind == parse.LineAssistant {
+			asst = append(asst, e)
+		}
+	}
+	if len(asst) != 1 {
+		t.Fatalf("assistant events = %d, want 1 coalesced (events: %+v)", len(asst), got)
+	}
+	turn := asst[0].Turn
+	if turn.Thinking != "reason" || turn.Text != "answer" {
+		t.Errorf("merged content wrong: thinking=%q text=%q", turn.Thinking, turn.Text)
+	}
+	if len(turn.ToolUses) != 1 || turn.ToolUses[0].Name != "Bash" {
+		t.Errorf("merged tools wrong: %+v", turn.ToolUses)
+	}
+	if turn.Usage.InputTokens != 100 || turn.Usage.OutputTokens != 200 {
+		t.Errorf("usage = %+v, want counted once (100/200)", turn.Usage)
+	}
+	if turn.UUID != "a1" {
+		t.Errorf("coalesced UUID = %q, want first line's a1", turn.UUID)
+	}
+}
+
 func TestFindBySessionID_PrefixMatch(t *testing.T) {
 	dir := t.TempDir()
 	// Real session.

@@ -108,8 +108,10 @@ func Tail(ctx context.Context, path string, opts TailOptions, onEvent func(Event
 		select {
 		case <-ctx.Done():
 			// Final drain so anything written between the last tick and
-			// shutdown doesn't get dropped.
+			// shutdown doesn't get dropped, then flush the last in-progress
+			// coalesced message (no successor line will arrive to flush it).
 			_ = t.readAvailable()
+			t.flushCoalesced()
 			return nil
 		case <-ticker.C:
 			if err := t.poll(); err != nil {
@@ -129,6 +131,13 @@ type tailer struct {
 	prev    os.FileInfo
 	offset  int64
 	partial []byte
+	// coalescer merges the content-block lines of one streamed assistant
+	// message (all sharing a message.id) into a single Turn, so the live UI
+	// counts a multi-block turn once instead of once per block. Legacy
+	// single-line-per-message lines (no message.id) bypass it and emit
+	// immediately. The in-progress message flushes when a different message.id,
+	// a non-assistant line, or end-of-stream arrives.
+	coalescer parse.Coalescer
 	// live flips to true after openWhenReady's first readAvailable
 	// completes (or immediately, when FromBeginning=false). Subsequent
 	// reads emit Event.Live=true. Stays true across rotations — a file
@@ -289,10 +298,36 @@ func (t *tailer) consume(b []byte) {
 		case parse.LineMalformed:
 			t.onNotice(Notice{Kind: NoticeMalformed, Message: "skipped malformed line"})
 		case parse.LineAssistant:
-			t.onEvent(Event{Kind: kind, Turn: turn, Live: t.live})
+			if turn.MessageID == "" {
+				// Legacy single-line-per-message line: nothing to coalesce, so
+				// emit immediately (after flushing any modern message that was
+				// mid-stream) to preserve per-line behavior for old transcripts.
+				t.flushCoalesced()
+				t.emitTurn(turn)
+				continue
+			}
+			if done, ok := t.coalescer.Push(turn); ok {
+				t.emitTurn(done)
+			}
 		case parse.LineUserMessage:
+			// A user line ends any in-progress assistant message.
+			t.flushCoalesced()
 			t.onEvent(Event{Kind: kind, User: user, Live: t.live})
 		}
+	}
+}
+
+// emitTurn emits one coalesced assistant turn as an Event, stamping the
+// current live flag.
+func (t *tailer) emitTurn(turn parse.Turn) {
+	t.onEvent(Event{Kind: parse.LineAssistant, Turn: turn, Live: t.live})
+}
+
+// flushCoalesced emits the in-progress coalesced message, if any. Called when a
+// boundary (non-assistant line, end-of-stream) signals the message is complete.
+func (t *tailer) flushCoalesced() {
+	if done, ok := t.coalescer.Flush(); ok {
+		t.emitTurn(done)
 	}
 }
 

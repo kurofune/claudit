@@ -1,12 +1,53 @@
 package aggregate
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
+
+func TestAggregate_CountsCoalescedMessageOnce(t *testing.T) {
+	// A streamed message fans out into 5 JSONL lines (thinking/text/3 tools),
+	// each repeating the same cumulative usage. Once ParseFile coalesces them,
+	// the aggregator must count the message's tokens/cost/turn exactly once,
+	// not 5x. Opus 1M input = $5, so the dollar figure is exact and the old
+	// per-line bug (which billed $25) is unambiguous.
+	blocks := []string{
+		`{"type":"thinking","thinking":"a"}`,
+		`{"type":"text","text":"b"}`,
+		`{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}`,
+		`{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/x"}}`,
+		`{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"/y"}}`,
+	}
+	var b strings.Builder
+	for i, blk := range blocks {
+		fmt.Fprintf(&b, `{"type":"assistant","uuid":"a%d","timestamp":"2026-04-10T10:00:0%dZ","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1000000,"output_tokens":0},"content":[%s]}}`+"\n", i, i, blk)
+	}
+	res, err := parse.ParseFile(strings.NewReader(b.String()), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	for _, tn := range res.Turns {
+		agg.Add(tn)
+	}
+	tot := agg.Totals()
+	if tot.Turns != 1 {
+		t.Errorf("Turns = %d, want 1 (message counted once, not per-line)", tot.Turns)
+	}
+	if tot.InputTokens != 1_000_000 {
+		t.Errorf("InputTokens = %d, want 1_000_000 once (not 5_000_000)", tot.InputTokens)
+	}
+	if tot.CostUSD < 4.99 || tot.CostUSD > 5.01 {
+		t.Errorf("CostUSD = %v, want ~$5.00 once (not ~$25)", tot.CostUSD)
+	}
+}
 
 func turn(model string, in, out int, sidechain bool, cwd string, ts time.Time, tools ...parse.ToolUse) parse.Turn {
 	return parse.Turn{
