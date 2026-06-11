@@ -714,8 +714,13 @@ test('buildDrawerPayload builds the tool payload, inheriting the parent step', (
   assert.equal(p.model, 'claude-opus-4');
   assert.equal(p.cost_usd, 0.10);
   assert.equal(p.durationMs, 4200);
-  // Tool/step do not carry agent token rollups.
-  assert.equal(p.tokens.total, 0);
+  // A tool inherits its parent turn's tokens, exactly as it inherits
+  // cost/model/duration. Step-0 fixture: 80 + 40 + (8 + 2) + 120 = 250.
+  assert.equal(p.tokens.input, 80);
+  assert.equal(p.tokens.output, 40);
+  assert.equal(p.tokens.cacheWrite, 10);
+  assert.equal(p.tokens.cacheRead, 120);
+  assert.equal(p.tokens.total, 250);
 });
 
 test('buildDrawerPayload builds the step payload as "Turn N" with no tool I/O', () => {

@@ -845,6 +845,8 @@ function drawerHTML(p, retry = null) {
       drSection('Narration', p.text, true),
       drIOSection('Input', p.input, 'input', p),
       drIOSection('Output', p.output, 'output', p),
+      // A tool inherits its turn's tokens; drTokens self-collapses at 0.
+      drTokens(p.tokens),
     ].join('');
   } else if (p.type === 'step') {
     sections = [

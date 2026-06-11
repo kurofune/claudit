@@ -775,10 +775,11 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
 
   // Tokens roll up to the agent for an agent ref and to the turn for a step
   // ref (agentTokens just reads a `.tokens` tuple, so it works on a step too).
-  // A tool ref carries no per-call tokens — usage is a turn-level total.
+  // A tool ref inherits its parent turn's tokens — usage is a turn-level
+  // total, the same way cost/model/duration are inherited from the step.
   const tokens = type === 'agent'
     ? agentTokens(agent)
-    : type === 'step'
+    : step
       ? agentTokens(step)
       : { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
   const cost_usd = type === 'agent' ? (agent.cost_usd || 0) : (step ? (step.cost_usd || 0) : 0);
