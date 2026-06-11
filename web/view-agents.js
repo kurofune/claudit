@@ -41,6 +41,8 @@ import {
   conversationSessionList,
   clampConvSidebarWidth,
   clampTreeWidth,
+  orderTreeSessions,
+  treeFollowMode,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -197,6 +199,14 @@ const openAgentBodies = new Set();
 const TREE_PAGE = 40;
 let treeLimit = TREE_PAGE;
 
+// Tree "anchor + pause reorder" live-stability state. lastTreeScrollAt is the
+// wall-clock of the user's last scroll in the .itree container; frozenTreeOrder
+// is the session-id order to hold while they're active (null = follow the live
+// newest-first order). treeFollowMode/orderTreeSessions in agents-logic.js turn
+// these into a decision; see renderActive's tree branch.
+let lastTreeScrollAt = null;
+let frozenTreeOrder = null;
+
 export function reset() {
   painted = false;
   navPainted = false;
@@ -211,6 +221,8 @@ export function reset() {
   hitIndex = -1;
   openAgentBodies.clear();
   treeLimit = TREE_PAGE;
+  lastTreeScrollAt = null;
+  frozenTreeOrder = null;
 }
 
 // paintNav resolves the sidebar metric before the tab is first opened.
@@ -318,7 +330,7 @@ function renderActive(container, preserve = false, paintDrawer = true) {
 
   const memo = preserve ? captureState(host) : null;
   if (activeSub === 'feed') host.innerHTML = renderControl(sessions);
-  else if (activeSub === 'tree') host.innerHTML = renderInspector(sessions);
+  else if (activeSub === 'tree') host.innerHTML = renderInspector(treeSessionOrder(host, sessions));
   else if (activeSub === 'timeline') host.innerHTML = renderTimeline(sessions);
   else if (activeSub === 'conversation') host.innerHTML = renderConversation(sessions);
   if (memo) restoreState(host, memo);
@@ -328,6 +340,25 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   if (paintDrawer) renderDrawer(container);
   applyFilter(container);
   tickTimers(container);
+}
+
+// treeSessionOrder picks the session order for a tree (re-)render. While the
+// user is reading (scrolled away and recently active) it holds the order frozen
+// so a live tick can't reshuffle rows; at the top or once idle it follows the
+// live newest-first order, re-capturing that order as the new freeze baseline.
+// Reads the OUTGOING .itree (still in `host` before innerHTML is replaced) for
+// the current scroll position.
+function treeSessionOrder(host, sessions) {
+  const itree = host.querySelector('.itree');
+  const atTop = !itree || itree.scrollTop <= 0;
+  const mode = treeFollowMode(lastTreeScrollAt, Date.now(), atTop);
+  if (mode === 'follow') {
+    // Keep the freeze baseline current so the instant we flip to 'frozen' we
+    // hold the order the user last saw — not a stale one.
+    frozenTreeOrder = sessions.map(s => s.session_id || '');
+    return sessions;
+  }
+  return orderTreeSessions(sessions, frozenTreeOrder);
 }
 
 // ── shared selection ──────────────────────────────────────────────────────
@@ -385,7 +416,7 @@ function wireSelection(container) {
     // Scroll doesn't bubble, so catch it in the capture phase: when the user
     // drags a session's Gantt away from the right edge we "pin" it so a live
     // update won't yank them back to now; returning to the edge un-pins.
-    lens.addEventListener('scroll', e => onTimelineScroll(e), true);
+    lens.addEventListener('scroll', e => { onTimelineScroll(e); onTreeScroll(e); }, true);
     // The Tree lens's agent bodies are lazy — fill/clear them as nodes expand or
     // collapse. `toggle` doesn't bubble, so catch it in the capture phase.
     lens.addEventListener('toggle', onTreeToggle, true);
@@ -1576,6 +1607,16 @@ function onTimelineScroll(e) {
   if (jump) jump.hidden = !(overflow && running && !atEdge);
 }
 
+// onTreeScroll stamps the user's last scroll in the tree's .itree container,
+// the signal treeFollowMode uses to pause/resume live reordering. A scroll back
+// to the very top resets the stamp so we follow again immediately rather than
+// waiting out the idle window.
+function onTreeScroll(e) {
+  const itree = e.target.closest && e.target.closest('.itree');
+  if (!itree) return;
+  lastTreeScrollAt = itree.scrollTop <= 0 ? null : Date.now();
+}
+
 // jumpToNow re-pins a session to the live edge and snaps its Gantt there.
 function jumpToNow(container, sid) {
   const sc = container.querySelector(`.timeline-scroll[data-tlscroll="${sid}"]`);
@@ -1647,7 +1688,47 @@ function captureState(host) {
   // snapshot — openAgentBodies drives their open state and lazy body, so
   // renderInspector already reproduces them on a re-render.
   host.querySelectorAll('details.itree-sess[data-skey]').forEach(d => { m.nodes[`s:${d.dataset.skey}`] = d.open; });
+  // Tree anchor: when scrolled into the list, pin a specific row across the
+  // re-render so it stays put even if the session order shifts around it. The
+  // plain scrollTop restore alone would keep the SAME pixel offset over now-
+  // different content → a visible jump.
+  if (activeSub === 'tree') {
+    const itree = host.querySelector('.itree');
+    if (itree && itree.scrollTop > 0) m.treeAnchor = captureTreeAnchor(itree);
+  }
   return m;
+}
+
+// captureTreeAnchor picks the row to hold steady across a tree re-render and
+// records its id plus its current offset from the .itree scroll container's
+// top. Prefers the selected row when it's on screen (that's what the user is
+// reading); otherwise the topmost row that starts within the viewport. Returns
+// null when no stable-id row is visible. Anchor ids are namespaced 'ref:'
+// (a step/tool/agent row) or 'skey:' (a session group).
+function captureTreeAnchor(itree) {
+  const cTop = itree.getBoundingClientRect().top;
+  const cBottom = cTop + itree.clientHeight;
+  const offsetOf = el => el.getBoundingClientRect().top - cTop;
+  const idOf = el => el.dataset.ref ? `ref:${el.dataset.ref}` : (el.dataset.skey ? `skey:${el.dataset.skey}` : null);
+  const visible = el => { const t = el.getBoundingClientRect().top; return t < cBottom && el.getBoundingClientRect().bottom > cTop; };
+
+  const sel = itree.querySelector('[data-ref].is-selected, .is-selected[data-ref]');
+  if (sel && visible(sel)) {
+    const id = idOf(sel);
+    if (id) return { id, offset: offsetOf(sel) };
+  }
+  // Topmost row that begins at/below the container top — the first thing whose
+  // top edge the user can see. Session <details> are tall, so we lean on the
+  // row elements (data-ref) and fall back to the session summary's data-skey.
+  const rows = itree.querySelectorAll('.itree-agent-row[data-ref], .insp-step-head[data-ref], .tr[data-ref], details.itree-sess[data-skey]');
+  for (const el of rows) {
+    const top = el.getBoundingClientRect().top;
+    if (top >= cTop - 1 && top < cBottom) {
+      const id = idOf(el);
+      if (id) return { id, offset: top - cTop };
+    }
+  }
+  return null;
 }
 
 function restoreState(host, m) {
@@ -1664,6 +1745,28 @@ function restoreState(host, m) {
       const v = m.nodes[`s:${d.dataset.skey}`]; if (v != null) d.open = v;
     });
   }
+  // Re-pin the anchored row last: the scrollTop restore above lands us roughly
+  // right, then we nudge so the anchor sits at exactly its old offset — even if
+  // the order (and thus what's above it) changed. Falls through to the plain
+  // restore when the row vanished or none was captured.
+  if (m.treeAnchor && activeSub === 'tree') {
+    const itree = host.querySelector('.itree');
+    if (itree) applyTreeAnchor(itree, m.treeAnchor);
+  }
+}
+
+// applyTreeAnchor adjusts the .itree scrollTop so the anchored row sits at its
+// captured offset again. The delta is (current offset − saved offset): a no-op
+// when nothing above it moved, a correction when the order shifted.
+function applyTreeAnchor(itree, anchor) {
+  const sel = anchor.id.startsWith('ref:')
+    ? `[data-ref="${cssEsc(anchor.id.slice(4))}"]`
+    : `details.itree-sess[data-skey="${cssEsc(anchor.id.slice(5))}"]`;
+  const el = itree.querySelector(sel);
+  if (!el) return;
+  const cTop = itree.getBoundingClientRect().top;
+  const newOffset = el.getBoundingClientRect().top - cTop;
+  itree.scrollTop += newOffset - anchor.offset;
 }
 
 const scrollKey = el => el.className.split(' ').find(c => /feed|itree|timeline-lens|conv/.test(c)) || el.className;
