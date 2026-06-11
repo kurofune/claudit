@@ -35,9 +35,12 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
-  filterTrace, specActive, parseRefKey, detectRetries, spawnTargetIndex,
+  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
+  conversationSessionList,
+  clampConvSidebarWidth,
+  clampTreeWidth,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -84,6 +87,7 @@ const SHELL = `
       <div class="subview" data-subview="timeline"></div>
       <div class="subview" data-subview="conversation"></div>
     </div>
+    <div class="agents-resize" data-agents-resize role="separator" aria-orientation="vertical" aria-label="Resize the detail panel"></div>
     <aside class="agents-drawer" data-drawer aria-label="Selection detail"></aside>
   </div>
 
@@ -136,7 +140,62 @@ let filterBarBuilt = false;
 let hitIndex = -1;
 let currentHits = [];
 
+// Conversation lens: the session list on the left is drag-resizable. Width is
+// clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
+// reloads, live re-renders, and lens switches. Read once, lazily, on first use.
+const CONV_SIDEBAR_KEY = 'claudit.agents.convSidebarW';
+let convSidebarW = null;
+function convSidebarWidth() {
+  if (convSidebarW == null) {
+    let stored = null;
+    try { stored = localStorage.getItem(CONV_SIDEBAR_KEY); } catch { /* private mode */ }
+    convSidebarW = clampConvSidebarWidth(stored);
+  }
+  return convSidebarW;
+}
+function setConvSidebarWidth(px) {
+  convSidebarW = clampConvSidebarWidth(px);
+  try { localStorage.setItem(CONV_SIDEBAR_KEY, String(convSidebarW)); } catch { /* private mode */ }
+  return convSidebarW;
+}
+
+// The Tree lens is a fixed-width left RAIL (the detail drawer takes the rest of
+// the width); the handle between them resizes the rail — the "left panel" the
+// user widens/narrows. Clamped + persisted like the conv sidebar so it survives
+// reloads, lens switches, and live re-renders.
+const TREE_KEY = 'claudit.agents.treeW';
+let treeW = null;
+function treeWidth() {
+  if (treeW == null) {
+    let stored = null;
+    try { stored = localStorage.getItem(TREE_KEY); } catch { /* private mode */ }
+    treeW = clampTreeWidth(stored);
+  }
+  return treeW;
+}
+function setTreeWidth(px) {
+  treeW = clampTreeWidth(px);
+  try { localStorage.setItem(TREE_KEY, String(treeW)); } catch { /* private mode */ }
+  return treeW;
+}
+
 const colorSlot = i => ((i % 5) + 1);
+
+// Tree lens: which agent nodes have their step/tool log rendered. The graph can
+// hold thousands of agents (and hundreds of thousands of tools), and a collapsed
+// <details> still keeps its children in the DOM — so agent bodies are LAZY: only
+// expanded agents (this set) render their log; others are bare summaries. Filled
+// on expand (onTreeToggle / ensureAgentExpanded), cleared on collapse, and read
+// by renderInspector so a live re-render reproduces exactly the open bodies.
+const openAgentBodies = new Set();
+
+// Tree lens paging: the window can hold thousands of sessions, and a <details>
+// keeps its children in the DOM even when collapsed — rendering every session
+// eagerly (and re-rendering them on every live tick) is what made the tree
+// janky. So the tree renders only the newest TREE_PAGE sessions, with a "show
+// more" control revealing the next page. Reset on a fresh load / window change.
+const TREE_PAGE = 40;
+let treeLimit = TREE_PAGE;
 
 export function reset() {
   painted = false;
@@ -150,6 +209,8 @@ export function reset() {
   filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
   filterBarBuilt = false;
   hitIndex = -1;
+  openAgentBodies.clear();
+  treeLimit = TREE_PAGE;
 }
 
 // paintNav resolves the sidebar metric before the tab is first opened.
@@ -218,6 +279,28 @@ function activateSub(container, sub) {
     t.classList.toggle('is-active', t.dataset.subtab === sub));
   container.querySelectorAll('.subview').forEach(s =>
     s.classList.toggle('is-active', s.dataset.subview === sub));
+  // The Conversation lens carries its own left session list and hides the shared
+  // detail drawer (the thread IS the detail), so it gets the full body width.
+  const body = container.querySelector('.agents-body');
+  if (body) {
+    body.classList.toggle('is-no-drawer', sub === 'conversation');
+    body.classList.toggle('is-tree', sub === 'tree');
+  }
+  applyBodyLayout(container);
+}
+
+// applyBodyLayout sizes the lens|drawer split per lens. The TREE lens is a
+// fixed-width navigator RAIL (resizable via the handle) with the detail drawer
+// flexing to fill the rest — the wide pane. Feed/Timeline are the opposite: a
+// wide lens with the drawer as a fixed side panel (no handle). Conversation
+// drops the drawer entirely. Inline so the persisted rail width beats the
+// stylesheet default and the right template survives lens switches.
+function applyBodyLayout(container) {
+  const body = container.querySelector('.agents-body');
+  if (!body) return;
+  if (body.classList.contains('is-no-drawer')) body.style.gridTemplateColumns = 'minmax(0, 1fr)';
+  else if (body.classList.contains('is-tree')) body.style.gridTemplateColumns = `${treeWidth()}px 6px minmax(0, 1fr)`;
+  else body.style.gridTemplateColumns = 'minmax(0, 1fr) 360px';
 }
 
 // renderActive draws the active lens from lastGraph. preserve=true keeps
@@ -259,9 +342,9 @@ function ensureSelection(graph) {
 }
 
 // wireSelection installs the delegated click/keyboard handlers once per shell
-// build. Any element carrying data-ref in the lens selects it; the drawer's
-// copy button copies the full session id. Delegation survives lens re-renders
-// because it's bound to the stable .agents-lens / .agents-drawer wrappers.
+// build. Any element carrying data-ref in the lens selects it. Delegation
+// survives lens re-renders because it's bound to the stable .agents-lens /
+// .agents-drawer wrappers.
 function wireSelection(container) {
   const lens = container.querySelector('.agents-lens');
   if (lens) {
@@ -273,6 +356,12 @@ function wireSelection(container) {
       // The scrubber's "● live" toggle resumes live playhead-follow.
       const live = e.target.closest('[data-tllive]');
       if (live) { setLive(container); return; }
+      // The Conversation lens's left session list switches which conversation
+      // shows by re-pointing the shared selection at that session's main agent.
+      const sess = e.target.closest('[data-conv-sess]');
+      if (sess) { pickConversation(container, sess.dataset.convSess); return; }
+      // The Tree lens pages its sessions; "show more" reveals the next page.
+      if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
       if (el) select(container, el.dataset.ref);
     });
@@ -282,11 +371,11 @@ function wireSelection(container) {
       const range = e.target.closest('[data-tlrange]');
       if (range) onScrub(container, range);
     });
-    // The Conversation lens's session picker switches which conversation shows
-    // by re-pointing the shared selection at the chosen session's main agent.
-    lens.addEventListener('change', e => {
-      const pick = e.target.closest('[data-conv-pick]');
-      if (pick) pickConversation(container, pick.value);
+    // The Conversation lens's session list is drag-resizable: a mousedown on the
+    // handle starts a document-level drag that widens/narrows the sidebar live.
+    lens.addEventListener('mousedown', e => {
+      const handle = e.target.closest('[data-conv-resize]');
+      if (handle) { e.preventDefault(); startConvResize(container, e.clientX); }
     });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -297,6 +386,18 @@ function wireSelection(container) {
     // drags a session's Gantt away from the right edge we "pin" it so a live
     // update won't yank them back to now; returning to the edge un-pins.
     lens.addEventListener('scroll', e => onTimelineScroll(e), true);
+    // The Tree lens's agent bodies are lazy — fill/clear them as nodes expand or
+    // collapse. `toggle` doesn't bubble, so catch it in the capture phase.
+    lens.addEventListener('toggle', onTreeToggle, true);
+  }
+  // The lens|drawer split handle lives in .agents-body, outside the lens, so its
+  // drag is wired on the body wrapper (which is stable across lens re-renders).
+  const body = container.querySelector('.agents-body');
+  if (body) {
+    body.addEventListener('mousedown', e => {
+      const handle = e.target.closest('[data-agents-resize]');
+      if (handle) { e.preventDefault(); startTreeResize(container, e.clientX); }
+    });
   }
   const drawer = container.querySelector('.agents-drawer');
   if (drawer) {
@@ -318,29 +419,88 @@ function wireSelection(container) {
   }
 }
 
-// select sets the shared selection and repaints. The Tree lens's step log is
-// agent-dependent, so switching selection there re-renders the lens (cheap,
-// and preserves open rows via captureState); the other lenses just restyle
-// the highlight in place and repaint the drawer.
+// select sets the shared selection and repaints. Every lens — the unified Tree
+// included — restyles the highlight in place and repaints the drawer; no lens
+// re-renders on select. (The Tree once re-rendered because its log pane was
+// agent-dependent; now the whole tree is always present, so a full re-render
+// would only clobber the native <details> toggle the click is also performing.)
 function select(container, ref) {
   if (!ref) return;
   selectedRef = ref;
-  if (activeSub === 'tree') {
-    renderActive(container, true);
-  } else {
-    updateHighlights(container);
-    renderDrawer(container);
-  }
+  // On the Tree lens, make sure the selected row's agent is expanded (its body
+  // is lazy) before highlighting — otherwise a jump into a collapsed agent would
+  // light up a row that isn't in the DOM.
+  if (activeSub === 'tree') ensureAgentExpanded(container, ref);
+  updateHighlights(container);
+  renderDrawer(container);
 }
 
 // pickConversation switches the Conversation lens to another session by pointing
 // the shared selection at that session's main agent (agentIndex 0), then doing a
-// full re-render so the lens shows the new dialogue and the drawer follows. No
-// scroll preserve — a new conversation opens at its top, as you'd expect.
+// full re-render so the lens shows the new dialogue and the drawer follows. The
+// new thread opens at its top, but the left session LIST keeps its scroll so the
+// row you just clicked stays put instead of jumping to the top of the list.
 function pickConversation(container, sessionId) {
   if (!sessionId) return;
   selectedRef = refKey({ sessionId, agentIndex: 0 });
+  const sidebar = container.querySelector('.conv-sidebar');
+  const top = sidebar ? sidebar.scrollTop : 0;
   renderActive(container, false);
+  const next = container.querySelector('.conv-sidebar');
+  if (next) next.scrollTop = top;
+}
+
+// startConvResize drives the Conversation sidebar's drag-to-resize. It sizes the
+// live .conv-sidebar element directly during the drag (no re-render — keeps it
+// smooth) and persists the clamped width on release, so it survives reloads,
+// lens switches, and live re-renders (which read it back via convSidebarWidth).
+function startConvResize(container, startX) {
+  const sidebar = container.querySelector('.conv-sidebar');
+  if (!sidebar) return;
+  const startW = sidebar.getBoundingClientRect().width;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  const onMove = e => {
+    const w = clampConvSidebarWidth(startW + (e.clientX - startX));
+    convSidebarW = w;
+    sidebar.style.width = `${w}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    setConvSidebarWidth(convSidebarW);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// startTreeResize drives the tree-rail|drawer split. The handle sits to the
+// RIGHT of the rail, so dragging it right widens the rail (and shrinks the
+// detail pane), dragging left does the reverse. It re-sizes the live grid track
+// directly during the drag (smooth, no re-render) and persists on release.
+function startTreeResize(container, startX) {
+  const body = container.querySelector('.agents-body');
+  const lens = container.querySelector('.agents-lens');
+  if (!body || !lens) return;
+  const startW = lens.getBoundingClientRect().width;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  const onMove = e => {
+    const w = clampTreeWidth(startW + (e.clientX - startX));
+    treeW = w;
+    body.style.gridTemplateColumns = `${w}px 6px minmax(0, 1fr)`;
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    setTreeWidth(treeW);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 // updateHighlights toggles .is-selected on lens elements without a re-render:
@@ -448,9 +608,8 @@ function applyFilter(container) {
 // no matched descendant — which is what ‹ › steps through. Sorted in reading
 // order (session order, then agent/step/tool index).
 function matchHits(matchSet) {
-  const refs = [...matchSet];
   const order = new Map(((lastGraph && lastGraph.sessions) || []).map((s, i) => [(s && s.session_id) || '', i]));
-  const leaves = refs.filter(r => !refs.some(o => o !== r && (o.startsWith(r + '.') || o.startsWith(r + ':'))));
+  const leaves = deepestRefs(matchSet);
   const rank = r => {
     const p = parseRefKey(r) || {};
     return [order.has(p.sessionId) ? order.get(p.sessionId) : 1e9, p.agentIndex ?? 1e9, p.stepIndex ?? -1, p.toolIndex ?? -1];
@@ -691,10 +850,7 @@ function drawerHTML(p, retry = null) {
     ${retryRow}
     ${spawnRow}
     <div class="dr-project" title="${escHtml(p.cwd)}">${labelIcon('overview')}<span class="dr-proj-name">${escHtml(p.project || '—')}</span></div>
-    <button type="button" class="dr-sid" data-copy="${escHtml(p.sessionId)}" title="Copy session id&#10;${escHtml(p.sessionId)}">
-      <span class="dr-sid-id">${escHtml(p.sessionId || '—')}</span>
-      <span class="dr-sid-copy">copy</span>
-    </button>
+    <div class="dr-sid" title="${escHtml(p.sessionId)}"><span class="dr-sid-id">${escHtml(p.sessionId || '—')}</span></div>
     <div class="dr-agentline"><span class="dr-agent">${escHtml(p.agentLabel)}</span>${p.detail ? ` <span class="dr-detail">${escHtml(p.detail)}</span>` : ''}</div>
     ${desc}
     ${metrics ? `<div class="dr-metrics">${metrics}</div>` : ''}
@@ -879,73 +1035,132 @@ function feMetric(cost, ms) {
 
 // ── Tree lens (formerly Inspector) ──────────────────────────────────────────
 
+// The Tree lens is ONE compact, collapsible navigator rail (no more split
+// list|log): each session is an expandable group, each agent an expandable node
+// whose summary is its headline row and whose body is a tight step→tool log.
+// Clicking any summary, turn, or tool sets the shared selection and fills the
+// wide detail drawer on the right (where input/output/reasoning live); the drag
+// handle between the rail and the drawer resizes the split. Native <details>
+// carries the expand/collapse state, snapshotted across live re-renders by
+// captureState/restoreState (session groups keyed by data-skey; agent bodies by
+// openAgentBodies).
 function renderInspector(sessions) {
   const sel = resolveRef(lastGraph, selectedRef);
-  const tree = sessions.map((s, si) => inspectorSessionHTML(s, si, sel)).join('');
-  const detail = sel
-    ? inspectorLogHTML(sel.session, sel.agent, sel.agentIndex)
-    : `<div class="ac-idle">Pick an agent on the left.</div>`;
-  return `<div class="insp">
-    <div class="insp-tree" role="tablist" aria-label="Agents">${tree}</div>
-    <div class="insp-log">${detail}</div>
-  </div>`;
+  if (!sessions.length) {
+    return `<div class="itree"><div class="ac-idle">No agents in this window.</div></div>`;
+  }
+  // Render only the newest `treeLimit` sessions, but always far enough to include
+  // the selected one (a ‹ › filter step can target a session past the cap).
+  const selIdx = sel ? sessions.findIndex(s => (s.session_id || '') === sel.session.session_id) : -1;
+  const shown = Math.min(sessions.length, Math.max(treeLimit, selIdx + 1));
+  const tree = sessions.slice(0, shown).map((s, si) => itreeSessionHTML(s, si, sel)).join('');
+  const more = sessions.length > shown
+    ? `<button type="button" class="itree-more" data-tree-more>Show ${Math.min(TREE_PAGE, sessions.length - shown)} more · ${fmtNum(sessions.length - shown)} older ${sessions.length - shown === 1 ? 'session' : 'sessions'} hidden</button>`
+    : '';
+  return `<div class="itree" role="tree" aria-label="Agents">${tree}${more}</div>`;
 }
 
-function inspectorSessionHTML(session, si, sel) {
+function itreeSessionHTML(session, si, sel) {
   const sid = session.session_id || '';
   const c = colorSlot(si);
   const agents = flattenSession(session);
-  const rows = agents.map((a, i) => {
-    const ref = refKey({ sessionId: sid, agentIndex: i });
-    const running = a && a.status === 'running';
-    const isSel = (sel && sel.session.session_id === sid && sel.agentIndex === i) ? ' is-selected' : '';
-    const steps = (a.steps || []).length;
-    const errs = (a && a.error_count) || 0;
-    const errBadge = errs > 0
-      ? `<span class="insp-err" title="${errs} ${errs === 1 ? 'error' : 'errors'}">✗${fmtNum(errs)}</span>` : '';
-    return `<button type="button" class="insp-agent${isSel}" data-ref="${escHtml(ref)}" data-c="${colorSlot(i)}">
-      <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
-      <span class="insp-name">${escHtml(agentLabel(a))}</span>
-      <span class="insp-sub">${fmtNum(steps)} · ${elapsedSpan(a)}</span>
-      ${errBadge}
-    </button>`;
-  }).join('');
-  return `<div class="insp-sess">
-    <div class="insp-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
+  const rows = agents.map((a, i) => itreeAgentHTML(session, a, i, sel)).join('');
+  return `<details class="itree-sess" data-skey="${escHtml(sid)}" open>
+    <summary class="itree-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
+      <span class="itree-caret" aria-hidden="true">▸</span>
       <span class="insp-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
       <span class="insp-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
-    </div>
-    ${rows}
-  </div>`;
+    </summary>
+    <div class="itree-sess-body">${rows}</div>
+  </details>`;
 }
 
-function inspectorLogHTML(session, agent, agentIndex) {
+function itreeAgentHTML(session, agent, agentIndex, sel) {
   const sid = session.session_id || '';
   const running = agent.status === 'running';
   const tokens = agentTokens(agent).total;
   const agentRef = refKey({ sessionId: sid, agentIndex });
+  // The agent (or any step/tool inside it) being selected lights the row and
+  // opens the node — so a spawn jump or the default selection lands expanded.
+  const holdsSel = !!(sel && sel.session.session_id === sid && sel.agentIndex === agentIndex);
+  if (holdsSel) openAgentBodies.add(agentRef);
+  // Lazy body: only render the log for an expanded agent (selected or toggled
+  // open earlier). Collapsed agents ship a bare placeholder, filled on expand.
+  const open = holdsSel || openAgentBodies.has(agentRef);
+  // Tight summary for the rail: name, an error flag if any, then duration + cost
+  // pinned right. Step/token totals (and everything else) ride in the drawer.
+  return `<details class="itree-agent" data-akey="${escHtml(agentRef)}"${open ? ' open' : ''} title="${escHtml(agentLabel(agent))}${tokens ? ` · ${fmtCompact(tokens)} tok` : ''}">
+    <summary class="itree-agent-row${holdsSel ? ' is-selected' : ''}" data-ref="${escHtml(agentRef)}">
+      <span class="itree-caret" aria-hidden="true">▸</span>
+      <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
+      <span class="insp-d-name">${escHtml(agentLabel(agent))}</span>
+      ${agent.error_count ? `<span class="insp-d-stat insp-d-err" title="tool calls that errored">✗${fmtNum(agent.error_count)}</span>` : ''}
+      <span class="insp-d-spacer"></span>
+      <span class="insp-d-stat">${elapsedSpan(agent)}</span>
+      <span class="insp-d-stat insp-d-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
+    </summary>
+    <div class="itree-agent-body"${open ? ' data-rendered="1"' : ''}>${open ? itreeAgentBodyHTML(session, agent, agentIndex) : ''}</div>
+  </details>`;
+}
+
+// itreeAgentBodyHTML is the inner of an agent node's lazy body: its description
+// (sub-agents only) plus the step→tool log. Rendered inline for agents open at
+// render time, and injected by fillAgentBody when one is expanded interactively.
+function itreeAgentBodyHTML(session, agent, agentIndex) {
+  const sid = session.session_id || '';
   const desc = agent.kind !== 'main' && agent.description
     ? `<p class="insp-d-desc">${escHtml(agent.description)}</p>` : '';
   const steps = (agent.steps || []);
   const stepHTML = steps.length === 0
     ? `<div class="ac-idle">No assistant turns recorded.</div>`
     : steps.map((st, i) => inspectorStepHTML(st, i, steps.length, sid, agentIndex, session)).join('');
-  return `<div class="insp-d">
-    <div class="insp-d-head${agentRef === selectedRef ? ' is-selected' : ''}" data-ref="${escHtml(agentRef)}" tabindex="0" role="button">
-      <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
-      <span class="insp-d-name">${escHtml(agentLabel(agent))}</span>
-      <span class="ag-pill ${running ? 'ag-running' : 'ag-done'}">${running ? 'running' : 'done'}</span>
-      <span class="insp-d-spacer"></span>
-      <span class="insp-d-stat">${fmtNum(steps.length)} steps</span>
-      ${agent.error_count ? `<span class="insp-d-stat insp-d-err" title="tool calls that errored">✗ ${fmtNum(agent.error_count)} ${agent.error_count === 1 ? 'error' : 'errors'}</span>` : ''}
-      ${tokens ? `<span class="insp-d-stat">${fmtCompact(tokens)} tok</span>` : ''}
-      <span class="insp-d-stat">${elapsedSpan(agent)}</span>
-      <span class="insp-d-stat insp-d-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
-    </div>
-    ${desc}
-    <div class="insp-steps">${stepHTML}</div>
-  </div>`;
+  return `${desc}<div class="insp-steps">${stepHTML}</div>`;
 }
+
+// fillAgentBody syncs one agent node's lazy body to its open state: an expanded
+// node gets its log rendered (once), a collapsed one is emptied to free the DOM.
+// Shared by the toggle handler and ensureAgentExpanded.
+function fillAgentBody(node) {
+  const akey = node.dataset.akey;
+  const body = node.querySelector('.itree-agent-body');
+  if (!body) return;
+  if (node.open) {
+    openAgentBodies.add(akey);
+    if (!body.dataset.rendered) {
+      const r = resolveRef(lastGraph, akey);
+      if (r) { body.innerHTML = itreeAgentBodyHTML(r.session, r.agent, r.agentIndex); body.dataset.rendered = '1'; }
+    }
+  } else {
+    openAgentBodies.delete(akey);
+    body.innerHTML = '';
+    delete body.dataset.rendered;
+  }
+}
+
+// onTreeToggle catches a user expanding/collapsing an agent node. The native
+// `toggle` event doesn't bubble, so this is wired in the capture phase.
+function onTreeToggle(e) {
+  const node = e.target;
+  if (node instanceof Element && node.classList && node.classList.contains('itree-agent')) {
+    fillAgentBody(node);
+  }
+}
+
+// ensureAgentExpanded opens the node holding `ref` and renders its body, so a
+// selection that lands inside a collapsed agent (a spawn jump, a ‹ › filter
+// step) reveals the row instead of highlighting a node that isn't there.
+function ensureAgentExpanded(container, ref) {
+  const p = parseRefKey(ref);
+  if (!p) return;
+  const akey = refKey({ sessionId: p.sessionId, agentIndex: p.agentIndex });
+  const node = container.querySelector(`details.itree-agent[data-akey="${cssEsc(akey)}"]`);
+  if (!node) return;
+  node.open = true;
+  fillAgentBody(node);
+}
+
+// cssEsc escapes a value for use inside a querySelector attribute match.
+const cssEsc = s => (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
 
 function inspectorStepHTML(step, i, total, sid, agentIndex, session) {
   const time = clockTime(parseTime(step.timestamp));
@@ -968,6 +1183,9 @@ function inspectorStepHTML(step, i, total, sid, agentIndex, session) {
   </div>`;
 }
 
+// In the compact tree a tool is ALWAYS one tight, clickable row (kind · name ·
+// detail · status · cost); its full input/output lives in the shared drawer,
+// which the click opens — so the rail stays a navigator, not a content dump.
 function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex, session) {
   const name = tool.name || '';
   const ref = refKey({ sessionId: sid, agentIndex, stepIndex, toolIndex });
@@ -981,17 +1199,7 @@ function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex, session) {
   const costBadge = tool.spawned
     ? `<span class="tr-spawn-cost" title="cost of the sub-agent this call launched">+${escHtml(fmtMoney(tool.spawned.cost_usd || 0))}</span>` : '';
   const spawnRow = tool.spawned ? spawnRowHTML(tool, session) : '';
-  const hasBody = (tool.input && tool.input !== '') || (tool.output && tool.output !== '');
-  const tkey = `${name}:${tool.detail || ''}:${(tool.input || '').slice(0, 24)}`;
-  if (!hasBody) {
-    return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</span></div>${spawnRow}`;
-  }
-  const input = tool.input ? `<div class="tr-io"><span class="tr-io-k">in</span><pre>${escHtml(tool.input)}</pre></div>` : '';
-  const output = tool.output ? `<div class="tr-io tr-io-out${tool.status === 'error' ? ' is-err' : ''}"><span class="tr-io-k">out</span><pre>${escHtml(tool.output)}</pre></div>` : '';
-  return `<details class="tr tr-exp${sel}" data-tkey="${escHtml(tkey)}" data-ref="${escHtml(ref)}">
-    <summary class="tr-row"><span class="tr-caret">▸</span>${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</summary>
-    <div class="tr-body">${input}${output}</div>
-  </details>${spawnRow}`;
+  return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</span></div>${spawnRow}`;
 }
 
 // spawnRowHTML renders the nested sub-agent affordance under a spawning Agent
@@ -1047,44 +1255,50 @@ function spawnRowHTML(tool, session) {
 // tick). Selecting any turn/agent in another lens, then switching here, scopes
 // the thread to that session; the sticky header names which one.
 function renderConversation(sessions) {
-  const withMain = sessions.filter(s => s && s.main);
-  if (withMain.length === 0) {
+  const list = conversationSessionList(sessions);
+  if (list.length === 0) {
     return `<div class="ac-idle">No conversation in this window.</div>`;
   }
   const sel = resolveRef(lastGraph, selectedRef);
-  const session = (sel && sel.session && sel.session.main) ? sel.session : withMain[0];
-  const si = sessions.findIndex(s => s && s.session_id === session.session_id);
-  return `<div class="conv">${conversationSessionHTML(session, si < 0 ? 0 : si, withMain)}</div>`;
+  const session = (sel && sel.session && sel.session.main) ? sel.session : sessions[list[0].index];
+  const curSid = session.session_id || '';
+  const w = convSidebarWidth();
+  return `<div class="conv-layout">
+    <div class="conv-sidebar" style="width:${w}px" role="tablist" aria-label="Conversations">${conversationSidebarHTML(list, curSid)}</div>
+    <div class="conv-resize" data-conv-resize role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
+    <div class="conv">${conversationSessionHTML(session)}</div>
+  </div>`;
 }
 
-// conversationSessionHTML renders the chosen session's header + dialogue. When
-// more than one session is in the window the header is a <select> picker (the
-// in-lens way to switch which conversation you're reading — selection elsewhere
-// still scopes it too); with a single session it's just the project + short id.
-function conversationSessionHTML(session, si, candidates) {
+// conversationSidebarHTML renders the left session list: one selectable row per
+// session in the window — the in-lens way to switch which conversation you're
+// reading (selecting a turn in another lens scopes it here too). The active
+// session is highlighted; each row carries data-conv-sess so a click re-points
+// the shared selection at that session's main agent and re-renders the thread.
+function conversationSidebarHTML(list, curSid) {
+  return list.map(e => {
+    const sel = e.sessionId === curSid ? ' is-selected' : '';
+    const c = colorSlot(e.index);
+    const turns = `${fmtNum(e.replyCount)} ${e.replyCount === 1 ? 'reply' : 'replies'}`;
+    return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}" title="${escHtml(e.cwd || '')}">
+      <span class="conv-sess-item-proj">${escHtml(baseName(e.cwd) || '—')}</span>
+      <span class="conv-sess-item-meta">
+        <span class="conv-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
+        <span class="conv-sess-item-turns">${turns}</span>
+      </span>
+    </button>`;
+  }).join('');
+}
+
+// conversationSessionHTML renders the chosen session's dialogue. No header —
+// which session you're reading is named (and switched) in the left sidebar.
+function conversationSessionHTML(session) {
   const sid = session.session_id || '';
-  const c = colorSlot(si);
   const segs = conversationSegments(session);
   const body = segs.length === 0
     ? `<div class="ac-idle">No assistant turns recorded.</div>`
     : segs.map(seg => conversationSegmentHTML(seg, sid, session)).join('');
-  const head = (candidates && candidates.length > 1)
-    ? `<select class="conv-sess-pick" data-conv-pick aria-label="Choose which conversation to read">
-        ${candidates.map(cd => {
-          const cid = cd.session_id || '';
-          const label = `${baseName(cd.cwd) || '—'} · ${shortId(cid)}`;
-          return `<option value="${escHtml(cid)}"${cid === sid ? ' selected' : ''}>${escHtml(label)}</option>`;
-        }).join('')}
-      </select>
-      <span class="conv-sess-count">${candidates.length} sessions</span>`
-    : `<span class="conv-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
-       <span class="conv-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>`;
-  return `<section class="conv-sess">
-    <div class="conv-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
-      ${head}
-    </div>
-    ${body}
-  </section>`;
+  return `<section class="conv-sess">${body}</section>`;
 }
 
 // conversationSegmentHTML renders one prompt + the assistant's spoken replies.
@@ -1374,8 +1588,8 @@ function renderScrub(container) {
 // ── preserve scroll / open-rows across a live re-render ────────────────────
 
 function captureState(host) {
-  const m = { scrolls: {}, openTools: [], tlScroll: {} };
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens, .conv').forEach(el => {
+  const m = { scrolls: {}, tlScroll: {}, nodes: {} };
+  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar').forEach(el => {
     m.scrolls[scrollKey(el)] = el.scrollTop;
   });
   // Per-session horizontal Gantt offset, so a live update that rebuilds the SVG
@@ -1384,12 +1598,16 @@ function captureState(host) {
   host.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
     m.tlScroll[sc.dataset.tlscroll] = sc.scrollLeft;
   });
-  host.querySelectorAll('details.tr[open]').forEach(d => m.openTools.push(d.dataset.tkey));
+  // Tree lens session groups default open and the user can collapse them, so
+  // snapshot EXACT open-state (must also be re-closed). Agent nodes need no
+  // snapshot — openAgentBodies drives their open state and lazy body, so
+  // renderInspector already reproduces them on a re-render.
+  host.querySelectorAll('details.itree-sess[data-skey]').forEach(d => { m.nodes[`s:${d.dataset.skey}`] = d.open; });
   return m;
 }
 
 function restoreState(host, m) {
-  host.querySelectorAll('.agent-feed, .insp-tree, .insp-log, .timeline-lens, .conv').forEach(el => {
+  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar').forEach(el => {
     const v = m.scrolls[scrollKey(el)];
     if (v != null) el.scrollTop = v;
   });
@@ -1397,13 +1615,14 @@ function restoreState(host, m) {
     const v = m.tlScroll[sc.dataset.tlscroll];
     if (v != null) sc.scrollLeft = v;
   });
-  if (m.openTools.length) {
-    const want = new Set(m.openTools);
-    host.querySelectorAll('details.tr').forEach(d => { if (want.has(d.dataset.tkey)) d.open = true; });
+  if (m.nodes) {
+    host.querySelectorAll('details.itree-sess[data-skey]').forEach(d => {
+      const v = m.nodes[`s:${d.dataset.skey}`]; if (v != null) d.open = v;
+    });
   }
 }
 
-const scrollKey = el => el.className.split(' ').find(c => /feed|tree|log|timeline-lens|conv/.test(c)) || el.className;
+const scrollKey = el => el.className.split(' ').find(c => /feed|itree|timeline-lens|conv/.test(c)) || el.className;
 
 // ── nav metric + small formatters ────────────────────────────────────────
 

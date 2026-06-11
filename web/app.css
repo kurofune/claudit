@@ -2060,6 +2060,22 @@
     border: 1px solid var(--border); border-radius: var(--r-lg);
     background: var(--surface-2); padding: var(--s-3);
   }
+  /* Drag handle between the tree rail and the detail drawer (data-agents-resize):
+     dragging it widens/narrows the rail. Only the Tree lens uses the resizable
+     rail layout, so the handle shows there alone — on Feed/Timeline it is hidden
+     and the 2-track grid skips it. Sticky so it tracks the (sticky) drawer. */
+  .agents-resize { display: none; }
+  .agents-body.is-tree .agents-resize {
+    display: block; align-self: stretch; position: sticky; top: var(--s-3);
+    height: 86vh; width: 6px; border-radius: var(--r-pill, 999px);
+    cursor: col-resize; background: var(--border);
+    transition: background 0.12s ease;
+  }
+  .agents-body.is-tree .agents-resize:hover { background: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+  /* The Conversation lens carries its own left session list and has no use for
+     the shared detail drawer, so it reclaims the full body width. */
+  .agents-body.is-no-drawer { grid-template-columns: minmax(0, 1fr); }
+  .agents-body.is-no-drawer .agents-drawer { display: none; }
 
   /* Kind → color/icon lens: one colored monogram per tool/agent/step kind,
      identical in every lens and the drawer. --kc carries the family hue. */
@@ -2134,15 +2150,10 @@
   .dr-project .icon { width: 16px; height: 16px; color: var(--accent); flex: none; }
   .dr-proj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dr-sid {
-    display: flex; align-items: center; gap: var(--s-2); width: 100%;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-    padding: 4px 8px; cursor: pointer; font: inherit; color: var(--ink-2); text-align: left;
+    display: flex; align-items: center; width: 100%;
+    padding: 2px 0; color: var(--ink-2); user-select: text;
   }
-  .dr-sid:hover { border-color: var(--ink-2); }
   .dr-sid-id { font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dr-sid-copy { margin-left: auto; font-size: var(--t-1); color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
-  .dr-sid.is-copied { border-color: var(--accent-2); }
-  .dr-sid.is-copied .dr-sid-copy { color: var(--accent-2); }
   .dr-agentline { font-size: var(--t-2); color: var(--ink); }
   .dr-agent { font-weight: 600; }
   .dr-detail { font-family: var(--font-mono); color: var(--ink-2); }
@@ -2293,55 +2304,70 @@
   .fe-verb { color: var(--ink-2); text-transform: uppercase; font-size: var(--t-1); letter-spacing: 0.04em; }
 
   /* ── Inspector ── */
-  .insp {
-    display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-    /* Bound the single row so the columns scroll within the panel instead of
-       growing to content height (grid items default to min-height:auto, which
-       defeats the columns' overflow-y:auto and the container just clips). */
-    grid-template-rows: minmax(0, 1fr);
-    height: 72vh; min-height: 360px;
-    border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden;
+  /* Tree lens: ONE scrollable, collapsible tree (session ▸ agent ▸ turn ▸ tool)
+     sitting beside the shared drawer; native <details> drive expand/collapse and
+     the drag handle between tree and drawer (.agents-resize) sizes the split. */
+  .itree {
+    height: 72vh; min-height: 360px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+    background: var(--surface-2);
   }
-  .insp-tree { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--surface-2); }
-  .insp-sess { border-bottom: 1px solid var(--border); padding: var(--s-2); }
-  .insp-sess-head {
-    display: flex; align-items: baseline; gap: var(--s-2);
-    font-size: var(--t-2); color: var(--ink);
-    border-left: 3px solid var(--cc, var(--border)); padding-left: 6px; margin-bottom: var(--s-1);
+  .itree-more {
+    display: block; width: 100%; padding: var(--s-2); border: none;
+    border-top: 1px solid var(--border); background: var(--surface-2);
+    color: var(--accent); font: inherit; font-size: var(--t-1); cursor: pointer;
+    text-align: center;
   }
+  .itree-more:hover { background: var(--surface); }
+  /* The tree's <details> nodes must shed the global card chrome (the generic
+     `details` rule gives every <details> a border, background, radius, margin,
+     padding, and shadow) so they read as tight tree rows, not stacked cards. */
+  .itree-sess, .itree-agent {
+    background: none; border: none; border-radius: 0; margin: 0; padding: 0; box-shadow: none;
+  }
+  .itree-sess { border-bottom: 1px solid var(--border); }
+  .itree-sess > summary, .itree-agent > summary { list-style: none; cursor: pointer; }
+  .itree-sess > summary::-webkit-details-marker,
+  .itree-agent > summary::-webkit-details-marker { display: none; }
+  .itree-sess-head {
+    display: flex; align-items: center; gap: var(--s-2);
+    position: sticky; top: 0; z-index: 1;
+    padding: var(--s-2); font-size: var(--t-2); color: var(--ink);
+    background: var(--surface-2); border-left: 3px solid var(--cc, var(--border));
+  }
+  .itree-sess-head:hover { background: var(--surface); }
+  .itree-sess-body { padding: 2px var(--s-2) var(--s-2); }
+  /* Caret rotates as the node opens; shared by session and agent rows. */
+  .itree-caret {
+    flex: none; color: var(--ink-2); font-size: var(--t-1);
+    display: inline-block; transition: transform 0.12s ease;
+  }
+  .itree-sess[open] > summary .itree-caret,
+  .itree-agent[open] > summary .itree-caret { transform: rotate(90deg); }
+  .itree-agent-row {
+    display: flex; align-items: center; gap: var(--s-2); flex-wrap: nowrap;
+    padding: 4px 6px; border-radius: var(--r-sm); color: var(--ink);
+  }
+  .itree-agent-row:hover { background: var(--surface); }
+  .itree-agent-row.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  /* The agent's turn/tool log, indented under its summary with a guide rule so
+     the session → agent → turn → tool hierarchy reads as one tree. */
+  .itree-agent-body { margin: 1px 0 4px 8px; padding-left: 10px; border-left: 1px solid var(--border); }
   .insp-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .insp-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
-  .insp-agent {
-    display: flex; align-items: center; gap: var(--s-2); width: 100%;
-    background: none; border: none; text-align: left; cursor: pointer;
-    padding: 5px 6px; border-radius: var(--r-sm); color: var(--ink); font: inherit;
-  }
-  .insp-agent:hover { background: var(--surface); }
-  .insp-agent.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
   .insp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .insp-dot.is-done { background: var(--ink-2); opacity: 0.5; }
   .insp-dot.is-running { background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
-  .insp-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .insp-sub { margin-left: auto; font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-  /* Error count badge on an agent card / detail head — danger hue, same as the
-     timeline pip and the ✗ error pill. margin-left auto-yields to insp-sub. */
-  .insp-err {
-    flex: none; font-size: var(--t-1); font-weight: 700; font-variant-numeric: tabular-nums;
-    color: var(--danger, #e5484d); padding: 0 6px; border-radius: var(--r-pill, 999px);
-    background: color-mix(in oklch, var(--danger, #e5484d) 12%, transparent);
-  }
   .insp-d-err { color: var(--danger, #e5484d); font-weight: 600; }
-  .insp-log { min-height: 0; overflow-y: auto; padding: var(--s-3); }
-  .insp-d-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; cursor: pointer; border-radius: var(--r-sm); padding: 2px 4px; }
-  .insp-d-head:hover { background: var(--surface-2); }
-  .insp-d-head.is-selected { box-shadow: inset 2px 0 0 var(--accent); background: var(--accent-soft); }
-  .insp-d-name { font-size: var(--t-4); font-weight: 700; color: var(--ink); }
+  .insp-d-name { font-size: var(--t-2); font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .insp-d-spacer { flex: 1; }
-  .insp-d-stat { font-size: var(--t-2); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .insp-d-stat { flex: none; font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .insp-d-cost { color: var(--ink); font-weight: 600; }
-  .insp-d-desc { color: var(--ink-2); font-size: var(--t-2); margin: var(--s-2) 0; }
-  .insp-steps { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); }
-  .insp-step { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); padding: var(--s-2); }
+  .insp-d-desc { color: var(--ink-2); font-size: var(--t-1); margin: 2px 0 var(--s-1); }
+  /* Compact, card-less rows: a turn is one tight line, its tools nest a notch
+     deeper. All heavy content (input/output/reasoning) lives in the drawer. */
+  .insp-steps { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
+  .insp-step { display: flex; flex-direction: column; }
   .insp-step-head {
     display: flex; align-items: center; gap: var(--s-2);
     font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums;
@@ -2349,36 +2375,21 @@
   }
   .insp-step-head:hover { background: var(--surface); }
   .insp-step-head.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-  .insp-step-n { font-weight: 600; color: var(--ink); }
+  .insp-step-n { font-weight: 600; color: var(--ink); flex: none; }
   .insp-step-model { font-family: var(--font-mono); }
   .insp-step-reason { color: var(--accent-2); font-weight: 600; }
-  .insp-step-cost { margin-left: auto; color: var(--ink); }
-  .insp-tools { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s-2); }
+  .insp-step-cost { margin-left: auto; color: var(--ink); flex: none; }
+  .insp-tools { display: flex; flex-direction: column; gap: 1px; margin: 0 0 2px 12px; padding-left: 8px; border-left: 1px solid var(--border); }
   .tr { font-size: var(--t-2); cursor: pointer; border-radius: var(--r-sm); }
-  .tr-row { display: flex; align-items: center; gap: var(--s-2); padding: 3px 4px; }
-  .tr:not(.tr-exp):hover .tr-row { background: var(--surface); border-radius: var(--r-sm); }
-  .tr.is-selected > .tr-row,
-  .tr.is-selected.tr-exp > summary { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); border-radius: var(--r-sm); }
+  .tr-row { display: flex; align-items: center; gap: var(--s-2); padding: 2px 4px; }
+  .tr:hover .tr-row { background: var(--surface); border-radius: var(--r-sm); }
+  .tr.is-selected > .tr-row { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); border-radius: var(--r-sm); }
   .tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .tr-exp > summary { cursor: pointer; list-style: none; border-radius: var(--r-sm); }
-  .tr-exp > summary::-webkit-details-marker { display: none; }
-  .tr-exp > summary:hover { background: var(--surface); }
-  .tr-caret { color: var(--ink-2); transition: transform 0.12s ease; display: inline-block; }
-  .tr-exp[open] > summary .tr-caret { transform: rotate(90deg); }
-  .tr-name { font-family: var(--font-mono); font-weight: 600; color: var(--ink); }
-  .tr-detail { font-family: var(--font-mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tr-status { margin-left: auto; font-weight: 700; }
+  .tr-name { font-family: var(--font-mono); font-weight: 600; color: var(--ink); flex: none; }
+  .tr-detail { font-family: var(--font-mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .tr-status { margin-left: auto; font-weight: 700; flex: none; }
   .tr-ok { color: var(--ok, var(--accent-2)); }
   .tr-err { color: var(--danger, #e5484d); }
-  .tr-body { padding: var(--s-1) 0 var(--s-2) var(--s-4); display: flex; flex-direction: column; gap: var(--s-1); }
-  .tr-io { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); gap: var(--s-2); align-items: start; }
-  .tr-io-k { font-size: var(--t-1); color: var(--ink-2); text-transform: uppercase; padding-top: 4px; }
-  .tr-io pre {
-    margin: 0; padding: var(--s-2); background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-sm); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
-    font-family: var(--font-mono); font-size: var(--t-1); color: var(--ink); max-height: 220px; overflow-y: auto;
-  }
-  .tr-io-out.is-err pre { border-color: color-mix(in oklch, var(--danger, #e5484d) 40%, var(--border)); }
 
   /* Spawn rollup: an Agent call's sub-agent cost shown inline (+$X), with the
      sub-agent nested directly beneath as a clickable jump — the Tree lens's
@@ -2409,28 +2420,43 @@
      assistant turn cards (the SAME .insp-step cards the Tree lens renders, so
      their refKeys/selection/drawer all carry over). Centered single column so
      it reads top-to-bottom like a transcript. */
-  .conv { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-5); padding: var(--s-2) 0; }
+  /* Two-pane layout: a resizable session list on the left, the chosen session's
+     thread on the right. The shared detail drawer is hidden on this lens (see
+     .agents-body.is-no-drawer) so the thread gets the full body width. */
+  .conv-layout {
+    display: flex; height: 84vh; min-height: 360px;
+    border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden;
+  }
+  .conv-sidebar {
+    flex: none; min-width: 0; overflow-y: auto;
+    border-right: 1px solid var(--border); background: var(--surface-2);
+    padding: var(--s-2);
+  }
+  /* The drag handle between the list and the thread (data-conv-resize). */
+  .conv-resize {
+    flex: none; width: 6px; cursor: col-resize; background: var(--border);
+    transition: background 0.12s ease;
+  }
+  .conv-resize:hover { background: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+  /* One session row in the list: project on top, short id + reply count below;
+     a colored left rule (--cc from data-c) ties it to the session's color slot. */
+  .conv-sess-item {
+    display: flex; flex-direction: column; gap: 2px; width: 100%;
+    background: none; border: none; text-align: left; cursor: pointer; font: inherit;
+    color: var(--ink); padding: var(--s-2); border-radius: var(--r-sm);
+    border-left: 3px solid transparent; margin-bottom: 2px;
+  }
+  .conv-sess-item:hover { background: var(--surface); }
+  .conv-sess-item.is-selected {
+    background: var(--accent-soft); border-left-color: var(--cc, var(--accent));
+  }
+  .conv-sess-item-proj { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-sess-item-meta { display: flex; align-items: baseline; gap: var(--s-2); }
+  .conv-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-sess-item-turns { margin-left: auto; flex: none; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
+  /* The thread pane (right): scrolls independently of the session list. */
+  .conv { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-5); padding: var(--s-2) var(--s-3); }
   .conv-sess { display: flex; flex-direction: column; gap: var(--s-3); max-width: 900px; width: 100%; margin: 0 auto; }
-  .conv-sess-head {
-    display: flex; align-items: baseline; gap: var(--s-2);
-    font-size: var(--t-2); color: var(--ink);
-    border-left: 3px solid var(--cc, var(--border)); padding-left: 6px;
-    position: sticky; top: 0; background: var(--bg); z-index: 1; padding-bottom: var(--s-1);
-  }
-  .conv-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conv-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
-  /* The in-lens conversation picker: a native select dressed to sit in the
-     sticky header, so you can jump between the window's sessions without
-     leaving the lens. */
-  .conv-sess-pick {
-    font: inherit; font-weight: 700; color: var(--ink);
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-sm); padding: 2px 6px; cursor: pointer;
-    max-width: 70%; overflow: hidden; text-overflow: ellipsis;
-  }
-  .conv-sess-pick:hover { border-color: color-mix(in oklch, var(--ink-2) 30%, var(--border)); }
-  .conv-sess-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .conv-sess-count { margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
   /* A user-prompt bubble: aligned right (the human side), accent-tinted, with
      the prompt text and the time it was sent. */
   .conv-prompt {

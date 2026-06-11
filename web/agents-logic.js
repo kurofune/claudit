@@ -107,6 +107,58 @@ export function conversationReplies(seg) {
   return out;
 }
 
+// conversationSessionList summarizes each session for the Conversation lens's
+// session picker: one entry per session that has a real main agent, in the
+// ORIGINAL input order. `index` is the session's position in the unfiltered
+// input (so it stays a stable color slot even when earlier sessions are
+// dropped). promptCount counts only segments tied to a real user prompt (a
+// non-empty uuid); replyCount sums the assistant's spoken replies across every
+// segment. Null/main-less sessions are excluded; a null/empty input → [].
+export function conversationSessionList(sessions) {
+  const list = sessions || [];
+  const out = [];
+  list.forEach((session, index) => {
+    if (!session || !session.main) return;
+    const segments = conversationSegments(session);
+    let promptCount = 0;
+    let replyCount = 0;
+    for (const seg of segments) {
+      if (seg.uuid) promptCount++;
+      replyCount += conversationReplies(seg).length;
+    }
+    out.push({
+      sessionId: session.session_id || '',
+      cwd: session.cwd || '',
+      index,
+      promptCount,
+      replyCount,
+    });
+  });
+  return out;
+}
+
+// clampConvSidebarWidth keeps the Conversation lens's resizable session
+// sidebar within sane bounds: a finite px is clamped to [MIN, MAX] and rounded
+// to a whole pixel; anything non-finite (NaN, undefined, null, Infinity, a
+// non-numeric string) falls back to DEFAULT.
+export function clampConvSidebarWidth(px) {
+  const MIN = 160, MAX = 560, DEFAULT = 240;
+  const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
+  if (!Number.isFinite(n)) return DEFAULT;
+  return Math.round(Math.max(MIN, Math.min(MAX, n)));
+}
+
+// clampTreeWidth bounds the Tree lens's left rail: it is a fixed-width column
+// (the detail pane takes the remaining width) that the user drags to resize.
+// Same contract as clampConvSidebarWidth — finite px clamped to [MIN, MAX] and
+// rounded; non-finite falls back to DEFAULT.
+export function clampTreeWidth(px) {
+  const MIN = 220, MAX = 680, DEFAULT = 320;
+  const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
+  if (!Number.isFinite(n)) return DEFAULT;
+  return Math.round(Math.max(MIN, Math.min(MAX, n)));
+}
+
 // packLanes assigns each agent to a swimlane via greedy interval
 // packing: agents whose [start, end] spans don't overlap can share a
 // lane, so a session's main agent (spanning everything) takes lane 0
@@ -610,6 +662,38 @@ function splitOnce(s, sep) {
 function toInt(s) {
   if (!/^\d+$/.test(s)) return null;
   return Number(s);
+}
+
+// deepestRefs reduces a collection of matched refKeys (a Set or array) to its
+// leaves: every ref with no strictly-deeper matched descendant in the input.
+// It is the O(n) replacement for the O(n²) leaf scan
+//   arr.filter(r => !arr.some(o => o !== r &&
+//     (o.startsWith(r + '.') || o.startsWith(r + ':'))))
+// Rather than scan pairwise (which also mis-flags agent-index prefixes like
+// "s#1" vs "s#12.0"), it derives each ref's ancestor refKeys via parseRefKey /
+// refKey and marks any ancestor that is itself in the set as a non-leaf:
+//   tool s#a.t:u → ancestors step s#a.t and agent s#a
+//   step s#a.t   → ancestor agent s#a
+//   agent s#a    → no ancestors
+// Input order is preserved; duplicates collapse (input is treated as a set).
+export function deepestRefs(refs) {
+  const set = refs instanceof Set ? refs : new Set(refs);
+  const nonLeaf = new Set();
+  for (const ref of set) {
+    const p = parseRefKey(ref);
+    if (!p) continue;
+    const ancestors = [];
+    if (p.type === 'tool') {
+      ancestors.push(refKey({ sessionId: p.sessionId, agentIndex: p.agentIndex, stepIndex: p.stepIndex }));
+      ancestors.push(refKey({ sessionId: p.sessionId, agentIndex: p.agentIndex }));
+    } else if (p.type === 'step') {
+      ancestors.push(refKey({ sessionId: p.sessionId, agentIndex: p.agentIndex }));
+    }
+    for (const anc of ancestors) {
+      if (set.has(anc)) nonLeaf.add(anc);
+    }
+  }
+  return [...set].filter(r => !nonLeaf.has(r));
 }
 
 // defaultRef is the root selection: the first session (array order) that

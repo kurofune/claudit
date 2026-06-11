@@ -19,6 +19,7 @@ import {
   agentTokens,
   refKey,
   parseRefKey,
+  deepestRefs,
   defaultRef,
   resolveRef,
   buildDrawerPayload,
@@ -35,6 +36,9 @@ import {
   spawnTargetIndex,
   conversationSegments,
   conversationReplies,
+  conversationSessionList,
+  clampConvSidebarWidth,
+  clampTreeWidth,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -487,6 +491,63 @@ test('refKey/parseRefKey round-trip a UUID sessionId with hyphens', () => {
   assert.deepEqual(parseRefKey(key), {
     sessionId: sid, agentIndex: 1, stepIndex: 2, toolIndex: 0, type: 'tool',
   });
+});
+
+// ── deepestRefs ─────────────────────────────────────────────────────
+test('deepestRefs returns [] for empty array and empty Set input', () => {
+  assert.deepEqual(deepestRefs([]), []);
+  assert.deepEqual(deepestRefs(new Set()), []);
+});
+
+test('deepestRefs keeps a lone agent ref with no descendants', () => {
+  assert.deepEqual(deepestRefs(['s#0']), ['s#0']);
+});
+
+test('deepestRefs: agent + step + tool all present → only the tool is a leaf', () => {
+  assert.deepEqual(deepestRefs(['s#0', 's#0.3', 's#0.3:1']), ['s#0.3:1']);
+});
+
+test('deepestRefs: agent + tool, intermediate step absent → only the tool is a leaf', () => {
+  // The agent is still non-leaf (it has a deeper descendant); the absent step
+  // is irrelevant.
+  assert.deepEqual(deepestRefs(['s#0', 's#0.3:1']), ['s#0.3:1']);
+});
+
+test('deepestRefs: two sibling steps + their agent → the two steps are leaves', () => {
+  assert.deepEqual(deepestRefs(['s#0', 's#0.1', 's#0.2']), ['s#0.1', 's#0.2']);
+});
+
+test('deepestRefs prefix-collision guard: s#1 and s#12.0 are both leaves', () => {
+  // s#12.0 descends from agent s#12, NOT s#1 — a naive startsWith would wrongly
+  // treat s#1 as having a descendant. Both must survive as leaves.
+  const out = deepestRefs(['s#1', 's#12.0']);
+  assert.ok(out.includes('s#1'));
+  assert.ok(out.includes('s#12.0'));
+  assert.equal(out.length, 2);
+});
+
+test('deepestRefs accepts a Set input and returns an array', () => {
+  const out = deepestRefs(new Set(['s#0', 's#0.3', 's#0.3:1']));
+  assert.ok(Array.isArray(out));
+  assert.deepEqual(out, ['s#0.3:1']);
+});
+
+test('deepestRefs treats cross-session refs as independent', () => {
+  // a#0.1 and b#0 are unrelated; both are leaves.
+  assert.deepEqual(deepestRefs(['a#0.1', 'b#0']), ['a#0.1', 'b#0']);
+});
+
+test('deepestRefs matches the O(n²) reference leaf scan on a hand-built list', () => {
+  const input = [
+    's#0', 's#0.1', 's#0.1:0', 's#0.2',
+    's#1', 's#12.0', 's#12',
+    'b#0', 'a#0.1',
+    's#0.1:0', // duplicate
+  ];
+  const arr = [...new Set(input)];
+  const expected = arr.filter(r =>
+    !arr.some(o => o !== r && (o.startsWith(r + '.') || o.startsWith(r + ':'))));
+  assert.deepEqual(deepestRefs(input).sort(), [...expected].sort());
 });
 
 // ── defaultRef ──────────────────────────────────────────────────────
@@ -1321,4 +1382,154 @@ test('conversationReplies returns [] for an empty or missing segment', () => {
     conversationReplies({ firstStepIndex: 0, steps: [{ text: '' }, { text: '  ' }] }),
     [],
   );
+});
+
+// ── conversationSessionList ─────────────────────────────────────────
+test('conversationSessionList maps the per-session summary fields', () => {
+  const session = {
+    session_id: 'sid-1',
+    cwd: '/home/me/proj',
+    prompts: [{ uuid: 'u1', text: 'hi', first_step_index: 0 }],
+    main: {
+      steps: [
+        { text: 'reply one' },
+        { text: 'reply two' },
+      ],
+    },
+  };
+  const out = conversationSessionList([session]);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0], {
+    sessionId: 'sid-1',
+    cwd: '/home/me/proj',
+    index: 0,
+    promptCount: 1,
+    replyCount: 2,
+  });
+});
+
+test('conversationSessionList excludes null and main-less sessions', () => {
+  const withMain = {
+    session_id: 'sid-ok',
+    cwd: '/x',
+    prompts: [{ uuid: 'u1', text: 'hi', first_step_index: 0 }],
+    main: { steps: [{ text: 'a' }] },
+  };
+  const mainless = { session_id: 'sid-no', cwd: '/y', prompts: [], main: null };
+  const out = conversationSessionList([null, mainless, withMain, undefined]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].sessionId, 'sid-ok');
+});
+
+test('conversationSessionList index reflects the ORIGINAL input position', () => {
+  const second = {
+    session_id: 'sid-2',
+    cwd: '/x',
+    prompts: [{ uuid: 'u1', first_step_index: 0 }],
+    main: { steps: [{ text: 'a' }] },
+  };
+  // input[0] is null and filtered out, but the surviving session keeps index 1.
+  const out = conversationSessionList([null, second]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].index, 1);
+});
+
+test('conversationSessionList promptCount counts only uuid-bearing segments', () => {
+  // Two markers: one with a uuid (real prompt), one without (orphan). The
+  // second marker carves a segment with uuid '' which must NOT be counted.
+  const session = {
+    session_id: 'sid',
+    cwd: '/x',
+    prompts: [
+      { uuid: 'u1', text: 'first', first_step_index: 0 },
+      { uuid: '', text: '', first_step_index: 1 },
+    ],
+    main: { steps: [{ text: 'r0' }, { text: 'r1' }] },
+  };
+  const out = conversationSessionList([session]);
+  assert.equal(out[0].promptCount, 1);
+});
+
+test('conversationSessionList replyCount sums replies across all segments', () => {
+  // Two prompts → two segments. Segment 0 has 2 spoken replies, segment 1 has 1
+  // (a tool-only step contributes none). Total replyCount = 3.
+  const session = {
+    session_id: 'sid',
+    cwd: '/x',
+    prompts: [
+      { uuid: 'u1', first_step_index: 0 },
+      { uuid: 'u2', first_step_index: 2 },
+    ],
+    main: {
+      steps: [
+        { text: 'a' },     // seg0 reply
+        { text: 'b' },     // seg0 reply
+        { text: '' },      // seg1 tool-only, no reply
+        { text: 'c' },     // seg1 reply
+      ],
+    },
+  };
+  const out = conversationSessionList([session]);
+  assert.equal(out[0].replyCount, 3);
+  assert.equal(out[0].promptCount, 2);
+});
+
+test('conversationSessionList returns [] for empty, null, or undefined input', () => {
+  assert.deepEqual(conversationSessionList([]), []);
+  assert.deepEqual(conversationSessionList(null), []);
+  assert.deepEqual(conversationSessionList(undefined), []);
+});
+
+// ── clampConvSidebarWidth ───────────────────────────────────────────
+test('clampConvSidebarWidth passes an in-range value through, rounded', () => {
+  assert.equal(clampConvSidebarWidth(300), 300);
+});
+
+test('clampConvSidebarWidth clamps a value below MIN to 160', () => {
+  assert.equal(clampConvSidebarWidth(50), 160);
+});
+
+test('clampConvSidebarWidth clamps a value above MAX to 560', () => {
+  assert.equal(clampConvSidebarWidth(9999), 560);
+});
+
+test('clampConvSidebarWidth returns DEFAULT 240 for non-finite input', () => {
+  assert.equal(clampConvSidebarWidth(NaN), 240);
+  assert.equal(clampConvSidebarWidth(undefined), 240);
+  assert.equal(clampConvSidebarWidth(null), 240);
+  assert.equal(clampConvSidebarWidth(Infinity), 240);
+  assert.equal(clampConvSidebarWidth('wide'), 240);
+});
+
+test('clampConvSidebarWidth rounds a fractional in-range value', () => {
+  assert.equal(clampConvSidebarWidth(300.6), 301);
+  assert.equal(clampConvSidebarWidth(300.4), 300);
+});
+
+// ── clampTreeWidth ──────────────────────────────────────────────────
+// The Tree lens is a fixed-width left rail (the detail pane takes the rest);
+// dragging the handle resizes that rail, clamped by clampTreeWidth.
+test('clampTreeWidth passes an in-range value through, rounded', () => {
+  assert.equal(clampTreeWidth(400), 400);
+});
+
+test('clampTreeWidth clamps a value below MIN to 220', () => {
+  assert.equal(clampTreeWidth(100), 220);
+});
+
+test('clampTreeWidth clamps a value above MAX to 680', () => {
+  assert.equal(clampTreeWidth(9999), 680);
+});
+
+test('clampTreeWidth returns DEFAULT 320 for non-finite input', () => {
+  assert.equal(clampTreeWidth(NaN), 320);
+  assert.equal(clampTreeWidth(undefined), 320);
+  assert.equal(clampTreeWidth(null), 320);
+  assert.equal(clampTreeWidth(Infinity), 320);
+  assert.equal(clampTreeWidth('wide'), 320);
+});
+
+test('clampTreeWidth rounds a fractional in-range value', () => {
+  assert.equal(clampTreeWidth(400.6), 401);
+  assert.equal(clampTreeWidth(400.4), 400);
 });
