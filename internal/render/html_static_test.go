@@ -36,7 +36,6 @@ func TestStatic_UsesSPAShellStructure(t *testing.T) {
 		`id="view-sessions"`,
 		`id="view-cache"`,
 		`id="view-tools"`,
-		`id="view-subagents"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("static report missing SPA view container %q", want)
@@ -265,7 +264,6 @@ func TestStatic_PreservesURLContract(t *testing.T) {
 		`href="#sessions"`,
 		`href="#cache"`,
 		`href="#tools"`,
-		`href="#subagents"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("static report missing nav link %q", want)

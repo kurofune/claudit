@@ -107,7 +107,6 @@ export function paintNavSkeletons(includeOverview) {
     'nav-metric-sessions',
     'nav-metric-cache',
     'nav-metric-tools',
-    'nav-metric-subagents',
     'nav-metric-agents',
   ];
   if (includeOverview) {

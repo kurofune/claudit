@@ -1,16 +1,17 @@
-// Cost view — fetches /_claudit/api/cost (and /trends?dim=model,project
-// for the per-row sparkline column) and paints the four cost subviews:
-// By model · By project · By skill / slash command · Top expensive
-// prompts. Mirrors the SSR'd output of the legacy fat-HTML report so
-// the SPA's #cost reads visually identical to /#cost.
+// Cost view — fetches /_claudit/api/cost (plus /trends?dim=model,project
+// for the per-row sparkline column and /subagents for the Subagents
+// subview) and paints five cost subviews: By model · By project ·
+// Subagents · By skill / slash command · Top expensive prompts. Mirrors
+// the SSR'd output of the legacy fat-HTML report so the SPA's #cost
+// reads visually identical to /#cost.
 
-import { fetchCost, fetchTrends } from './api.js';
-import { fmtMoney, fmtPct, fmtNum, escHtml, truncate, pct } from './format.js';
+import { fetchCost, fetchTrends, fetchSubagents } from './api.js';
+import { fmtMoney, fmtPct, fmtNum, fmtDate, escHtml, truncate, pct } from './format.js';
 import { trendSpark } from './charts.js';
 import {
   buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
 } from './table.js';
-import { hbarListSkeleton, tableBodySkeleton } from './skeleton.js';
+import { hbarListSkeleton, tableBodySkeleton, stackedSkeleton } from './skeleton.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -48,6 +49,7 @@ const SHELL = `
       <ul>
         <li><strong>By model</strong> — what fraction of spend went to each model. Opus dominating is expected for hard work; if it's also serving small or repetitive tasks, those are candidates to route to Sonnet or Haiku.</li>
         <li><strong>By project</strong> — which working directories cost the most. A surprise winner here is usually a side project quietly running up more spend than you realized.</li>
+        <li><strong>Subagents</strong> — main thread (your direct conversation) vs sidechain (work delegated to subagents). Sidechain cost &gt; main cost usually means over-delegating; one subagent type dominating the sidechain is your best optimization target.</li>
         <li><strong>By skill &amp; slash command</strong> — cost per invoked <code>/command</code> or skill. A high <em>cost-per-call</em> ratio flags candidates for tightening (smaller starting context, less tool output) or replacement.</li>
         <li><strong>Top expensive prompts</strong> — recurring prompts that kicked off long, costly turn chains. Repeated expensive prompts often justify a custom skill or compact agent that does the same job with less context.</li>
       </ul>
@@ -57,6 +59,7 @@ const SHELL = `
   <nav class="subtabs" aria-label="Cost sections">
     <a class="subtab is-active" href="#cost/model"   data-subtab="model">By model</a>
     <a class="subtab"           href="#cost/project" data-subtab="project">By project</a>
+    <a class="subtab"           href="#cost/subagents" data-subtab="subagents">Subagents</a>
     <a class="subtab"           href="#cost/skill"   data-subtab="skill">By skill &amp; slash command</a>
     <a class="subtab"           href="#cost/prompt"  data-subtab="prompt">Top expensive prompts</a>
   </nav>
@@ -86,6 +89,48 @@ const SHELL = `
         <th data-key="Sessions" class="num" title="Number of distinct session IDs that ran in this project.">Sessions</th>
         <th data-key="Turns" class="num" title="Number of assistant turns across those sessions.">Turns</th>
         <th data-key="DominantModel" title="The model that produced the most output tokens in this project.">Dominant model</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="subview" data-subview="subagents">
+    <h2>Main vs sidechain</h2>
+    <div class="stacked" id="stacked-main"></div>
+    <table data-table="mainside">
+      <thead><tr>
+        <th title="main = your direct conversation. sidechain = work done in subagents (Agent tool, custom agents).">Bucket</th>
+        <th class="num" title="Dollar cost of this bucket.">Cost</th>
+        <th class="num" title="Share of main + sidechain cost.">%</th>
+        <th class="num" title="Assistant turns in this bucket.">Turns</th>
+        <th class="num" title="Tokens served from cache in this bucket. Sidechain cache reads are usually small — every invocation starts cold.">Cache read</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>By subagent type</h2>
+    <table data-table="subagent">
+      <thead><tr>
+        <th data-key="Type" title="Subagent type (the agent name from ~/.claude/agents or the built-in Agent tool).">Subagent</th>
+        <th data-key="CostUSD" class="num" title="Total dollar cost across all invocations of this subagent type.">Cost</th>
+        <th data-key="PctSide" class="num" title="Share of sidechain cost (not total cost). Use to spot which subagent type dominates your delegation.">% of sidechain</th>
+        <th data-key="Turns" class="num" title="Total assistant turns across all invocations of this subagent type.">Turns</th>
+        <th data-key="OutputTokens" class="num" title="Tokens the model generated across those turns.">Output</th>
+        <th data-key="CacheReadTokens" class="num" title="Tokens served from cache (only possible within a single invocation, after the first turn).">Cache read</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Top invocations</h2>
+    <div class="small">Each row is one subagent run (one <code>agent-&lt;id&gt;.jsonl</code> file). Use the global filter above to narrow by subagent type, description, or project.</div>
+    <table data-table="invocation">
+      <thead><tr>
+        <th data-key="SubagentType" title="Subagent type for this invocation.">Subagent</th>
+        <th data-key="Description" title="The description argument passed when this subagent was invoked.">Description</th>
+        <th data-key="CostUSD" class="num" title="Dollar cost of this single invocation. Outliers here often signal a poorly-scoped delegation.">Cost</th>
+        <th data-key="Turns" class="num" title="Assistant turns in this invocation.">Turns</th>
+        <th data-key="Project" title="Working directory the parent session was running in.">Project</th>
+        <th data-key="First" title="Timestamp this subagent invocation started.">Started</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -128,12 +173,14 @@ function paintCostSkeletons(container) {
   if (barsModel) barsModel.innerHTML = hbarListSkeleton(5);
   const barsProject = container.querySelector('#cost-bars-project');
   if (barsProject) barsProject.innerHTML = hbarListSkeleton(8);
+  const stacked = container.querySelector('#stacked-main');
+  if (stacked) stacked.innerHTML = stackedSkeleton();
   const tables = {
-    model: 6, project: 6, skill: 5, prompt: 6,
+    model: 6, project: 6, mainside: 5, subagent: 6, invocation: 6, skill: 5, prompt: 6,
   };
   for (const [name, cols] of Object.entries(tables)) {
     const tb = container.querySelector(`[data-table="${name}"] tbody`);
-    if (tb) tb.innerHTML = tableBodySkeleton(cols, 6);
+    if (tb) tb.innerHTML = tableBodySkeleton(cols, name === 'mainside' ? 2 : 6);
   }
 }
 
@@ -215,16 +262,18 @@ export async function paint(route) {
   // alongside the data so we know whether to inject the Trend column
   // at all. Fetched in parallel so cost rendering isn't blocked when
   // --by is unset (the common case for serve mode).
-  let modelTrends = null, projectTrends = null, period = '';
+  let modelTrends = null, projectTrends = null, subagents = null, period = '';
   try {
-    const [m, p] = await Promise.all([
+    const [m, p, s] = await Promise.all([
       fetchTrends('model').catch(() => null),
       fetchTrends('project').catch(() => null),
+      fetchSubagents().catch(() => null),
     ]);
     modelTrends = m;
     projectTrends = p;
+    subagents = s;
     period = (m && m.period) || (p && p.period) || '';
-  } catch { /* no-op — trend column stays uninjected */ }
+  } catch { /* no-op — trend column stays uninjected, subagents panel empty */ }
 
   const modelTable = container.querySelector('[data-table="model"]');
   const projectTable = container.querySelector('[data-table="project"]');
@@ -271,6 +320,57 @@ export async function paint(route) {
       [pct(r.CostUSD, totalCost), true],
     ];
   });
+
+  // Subagents subview — main vs sidechain, by type, top invocations.
+  // main_side_cost ships from Go as the literal main+side sum; the
+  // per-bucket share division below stays client-side.
+  if (subagents) {
+    const bySub = subagents.by_subagent || [];
+    const invs = subagents.agent_invocations || [];
+    const main = subagents.main || { cost: 0, turns: 0, tokens: {} };
+    const side = subagents.sidechain || { cost: 0, turns: 0, tokens: {} };
+    const sideCost = side.cost || 0;
+    const totalMainSide = subagents.main_side_cost || 0;
+
+    const stacked = container.querySelector('#stacked-main');
+    if (stacked && totalMainSide > 0) {
+      const mp = 100 * main.cost / totalMainSide;
+      const sp = 100 - mp;
+      stacked.innerHTML = `
+        <div class="bucket bucket-main" style="width:${mp}%" title="main: ${escHtml(fmtMoney(main.cost))}">main · ${mp.toFixed(1)}%</div>
+        <div class="bucket bucket-side" style="width:${sp}%" title="sidechain: ${escHtml(fmtMoney(side.cost))}">sidechain · ${sp.toFixed(1)}%</div>`;
+    }
+
+    // Mainside table — no sort (the rows are fixed: main, sidechain).
+    const mainsideBody = container.querySelector('[data-table="mainside"] tbody');
+    if (mainsideBody) {
+      const buckets = [
+        ['main', main.cost, main.turns, (main.tokens || {}).CacheReadTokens || 0],
+        ['sidechain', side.cost, side.turns, (side.tokens || {}).CacheReadTokens || 0],
+      ];
+      mainsideBody.innerHTML = buckets.map(([n, c, t, cr]) =>
+        `<tr data-cost="${c}"><td>${n}</td><td class="num">${escHtml(fmtMoney(c))}</td><td class="num">${fmtPct(c, totalMainSide)}</td><td class="num">${fmtNum(t)}</td><td class="num">${fmtNum(cr)}</td></tr>`
+      ).join('');
+    }
+
+    buildRows(container.querySelector('[data-table="subagent"]'), bySub, r => [
+      [escHtml(r.Type), false],
+      [escHtml(fmtMoney(r.CostUSD)), true, r.CostUSD],
+      [pct(r.CostUSD, sideCost), true],
+      [fmtNum(r.Turns), true],
+      [fmtNum(r.OutputTokens), true],
+      [fmtNum(r.CacheReadTokens), true],
+    ]);
+
+    buildRows(container.querySelector('[data-table="invocation"]'), invs, r => [
+      [escHtml(r.SubagentType || '(unknown)'), false],
+      [`<span title="${escHtml(r.Description)}">${escHtml(truncate(r.Description, 80))}</span>`, false],
+      [escHtml(fmtMoney(r.CostUSD)), true, r.CostUSD],
+      [fmtNum(r.Turns), true],
+      [`<span class="truncate path" title="${escHtml(r.Project)}">${escHtml(truncate(r.Project, 80))}</span>`, false],
+      [fmtDate(r.First), false],
+    ]);
+  }
 
   wireGlobalFilters();
   activateSubview(container, route.sub);
