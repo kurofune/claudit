@@ -9,12 +9,44 @@
 #   cache_write_5m = input * 1.25
 #   cache_write_1h = input * 2.00
 #
-# 1M-context-window pricing: Opus 4.6, Opus 4.7, Opus 4.8, and Sonnet 4.6
-# include the full 1M context at *standard* rates — no premium tier. The
+# 1M-context-window pricing: Fable 5, Mythos 5, Opus 4.6, Opus 4.7, Opus 4.8,
+# and Sonnet 4.6 include the full 1M context at *standard* rates — no premium
+# tier. The
 # "[1m]" suffix claudit may see in the wild is just a context-mode marker,
 # not a pricing tier, so we list those at the same prices as their base model.
 
 models:
+  # ── Fable 5 / Mythos 5 — $10 / $50 base ──
+  # Mythos 5 is limited-availability (Project Glasswing) but shares Fable 5's
+  # rate card; claudit prices it identically if the id shows up in a session.
+  claude-fable-5:                   # verified 2026-06-10
+    input_per_mtok: 10.00
+    output_per_mtok: 50.00
+    cache_read_per_mtok: 1.00
+    cache_write_5m_per_mtok: 12.50
+    cache_write_1h_per_mtok: 20.00
+
+  "claude-fable-5[1m]":              # verified 2026-06-10 — 1M context bundled at standard rates
+    input_per_mtok: 10.00
+    output_per_mtok: 50.00
+    cache_read_per_mtok: 1.00
+    cache_write_5m_per_mtok: 12.50
+    cache_write_1h_per_mtok: 20.00
+
+  claude-mythos-5:                  # verified 2026-06-10
+    input_per_mtok: 10.00
+    output_per_mtok: 50.00
+    cache_read_per_mtok: 1.00
+    cache_write_5m_per_mtok: 12.50
+    cache_write_1h_per_mtok: 20.00
+
+  "claude-mythos-5[1m]":            # verified 2026-06-10 — 1M context bundled at standard rates
+    input_per_mtok: 10.00
+    output_per_mtok: 50.00
+    cache_read_per_mtok: 1.00
+    cache_write_5m_per_mtok: 12.50
+    cache_write_1h_per_mtok: 20.00
+
   # ── Opus 4.5/4.6/4.7/4.8 family — $5 / $25 base ──
   claude-opus-4-8:                  # verified 2026-05-29
     input_per_mtok: 5.00

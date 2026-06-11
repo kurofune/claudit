@@ -24,6 +24,33 @@ func TestDefault_KnownModels(t *testing.T) {
 	}
 }
 
+func TestDefault_Fable5AndMythos5(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fable 5 and Mythos 5 launched at $10 input / $50 output, with cache
+	// rates following the standard ratios off the $10 input rate.
+	for _, m := range []string{
+		"claude-fable-5",
+		"claude-fable-5[1m]",
+		"claude-mythos-5",
+		"claude-mythos-5[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 10.00 || p.Output != 50.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p)
+		}
+		if p.CacheRead != 1.00 || p.CacheWrite5m != 12.50 || p.CacheWrite1h != 20.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p)
+		}
+	}
+}
+
 func TestCost(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
