@@ -34,7 +34,7 @@ import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
-  looksTruncated, timelineAtTime, playheadBounds, playheadStats,
+  looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
@@ -1579,6 +1579,27 @@ function countsHTML(s) {
     `<span class="tlc tlc-pending" title="agents not yet started at the playhead">○ ${fmtNum(s.pending)}</span>`;
 }
 
+// timelineSummaryHTML is the at-a-glance triage strip for a session card: its
+// duration, turns, tools, agents, errors, and cost as .tlc pills (mirroring
+// countsHTML's idiom). These are whole-session totals, NOT playhead-relative, so
+// every scrub frame recomputes the same values — but it must live in the shared
+// timelineSessionHTML anyway, because renderScrub rewrites .timeline-sessions
+// wholesale and a strip kept out of that path would vanish mid-scrub. Stable
+// values → no flicker; the sessionStats walk is the same O(steps) order as the
+// timelineAtTime geometry the scrub already runs per session. The errors pill is
+// omitted when the session is clean.
+function timelineSummaryHTML(s) {
+  const err = s.errorCount > 0
+    ? `<span class="tlc tlc-err" title="${fmtNum(s.errorCount)} tool error${s.errorCount === 1 ? '' : 's'} in this session">⚠ ${fmtNum(s.errorCount)}</span>`
+    : '';
+  return `<span class="tlc" title="session duration">◷ ${escHtml(formatElapsed(s.durationMs))}</span>` +
+    `<span class="tlc" title="turns (model steps) across all agents">⤳ ${fmtNum(s.turnCount)}</span>` +
+    `<span class="tlc" title="tool calls across all agents">⚒ ${fmtNum(s.toolCount)}</span>` +
+    `<span class="tlc" title="agents (main + sub-agents)">❏ ${fmtNum(s.agentCount)}</span>` +
+    err +
+    `<span class="tlc tlc-cost" title="session cost">${escHtml(fmtMoney(s.cost_usd))}</span>`;
+}
+
 function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
   const sid = session.session_id || '';
   const tl = timelineAtTime(session, T, { hostW, nowMs });
@@ -1618,6 +1639,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
       <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
       <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>
+    <div class="timeline-sess-sum">${timelineSummaryHTML(sessionStats(session, nowMs))}</div>
     <div class="timeline-body">
       <svg class="timeline-gutter" viewBox="0 0 ${gutterW} ${tl.height}" width="${gutterW}" height="${tl.height}" role="img" aria-label="Agent labels">
         <g class="tl-rows">${gutterRows}</g>

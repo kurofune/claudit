@@ -539,6 +539,32 @@ export function playheadStats(graph, T) {
   return out;
 }
 
+// sessionStats rolls one session up to the six numbers the Timeline's
+// per-session summary strip shows, all from already-present data.
+export function sessionStats(session, nowMs = Date.now()) {
+  const agents = flattenSession(session);
+  let turnCount = 0, toolCount = 0, toolErrors = 0, stepCost = 0;
+  for (const a of agents) {
+    for (const step of (a.steps || [])) {
+      turnCount++;
+      stepCost += step.cost_usd || 0;
+      for (const t of (step.tools || [])) {
+        toolCount++;
+        if (t && t.status === 'error') toolErrors++;
+      }
+    }
+  }
+  const start = parseTime(session && session.started_at);
+  const end = parseTime(session && session.ended_at);
+  const until = Number.isNaN(end) ? nowMs : end;
+  const durationMs = Number.isNaN(start) ? 0 : Math.max(0, until - start);
+  // session.error_count / cost_usd are backend totals for the whole session;
+  // prefer them when present, else fall back to the per-step/tool hand walk.
+  const errorCount = Number.isFinite(session && session.error_count) ? session.error_count : toolErrors;
+  const cost_usd = Number.isFinite(session && session.cost_usd) ? session.cost_usd : stepCost;
+  return { durationMs, turnCount, toolCount, errorCount, agentCount: agents.length, cost_usd };
+}
+
 // buildTimeline computes a per-session horizontal Gantt layout: one row per
 // agent (main first at depth 0, each sub-agent at depth 1), each bar placed on
 // a real time axis spanning the session's lifetime, plus axis ticks and a

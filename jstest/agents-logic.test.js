@@ -32,6 +32,7 @@ import {
   agentPhaseAt,
   playheadBounds,
   playheadStats,
+  sessionStats,
   timelineAtTime,
   specActive,
   filterTrace,
@@ -1111,6 +1112,82 @@ test('playheadStats: all-pending before first start, all-done after last end', (
 test('playheadStats is zeros for a null/empty graph', () => {
   assert.deepEqual(playheadStats(null, 100), { pending: 0, active: 0, done: 0 });
   assert.deepEqual(playheadStats({ sessions: [] }, 100), { pending: 0, active: 0, done: 0 });
+});
+
+// ── sessionStats ────────────────────────────────────────────────────
+test('sessionStats is all zeros for a null/empty session', () => {
+  const zero = { durationMs: 0, turnCount: 0, toolCount: 0, errorCount: 0, agentCount: 0, cost_usd: 0 };
+  assert.deepEqual(sessionStats(null, 1000), zero);
+  assert.deepEqual(sessionStats({}, 1000), zero);
+});
+
+// A finished session with main + one sub-agent. Top-level error_count/cost_usd
+// are set to the hand walk so the test can assert sessionStats prefers them AND
+// that they agree with a manual count (the contract the prompt calls for).
+const STATS_SESSION = {
+  session_id: 'stats-1',
+  started_at: '2026-05-01T12:00:00Z',
+  ended_at: '2026-05-01T12:01:00Z', // 60s
+  error_count: 1,
+  cost_usd: 0.47,
+  main: {
+    kind: 'main', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:40Z',
+    status: 'done',
+    steps: [
+      { timestamp: '2026-05-01T12:00:10Z', cost_usd: 0.10, tools: [
+        { name: 'Bash', status: 'ok' },
+      ] },
+      { timestamp: '2026-05-01T12:00:40Z', cost_usd: 0.32, tools: [] },
+    ],
+  },
+  children: [
+    { kind: 'subagent', started_at: '2026-05-01T12:00:15Z', ended_at: '2026-05-01T12:00:35Z',
+      status: 'done',
+      steps: [
+        { timestamp: '2026-05-01T12:00:15Z', cost_usd: 0.05, tools: [
+          { name: 'Read', status: 'ok' },
+          { name: 'Grep', status: 'error' },
+        ] },
+      ] },
+  ],
+};
+
+test('sessionStats rolls up a finished session with a sub-agent', () => {
+  const s = sessionStats(STATS_SESSION, 9_999_999);
+  assert.equal(s.durationMs, 60000); // 12:01:00 − 12:00:00
+  assert.equal(s.agentCount, 2);     // main + 1 child
+  assert.equal(s.turnCount, 3);      // 2 main steps + 1 child step
+  assert.equal(s.toolCount, 3);      // 1 + 0 + 2
+  assert.equal(s.errorCount, 1);     // top-level error_count
+  assert.equal(s.cost_usd, 0.47);    // top-level cost_usd
+  // …and the preferred top-level numbers equal a hand walk of the underlying data.
+  const handErrors = flattenSession(STATS_SESSION)
+    .flatMap(a => a.steps).flatMap(st => st.tools).filter(t => t.status === 'error').length;
+  assert.equal(s.errorCount, handErrors);
+  const handCost = flattenSession(STATS_SESSION)
+    .flatMap(a => a.steps).reduce((sum, st) => sum + st.cost_usd, 0);
+  assert.ok(Math.abs(s.cost_usd - handCost) < 1e-9);
+});
+
+test('sessionStats falls back to counting tool errors when error_count is absent', () => {
+  const { error_count, ...noErrCount } = STATS_SESSION;
+  assert.equal(sessionStats(noErrCount, 9_999_999).errorCount, 1); // the one Grep status:'error'
+});
+
+test('sessionStats falls back to summing step cost when cost_usd is absent', () => {
+  const { cost_usd, ...noCost } = STATS_SESSION;
+  assert.ok(Math.abs(sessionStats(noCost, 9_999_999).cost_usd - 0.47) < 1e-9); // 0.10+0.32+0.05
+});
+
+test('sessionStats measures a running session (no ended_at) up to nowMs', () => {
+  const running = {
+    session_id: 'run-1',
+    started_at: '2026-05-01T12:00:00Z', // ended_at omitted
+    main: { kind: 'main', started_at: '2026-05-01T12:00:00Z', status: 'running', steps: [] },
+    children: [],
+  };
+  const nowMs = Date.parse('2026-05-01T12:00:30Z');
+  assert.equal(sessionStats(running, nowMs).durationMs, 30000);
 });
 
 // ── timelineAtTime ──────────────────────────────────────────────────
