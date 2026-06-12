@@ -2573,11 +2573,11 @@
   .timeline-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
   /* Per-session triage strip under the head: whole-session totals as .tlc pills. */
   .timeline-sess-sum {
-    display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: baseline;
+    display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: center;
     padding-left: 9px; margin-bottom: var(--s-2);
     font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums;
   }
-  .timeline-sess-sum .tlc { color: var(--ink); }
+  .timeline-sess-sum .tlc { color: var(--ink); display: inline-flex; align-items: center; gap: 3px; }
   .timeline-sess-sum .tlc-cost { color: var(--ink-2); }
   .timeline-sess-sum .tlc-err { color: var(--danger, #e5484d); font-weight: 700; }
   /* "● now" re-pin button — only shown (JS un-hides) when scrolled into history. */

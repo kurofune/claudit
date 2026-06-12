@@ -539,12 +539,13 @@ export function playheadStats(graph, T) {
   return out;
 }
 
-// sessionStats rolls one session up to the six numbers the Timeline's
-// per-session summary strip shows, all from already-present data.
+// sessionStats rolls one session up to the numbers the Timeline's per-session
+// summary strip shows, all from already-present data.
 export function sessionStats(session, nowMs = Date.now()) {
   const agents = flattenSession(session);
-  let turnCount = 0, toolCount = 0, toolErrors = 0, stepCost = 0;
+  let turnCount = 0, toolCount = 0, toolErrors = 0, stepCost = 0, tokenCount = 0;
   for (const a of agents) {
+    tokenCount += agentTokens(a).total; // input+output+cache, the drawer's "X total"
     for (const step of (a.steps || [])) {
       turnCount++;
       stepCost += step.cost_usd || 0;
@@ -562,7 +563,7 @@ export function sessionStats(session, nowMs = Date.now()) {
   // prefer them when present, else fall back to the per-step/tool hand walk.
   const errorCount = Number.isFinite(session && session.error_count) ? session.error_count : toolErrors;
   const cost_usd = Number.isFinite(session && session.cost_usd) ? session.cost_usd : stepCost;
-  return { durationMs, turnCount, toolCount, errorCount, agentCount: agents.length, cost_usd };
+  return { durationMs, turnCount, toolCount, errorCount, agentCount: agents.length, tokenCount, cost_usd };
 }
 
 // buildTimeline computes a per-session horizontal Gantt layout: one row per

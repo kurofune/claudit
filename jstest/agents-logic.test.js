@@ -1116,7 +1116,7 @@ test('playheadStats is zeros for a null/empty graph', () => {
 
 // ── sessionStats ────────────────────────────────────────────────────
 test('sessionStats is all zeros for a null/empty session', () => {
-  const zero = { durationMs: 0, turnCount: 0, toolCount: 0, errorCount: 0, agentCount: 0, cost_usd: 0 };
+  const zero = { durationMs: 0, turnCount: 0, toolCount: 0, errorCount: 0, agentCount: 0, tokenCount: 0, cost_usd: 0 };
   assert.deepEqual(sessionStats(null, 1000), zero);
   assert.deepEqual(sessionStats({}, 1000), zero);
 });
@@ -1133,6 +1133,8 @@ const STATS_SESSION = {
   main: {
     kind: 'main', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:40Z',
     status: 'done',
+    // total = 100+50+10+5+200 = 365
+    tokens: { InputTokens: 100, OutputTokens: 50, CacheCreate5mTokens: 10, CacheCreate1hTokens: 5, CacheReadTokens: 200 },
     steps: [
       { timestamp: '2026-05-01T12:00:10Z', cost_usd: 0.10, tools: [
         { name: 'Bash', status: 'ok' },
@@ -1143,6 +1145,8 @@ const STATS_SESSION = {
   children: [
     { kind: 'subagent', started_at: '2026-05-01T12:00:15Z', ended_at: '2026-05-01T12:00:35Z',
       status: 'done',
+      // total = 20+10+100 = 130
+      tokens: { InputTokens: 20, OutputTokens: 10, CacheReadTokens: 100 },
       steps: [
         { timestamp: '2026-05-01T12:00:15Z', cost_usd: 0.05, tools: [
           { name: 'Read', status: 'ok' },
@@ -1167,6 +1171,11 @@ test('sessionStats rolls up a finished session with a sub-agent', () => {
   const handCost = flattenSession(STATS_SESSION)
     .flatMap(a => a.steps).reduce((sum, st) => sum + st.cost_usd, 0);
   assert.ok(Math.abs(s.cost_usd - handCost) < 1e-9);
+});
+
+test('sessionStats sums total tokens (input+output+cache) across all agents', () => {
+  // main 365 + child 130 = 495.
+  assert.equal(sessionStats(STATS_SESSION, 9_999_999).tokenCount, 495);
 });
 
 test('sessionStats falls back to counting tool errors when error_count is absent', () => {

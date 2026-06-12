@@ -1589,15 +1589,19 @@ function countsHTML(s) {
 // timelineAtTime geometry the scrub already runs per session. The errors pill is
 // omitted when the session is clean.
 function timelineSummaryHTML(s) {
+  // Each pill leads with an emoji (the strip is HTML, so emoji render fine) and
+  // keeps the full meaning in its title tooltip. The errors pill is omitted when
+  // the session is clean.
   const err = s.errorCount > 0
-    ? `<span class="tlc tlc-err" title="${fmtNum(s.errorCount)} tool error${s.errorCount === 1 ? '' : 's'} in this session">⚠ ${fmtNum(s.errorCount)}</span>`
+    ? `<span class="tlc tlc-err" title="${fmtNum(s.errorCount)} tool error${s.errorCount === 1 ? '' : 's'} in this session">⚠️ ${fmtNum(s.errorCount)}</span>`
     : '';
-  return `<span class="tlc" title="session duration">◷ ${escHtml(formatElapsed(s.durationMs))}</span>` +
-    `<span class="tlc" title="turns (model steps) across all agents">⤳ ${fmtNum(s.turnCount)}</span>` +
-    `<span class="tlc" title="tool calls across all agents">⚒ ${fmtNum(s.toolCount)}</span>` +
-    `<span class="tlc" title="agents (main + sub-agents)">❏ ${fmtNum(s.agentCount)}</span>` +
+  return `<span class="tlc" title="session duration">⏱️ ${escHtml(formatElapsed(s.durationMs))}</span>` +
+    `<span class="tlc" title="turns (model steps) across all agents">💬 ${fmtNum(s.turnCount)}</span>` +
+    `<span class="tlc" title="tool calls across all agents">🛠️ ${fmtNum(s.toolCount)}</span>` +
+    `<span class="tlc" title="agents (main + sub-agents)">🤖 ${fmtNum(s.agentCount)}</span>` +
     err +
-    `<span class="tlc tlc-cost" title="session cost">${escHtml(fmtMoney(s.cost_usd))}</span>`;
+    `<span class="tlc" title="total tokens (input + output + cache) across all agents">🎟️ ${escHtml(fmtCompact(s.tokenCount))}</span>` +
+    `<span class="tlc tlc-cost" title="session cost">💰 ${escHtml(fmtMoney(s.cost_usd))}</span>`;
 }
 
 function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
