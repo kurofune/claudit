@@ -285,6 +285,10 @@ export function agentBar(item, scale) {
 // dropped and a step straddling it is truncated. A segment is tinted 'error'
 // when any tool in its step failed. x already includes chartX and each segment
 // carries the step's refKey, so a click selects that turn in the drawer.
+// durationMs is the segment's VISUAL span (end - start after any playhead clamp),
+// not step.duration_ms — so the last step (raw duration 0, stretched to effEnd)
+// and a truncated straddler both report the wall-clock the rendered width depicts,
+// which is what an inline label reads off (see fitSegmentLabel).
 export function stepSegments(agent, opts = {}) {
   const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
   const steps = (agent && agent.steps) || [];
@@ -308,9 +312,46 @@ export function stepSegments(agent, opts = {}) {
       refKey: refKey({ sessionId, agentIndex, stepIndex: k }),
       status: hasErr ? 'error' : '',
       cost_usd: (step && step.cost_usd) || 0,
+      durationMs: end - start,
     });
   }
   return segs;
+}
+
+// fitSegmentLabel picks the richest inline label that fits inside a timeline
+// segment `width` px wide: "<dur> · <cost>" when both fit, else just "<dur>"
+// when that fits, else '' (the segment is too narrow → stay tooltip-only). The
+// caller pre-formats durText (via formatElapsed) and costText (via fmtMoney);
+// costText '' means "no cost worth showing", so only the duration is considered.
+// charW is the approximate px per glyph at the segment font size and padX the
+// breathing room reserved on each side — both tunable so the view can match its
+// actual CSS without this module touching the DOM.
+export function fitSegmentLabel(width, durText, costText, opts = {}) {
+  const { charW = 6, padX = 4 } = opts;
+  const avail = width - padX * 2;
+  const fits = s => s.length * charW <= avail;
+  if (costText) {
+    const both = `${durText} · ${costText}`;
+    if (fits(both)) return both;
+  }
+  if (durText && fits(durText)) return durText;
+  return '';
+}
+
+// costHeat maps a segment's cost to a 0..1 intensity RELATIVE to maxCost — the
+// cost-heat ramp the Timeline tints segments with so an expensive turn stands
+// out against its session's other turns. 0 is coolest (a free turn, or a session
+// with no costed turns at all); 1 is the most expensive turn in view. The gamma
+// shapes the ramp: gamma > 1 holds cheap turns cool so only the genuinely
+// expensive ones light up (cost is long-tailed, so a linear ramp would wash
+// everything mid-bright). The caller feeds the result to an inline CSS var.
+export function costHeat(cost, maxCost, opts = {}) {
+  const { gamma = 2 } = opts;
+  const c = cost > 0 ? cost : 0;
+  const max = maxCost > 0 ? maxCost : 0;
+  if (max <= 0 || c <= 0) return 0;
+  const frac = Math.min(1, c / max);
+  return frac ** gamma;
 }
 
 // agentElapsedMs returns how long an agent has been active. A running

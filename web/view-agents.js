@@ -35,6 +35,7 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats,
+  fitSegmentLabel, costHeat,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -1586,7 +1587,14 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   const playhead = showHead
     ? `<line class="tl-playhead" x1="${tl.playheadX.toFixed(1)}" y1="0" x2="${tl.playheadX.toFixed(1)}" y2="${tl.height}"/>` : '';
   const agents = flattenSession(session);
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex]));
+  // The cost-heat ramp normalizes per session: the priciest turn anywhere in
+  // this card is the hottest, so a click-target turn "stands out" relative to
+  // its own trace rather than to some other session's spend.
+  let maxSegCost = 0;
+  for (const r of tl.rows) for (const s of (r.segments || [])) {
+    if (s.cost_usd > maxSegCost) maxSegCost = s.cost_usd;
+  }
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
@@ -1617,7 +1625,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
 // is-selected / is-new / tl-pending classes so state shows on both sides of the
 // freeze line. A row's phase comes from the playhead: 'active' draws the pulse
 // at the (clamped) bar end, 'pending' ghosts the label (the bar is zero-width).
-function timelineRowHTML(r, tl, selAgentKey, seen, next, agent) {
+function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
@@ -1640,13 +1648,30 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent) {
   // has segments the lifetime bar drops to a faint rail behind them (.has-segs);
   // a row with no timed steps (older data, or a run before its first turn) keeps
   // the solid bar so it never looks empty.
+  // Each turn segment encodes time as width (Phase 1), now also cost as fill
+  // intensity (a per-session heat ramp) and — on wide-enough segments — its
+  // duration (and cost, when there's room) as an inline label. A segment that
+  // hit a tool error stays red and skips the heat var so error always wins the
+  // fill; the label still rides on top. Narrow segments carry no label and read
+  // by width + tint + tooltip alone, so the row never crowds.
   const segs = r.segments || [];
   const hasSegs = segs.length ? ' has-segs' : '';
+  const segLabelY = (barY + barH / 2 + 3).toFixed(1);
   const segHTML = segs.map(s => {
     const ssel = s.refKey === selectedRef ? ' is-selected' : '';
-    const serr = s.status === 'error' ? ' is-error' : '';
-    const tip = `Turn ${s.stepIndex + 1}${s.cost_usd ? ` · ${fmtMoney(s.cost_usd)}` : ''}`;
-    return `<rect class="tl-seg${serr}${ssel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+    const isErr = s.status === 'error';
+    const serr = isErr ? ' is-error' : '';
+    const costText = s.cost_usd ? fmtMoney(s.cost_usd) : '';
+    const tip = `Turn ${s.stepIndex + 1} · ${formatElapsed(s.durationMs)}${costText ? ` · ${costText}` : ''}`;
+    const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
+    const rect = `<rect class="tl-seg${serr}${ssel}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+    // Inline label: the richest of "dur · cost" / "dur" that fits the segment
+    // width; '' when too narrow. pointer-events:none keeps the click on the rect.
+    const text = fitSegmentLabel(s.w, formatElapsed(s.durationMs), costText);
+    const label = text
+      ? `<text class="tl-seg-label" x="${(s.x + s.w / 2).toFixed(1)}" y="${segLabelY}">${escHtml(text)}</text>`
+      : '';
+    return rect + label;
   }).join('');
   const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}`;
   const meta = r.phase === 'pending' ? 'not started yet'

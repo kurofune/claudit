@@ -27,6 +27,8 @@ import {
   timelineBounds,
   buildTimeline,
   stepSegments,
+  fitSegmentLabel,
+  costHeat,
   agentPhaseAt,
   playheadBounds,
   playheadStats,
@@ -1203,13 +1205,13 @@ test('stepSegments lays out each timed step as a segment on the scale', () => {
     scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
   });
   assert.equal(segs.length, 2);
-  // step0: 0..400 → x 100, w 120
+  // step0: 0..400 → x 100, w 120, span 400ms
   assert.deepEqual(segs[0], {
-    x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01,
+    x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400,
   });
-  // step1 (duration 0) extends to effEnd 1000: 400..1000 → x 220, w 180
+  // step1 (duration 0) extends to effEnd 1000: 400..1000 → x 220, w 180, span 600ms
   assert.deepEqual(segs[1], {
-    x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02,
+    x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600,
   });
 });
 
@@ -1250,6 +1252,22 @@ test('stepSegments returns [] for an agent with no steps', () => {
   }), []);
 });
 
+test('stepSegments carries each segment\'s visual span (end-start) as durationMs', () => {
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      { timestamp: 0, duration_ms: 400, cost_usd: 0.01, tools: [] },
+      { timestamp: 400, duration_ms: 0, cost_usd: 0.02, tools: [] },
+    ],
+  };
+  const segs = stepSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  // step0 spans 0..400; step1 (duration 0) stretches to effEnd 1000 → 400..1000.
+  assert.equal(segs[0].durationMs, 400);
+  assert.equal(segs[1].durationMs, 600);
+});
+
 test('buildTimeline attaches per-turn segments to each row', () => {
   const session = {
     session_id: 's1',
@@ -1267,8 +1285,8 @@ test('buildTimeline attaches per-turn segments to each row', () => {
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
   });
   assert.deepEqual(layout.rows[0].segments, [
-    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01 },
-    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02 },
+    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400 },
+    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600 },
   ]);
 });
 
@@ -1295,8 +1313,52 @@ test('timelineAtTime clamps segments to the playhead (after T dropped, straddlin
   assert.equal(t.rows[0].segments[0].x, 100);
   assert.equal(t.rows[0].segments[0].w, 90);
   assert.equal(t.rows[0].segments[0].stepIndex, 0);
+  // durationMs follows the clamp: step0's 0..400 span truncated to 0..300 → 300ms.
+  assert.equal(t.rows[0].segments[0].durationMs, 300);
   // child pending at T=300 (starts 600): no segments.
   assert.deepEqual(t.rows[1].segments, []);
+});
+
+// ── fitSegmentLabel (inline segment labels) ─────────────────────────
+// charW 6, padX 4 → a W-wide segment fits floor((W - 8) / 6) glyphs.
+
+test('fitSegmentLabel returns "dur · cost" when both fit the width', () => {
+  // "5s · $0.20" is 10 chars → needs 8 + 60 = 68px; give it 80.
+  assert.equal(fitSegmentLabel(80, '5s', '$0.20'), '5s · $0.20');
+});
+
+test('fitSegmentLabel falls back to the duration when only it fits', () => {
+  // 30px: avail 22 fits "5s" (12px) but not the 10-char combined label (60px).
+  assert.equal(fitSegmentLabel(30, '5s', '$0.20'), '5s');
+});
+
+test('fitSegmentLabel returns "" when even the duration does not fit', () => {
+  // 10px: avail 2 fits nothing → stay tooltip-only.
+  assert.equal(fitSegmentLabel(10, '5s', '$0.20'), '');
+});
+
+test('fitSegmentLabel ignores an empty cost, showing the duration alone', () => {
+  // A free turn (costText '') on a wide segment shows just the duration.
+  assert.equal(fitSegmentLabel(80, '5s', ''), '5s');
+});
+
+// ── costHeat (segment cost ramp) ─────────────────────────────────────
+
+test('costHeat is 0 when there is no cost or no max', () => {
+  assert.equal(costHeat(0, 5), 0);     // a free turn is coolest
+  assert.equal(costHeat(2, 0), 0);     // nothing has cost → no ramp
+  assert.equal(costHeat(-1, 5), 0);    // negative cost guarded
+});
+
+test('costHeat is 1 for the most expensive turn (at the max)', () => {
+  assert.equal(costHeat(5, 5), 1);
+  // costs above the max (shouldn\'t happen) clamp to 1, not beyond.
+  assert.equal(costHeat(8, 5), 1);
+});
+
+test('costHeat gamma keeps a mid-cost turn cool (ratio 0.5, gamma 2 → 0.25)', () => {
+  assert.equal(costHeat(5, 10), 0.25);
+  assert.equal(costHeat(5, 10, { gamma: 1 }), 0.5); // linear ramp when gamma 1
 });
 
 // ── filterTrace / specActive (Phase 2 — trace filter) ────────────────

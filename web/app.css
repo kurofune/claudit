@@ -2620,17 +2620,32 @@
      turn is the current selection. Each is individually clickable. */
   .tl-row.has-segs .tl-bar { fill: color-mix(in oklch, var(--ink) 6%, transparent); stroke: var(--border); }
   .tl-row.has-segs.tl-main .tl-bar { fill: color-mix(in oklch, var(--accent) 9%, transparent); }
+  /* Fill is one ramp: the kind sets the HUE (--seg-hot), the inline --seg-heat
+     (0..1, the per-session cost intensity from costHeat) sets how vivid it is —
+     so a cheap turn recedes toward the surface and an expensive one saturates,
+     without changing hue (kind identity survives). Error overrides the fill at
+     higher specificity, so a failed turn is red whatever its cost. */
   .tl-seg {
-    fill: var(--surface-3, var(--surface-2));
+    --seg-hot: var(--ink);
+    fill: color-mix(in oklch, var(--seg-hot) calc(var(--seg-heat, 0) * 44% + 30%), var(--surface));
     stroke: var(--surface); stroke-width: 0.5;
     cursor: pointer; transition: fill 0.12s ease, stroke 0.12s ease;
   }
-  .tl-main .tl-seg { fill: color-mix(in oklch, var(--accent) 48%, var(--surface)); }
-  .tl-sub .tl-seg { fill: color-mix(in oklch, var(--ink) 30%, var(--surface)); }
-  .tl-row.is-running .tl-seg { fill: color-mix(in oklch, var(--accent-2) 42%, var(--surface)); }
+  .tl-main .tl-seg { --seg-hot: var(--accent); }
+  .tl-sub .tl-seg { --seg-hot: var(--ink); }
+  .tl-row.is-running .tl-seg { --seg-hot: var(--accent-2); }
   .tl-seg:hover { filter: brightness(1.15); }
   .tl-seg.is-error { fill: var(--danger, #e5484d); stroke: color-mix(in oklch, var(--danger, #e5484d) 50%, var(--surface)); }
   .tl-seg.is-selected { stroke: var(--accent); stroke-width: 1.5; }
+  /* Inline duration/cost label on wide-enough segments. A surface-colored halo
+     (paint-order:stroke) keeps it legible whether the segment fill is faded
+     (cheap) or vivid (expensive); pointer-events:none so clicks hit the rect. */
+  .tl-seg-label {
+    font-family: var(--font-mono); font-size: 9px;
+    fill: var(--ink); text-anchor: middle; dominant-baseline: alphabetic;
+    pointer-events: none;
+    paint-order: stroke; stroke: var(--surface); stroke-width: 2px; stroke-linejoin: round;
+  }
   .tl-pulse { fill: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
   /* Red error pip on a bar whose agent hit ≥1 tool error — a thin surface ring
      keeps it legible on both the accent-soft (main) and plain (sub) bar fills. */
