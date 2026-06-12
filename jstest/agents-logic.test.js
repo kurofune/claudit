@@ -39,6 +39,7 @@ import {
   conversationSessionList,
   clampConvSidebarWidth,
   clampTreeWidth,
+  clampDrawerWidth,
   orderTreeSessions,
   treeFollowMode,
 } from '../web/agents-logic.js';
@@ -1582,6 +1583,35 @@ test('clampTreeWidth returns DEFAULT 320 for non-finite input', () => {
 test('clampTreeWidth rounds a fractional in-range value', () => {
   assert.equal(clampTreeWidth(400.6), 401);
   assert.equal(clampTreeWidth(400.4), 400);
+});
+
+// ── clampDrawerWidth ────────────────────────────────────────────────
+// On the Feed/Timeline lenses the detail drawer is the fixed-width RIGHT
+// column (the lens flexes); dragging the handle resizes that drawer,
+// clamped by clampDrawerWidth. Same contract as the other width clamps.
+test('clampDrawerWidth passes an in-range value through, rounded', () => {
+  assert.equal(clampDrawerWidth(420), 420);
+});
+
+test('clampDrawerWidth clamps a value below MIN to 280', () => {
+  assert.equal(clampDrawerWidth(100), 280);
+});
+
+test('clampDrawerWidth clamps a value above MAX to 640', () => {
+  assert.equal(clampDrawerWidth(9999), 640);
+});
+
+test('clampDrawerWidth returns DEFAULT 360 for non-finite input', () => {
+  assert.equal(clampDrawerWidth(NaN), 360);
+  assert.equal(clampDrawerWidth(undefined), 360);
+  assert.equal(clampDrawerWidth(null), 360);
+  assert.equal(clampDrawerWidth(Infinity), 360);
+  assert.equal(clampDrawerWidth('wide'), 360);
+});
+
+test('clampDrawerWidth rounds a fractional in-range value', () => {
+  assert.equal(clampDrawerWidth(400.6), 401);
+  assert.equal(clampDrawerWidth(400.4), 400);
 });
 
 // ── orderTreeSessions ───────────────────────────────────────────────

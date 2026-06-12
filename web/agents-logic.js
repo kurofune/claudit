@@ -159,6 +159,17 @@ export function clampTreeWidth(px) {
   return Math.round(Math.max(MIN, Math.min(MAX, n)));
 }
 
+// clampDrawerWidth bounds the detail drawer on the Feed/Timeline lenses: there
+// the drawer is the fixed-width RIGHT column (the lens flexes to fill the rest)
+// and the handle between them resizes it. Same contract as the rail clamps —
+// finite px clamped to [MIN, MAX] and rounded; non-finite falls back to DEFAULT.
+export function clampDrawerWidth(px) {
+  const MIN = 280, MAX = 640, DEFAULT = 360;
+  const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
+  if (!Number.isFinite(n)) return DEFAULT;
+  return Math.round(Math.max(MIN, Math.min(MAX, n)));
+}
+
 // orderTreeSessions reorders the natural (newest-first) session list to a
 // frozen display order, so a live tick can't reshuffle rows under a user who's
 // mid-read. `frozenOrderIds` null ⇒ no freeze, return the list as-is. Otherwise
@@ -1002,7 +1013,7 @@ export function detectRetries(agent) {
     (step.tools || []).forEach((tool, ti) => {
       if (!tool) return;
       const coord = `${si}:${ti}`;
-      const groupKey = `${tool.kind || ''} ${tool.name || ''} ${tool.detail || ''}`;
+      const groupKey = `${tool.kind || ''}\u0000${tool.name || ''}\u0000${tool.detail || ''}`;
       let g = groups.get(groupKey);
       if (!g) {
         g = { firstRef: coord, count: 0, sawError: false };

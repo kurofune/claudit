@@ -41,6 +41,7 @@ import {
   conversationSessionList,
   clampConvSidebarWidth,
   clampTreeWidth,
+  clampDrawerWidth,
   orderTreeSessions,
   treeFollowMode,
 } from './agents-logic.js';
@@ -83,6 +84,7 @@ const SHELL = `
   <div class="trace-filter" data-trace-filter role="search" aria-label="Filter this trace"></div>
 
   <div class="agents-body">
+    <section class="agents-active" data-active-band aria-label="Agents running now" hidden></section>
     <div class="agents-lens">
       <div class="subview is-active" data-subview="feed"></div>
       <div class="subview" data-subview="tree"></div>
@@ -179,6 +181,26 @@ function setTreeWidth(px) {
   treeW = clampTreeWidth(px);
   try { localStorage.setItem(TREE_KEY, String(treeW)); } catch { /* private mode */ }
   return treeW;
+}
+
+// On the Feed/Timeline lenses the detail drawer is the opposite of the Tree
+// rail: a fixed-width RIGHT column (the lens flexes to fill the rest) that the
+// handle between them resizes. Its width is clamped + persisted like the rail
+// so it survives reloads, lens switches, and live re-renders.
+const DRAWER_KEY = 'claudit.agents.drawerW';
+let drawerW = null;
+function drawerWidth() {
+  if (drawerW == null) {
+    let stored = null;
+    try { stored = localStorage.getItem(DRAWER_KEY); } catch { /* private mode */ }
+    drawerW = clampDrawerWidth(stored);
+  }
+  return drawerW;
+}
+function setDrawerWidth(px) {
+  drawerW = clampDrawerWidth(px);
+  try { localStorage.setItem(DRAWER_KEY, String(drawerW)); } catch { /* private mode */ }
+  return drawerW;
 }
 
 const colorSlot = i => ((i % 5) + 1);
@@ -295,8 +317,8 @@ function activateSub(container, sub) {
   // detail drawer (the thread IS the detail), so it gets the full body width.
   const body = container.querySelector('.agents-body');
   if (body) {
+    body.dataset.lens = sub;
     body.classList.toggle('is-no-drawer', sub === 'conversation');
-    body.classList.toggle('is-tree', sub === 'tree');
   }
   applyBodyLayout(container);
 }
@@ -310,9 +332,23 @@ function activateSub(container, sub) {
 function applyBodyLayout(container) {
   const body = container.querySelector('.agents-body');
   if (!body) return;
-  if (body.classList.contains('is-no-drawer')) body.style.gridTemplateColumns = 'minmax(0, 1fr)';
-  else if (body.classList.contains('is-tree')) body.style.gridTemplateColumns = `${treeWidth()}px 6px minmax(0, 1fr)`;
-  else body.style.gridTemplateColumns = 'minmax(0, 1fr) 360px';
+  const lens = body.dataset.lens || 'feed';
+  if (lens === 'conversation') {
+    // No shared drawer: the conversation thread reclaims the full width.
+    body.style.gridTemplateColumns = 'minmax(0, 1fr)';
+    body.style.gridTemplateAreas = '"lens"';
+  } else if (lens === 'tree') {
+    // Fixed left RAIL (resizable) with the drawer flexing to fill the rest.
+    body.style.gridTemplateColumns = `${treeWidth()}px 6px minmax(0, 1fr)`;
+    body.style.gridTemplateAreas = '"lens resize drawer"';
+  } else {
+    // Feed/Timeline: a wide lens with the drawer as a fixed RIGHT column the
+    // handle resizes. Feed alone carries the full-width Active-now band on top.
+    body.style.gridTemplateColumns = `minmax(0, 1fr) 6px ${drawerWidth()}px`;
+    body.style.gridTemplateAreas = lens === 'feed'
+      ? '"active active active" "lens resize drawer"'
+      : '"lens resize drawer"';
+  }
 }
 
 // renderActive draws the active lens from lastGraph. preserve=true keeps
@@ -334,6 +370,14 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   else if (activeSub === 'timeline') host.innerHTML = renderTimeline(sessions);
   else if (activeSub === 'conversation') host.innerHTML = renderConversation(sessions);
   if (memo) restoreState(host, memo);
+  // The "Active now" band is a full-width row above the feed|drawer split, so it
+  // lives outside the lens host — paint it only on the Feed lens, hide it (and
+  // collapse its grid row) on the others.
+  const band = container.querySelector('[data-active-band]');
+  if (band) {
+    band.hidden = activeSub !== 'feed';
+    band.innerHTML = activeSub === 'feed' ? renderActiveBand(sessions) : '';
+  }
   // The Gantt's horizontal scroll (live-edge follow + restored history offset)
   // can only be set on real DOM, so it runs after innerHTML is in place.
   if (activeSub === 'timeline') syncTimelineScroll(container);
@@ -421,13 +465,28 @@ function wireSelection(container) {
     // collapse. `toggle` doesn't bubble, so catch it in the capture phase.
     lens.addEventListener('toggle', onTreeToggle, true);
   }
+  // The "Active now" band sits outside .agents-lens (it spans the full body
+  // width above the split), so its cards don't reach the lens click delegate —
+  // give it its own, routing card clicks/keys to the same shared selection.
+  const band = container.querySelector('[data-active-band]');
+  if (band) {
+    band.addEventListener('click', e => {
+      const el = e.target.closest('[data-ref]');
+      if (el) select(container, el.dataset.ref);
+    });
+    band.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const el = e.target.closest('[data-ref]');
+      if (el) { e.preventDefault(); select(container, el.dataset.ref); }
+    });
+  }
   // The lens|drawer split handle lives in .agents-body, outside the lens, so its
   // drag is wired on the body wrapper (which is stable across lens re-renders).
   const body = container.querySelector('.agents-body');
   if (body) {
     body.addEventListener('mousedown', e => {
       const handle = e.target.closest('[data-agents-resize]');
-      if (handle) { e.preventDefault(); startTreeResize(container, e.clientX); }
+      if (handle) { e.preventDefault(); startSplitResize(container, e.clientX); }
     });
   }
   const drawer = container.querySelector('.agents-drawer');
@@ -507,28 +566,44 @@ function startConvResize(container, startX) {
   document.addEventListener('mouseup', onUp);
 }
 
-// startTreeResize drives the tree-rail|drawer split. The handle sits to the
-// RIGHT of the rail, so dragging it right widens the rail (and shrinks the
-// detail pane), dragging left does the reverse. It re-sizes the live grid track
-// directly during the drag (smooth, no re-render) and persists on release.
-function startTreeResize(container, startX) {
+// startSplitResize drives the lens|drawer split handle. Its meaning flips by
+// lens: on the Tree lens the LEFT pane is a fixed rail (drag widens the rail,
+// shrinks the drawer); on Feed/Timeline the RIGHT pane is the fixed drawer (drag
+// LEFT widens the drawer, shrinks the lens). Either way it re-sizes the live
+// grid track during the drag (smooth, no re-render) and persists on release.
+function startSplitResize(container, startX) {
   const body = container.querySelector('.agents-body');
   const lens = container.querySelector('.agents-lens');
+  const drawer = container.querySelector('.agents-drawer');
   if (!body || !lens) return;
-  const startW = lens.getBoundingClientRect().width;
+  const isTree = (body.dataset.lens || '') === 'tree';
+  const hasBand = (body.dataset.lens || '') === 'feed';
+  const areas = hasBand ? '"active active active" "lens resize drawer"' : '"lens resize drawer"';
   document.body.style.cursor = 'col-resize';
   document.body.style.userSelect = 'none';
-  const onMove = e => {
-    const w = clampTreeWidth(startW + (e.clientX - startX));
-    treeW = w;
-    body.style.gridTemplateColumns = `${w}px 6px minmax(0, 1fr)`;
-  };
+  let onMove;
+  if (isTree) {
+    const startW = lens.getBoundingClientRect().width;
+    onMove = e => {
+      treeW = clampTreeWidth(startW + (e.clientX - startX));
+      body.style.gridTemplateColumns = `${treeW}px 6px minmax(0, 1fr)`;
+    };
+  } else {
+    const startW = drawer ? drawer.getBoundingClientRect().width : drawerWidth();
+    onMove = e => {
+      // Drawer is on the right, so dragging the handle LEFT (negative dx) widens it.
+      drawerW = clampDrawerWidth(startW - (e.clientX - startX));
+      body.style.gridTemplateColumns = `minmax(0, 1fr) 6px ${drawerW}px`;
+      body.style.gridTemplateAreas = areas;
+    };
+  }
   const onUp = () => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    setTreeWidth(treeW);
+    if (isTree) setTreeWidth(treeW);
+    else setDrawerWidth(drawerW);
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
@@ -861,19 +936,22 @@ function drawerHTML(p, retry = null) {
     drMetric('steps', p.type === 'agent' && p.stepCount ? fmtNum(p.stepCount) : ''),
   ].filter(Boolean).join('');
 
-  // Sections vary by level so no row is dead weight:
-  //  - tool: Reasoning, Narration, then its own Input/Output (the only level
-  //    that has real tool I/O).
-  //  - step (turn): Reasoning, Narration, a Tools list (each row clicks through
-  //    to that tool's I/O), and the per-turn token breakdown — never the
+  // Sections vary by level so no row is dead weight. "Reasoning" is the turn's
+  // extended-thinking; "Message" is the assistant's prose for that turn (what it
+  // says between tool calls) — both inherited from the parent step.
+  //  - tool: Reasoning, Message, then its own Input/Output (the only level that
+  //    has real tool I/O).
+  //  - step (turn): Reasoning, Message, a Tools list (each row clicks through to
+  //    that tool's I/O), and the per-turn token breakdown — never the
   //    always-empty I/O rows a turn would otherwise show.
-  //  - agent: Reasoning/Narration (usually empty) plus the rolled-up tokens.
+  //  - agent: only the rolled-up tokens. An agent has no turn text of its own,
+  //    so Reasoning/Message would always be empty placeholders — omit them.
   // The skeleton order is stable so the layout never jumps between selections.
   let sections;
   if (p.type === 'tool') {
     sections = [
       drSection('Reasoning', p.thinking, true),
-      drSection('Narration', p.text, true),
+      drSection('Message', p.text, true),
       drIOSection('Input', p.input, 'input', p),
       drIOSection('Output', p.output, 'output', p),
       // A tool inherits its turn's tokens; drTokens self-collapses at 0.
@@ -882,16 +960,12 @@ function drawerHTML(p, retry = null) {
   } else if (p.type === 'step') {
     sections = [
       drSection('Reasoning', p.thinking, true),
-      drSection('Narration', p.text, true),
+      drSection('Message', p.text, true),
       drToolList(p.tools),
       drTokens(p.tokens),
     ].join('');
   } else {
-    sections = [
-      drSection('Reasoning', p.thinking, true),
-      drSection('Narration', p.text, true),
-      drTokens(p.tokens),
-    ].join('');
+    sections = drTokens(p.tokens);
   }
 
   return `<div class="dr">
@@ -1007,11 +1081,15 @@ function drTokens(t) {
 
 // ── Feed lens (formerly Mission Control) ────────────────────────────────────
 
-function renderControl(sessions) {
-  // Flatten to (session, agent, index) tuples so we can pull the live ones.
-  const all = [];
-  sessions.forEach(s => flattenSession(s).forEach((a, i) => all.push({ s, a, i })));
-  const live = all.filter(x => x.a && x.a.status === 'running');
+// renderActiveBand draws the "Active now" cards for the full-width band that
+// sits ABOVE the feed|drawer split (so the feed and the detail drawer align at
+// the top instead of the drawer floating up beside this short row). Lives in
+// .agents-active, painted only on the Feed lens; renderControl owns the feed.
+function renderActiveBand(sessions) {
+  const live = [];
+  sessions.forEach(s => flattenSession(s).forEach((a, i) => {
+    if (a && a.status === 'running') live.push({ s, a, i });
+  }));
 
   const activeHTML = live.length === 0
     ? `<div class="ac-idle">No agents running right now. The feed below is the recent history; it'll come alive the moment one starts.</div>`
@@ -1019,16 +1097,18 @@ function renderControl(sessions) {
       .sort((x, y) => agentElapsedMs(y.a, Date.now()) - agentElapsedMs(x.a, Date.now()))
       .map(x => activeCardHTML(x.s, x.a, x.i)).join('');
 
+  return `
+    <div class="mc-section-head"><span class="mc-dot-live"></span>Active now <span class="mc-count">${live.length}</span></div>
+    <div class="mc-active-grid">${activeHTML}</div>`;
+}
+
+function renderControl(sessions) {
   const feed = buildEventFeed(lastGraph, { limit: 250 });
   const feedHTML = feed.length === 0
     ? `<div class="ac-idle">No activity yet.</div>`
     : feed.map(feedRowHTML).join('');
 
   return `
-    <section class="mc-active">
-      <div class="mc-section-head"><span class="mc-dot-live"></span>Active now <span class="mc-count">${live.length}</span></div>
-      <div class="mc-active-grid">${activeHTML}</div>
-    </section>
     <section class="mc-feed">
       <div class="mc-section-head">Live feed <span class="mc-count">${feed.length}</span></div>
       <div class="agent-feed" tabindex="0">${feedHTML}</div>

@@ -2049,29 +2049,44 @@
      .agents-drawer is the single shared master-detail panel — clicking any
      row/card/node in any lens repaints it. The drawer sticks while the lens
      scrolls. Desktop-only, so a fixed-width drawer beside a wide lens is fine. */
+  /* Three named areas: a full-width "active" band on top (the Feed lens's
+     Active-now cards), then the lens | resize-handle | drawer split below. The
+     exact tracks/areas are set inline per lens by applyBodyLayout (the band row
+     only exists on Feed; Tree flips which side is the fixed rail); this is the
+     first-paint default. align-items:start lets the drawer stick as the lens
+     scrolls. */
   .agents-body {
-    display: grid; grid-template-columns: minmax(0, 1fr) 360px;
-    gap: var(--s-3); align-items: start;
+    display: grid; gap: var(--s-3); align-items: start;
+    grid-template-columns: minmax(0, 1fr) 6px 360px;
+    grid-template-areas: "active active active" "lens resize drawer";
   }
-  .agents-lens { min-width: 0; }
+  .agents-active { grid-area: active; min-width: 0; }
+  .agents-active[hidden] { display: none; }
+  .agents-lens { grid-area: lens; min-width: 0; }
   .agents-drawer {
+    grid-area: drawer;
     position: sticky; top: var(--s-3);
     max-height: 86vh; overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--r-lg);
     background: var(--surface-2); padding: var(--s-3);
   }
-  /* Drag handle between the tree rail and the detail drawer (data-agents-resize):
-     dragging it widens/narrows the rail. Only the Tree lens uses the resizable
-     rail layout, so the handle shows there alone — on Feed/Timeline it is hidden
-     and the 2-track grid skips it. Sticky so it tracks the (sticky) drawer. */
+  /* Drag handle for the lens|drawer split (data-agents-resize). On the Tree lens
+     it resizes the left rail; on Feed/Timeline it resizes the right drawer. Shown
+     on every lens that has a drawer (all but Conversation); sticky so it tracks
+     the (sticky) drawer. */
   .agents-resize { display: none; }
-  .agents-body.is-tree .agents-resize {
+  .agents-body[data-lens="tree"] .agents-resize,
+  .agents-body[data-lens="feed"] .agents-resize,
+  .agents-body[data-lens="timeline"] .agents-resize {
+    grid-area: resize;
     display: block; align-self: stretch; position: sticky; top: var(--s-3);
     height: 86vh; width: 6px; border-radius: var(--r-pill, 999px);
     cursor: col-resize; background: var(--border);
     transition: background 0.12s ease;
   }
-  .agents-body.is-tree .agents-resize:hover { background: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+  .agents-body[data-lens="tree"] .agents-resize:hover,
+  .agents-body[data-lens="feed"] .agents-resize:hover,
+  .agents-body[data-lens="timeline"] .agents-resize:hover { background: color-mix(in oklch, var(--accent) 50%, var(--border)); }
   /* The Conversation lens carries its own left session list and has no use for
      the shared detail drawer, so it reclaims the full body width. */
   .agents-body.is-no-drawer { grid-template-columns: minmax(0, 1fr); }
