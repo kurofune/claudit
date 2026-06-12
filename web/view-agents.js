@@ -144,6 +144,11 @@ let filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, min
 let filterBarBuilt = false;
 let hitIndex = -1;
 let currentHits = [];
+// Cached match Set from the last applyFilter (null when not filtering). The
+// Timeline's scrub repaint rebuilds ~19k segment nodes per animation frame and
+// re-dims them from THIS cache — a class-only pass — instead of re-running the
+// full-graph filterTrace walk every frame.
+let filterMatchSet = null;
 
 // Conversation lens: the session list on the left is drag-resizable. Width is
 // clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
@@ -643,10 +648,12 @@ function copyText(text, btn) {
 
 const FILTER_KIND_ORDER = ['agent', 'edit', 'exec', 'read', 'web', 'skill', 'mcp', 'command', 'todo', 'other'];
 
-// The trace filter dims + steps through per-ref rows, which only the Feed and
-// Tree lenses lay out. Timeline (a Gantt) and Conversation (a thread) have no
-// such rows to act on, so the bar is hidden — and filtering not applied — there.
-const FILTER_LENSES = new Set(['feed', 'tree']);
+// The trace filter dims + steps through per-ref rows. Feed and Tree lay them out
+// directly; the Timeline's agent bars and turn segments also carry data-ref, so
+// the same dim-walk collapses the Gantt to matches (e.g. failures only). Only
+// Conversation (a thread) has no such rows, so the bar is hidden — and filtering
+// not applied — there.
+const FILTER_LENSES = new Set(['feed', 'tree', 'timeline']);
 function lensHasFilter(sub) { return FILTER_LENSES.has(sub); }
 
 // presentKinds lists the kinds that actually occur in the graph, in canonical
@@ -706,17 +713,24 @@ function readSpec(container) {
 // Called after each (re)render so live updates and lens switches keep dimming.
 function applyFilter(container) {
   const active = specActive(filterSpec) && lensHasFilter(activeSub);
-  const matchSet = active ? filterTrace(lastGraph, filterSpec) : null;
+  filterMatchSet = active ? filterTrace(lastGraph, filterSpec) : null;
   const lens = container.querySelector('.agents-lens');
   if (lens) {
     lens.classList.toggle('is-filtering', active);
-    lens.querySelectorAll('[data-ref]').forEach(el => {
-      el.classList.toggle('is-dimmed', active && !(matchSet && matchSet.has(el.dataset.ref)));
-    });
+    dimNodes(lens, filterMatchSet);
   }
-  currentHits = matchSet ? matchHits(matchSet) : [];
+  currentHits = filterMatchSet ? matchHits(filterMatchSet) : [];
   if (hitIndex >= currentHits.length) hitIndex = -1;
   updateFilterResult(container);
+}
+
+// dimNodes toggles is-dimmed on every [data-ref] under root against a match Set
+// (null = not filtering → clears dimming). Class-only, no filterTrace recompute,
+// so the Timeline's per-frame scrub repaint can re-dim its fresh nodes cheaply.
+function dimNodes(root, matchSet) {
+  root.querySelectorAll('[data-ref]').forEach(el => {
+    el.classList.toggle('is-dimmed', !!matchSet && !matchSet.has(el.dataset.ref));
+  });
 }
 
 // matchHits is the ordered list of "deepest" matched refs — a matched ref with
@@ -1791,6 +1805,10 @@ function renderScrub(container) {
     const memo = captureState(lensHost);
     host.innerHTML = renderTimelineSessions(sessions, Date.now(), T);
     restoreState(lensHost, memo);
+    // The repaint replaced the row/segment nodes with fresh, undimmed ones; re-
+    // apply the cached filter dimming (class-only, no recompute) so it survives
+    // the scrub. is-filtering lives on the parent .agents-lens, untouched here.
+    if (filterMatchSet) dimNodes(host, filterMatchSet);
   }
   const clock = container.querySelector('[data-tlclock]');
   if (clock) clock.textContent = clockTime(T);
