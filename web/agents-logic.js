@@ -276,6 +276,43 @@ export function agentBar(item, scale) {
   return { x, width: Math.max(scale.minBlock, raw), lane: item.lane };
 }
 
+// stepSegments computes the per-turn sub-segments that tile an agent's bar:
+// one rect per timed step, placed on the shared time scale. A step's timestamp
+// is its start; its duration_ms (the wall-clock gap to the next step) is its
+// width, and the final step (duration_ms 0) stretches to the agent's effEnd so
+// the segments tile [firstStep … end]. `until` caps segment ends at the
+// playhead T (default: no cap, i.e. effEnd) — a step starting after the cap is
+// dropped and a step straddling it is truncated. A segment is tinted 'error'
+// when any tool in its step failed. x already includes chartX and each segment
+// carries the step's refKey, so a click selects that turn in the drawer.
+export function stepSegments(agent, opts = {}) {
+  const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
+  const steps = (agent && agent.steps) || [];
+  const cap = until == null ? effEnd : until;
+  const segs = [];
+  for (let k = 0; k < steps.length; k++) {
+    const step = steps[k];
+    const start = parseTime(step && step.timestamp);
+    if (Number.isNaN(start)) continue;
+    if (cap != null && start > cap) continue;
+    const dur = (step && step.duration_ms) || 0;
+    let end = dur > 0 ? start + dur : effEnd;
+    if (Number.isNaN(end) || end < start) end = start;
+    if (cap != null && end > cap) end = cap;
+    const bar = agentBar({ start, end }, scale);
+    const hasErr = ((step && step.tools) || []).some(t => t && t.status === 'error');
+    segs.push({
+      x: chartX + bar.x,
+      w: bar.width,
+      stepIndex: k,
+      refKey: refKey({ sessionId, agentIndex, stepIndex: k }),
+      status: hasErr ? 'error' : '',
+      cost_usd: (step && step.cost_usd) || 0,
+    });
+  }
+  return segs;
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.
@@ -511,6 +548,7 @@ export function buildTimeline(session, opts = {}) {
       x: chartX + bar.x, w: bar.width,
       y: axisH + i * rowH, h: rowH,
       labelX: pad + d * indent,
+      segments: stepSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
     };
   });
 
@@ -555,11 +593,12 @@ export function timelineAtTime(session, T, opts = {}) {
     startMs: base.startMs, endMs: base.endMs, width: base.chartW, minBlock,
   });
   const agents = flattenSession(session);
+  const nowMs = opts.nowMs || 0;
   const rows = agents.map((a, i) => {
     const start = parseTime(a.started_at);
     const phase = agentPhaseAt(a, T);
     if (phase === 'pending') {
-      return { ...base.rows[i], w: 0, phase: 'pending', running: false };
+      return { ...base.rows[i], w: 0, phase: 'pending', running: false, segments: [] };
     }
     let clampEnd;
     if (phase === 'active') {
@@ -569,7 +608,14 @@ export function timelineAtTime(session, T, opts = {}) {
       clampEnd = (Number.isNaN(end) || end < start) ? start : end;
     }
     const bar = agentBar({ start, end: clampEnd, lane: 0 }, scale);
-    return { ...base.rows[i], w: bar.width, phase, running: phase === 'active' };
+    const effEnd = a.status === 'running'
+      ? nowMs
+      : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
+    const segments = stepSegments(a, {
+      scale, chartX: base.chartX, sessionId: base.sessionId,
+      agentIndex: i, effEnd, until: clampEnd,
+    });
+    return { ...base.rows[i], w: bar.width, phase, running: phase === 'active', segments };
   });
   const playheadX = T < base.startMs ? null : base.chartX + scale.x(T);
   return { ...base, rows, playheadX, atMs: T };

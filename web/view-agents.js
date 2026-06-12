@@ -320,6 +320,8 @@ function activateSub(container, sub) {
     body.dataset.lens = sub;
     body.classList.toggle('is-no-drawer', sub === 'conversation');
   }
+  const bar = container.querySelector('[data-trace-filter]');
+  if (bar) bar.hidden = !lensHasFilter(sub);
   applyBodyLayout(container);
 }
 
@@ -640,6 +642,12 @@ function copyText(text, btn) {
 
 const FILTER_KIND_ORDER = ['agent', 'edit', 'exec', 'read', 'web', 'skill', 'mcp', 'command', 'todo', 'other'];
 
+// The trace filter dims + steps through per-ref rows, which only the Feed and
+// Tree lenses lay out. Timeline (a Gantt) and Conversation (a thread) have no
+// such rows to act on, so the bar is hidden — and filtering not applied — there.
+const FILTER_LENSES = new Set(['feed', 'tree']);
+function lensHasFilter(sub) { return FILTER_LENSES.has(sub); }
+
 // presentKinds lists the kinds that actually occur in the graph, in canonical
 // order — the chip row only offers kinds the user can act on.
 function presentKinds(graph) {
@@ -696,7 +704,7 @@ function readSpec(container) {
 // applyFilter recomputes the match set and dims every non-matching lens row.
 // Called after each (re)render so live updates and lens switches keep dimming.
 function applyFilter(container) {
-  const active = specActive(filterSpec);
+  const active = specActive(filterSpec) && lensHasFilter(activeSub);
   const matchSet = active ? filterTrace(lastGraph, filterSpec) : null;
   const lens = container.querySelector('.agents-lens');
   if (lens) {
@@ -1626,7 +1634,21 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent) {
   const errPip = errs > 0 && r.phase !== 'pending'
     ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
     : '';
-  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}`;
+  // Per-turn segments tile the bar on the time axis — each carries its step's
+  // refKey, so a click selects that turn in the drawer (the bar/rowbg under them
+  // have no data-ref and fall through to selecting the whole agent). When a row
+  // has segments the lifetime bar drops to a faint rail behind them (.has-segs);
+  // a row with no timed steps (older data, or a run before its first turn) keeps
+  // the solid bar so it never looks empty.
+  const segs = r.segments || [];
+  const hasSegs = segs.length ? ' has-segs' : '';
+  const segHTML = segs.map(s => {
+    const ssel = s.refKey === selectedRef ? ' is-selected' : '';
+    const serr = s.status === 'error' ? ' is-error' : '';
+    const tip = `Turn ${s.stepIndex + 1}${s.cost_usd ? ` · ${fmtMoney(s.cost_usd)}` : ''}`;
+    return `<rect class="tl-seg${serr}${ssel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+  }).join('');
+  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}`;
   const meta = r.phase === 'pending' ? 'not started yet'
     : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
   const labelY = (r.y + r.h / 2 + 4).toFixed(1);
@@ -1641,6 +1663,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent) {
     <rect class="tl-bar" x="${r.x.toFixed(1)}" y="${barY}" width="${r.w.toFixed(1)}" height="${barH}" rx="3">
       <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
     </rect>
+    ${segHTML}
     ${r.running ? `<circle class="tl-pulse" cx="${cx}" cy="${cy}" r="3.5"/>` : ''}
   </g>`;
   return { gutter, chart };

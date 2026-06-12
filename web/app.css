@@ -1973,6 +1973,9 @@
     background: var(--surface-2); font-size: var(--t-2);
   }
   .trace-filter:empty { display: none; }
+  /* Hidden on lenses without per-ref rows to filter (Timeline, Conversation);
+     class-specificity display:flex above would otherwise beat the UA [hidden]. */
+  .trace-filter[hidden] { display: none; }
   .tf-text {
     flex: 1 1 240px; min-width: 180px;
     padding: 5px var(--s-2); border: 1px solid var(--border); border-radius: var(--r-sm);
@@ -2610,6 +2613,24 @@
   .tl-row.is-running .tl-bar { fill: color-mix(in oklch, var(--accent-2) 22%, var(--surface)); stroke: var(--accent-2); }
   .tl-row.is-selected .tl-bar { stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 1px 3px color-mix(in oklch, var(--accent) 30%, transparent)); }
   .tl-row:hover .tl-bar { stroke: var(--ink-2); }
+  /* Per-turn segments tile the bar on the time axis. When a row has them the
+     lifetime bar fades to a faint rail (so the lead-in gap before the first
+     turn still reads), and the segments are the foreground fill — colored by
+     agent kind, red on a turn that hit a tool error, accent-stroked when the
+     turn is the current selection. Each is individually clickable. */
+  .tl-row.has-segs .tl-bar { fill: color-mix(in oklch, var(--ink) 6%, transparent); stroke: var(--border); }
+  .tl-row.has-segs.tl-main .tl-bar { fill: color-mix(in oklch, var(--accent) 9%, transparent); }
+  .tl-seg {
+    fill: var(--surface-3, var(--surface-2));
+    stroke: var(--surface); stroke-width: 0.5;
+    cursor: pointer; transition: fill 0.12s ease, stroke 0.12s ease;
+  }
+  .tl-main .tl-seg { fill: color-mix(in oklch, var(--accent) 48%, var(--surface)); }
+  .tl-sub .tl-seg { fill: color-mix(in oklch, var(--ink) 30%, var(--surface)); }
+  .tl-row.is-running .tl-seg { fill: color-mix(in oklch, var(--accent-2) 42%, var(--surface)); }
+  .tl-seg:hover { filter: brightness(1.15); }
+  .tl-seg.is-error { fill: var(--danger, #e5484d); stroke: color-mix(in oklch, var(--danger, #e5484d) 50%, var(--surface)); }
+  .tl-seg.is-selected { stroke: var(--accent); stroke-width: 1.5; }
   .tl-pulse { fill: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
   /* Red error pip on a bar whose agent hit ≥1 tool error — a thin surface ring
      keeps it legible on both the accent-soft (main) and plain (sub) bar fills. */

@@ -26,6 +26,7 @@ import {
   looksTruncated,
   timelineBounds,
   buildTimeline,
+  stepSegments,
   agentPhaseAt,
   playheadBounds,
   playheadStats,
@@ -1184,6 +1185,118 @@ test('timelineAtTime: axis (chartX/contentW/ticks) is identical to buildTimeline
     assert.equal(t.endMs, base.endMs);
     assert.deepEqual(t.ticks, base.ticks);
   }
+});
+
+// ── stepSegments (per-turn timeline segments) ───────────────────────
+// scale maps [0,1000] → [0,300]px, so x(ts) = ts*0.3; chartX 100.
+const segScale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+
+test('stepSegments lays out each timed step as a segment on the scale', () => {
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      { timestamp: 0, duration_ms: 400, cost_usd: 0.01, tools: [] },
+      { timestamp: 400, duration_ms: 0, cost_usd: 0.02, tools: [{ status: 'ok' }] },
+    ],
+  };
+  const segs = stepSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  assert.equal(segs.length, 2);
+  // step0: 0..400 → x 100, w 120
+  assert.deepEqual(segs[0], {
+    x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01,
+  });
+  // step1 (duration 0) extends to effEnd 1000: 400..1000 → x 220, w 180
+  assert.deepEqual(segs[1], {
+    x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02,
+  });
+});
+
+test('stepSegments marks a segment error when any tool in its step failed', () => {
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      { timestamp: 0, duration_ms: 500, tools: [{ status: 'ok' }] },
+      { timestamp: 500, duration_ms: 0, tools: [{ status: 'ok' }, { status: 'error' }] },
+    ],
+  };
+  const segs = stepSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  assert.equal(segs[0].status, '');
+  assert.equal(segs[1].status, 'error');
+});
+
+test('stepSegments skips a step with an unparseable timestamp, keeping true stepIndex', () => {
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      { timestamp: 'not-a-time', duration_ms: 100, tools: [] },
+      { timestamp: 500, duration_ms: 0, tools: [] },
+    ],
+  };
+  const segs = stepSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].stepIndex, 1);
+  assert.equal(segs[0].refKey, 's1#0.1');
+});
+
+test('stepSegments returns [] for an agent with no steps', () => {
+  assert.deepEqual(stepSegments({ kind: 'main' }, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  }), []);
+});
+
+test('buildTimeline attaches per-turn segments to each row', () => {
+  const session = {
+    session_id: 's1',
+    main: {
+      kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+      steps: [
+        { timestamp: 0, duration_ms: 400, cost_usd: 0.01, tools: [] },
+        { timestamp: 400, duration_ms: 0, cost_usd: 0.02, tools: [] },
+      ],
+    },
+    children: [],
+  };
+  const layout = buildTimeline(session, {
+    hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+    minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+  });
+  assert.deepEqual(layout.rows[0].segments, [
+    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01 },
+    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02 },
+  ]);
+});
+
+test('timelineAtTime clamps segments to the playhead (after T dropped, straddling truncated, pending agent empty)', () => {
+  const session = {
+    session_id: 's1',
+    main: {
+      kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+      steps: [
+        { timestamp: 0, duration_ms: 400, tools: [] },
+        { timestamp: 400, duration_ms: 0, tools: [] },
+      ],
+    },
+    children: [
+      { kind: 'subagent', started_at: 600, status: 'running', steps: [{ timestamp: 600, duration_ms: 0, tools: [] }] },
+    ],
+  };
+  const t = timelineAtTime(session, 300, {
+    hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+    minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+  });
+  // main active at T=300: step0 (0..400) truncated to 0..300 (w 90); step1 (start 400) dropped.
+  assert.equal(t.rows[0].segments.length, 1);
+  assert.equal(t.rows[0].segments[0].x, 100);
+  assert.equal(t.rows[0].segments[0].w, 90);
+  assert.equal(t.rows[0].segments[0].stepIndex, 0);
+  // child pending at T=300 (starts 600): no segments.
+  assert.deepEqual(t.rows[1].segments, []);
 });
 
 // ── filterTrace / specActive (Phase 2 — trace filter) ────────────────
