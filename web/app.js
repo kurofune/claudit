@@ -18,6 +18,7 @@ import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 import { init as initThemes } from './themes.js';
+import { init as initTooltips } from './tooltip.js';
 
 const VIEW_PAINTERS = {
   overview: paintOverview,
@@ -66,6 +67,11 @@ wireDatePicker();
 // theme is already applied by the inline FOUC-prevention script in
 // index.html; init() just binds the popover.
 initThemes();
+
+// Custom tooltip popover — replaces native `title=` everywhere. init()
+// migrates existing title= → data-tooltip= and watches for nodes added by
+// later view re-renders, so the ~150 native call sites upgrade automatically.
+initTooltips();
 
 // Sidebar metric prefetch — fires the five non-overview sections in
 // parallel at startup so their nav-metric dashes resolve before the
