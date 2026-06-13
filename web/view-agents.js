@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries,
+  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -184,6 +184,9 @@ let filterMatchSet = null;
 // a safe default when the chosen scope/metric has nothing to show.
 let insightsScope = 'graph';
 let insightsMetric = 'cost';
+// Group-by panel: which dimension buckets the tool rows (kind / model / agent /
+// status). Clamps to 'kind' via INS_GROUP_DIMS when an unknown value sneaks in.
+let insightsGroupDim = 'kind';
 
 // Conversation lens: the session list on the left is drag-resizable. Width is
 // clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
@@ -493,6 +496,10 @@ function wireSelection(container) {
       if (insScope) { if (!insScope.disabled) { insightsScope = insScope.dataset.insScope; renderActive(container, false); } return; }
       const insMetric = e.target.closest('[data-ins-metric]');
       if (insMetric) { insightsMetric = insMetric.dataset.insMetric; renderActive(container, false); return; }
+      // The Group-by panel's dimension toggle re-buckets the tool rows — a pure
+      // re-render from lastGraph, like the scope/metric toggles.
+      const insGroupDim = e.target.closest('[data-ins-group-dim]');
+      if (insGroupDim) { insightsGroupDim = insGroupDim.dataset.insGroupDim; renderActive(container, false); return; }
       // A latency histogram bucket filters the trace to the kinds it holds and
       // jumps to the Timeline — Insights has no dimming of its own, so the filter
       // only "lands" on a filter-bearing lens.
@@ -507,6 +514,15 @@ function wireSelection(container) {
       // lens idiom. data-ins-kinds is empty for the "all errors" headline.
       const insErr = e.target.closest('[data-ins-err]');
       if (insErr) { applyErrorFilter(container, (insErr.dataset.insKinds || '').split(',').filter(Boolean)); return; }
+      // A Group-by row filters the trace where its dimension maps to one: a kind
+      // group pins that kind, the 'error' status group turns on errorsOnly — both
+      // routing to the Timeline (model/agent/ok rows aren't clickable).
+      const insGroup = e.target.closest('[data-ins-group]');
+      if (insGroup) {
+        if (insGroup.hasAttribute('data-ins-err')) applyErrorFilter(container, []);
+        else applyBucketFilter(container, (insGroup.dataset.insKinds || '').split(',').filter(Boolean));
+        return;
+      }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -544,6 +560,13 @@ function wireSelection(container) {
       if (cut) { e.preventDefault(); applyCostFilter(container, cut.dataset.insCostCut); return; }
       const err = e.target.closest('[data-ins-err]');
       if (err) { e.preventDefault(); applyErrorFilter(container, (err.dataset.insKinds || '').split(',').filter(Boolean)); return; }
+      const grp = e.target.closest('[data-ins-group]');
+      if (grp) {
+        e.preventDefault();
+        if (grp.hasAttribute('data-ins-err')) applyErrorFilter(container, []);
+        else applyBucketFilter(container, (grp.dataset.insKinds || '').split(',').filter(Boolean));
+        return;
+      }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -1815,6 +1838,7 @@ function renderInsights(sessions) {
     ${renderParetoPanel(agents)}
     ${renderErrorPanel(agents)}
     ${renderTokenPanel(agents)}
+    ${renderGroupPanel(agents)}
   </div>`;
 }
 
@@ -2113,6 +2137,96 @@ function renderTokenPanel(agents) {
       ${comp}
       ${legend}
       ${turnsFig}
+    </section>`;
+}
+
+// INS_GROUP_DIMS is the Group-by panel's dimension menu: which field buckets the
+// tool rows. Order is the toggle order; the first is the default. Each key is a
+// groupBy dimension; label is the toggle text.
+const INS_GROUP_DIMS = [
+  { key: 'kind',   label: 'Kind' },
+  { key: 'model',  label: 'Model' },
+  { key: 'agent',  label: 'Agent' },
+  { key: 'status', label: 'Status' },
+];
+
+// renderGroupPanel draws the sixth Insights panel — the lightweight BubbleUp
+// slice. A dimension toggle (kind / model / agent / status) buckets every tool
+// row, and the table reports per group: calls, median + total wall-clock, and
+// total (call-share-apportioned) cost, sorted worst-first by spend (groupBy's
+// order). The bar reads the cost share, so the table doubles as "where the spend
+// concentrates" — falling back to call share when the scope carries no cost.
+//
+// Click-through is partial BY DESIGN: it only lights up where the dimension value
+// maps to a precise trace filter. The 'kind' dimension pins kinds:[key] (reusing
+// applyBucketFilter); the 'status' dimension's 'error' row turns on errorsOnly
+// (reusing applyErrorFilter). 'model' and 'agent' — and the ok/none status rows —
+// have no matching trace dimension (the filter is tool-centric: kind / cost /
+// duration / errors), so those rows stay read-only diagnostics, like the Token
+// panel. Pure render from the scoped agents (no scrub / SSE), so it degrades
+// cleanly in the static `claudit report`.
+function renderGroupPanel(agents) {
+  const dim = INS_GROUP_DIMS.find(d => d.key === insightsGroupDim) || INS_GROUP_DIMS[0];
+  const { total, rows } = groupBy(agents, { dimension: dim.key });
+  const dimBtn = (d) =>
+    `<button type="button" class="ins-seg-btn${dim.key === d.key ? ' is-active' : ''}" data-ins-group-dim="${d.key}" aria-pressed="${dim.key === d.key}">${escHtml(d.label)}</button>`;
+  const toggle = `<div class="ins-seg ins-seg-sm" role="group" aria-label="Group-by dimension">${INS_GROUP_DIMS.map(dimBtn).join('')}</div>`;
+  if (rows.length === 0) {
+    return `<section class="ins-panel">
+        <div class="ins-panel-head ins-panel-head--split">
+          <h3 class="ins-panel-title">Group by</h3>${toggle}
+        </div>
+        <div class="ins-empty">No tool calls in this scope.</div>
+      </section>`;
+  }
+
+  // Bar reads cost share when there's spend to compare, else falls back to call
+  // share so the column still ranks something visible.
+  const byCost = total.costUSD > 0;
+  const barVal = r => (byCost ? r.costUSD : r.count);
+  const maxBar = rows.reduce((m, r) => Math.max(m, barVal(r)), 0) || 1;
+
+  const colLabels = `<div class="ins-row ins-grp-row ins-row-labels" aria-hidden="true">
+      <span class="ins-row-head"></span><span class="ins-bar-wrap"></span>
+      <span class="ins-figs"><span class="ins-fig">calls</span><span class="ins-fig">med</span><span class="ins-fig">time</span><span class="ins-fig is-primary">cost</span></span>
+    </div>`;
+
+  const body = rows.map(r => {
+    const pct = Math.max(2, Math.round((barVal(r) / maxBar) * 100));
+    // Clickability — only where the value maps to a trace filter (see doc above).
+    let clickAttr = '', cls = '';
+    if (dim.key === 'kind') {
+      clickAttr = ` role="button" tabindex="0" data-ins-group data-ins-kinds="${escHtml(r.key)}" title="Filter the trace to ${escHtml(r.key)} tools and show on the Timeline"`;
+      cls = ' is-clickable';
+    } else if (dim.key === 'status' && r.key === 'error') {
+      clickAttr = ` role="button" tabindex="0" data-ins-group data-ins-err title="Filter the trace to errored tools and show on the Timeline"`;
+      cls = ' is-clickable';
+    }
+    const label = dim.key === 'kind'
+      ? `${kindBadge(r.key)}<span class="ins-kind-name">${escHtml(r.key)}</span>`
+      : `<span class="ins-grp-key" title="${escHtml(r.key)}">${escHtml(r.key)}</span>`;
+    const med = Number.isNaN(r.medianMs) ? '—' : fmtDur(r.medianMs);
+    const fam = dim.key === 'kind' ? kindFamily(r.key) : 'other';
+    return `<div class="ins-row ins-grp-row kind-${fam}${cls}"${clickAttr}>
+        <span class="ins-row-head">${label}</span>
+        <span class="ins-bar-wrap"><span class="ins-bar ins-grp-bar" style="width:${pct}%"></span></span>
+        <span class="ins-figs">
+          <span class="ins-fig">${fmtNum(r.count)}</span>
+          <span class="ins-fig" title="median tool wall-clock">${escHtml(med)}</span>
+          <span class="ins-fig" title="total tool wall-clock">${escHtml(fmtDur(r.durationMs))}</span>
+          <span class="ins-fig is-primary">${escHtml(fmtMoney(r.costUSD))}</span>
+        </span>
+      </div>`;
+  }).join('');
+
+  const stats = `<div class="ins-stats"><span class="ins-stat ins-stat-n">${fmtNum(rows.length)} group${rows.length === 1 ? '' : 's'}</span><span class="ins-stat ins-stat-n">${fmtNum(total.count)} calls</span></div>`;
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Group by</h3>
+        <div class="ins-grp-head-controls">${stats}${toggle}</div>
+      </div>
+      ${colLabels}
+      <div class="ins-rows ins-grp-rows">${body}</div>
     </section>`;
 }
 

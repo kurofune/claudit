@@ -66,6 +66,7 @@ import {
   errorRates,
   contextSeries,
   binSeries,
+  groupBy,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2989,4 +2990,123 @@ test('binSeries never emits more than maxBins bins, and every turn lands in exac
     assert.ok(bins.length <= cap, `n=${n} cap=${cap} → ${bins.length} bins`);
     assert.equal(bins.reduce((s, b) => s + b.count, 0), n);   // no turn dropped or double-counted
   }
+});
+
+// ── groupBy (Insights 2f) ───────────────────────────────────────────
+test('groupBy returns a zeroed/empty result for null/empty agents (default dimension kind)', () => {
+  const empty = { dimension: 'kind', total: { count: 0, durationMs: 0, costUSD: 0 }, rows: [] };
+  assert.deepEqual(groupBy(null), empty);
+  assert.deepEqual(groupBy([]), empty);
+});
+
+test('groupBy groups tool rows by kind (default): count of calls, total wall-clock, total cost', () => {
+  const agents = [{ steps: [
+    { cost_usd: 0.10, tools: [{ kind: 'exec', started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:01.000Z' }] }, // 1000ms
+    { cost_usd: 0.04, tools: [{ kind: 'read', started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:00.500Z' }] }, //  500ms
+    { cost_usd: 0.06, tools: [{ kind: 'exec', started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:03.000Z' }] }, // 3000ms
+  ] }];
+  const rows = groupBy(agents).rows;
+  const exec = rows.find(r => r.key === 'exec');
+  const read = rows.find(r => r.key === 'read');
+  assert.equal(exec.count, 2);
+  assert.equal(exec.durationMs, 4000);
+  assert.ok(Math.abs(exec.costUSD - 0.16) < 1e-9);
+  assert.equal(read.count, 1);
+  assert.equal(read.durationMs, 500);
+  assert.ok(Math.abs(read.costUSD - 0.04) < 1e-9);
+});
+
+test('groupBy reports medianMs per group (reuses percentiles); NaN when the group has no measured rows', () => {
+  const d = (kind, ms) => ({ kind, started_at: '2026-01-01T00:00:00.000Z', ended_at: new Date(Date.parse('2026-01-01T00:00:00.000Z') + ms).toISOString() });
+  const agents = [{ steps: [
+    { tools: [d('exec', 1000), d('exec', 3000), d('exec', 2000)] },        // median 2000
+    { tools: [{ kind: 'web' }] },                                          // no timestamps → unmeasured
+  ] }];
+  const rows = groupBy(agents).rows;
+  assert.equal(rows.find(r => r.key === 'exec').medianMs, 2000);
+  assert.ok(Number.isNaN(rows.find(r => r.key === 'web').medianMs));
+});
+
+test("groupBy dimension 'status' groups by tool status; missing/empty folds to 'none'", () => {
+  const agents = [{ steps: [{ tools: [
+    { kind: 'exec', status: 'error' },
+    { kind: 'read', status: 'ok' },
+    { kind: 'edit' },               // missing status → 'none'
+    { kind: 'exec', status: 'error' },
+  ] }] }];
+  const res = groupBy(agents, { dimension: 'status' });
+  assert.equal(res.dimension, 'status');
+  const by = Object.fromEntries(res.rows.map(r => [r.key, r.count]));
+  assert.deepEqual(by, { error: 2, ok: 1, none: 1 });
+});
+
+test("groupBy dimension 'model' groups by the parent step.model; missing folds to '(none)'", () => {
+  const agents = [{ steps: [
+    { model: 'claude-opus-4-8', tools: [{ kind: 'exec' }, { kind: 'read' }] },
+    { model: 'claude-haiku-4-5', tools: [{ kind: 'exec' }] },
+    { tools: [{ kind: 'web' }] },   // no model → '(none)'
+  ] }];
+  const res = groupBy(agents, { dimension: 'model' });
+  assert.equal(res.dimension, 'model');
+  const by = Object.fromEntries(res.rows.map(r => [r.key, r.count]));
+  assert.deepEqual(by, { 'claude-opus-4-8': 2, 'claude-haiku-4-5': 1, '(none)': 1 });
+});
+
+test("groupBy dimension 'agent' groups by agentLabel (main vs agent_type)", () => {
+  const agents = [
+    { kind: 'main', steps: [{ tools: [{ kind: 'exec' }, { kind: 'read' }] }] },
+    { agent_type: 'Explore', steps: [{ tools: [{ kind: 'read' }] }] },
+  ];
+  const res = groupBy(agents, { dimension: 'agent' });
+  assert.equal(res.dimension, 'agent');
+  const by = Object.fromEntries(res.rows.map(r => [r.key, r.count]));
+  assert.deepEqual(by, { main: 2, Explore: 1 });
+});
+
+test('groupBy sorts rows by cost desc, then count desc, then key asc', () => {
+  // Insertion order (mm, bb, aa, cc) is NOT the expected sorted order, so a
+  // no-op (Map insertion-order) result would fail. cc wins on cost; aa/bb/mm
+  // tie on cost (.10) → count desc puts aa(5) first; bb/mm tie on count → key asc.
+  const agents = [{ steps: [
+    { cost_usd: 0.10, tools: [{ kind: 'mm', count: 2 }] },
+    { cost_usd: 0.10, tools: [{ kind: 'bb', count: 2 }] },
+    { cost_usd: 0.10, tools: [{ kind: 'aa', count: 5 }] },
+    { cost_usd: 0.30, tools: [{ kind: 'cc', count: 1 }] },
+  ] }];
+  const rows = groupBy(agents).rows;
+  assert.deepEqual(rows.map(r => r.key), ['cc', 'aa', 'bb', 'mm']);
+});
+
+test('groupBy gives each group its costShare and countShare of the totals', () => {
+  const agents = [{ steps: [
+    { cost_usd: 0.30, tools: [{ kind: 'exec', count: 1 }] },   // cost-heavy, call-light
+    { cost_usd: 0.10, tools: [{ kind: 'read', count: 3 }] },   // cost-light, call-heavy
+  ] }];
+  const res = groupBy(agents);
+  assert.deepEqual(res.total, { count: 4, durationMs: 0, costUSD: 0.4 });
+  const exec = res.rows.find(r => r.key === 'exec');
+  const read = res.rows.find(r => r.key === 'read');
+  assert.ok(Math.abs(exec.costShare - 0.75) < 1e-9 && Math.abs(exec.countShare - 0.25) < 1e-9);
+  assert.ok(Math.abs(read.costShare - 0.25) < 1e-9 && Math.abs(read.countShare - 0.75) < 1e-9);
+});
+
+test('groupBy apportions a turn cost across its tools by call-share (toolMix convention)', () => {
+  // One $0.90 turn, 3 calls (exec×2, read×1) → exec 0.60, read 0.30.
+  const agents = [{ steps: [
+    { cost_usd: 0.90, tools: [{ kind: 'exec', count: 2 }, { kind: 'read', count: 1 }] },
+  ] }];
+  const rows = groupBy(agents).rows;
+  assert.ok(Math.abs(rows.find(r => r.key === 'exec').costUSD - 0.60) < 1e-9);
+  assert.ok(Math.abs(rows.find(r => r.key === 'read').costUSD - 0.30) < 1e-9);
+});
+
+test('groupBy tolerates null agents/steps/tool entries and sums t.count for repeated calls', () => {
+  const agents = [
+    null,
+    { steps: null },
+    { steps: [null, { tools: null }, { tools: [null, { kind: 'exec', count: 3 }, null] }] },
+  ];
+  const res = groupBy(agents);
+  assert.equal(res.total.count, 3);
+  assert.deepEqual(res.rows.map(r => ({ key: r.key, count: r.count })), [{ key: 'exec', count: 3 }]);
 });

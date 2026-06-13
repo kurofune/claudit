@@ -949,6 +949,83 @@ export function binSeries(series, maxBins) {
   return bins;
 }
 
+// groupBy is the lightweight BubbleUp slice for the Insights "Group-by" panel:
+// it buckets tool rows along ONE dimension and reports, per group, how many
+// calls / how long / how much. Pure and scope-agnostic — the caller passes the
+// already-scoped agents (whole graph, one session, or one agent). The unit is
+// the tool ROW, generalizing toolMix: count sums t.count (calls), durationMs/
+// medianMs are over tool wall-clock (started_at→ended_at, same source as
+// durationHistogram — rows without a parseable span are uncounted there but
+// still counted in `count`), and cost is the turn cost_usd apportioned across
+// the turn's tools by call-share (the honest split toolMix uses; a tool-less
+// turn contributes no cost).
+//
+// opts.dimension selects the bucket key:
+//   'kind'   — tool.kind (missing → 'other')           [default]
+//   'status' — tool.status (missing/'' → 'none')
+//   'model'  — parent step.model (missing → '(none)')
+//   'agent'  — agentLabel(parent) ('main' or agent_type)
+//
+// Returns:
+//   { dimension, total, rows }
+//   total — summed { count, durationMs, costUSD } across all groups
+//   rows  — per group, sorted cost desc → count desc → key asc, each
+//           { key, count, durationMs, medianMs, costUSD, costShare, countShare }.
+//           medianMs is the median tool-row wall-clock (NaN when the group has
+//           no measured rows); costShare/countShare are the group's fraction of
+//           the totals (0 when the total is 0).
+export function groupBy(agents, opts = {}) {
+  const dimension = opts.dimension || 'kind';
+  const dimKey = (t, step, aLabel) => {
+    switch (dimension) {
+      case 'status': return t.status || 'none';
+      case 'model': return (step && step.model) || '(none)';
+      case 'agent': return aLabel;
+      case 'kind':
+      default: return t.kind || 'other';
+    }
+  };
+  const groups = new Map();
+  for (const a of (Array.isArray(agents) ? agents : [])) {
+    const aLabel = agentLabel(a);
+    for (const step of (a && a.steps) || []) {
+      const tools = (step && step.tools) || [];
+      const stepCalls = tools.reduce((n, t) => n + ((t && t.count) || (t ? 1 : 0)), 0);
+      const stepCost = (step && step.cost_usd) || 0;
+      for (const t of tools) {
+        if (!t) continue;
+        const calls = t.count || 1;
+        const key = dimKey(t, step, aLabel);
+        const g = groups.get(key) || { key, count: 0, durationMs: 0, costUSD: 0, durs: [] };
+        g.count += calls;
+        const start = parseTime(t.started_at), end = parseTime(t.ended_at);
+        if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+          const ms = end - start;
+          g.durationMs += ms;
+          g.durs.push(ms);
+        }
+        if (stepCalls > 0) g.costUSD += stepCost * (calls / stepCalls);
+        groups.set(key, g);
+      }
+    }
+  }
+  const base = [...groups.values()].map(g => {
+    const { durs, ...rest } = g;
+    return { ...rest, medianMs: percentiles(durs, [50])[0] };
+  });
+  const total = base.reduce(
+    (acc, r) => ({ count: acc.count + r.count, durationMs: acc.durationMs + r.durationMs, costUSD: acc.costUSD + r.costUSD }),
+    { count: 0, durationMs: 0, costUSD: 0 });
+  const rows = base
+    .map(r => ({
+      ...r,
+      costShare: total.costUSD ? r.costUSD / total.costUSD : 0,
+      countShare: total.count ? r.count / total.count : 0,
+    }))
+    .sort((a, b) => b.costUSD - a.costUSD || b.count - a.count || a.key.localeCompare(b.key));
+  return { dimension, total, rows };
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.
