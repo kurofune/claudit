@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix,
+  criticalSpans, toolMix, percentiles, durationHistogram,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -493,6 +493,11 @@ function wireSelection(container) {
       if (insScope) { if (!insScope.disabled) { insightsScope = insScope.dataset.insScope; renderActive(container, false); } return; }
       const insMetric = e.target.closest('[data-ins-metric]');
       if (insMetric) { insightsMetric = insMetric.dataset.insMetric; renderActive(container, false); return; }
+      // A latency histogram bucket filters the trace to the kinds it holds and
+      // jumps to the Timeline — Insights has no dimming of its own, so the filter
+      // only "lands" on a filter-bearing lens.
+      const insBucket = e.target.closest('[data-ins-bucket]');
+      if (insBucket) { applyBucketFilter(container, (insBucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -524,6 +529,8 @@ function wireSelection(container) {
     });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
+      const bucket = e.target.closest('[data-ins-bucket]');
+      if (bucket) { e.preventDefault(); applyBucketFilter(container, (bucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -882,6 +889,35 @@ function stepHit(container, dir) {
   const el = container.querySelector(`.agents-lens [data-ref="${ref}"]`);
   if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   updateFilterResult(container);
+}
+
+// applyBucketFilter is the bridge from an Insights latency bucket to the trace
+// filter: it sets the spec to the bucket's tool kinds, mirrors that into the
+// (shared) filter bar, and routes to the Timeline — a filter-bearing lens — so
+// the dimming the Insights lens can't show actually appears. Empty kinds clears
+// nothing useful, so it's a no-op (the bucket wasn't clickable anyway).
+function applyBucketFilter(container, kinds) {
+  if (!kinds || kinds.length === 0) return;
+  filterSpec = { text: '', kinds: kinds.slice(), errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
+  hitIndex = -1;
+  syncFilterBar(container);
+  location.hash = '#agents/timeline';
+}
+
+// syncFilterBar pushes the current filterSpec into the bar's controls — the
+// inverse of readSpec — so a programmatic filter (e.g. an Insights bucket click)
+// shows up in the bar the user can then read and clear.
+function syncFilterBar(container) {
+  const bar = container.querySelector('[data-trace-filter]');
+  if (!bar) return;
+  const set = (sel, v) => { const el = bar.querySelector(sel); if (el) el.value = v; };
+  set('[data-tf-text]', filterSpec.text || '');
+  set('[data-tf-dur]', filterSpec.minDurationMs || '');
+  set('[data-tf-cost]', filterSpec.minCostUSD || '');
+  bar.querySelectorAll('[data-tf-kind]').forEach(b =>
+    b.setAttribute('aria-pressed', filterSpec.kinds.includes(b.dataset.tfKind) ? 'true' : 'false'));
+  const err = bar.querySelector('[data-tf-errors]');
+  if (err) err.setAttribute('aria-pressed', filterSpec.errorsOnly ? 'true' : 'false');
 }
 
 // clearFilter resets the controls and removes all dimming.
@@ -1732,7 +1768,67 @@ function renderInsights(sessions) {
       ${colLabels}
       <div class="ins-rows">${rows}</div>
     </section>
+    ${renderLatencyPanel(agents)}
   </div>`;
+}
+
+// fmtDur renders a millisecond latency at the resolution tool spans actually
+// land in — keeping sub-second values legible (the seconds-floored formatElapsed
+// would collapse them all to "0s"). 240→"240ms", 2500→"2.5s", 60000→"1m".
+function fmtDur(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const trim = n => (n < 10 ? n.toFixed(1).replace(/\.0$/, '') : String(Math.round(n)));
+  if (ms < 60000) return `${trim(ms / 1000)}s`;
+  return `${trim(ms / 60000)}m`;
+}
+
+// latencyBucketLabel names a histogram bucket from its [lo, hi) edges: the first
+// bucket reads "< hi", the open tail "≥ lo", the rest "lo–hi".
+function latencyBucketLabel(b) {
+  if (b.lo === 0) return `< ${fmtDur(b.hi)}`;
+  if (!Number.isFinite(b.hi)) return `≥ ${fmtDur(b.lo)}`;
+  return `${fmtDur(b.lo)}–${fmtDur(b.hi)}`;
+}
+
+// renderLatencyPanel draws the second Insights panel: a horizontal histogram of
+// per-tool wall-clock (one row per duration bucket, bar ∝ count) plus a p50 /
+// p95 / max readout. A non-empty bucket is clickable — it filters the trace to
+// the tool kinds in that bucket and jumps to the Timeline (the Insights lens
+// itself doesn't dim). Pure render from the scoped agents (no scrub / SSE), so
+// it degrades cleanly in the static report.
+function renderLatencyPanel(agents) {
+  const { buckets, values } = durationHistogram(agents);
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Latency</h3></header>`;
+  if (values.length === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty">No timed tool calls in this scope.</div></section>`;
+  }
+
+  const [p50, p95, max] = percentiles(values, [50, 95, 100]);
+  const stat = (label, v) => `<span class="ins-stat"><span class="ins-stat-k">${label}</span><span class="ins-stat-v">${escHtml(fmtDur(v))}</span></span>`;
+  const stats = `<div class="ins-stats">${stat('p50', p50)}${stat('p95', p95)}${stat('max', max)}<span class="ins-stat ins-stat-n">${fmtNum(values.length)} timed</span></div>`;
+
+  const maxCount = buckets.reduce((m, b) => Math.max(m, b.count), 0) || 1;
+  const rows = buckets.map(b => {
+    const pct = b.count > 0 ? Math.max(3, Math.round((b.count / maxCount) * 100)) : 0;
+    const clickable = b.count > 0 && b.kinds.length > 0;
+    const attrs = clickable
+      ? ` role="button" tabindex="0" data-ins-bucket data-ins-kinds="${escHtml(b.kinds.join(','))}" title="Filter the trace to ${escHtml(b.kinds.join(', '))} and show on the Timeline"`
+      : '';
+    return `<div class="ins-lat-row${clickable ? ' is-clickable' : ''}"${attrs}>
+        <span class="ins-lat-label">${escHtml(latencyBucketLabel(b))}</span>
+        <span class="ins-bar-wrap"><span class="ins-bar ins-lat-bar" style="width:${pct}%"></span></span>
+        <span class="ins-lat-count">${b.count ? fmtNum(b.count) : ''}</span>
+      </div>`;
+  }).join('');
+
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Latency</h3>
+        ${stats}
+      </div>
+      <div class="ins-rows ins-lat-rows">${rows}</div>
+    </section>`;
 }
 
 // renderTimeline draws the Gantt lens: a scrubber bar on top, then one

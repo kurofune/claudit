@@ -680,6 +680,55 @@ export function toolMix(agents) {
     b.costUSD - a.costUSD || b.count - a.count || a.kind.localeCompare(b.kind));
 }
 
+// percentiles returns one value per requested point.
+export function percentiles(values, ps) {
+  const points = Array.isArray(ps) ? ps : [];
+  const nums = (Array.isArray(values) ? values : [])
+    .filter(v => typeof v === 'number' && !Number.isNaN(v))
+    .sort((a, b) => a - b);
+  if (nums.length === 0) return points.map(() => NaN);
+  return points.map(p => {
+    const rank = (Math.max(0, Math.min(100, p)) / 100) * (nums.length - 1);
+    const lo = Math.floor(rank), hi = Math.ceil(rank);
+    if (lo === hi) return nums[lo];
+    return nums[lo] + (rank - lo) * (nums[hi] - nums[lo]);
+  });
+}
+
+// DURATION_EDGES are the default upper bounds (ms) for the latency histogram —
+// a log-ish progression tuned for tool wall-clock (sub-100ms reads up to
+// multi-minute execs). Each edge opens a [prev, edge) bucket; a trailing
+// [lastEdge, ∞) bucket catches the long tail.
+export const DURATION_EDGES = [100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000];
+
+// durationHistogram buckets per-tool wall-clock.
+export function durationHistogram(agents, opts = {}) {
+  const edges = (Array.isArray(opts.edges) && opts.edges.length)
+    ? opts.edges.slice().sort((a, b) => a - b)
+    : DURATION_EDGES;
+  const buckets = [];
+  let lo = 0;
+  for (const e of edges) { buckets.push({ lo, hi: e, count: 0, kinds: [] }); lo = e; }
+  buckets.push({ lo, hi: Infinity, count: 0, kinds: [] });
+  const values = [];
+  for (const a of (Array.isArray(agents) ? agents : [])) {
+    for (const step of (a && a.steps) || []) {
+      for (const t of (step && step.tools) || []) {
+        if (!t) continue;
+        const start = parseTime(t.started_at), end = parseTime(t.ended_at);
+        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) continue;
+        const d = end - start;
+        const b = buckets.find(bk => d < bk.hi);
+        b.count += 1;
+        const kind = t.kind || 'other';
+        if (!b.kinds.includes(kind)) b.kinds.push(kind);
+        values.push(d);
+      }
+    }
+  }
+  return { buckets, values };
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.

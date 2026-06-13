@@ -59,6 +59,9 @@ import {
   idleSegments,
   criticalSpans,
   toolMix,
+  percentiles,
+  durationHistogram,
+  DURATION_EDGES,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2534,4 +2537,99 @@ test('toolMix sorts rows by costUSD descending', () => {
     ],
   }];
   assert.deepEqual(toolMix(agents).map(r => r.kind), ['exec', 'web', 'read']);
+});
+
+// ── percentiles (Insights 2b) ───────────────────────────────────────
+test('percentiles returns one NaN per requested point on empty values', () => {
+  const out = percentiles([], [50, 95]);
+  assert.equal(out.length, 2);
+  assert.ok(out.every(Number.isNaN));
+});
+
+test('percentiles at p0/p100 returns min/max', () => {
+  assert.deepEqual(percentiles([5, 1, 9, 3], [0, 100]), [1, 9]);
+});
+
+test('percentiles interpolates linearly between ranks (p50 of [1,2,3,4] = 2.5)', () => {
+  assert.deepEqual(percentiles([1, 2, 3, 4], [50]), [2.5]);
+});
+
+test('percentiles returns the lone value for any point on a single-element input', () => {
+  assert.deepEqual(percentiles([7], [0, 50, 95, 100]), [7, 7, 7, 7]);
+});
+
+test('percentiles sorts unsorted input and ignores non-numeric/NaN values', () => {
+  // Non-numbers (NaN, '3' string, null, undefined) are dropped, leaving the
+  // numbers [4,1,2] → sorted [1,2,4]; p50 interpolates to 2, p100 = 4.
+  assert.deepEqual(percentiles([4, NaN, '3', 1, null, 2, undefined], [50, 100]), [2, 4]);
+});
+
+// ── durationHistogram (Insights 2b) ─────────────────────────────────
+test('durationHistogram returns zero-count buckets + empty values for null/empty agents', () => {
+  const h = durationHistogram(null, { edges: [100, 1000] });
+  assert.deepEqual(h.values, []);
+  // edges [100,1000] → 3 buckets: [0,100) [100,1000) [1000,∞)
+  assert.deepEqual(h.buckets.map(b => [b.lo, b.hi]), [[0, 100], [100, 1000], [1000, Infinity]]);
+  assert.ok(h.buckets.every(b => b.count === 0 && Array.isArray(b.kinds) && b.kinds.length === 0));
+});
+
+test('durationHistogram counts each timed tool into its [lo,hi) bucket and collects the flat values', () => {
+  const agents = [{
+    steps: [
+      { tools: [
+        { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.050Z' }, // 50ms → [0,100)
+        { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.300Z' }, // 300ms → [100,1000)
+      ] },
+      { tools: [
+        { kind: 'exec', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:02Z' }, // 2000ms → [1000,∞)
+      ] },
+    ],
+  }];
+  const h = durationHistogram(agents, { edges: [100, 1000] });
+  assert.deepEqual(h.buckets.map(b => b.count), [1, 1, 1]);
+  assert.deepEqual(h.values.slice().sort((a, b) => a - b), [50, 300, 2000]);
+});
+
+test('durationHistogram skips tools with missing/invalid/non-positive timing', () => {
+  const agents = [{
+    steps: [{ tools: [
+      { kind: 'read' },                                                                            // no timing
+      { kind: 'read', started_at: '2026-05-01T12:00:00Z' },                                        // half timing
+      { kind: 'read', started_at: '2026-05-01T12:00:05Z', ended_at: '2026-05-01T12:00:05Z' },      // zero span
+      { kind: 'read', started_at: '2026-05-01T12:00:05Z', ended_at: '2026-05-01T12:00:00Z' },      // negative span
+      { kind: 'read', started_at: 'garbage', ended_at: 'also-garbage' },                           // unparseable
+      { kind: 'exec', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.080Z' },  // 80ms → kept
+    ] }],
+  }];
+  const h = durationHistogram(agents, { edges: [100, 1000] });
+  assert.deepEqual(h.values, [80]);
+  assert.deepEqual(h.buckets.map(b => b.count), [1, 0, 0]);
+});
+
+test('durationHistogram collects the distinct tool kinds present in each bucket', () => {
+  const agents = [{
+    steps: [{ tools: [
+      { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.050Z' }, // 50ms → [0,100)
+      { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.060Z' }, // 60ms → [0,100), dup kind
+      { kind: 'exec', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.070Z' }, // 70ms → [0,100)
+      { started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:02Z' },                   // 2000ms → [1000,∞), no kind → 'other'
+    ] }],
+  }];
+  const h = durationHistogram(agents, { edges: [100, 1000] });
+  assert.deepEqual(h.buckets.map(b => b.kinds), [['read', 'exec'], [], ['other']]);
+});
+
+test('durationHistogram defaults to the log-scale DURATION_EDGES when no opts given', () => {
+  const agents = [{
+    steps: [{ tools: [
+      { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:00.300Z' }, // 300ms → [250,500)
+      { kind: 'exec', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:45Z' },      // 45s → [30000,60000)
+    ] }],
+  }];
+  const h = durationHistogram(agents);
+  // DURATION_EDGES = [100,250,500,1000,2500,5000,10000,30000,60000] → 10 buckets.
+  assert.equal(h.buckets.length, DURATION_EDGES.length + 1);
+  const bucketWith = ms => h.buckets.find(b => b.lo <= ms && ms < b.hi);
+  assert.deepEqual(bucketWith(300), { lo: 250, hi: 500, count: 1, kinds: ['read'] });
+  assert.deepEqual(bucketWith(45000), { lo: 30000, hi: 60000, count: 1, kinds: ['exec'] });
 });
