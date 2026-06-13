@@ -97,6 +97,19 @@ type ToolInvocation struct {
 	// aware snippet of what the tool returned. Both empty when unjoined.
 	Status string `json:"status,omitempty"`
 	Output string `json:"output,omitempty"`
+	// Count is how many raw invocations collapsed into this row — a turn that
+	// ran the same (Name, Detail, Input) five times reports Count:5 on the one
+	// surviving row instead of hiding the cardinality. Always ≥1. Lets the UI
+	// say "ran Read 400×" that the dedup would otherwise erase.
+	Count int `json:"count"`
+	// OutputBytes/OutputLines are the joined result's FULL size (pre-truncation)
+	// from the matching tool_result — how much the tool actually returned, not
+	// the bounded Output snippet. Rows is a structured record count (changed
+	// lines for Edit/Write, match/result rows for Grep/WebSearch). All zero when
+	// no result joined or the tool exposes no such measure.
+	OutputBytes int `json:"output_bytes,omitempty"`
+	OutputLines int `json:"output_lines,omitempty"`
+	Rows        int `json:"rows,omitempty"`
 	// Spawned is the rolled-up cost of the sub-agent this Agent call launched —
 	// nil for non-Agent calls and Agent calls whose sub-agent isn't in the
 	// snapshot. It surfaces one decision's full blast radius (the sub-agent's
@@ -487,17 +500,19 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		startedAt = &ts
 	}
 	type key struct{ name, detail, input string }
-	seen := make(map[key]struct{}, len(uses))
+	// Map each dedup key to its row index in out, so a repeated call bumps the
+	// surviving row's Count instead of being silently dropped.
+	seen := make(map[key]int, len(uses))
 	out := make([]ToolInvocation, 0, len(uses))
 	for _, u := range uses {
 		d := toolDetailFor(u)
 		// Dedup on the REAL input so two distinct commands of the same
 		// length stay distinct even under --redact.
 		k := key{u.Name, d, u.Input}
-		if _, ok := seen[k]; ok {
+		if idx, ok := seen[k]; ok {
+			out[idx].Count++
 			continue
 		}
-		seen[k] = struct{}{}
 		input := u.Input
 		// Redact the input snippet (full Bash command, subagent prompt, etc.)
 		// to a length-echoing marker so shared/static reports don't leak it.
@@ -507,7 +522,7 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		if redact && input != "" {
 			input = redactMarker(input)
 		}
-		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: input, StartedAt: startedAt}
+		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: input, StartedAt: startedAt, Count: 1}
 		// Join the outcome from the matching tool_result (by tool_use id).
 		// Status is content-free so it survives redaction; Output is masked
 		// the same way Input is.
@@ -521,6 +536,11 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 			if redact && inv.Output != "" {
 				inv.Output = redactMarker(inv.Output)
 			}
+			// Size measures are pure counts (no content), so they ride through
+			// untouched by redaction.
+			inv.OutputBytes = res.OutputBytes
+			inv.OutputLines = res.OutputLines
+			inv.Rows = res.Rows
 			// The result line's timestamp is this tool's wall-clock end. Guard
 			// the zero time (older transcripts without line timestamps) so a
 			// missing end stays nil rather than a year-1 instant.
@@ -529,6 +549,7 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 				inv.EndedAt = &end
 			}
 		}
+		seen[k] = len(out)
 		out = append(out, inv)
 	}
 	return out

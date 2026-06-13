@@ -343,14 +343,16 @@ func TestBuildSessionTimelines_DistinctToolInvocations(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out[0].Prompts[0].Turns[0].Tools
+	// Count reflects the collapse: the two duplicated calls (git status, .go)
+	// report Count:2; the rest fired once.
 	want := []ToolInvocation{
-		{Name: "Bash", Kind: "exec", Detail: "git status"},
-		{Name: "Read", Kind: "read", Detail: ".go"},
-		{Name: "Bash", Kind: "exec", Detail: "go test"},
-		{Name: "Agent", Kind: "agent", Detail: "Explore"},
-		{Name: "Skill", Kind: "skill", Detail: "handoff"},
-		{Name: "SlashCommand", Kind: "command", Detail: "/review"},
-		{Name: "Edit", Kind: "edit", Detail: ""},
+		{Name: "Bash", Kind: "exec", Detail: "git status", Count: 2},
+		{Name: "Read", Kind: "read", Detail: ".go", Count: 2},
+		{Name: "Bash", Kind: "exec", Detail: "go test", Count: 1},
+		{Name: "Agent", Kind: "agent", Detail: "Explore", Count: 1},
+		{Name: "Skill", Kind: "skill", Detail: "handoff", Count: 1},
+		{Name: "SlashCommand", Kind: "command", Detail: "/review", Count: 1},
+		{Name: "Edit", Kind: "edit", Detail: "", Count: 1},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
@@ -463,6 +465,53 @@ func TestDistinctToolInvocations_NilEndWhenNoJoinableResult(t *testing.T) {
 		if inv.StartedAt == nil || !inv.StartedAt.Equal(turnTS) {
 			t.Errorf("got[%d] (%s) StartedAt = %v, want %v", i, inv.Name, inv.StartedAt, turnTS)
 		}
+	}
+}
+
+// Dedup collapses repeated calls to one row, which hides how many times a tool
+// actually ran. Count records the collapsed cardinality so the UI can say "ran
+// Read 5×": every row reports Count≥1, and a row standing for N identical calls
+// reports Count:N.
+func TestDistinctToolInvocations_CountsCollapsedCalls(t *testing.T) {
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Read", Detail: ".go"},
+		{ID: "t2", Name: "Read", Detail: ".go"}, // dup of t1
+		{ID: "t3", Name: "Read", Detail: ".go"}, // dup of t1
+		{ID: "t4", Name: "Bash", Input: "go test"},
+	}
+	got := DistinctToolInvocations(uses, nil, false, time.Time{})
+	if len(got) != 2 {
+		t.Fatalf("got %d invocations, want 2 (dedup)", len(got))
+	}
+	if got[0].Count != 3 {
+		t.Errorf("collapsed Read Count = %d, want 3", got[0].Count)
+	}
+	if got[1].Count != 1 {
+		t.Errorf("singleton Bash Count = %d, want 1", got[1].Count)
+	}
+}
+
+// The full output size measured at parse time (OutputBytes/OutputLines/Rows)
+// must ride through the join onto the invocation, so downstream views can rank
+// tools by how much they returned without re-reading the transcript.
+func TestDistinctToolInvocations_JoinsOutputSize(t *testing.T) {
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: "ls"},
+		{ID: "t2", Name: "Edit", Detail: ".go"},
+	}
+	results := map[string]parse.ToolResult{
+		"t1": {ToolUseID: "t1", Content: "a\nb", OutputBytes: 4096, OutputLines: 120},
+		"t2": {ToolUseID: "t2", Content: "ok", Rows: 7},
+	}
+	got := DistinctToolInvocations(uses, results, false, time.Time{})
+	if len(got) != 2 {
+		t.Fatalf("got %d invocations, want 2", len(got))
+	}
+	if got[0].OutputBytes != 4096 || got[0].OutputLines != 120 {
+		t.Errorf("t1 size = %d bytes / %d lines, want 4096/120", got[0].OutputBytes, got[0].OutputLines)
+	}
+	if got[1].Rows != 7 {
+		t.Errorf("t2 Rows = %d, want 7", got[1].Rows)
 	}
 }
 

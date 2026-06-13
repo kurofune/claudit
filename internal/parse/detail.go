@@ -272,6 +272,63 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+// countLines returns the number of text lines in s — `\n`-count plus one for a
+// final unterminated line. Empty string is zero lines (not one). So "a\nb" is
+// 2, "a\nb\n" is 2, and "" is 0.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+// rawToolUseResult decodes only the size-bearing fields of a line's top-level
+// `toolUseResult`. The wire object is large and tool-specific; we ignore
+// everything but the few shapes that carry a record count.
+type rawToolUseResult struct {
+	StructuredPatch []struct {
+		Lines []string `json:"lines"`
+	} `json:"structuredPatch"`
+	Matches []json.RawMessage `json:"matches"`
+	Results []json.RawMessage `json:"results"`
+}
+
+// toolResultRows extracts a structured record count from a line's raw
+// `toolUseResult`, or 0 when none applies. Precedence reflects which signal is
+// most specific to the tool:
+//   - structuredPatch (Edit/Write) → changed lines: those starting with '+' or
+//     '-' across all hunks (context lines, which start with a space, don't count).
+//   - matches (Grep-style) → number of matches.
+//   - results (search-style) → number of results.
+func toolResultRows(raw json.RawMessage) int {
+	if len(raw) == 0 || raw[0] != '{' {
+		return 0
+	}
+	var r rawToolUseResult
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return 0
+	}
+	if len(r.StructuredPatch) > 0 {
+		changed := 0
+		for _, h := range r.StructuredPatch {
+			for _, ln := range h.Lines {
+				if strings.HasPrefix(ln, "+") || strings.HasPrefix(ln, "-") {
+					changed++
+				}
+			}
+		}
+		return changed
+	}
+	if len(r.Matches) > 0 {
+		return len(r.Matches)
+	}
+	return len(r.Results)
+}
+
 // bashPattern collapses a shell command to its "shape" so similar invocations
 // bucket together. Strategy:
 //  1. If the command has "&&", "||", or ";", take the LAST segment — `cd foo

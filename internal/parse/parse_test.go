@@ -658,6 +658,97 @@ func TestPeekToolResults_ZeroTimestampWhenLineHasNone(t *testing.T) {
 	}
 }
 
+// A tool's full output size is signal the snippet cap erases — a Bash that
+// dumped 50KB and one that printed "ok" both truncate to a 2000-char Content.
+// peekToolResults must measure the FULL result text: OutputBytes = byte length,
+// OutputLines = line count, both taken before truncation.
+func TestPeekToolResults_MeasuresOutputSize(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"line one\nline two\nline three"}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1 (%+v)", len(got), got)
+	}
+	const text = "line one\nline two\nline three"
+	if got[0].OutputBytes != len(text) {
+		t.Errorf("OutputBytes = %d, want %d", got[0].OutputBytes, len(text))
+	}
+	if got[0].OutputLines != 3 {
+		t.Errorf("OutputLines = %d, want 3", got[0].OutputLines)
+	}
+}
+
+// OutputBytes is the size BEFORE the snippet cap, so a result longer than the
+// cap still reports its true byte count (and Content is the truncated snippet).
+func TestPeekToolResults_OutputBytesIsPreTruncation(t *testing.T) {
+	big := strings.Repeat("x", 5000) // > toolResultMaxChars (2000)
+	line := `{"type":"user","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"` + big + `"}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1", len(got))
+	}
+	if got[0].OutputBytes != 5000 {
+		t.Errorf("OutputBytes = %d, want 5000 (pre-truncation)", got[0].OutputBytes)
+	}
+	if n := len([]rune(got[0].Content)); n > toolResultMaxChars+1 { // +1 for the ellipsis
+		t.Errorf("Content runes = %d, want it still truncated to ~%d", n, toolResultMaxChars)
+	}
+}
+
+// An empty result reports zero size, not a phantom 1-line/0-byte mix.
+func TestPeekToolResults_EmptyOutputIsZeroSize(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":""}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1", len(got))
+	}
+	if got[0].OutputBytes != 0 || got[0].OutputLines != 0 {
+		t.Errorf("empty result size = %d bytes / %d lines, want 0/0", got[0].OutputBytes, got[0].OutputLines)
+	}
+}
+
+// Edit/Write carry a `structuredPatch` in the line's top-level `toolUseResult`;
+// Rows counts the changed (added/removed) lines across its hunks — the real
+// size of the edit, which the text snippet doesn't expose.
+func TestPeekToolResults_RowsFromStructuredPatch(t *testing.T) {
+	line := `{"type":"user","timestamp":"2026-04-10T10:00:00Z",` +
+		`"toolUseResult":{"filePath":"/a.go","structuredPatch":[` +
+		`{"oldStart":1,"oldLines":2,"newStart":1,"newLines":3,"lines":[" ctx"," keep","+added one","+added two","-removed one"]}` +
+		`]},` +
+		`"message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"ok"}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1", len(got))
+	}
+	if got[0].Rows != 3 { // 2 added + 1 removed; context lines don't count
+		t.Errorf("Rows = %d, want 3 (changed lines in structuredPatch)", got[0].Rows)
+	}
+}
+
+// Search-style tools carry a `results` array in `toolUseResult`; Rows = its
+// length (how many hits came back).
+func TestPeekToolResults_RowsFromResultsArray(t *testing.T) {
+	line := `{"type":"user",` +
+		`"toolUseResult":{"query":"foo","results":[{"title":"a"},{"title":"b"},{"title":"c"},{"title":"d"}],"searchCount":1},` +
+		`"message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"..."}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1", len(got))
+	}
+	if got[0].Rows != 4 {
+		t.Errorf("Rows = %d, want 4 (len results array)", got[0].Rows)
+	}
+}
+
 func TestParseFile_StreamingNotInMemory(t *testing.T) {
 	// Smoke test that we use a Scanner (won't allocate the whole file).
 	// Verify by reading a moderately long synthetic input.

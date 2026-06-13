@@ -57,6 +57,18 @@ type ToolResult struct {
 	// is either a bare string or an array of {type:"text",text} blocks; both
 	// collapse to plain text here. Capped to bound payload size.
 	Content string
+	// OutputBytes is the byte length of the FULL (untruncated) result content
+	// text — the size the tool actually returned, measured before Content's
+	// snippet cap. OutputLines is that text's line count. Both are pure counts
+	// (they leak no content, so they survive redaction). Zero for an empty
+	// result.
+	OutputBytes int
+	OutputLines int
+	// Rows is a structured record count parsed from the line's `toolUseResult`
+	// (a top-level sibling of `message`): changed lines for Edit/Write
+	// (structuredPatch), or match/result rows for Grep/WebSearch. Zero when the
+	// tool carries no such measure.
+	Rows int
 	// Timestamp is the carrying user line's `timestamp` — the wall-clock moment
 	// the tool's result arrived. It's the only per-tool time we can recover (the
 	// tool_use side stamps the whole assistant turn, not each call), so the join
@@ -150,6 +162,11 @@ type rawLine struct {
 	Entrypoint string          `json:"entrypoint"`
 	Message    json.RawMessage `json:"message"`
 	IsMeta     bool            `json:"isMeta"`
+	// ToolUseResult is the line's top-level structured tool outcome (a sibling
+	// of `message`, NOT inside the content blocks). Shape varies by tool —
+	// structuredPatch for Edit/Write, results/matches for searches — so it's
+	// held raw and measured by toolResultRows. Absent for non-result lines.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
 }
 
 type rawMessage struct {
@@ -584,16 +601,24 @@ func peekToolResults(line []byte) []ToolResult {
 		return nil
 	}
 	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+	// Rows comes from the single top-level toolUseResult, which describes the
+	// line's tool call; lift it once and attach to each result block (a user
+	// line carries one tool_result in practice).
+	rows := toolResultRows(raw.ToolUseResult)
 	var out []ToolResult
 	for _, e := range entries {
 		if e.Type != "tool_result" {
 			continue
 		}
+		full := toolResultText(e.Content)
 		out = append(out, ToolResult{
-			ToolUseID: e.ToolUseID,
-			IsError:   e.IsError,
-			Content:   truncateRunes(toolResultText(e.Content), toolResultMaxChars),
-			Timestamp: ts,
+			ToolUseID:   e.ToolUseID,
+			IsError:     e.IsError,
+			Content:     truncateRunes(full, toolResultMaxChars),
+			OutputBytes: len(full),
+			OutputLines: countLines(full),
+			Rows:        rows,
+			Timestamp:   ts,
 		})
 	}
 	return out
