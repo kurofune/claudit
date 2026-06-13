@@ -748,9 +748,47 @@ export function buildTimeline(session, opts = {}) {
 
   return {
     sessionId: sid, startMs, endMs, span,
-    chartX, chartW, contentW, width: contentW, height,
+    chartX, chartW, chartHostW, contentW, width: contentW, height,
     nowX, rows, ticks,
   };
+}
+
+// TL_MAX_PX_PER_MS caps how far the Timeline can zoom in: enough px-per-ms that
+// even a sub-second tool call stays a legible, clickable sliver, without letting
+// the chart blow up to an unscrollable width. The floor is computed per session
+// (fit-to-width); this is the shared ceiling, tuned by eye.
+export const TL_MAX_PX_PER_MS = 0.12;
+
+// zoomClampPxPerMs bounds a requested time-axis density (px per ms) to the
+// Timeline's usable zoom range. The FLOOR is fit-to-width — chartHostW / span,
+// the density at which the chart exactly fills the host (zooming out past it
+// would only add empty scroll). The CEILING is TL_MAX_PX_PER_MS. A short
+// session whose fit-density already exceeds the ceiling can't zoom at all, so
+// floor wins and every request collapses to it. A zero/negative span (a
+// zero-length session) has no meaningful axis → returns the ceiling; a
+// non-positive/NaN request returns the floor (the safe overview density).
+export function zoomClampPxPerMs(pxPerMs, opts = {}) {
+  const { span, chartHostW, maxPxPerMs = TL_MAX_PX_PER_MS } = opts;
+  const floor = span > 0 ? chartHostW / span : maxPxPerMs;
+  const lo = floor;
+  const hi = Math.max(floor, maxPxPerMs);
+  if (!(pxPerMs > 0)) return lo;
+  return Math.max(lo, Math.min(hi, pxPerMs));
+}
+
+// zoomAnchorScrollLeft keeps the timestamp currently under the pointer pinned in
+// place as the chart's pixel width changes under a zoom. Given the cursor's x
+// within the scroll viewport, the current scrollLeft, the viewport width, and
+// the old/new chart content widths, it returns the scrollLeft that puts the same
+// FRACTIONAL content position back under the cursor — clamped to [0, maxScroll]
+// so the result never over- or under-scrolls. A degenerate old width yields 0.
+export function zoomAnchorScrollLeft(opts = {}) {
+  const { cursorX = 0, scrollLeft = 0, viewportW = 0, oldChartW = 0, newChartW = 0 } = opts;
+  if (!(oldChartW > 0)) return 0;
+  const frac = (scrollLeft + cursorX) / oldChartW;
+  const want = frac * newChartW - cursorX;
+  const maxScroll = Math.max(0, newChartW - viewportW);
+  return Math.max(0, Math.min(maxScroll, want));
 }
 
 // timelineAtTime is buildTimeline scrubbed to an instant T: it reuses the same

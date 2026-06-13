@@ -49,6 +49,8 @@ import {
   clampDrawerWidth,
   orderTreeSessions,
   treeFollowMode,
+  zoomClampPxPerMs,
+  zoomAnchorScrollLeft,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2124,4 +2126,80 @@ test('treeFollowMode follows when the user has never scrolled', () => {
 test('treeFollowMode honours a custom idle window', () => {
   assert.equal(treeFollowMode(1000, 4000, false, 5000), 'frozen'); // 3s < 5s
   assert.equal(treeFollowMode(1000, 6000, false, 5000), 'follow'); // 5s >= 5s
+});
+
+// ── zoomClampPxPerMs (timeline scroll-wheel zoom) ───────────────────
+// The Timeline Gantt zooms by raising minPxPerMs (px per ms of the time axis).
+// zoomClampPxPerMs bounds a requested density to a usable range: the floor is
+// "fit to width" (chartHostW / span — below it the chart would under-fill the
+// host and scroll pointlessly), the ceiling a fixed legibility cap.
+test('zoomClampPxPerMs leaves an in-range density untouched', () => {
+  // span 1e6 ms, chartHostW 300 → floor 0.0003; 0.01 sits between floor and cap.
+  assert.equal(zoomClampPxPerMs(0.01, { span: 1_000_000, chartHostW: 300 }), 0.01);
+});
+
+test('zoomClampPxPerMs floors a density below fit-to-width', () => {
+  // floor = 300 / 1e6 = 0.0003; a smaller request snaps up to it.
+  assert.equal(zoomClampPxPerMs(0.0001, { span: 1_000_000, chartHostW: 300 }), 0.0003);
+});
+
+test('zoomClampPxPerMs caps a density above the ceiling', () => {
+  assert.equal(zoomClampPxPerMs(5, { span: 1_000_000, chartHostW: 300 }), 0.12);
+});
+
+test('zoomClampPxPerMs honours a custom ceiling', () => {
+  assert.equal(zoomClampPxPerMs(5, { span: 1_000_000, chartHostW: 300, maxPxPerMs: 0.2 }), 0.2);
+});
+
+test('zoomClampPxPerMs pins a short session at fit (floor above the ceiling)', () => {
+  // span 1000, chartHostW 300 → floor 0.3 > cap 0.12; the session already fits,
+  // so every request collapses to the floor — no zoom in either direction.
+  assert.equal(zoomClampPxPerMs(0.5, { span: 1000, chartHostW: 300 }), 0.3);
+  assert.equal(zoomClampPxPerMs(0.05, { span: 1000, chartHostW: 300 }), 0.3);
+});
+
+test('zoomClampPxPerMs returns the ceiling for a zero/negative span', () => {
+  assert.equal(zoomClampPxPerMs(0.01, { span: 0, chartHostW: 300 }), 0.12);
+});
+
+test('zoomClampPxPerMs returns the floor for a non-positive request', () => {
+  assert.equal(zoomClampPxPerMs(0, { span: 1_000_000, chartHostW: 300 }), 0.0003);
+  assert.equal(zoomClampPxPerMs(NaN, { span: 1_000_000, chartHostW: 300 }), 0.0003);
+});
+
+// ── zoomAnchorScrollLeft (cursor-anchored zoom) ─────────────────────
+// As the chart pixel width changes under a zoom, keep the timestamp under the
+// pointer fixed: returns the new scrollLeft that puts the same fractional
+// content position back under the cursor, clamped to [0, maxScroll].
+test('zoomAnchorScrollLeft keeps the mid-cursor timestamp fixed when zooming in', () => {
+  // cursor at content px 250 of 1000 (frac .25); doubling to 2000 → that point
+  // is now px 500, minus the 250 cursor offset = scrollLeft 250.
+  assert.equal(zoomAnchorScrollLeft({
+    cursorX: 250, scrollLeft: 0, viewportW: 500, oldChartW: 1000, newChartW: 2000,
+  }), 250);
+});
+
+test('zoomAnchorScrollLeft holds the left edge at zero', () => {
+  assert.equal(zoomAnchorScrollLeft({
+    cursorX: 0, scrollLeft: 0, viewportW: 500, oldChartW: 1000, newChartW: 2000,
+  }), 0);
+});
+
+test('zoomAnchorScrollLeft clamps to maxScroll near the right edge', () => {
+  // frac .95 of a 2000-wide chart wants 1900 - 0, but maxScroll is 2000-500=1500.
+  assert.equal(zoomAnchorScrollLeft({
+    cursorX: 0, scrollLeft: 1900, viewportW: 500, oldChartW: 2000, newChartW: 2000,
+  }), 1500);
+});
+
+test('zoomAnchorScrollLeft clamps a negative result to zero (zoom out near start)', () => {
+  assert.equal(zoomAnchorScrollLeft({
+    cursorX: 100, scrollLeft: 0, viewportW: 500, oldChartW: 2000, newChartW: 1000,
+  }), 0);
+});
+
+test('zoomAnchorScrollLeft returns 0 when the old width is degenerate', () => {
+  assert.equal(zoomAnchorScrollLeft({
+    cursorX: 100, scrollLeft: 0, viewportW: 500, oldChartW: 0, newChartW: 1000,
+  }), 0);
 });

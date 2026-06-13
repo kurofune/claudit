@@ -47,6 +47,8 @@ import {
   clampDrawerWidth,
   orderTreeSessions,
   treeFollowMode,
+  buildTimeline,
+  zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
 } from './agents-logic.js';
 import { fetchAgentToolFull } from './api.js';
 
@@ -136,6 +138,18 @@ let liveScheduled = false;
 // recompute from events ≤ T (a pure seek, never an incremental replay).
 let playheadT = null;
 let scrubRaf = 0;
+// Timeline zoom state. tlMinPxPerMs is the time-axis density (px per ms) the
+// Gantt renders at; null ⇒ buildTimeline's default (the un-zoomed overview).
+// Scroll-wheel over the chart multiplies it (cursor-anchored), double-click
+// resets to fit-to-width. Like playheadT it's a single module var scoped to the
+// one plotted session and reset whenever the plotted session changes. The
+// time WINDOW [startMs,endMs] is untouched by zoom — only pixel density — so
+// zoom and scrub compose cleanly (the axis never reflows).
+let tlMinPxPerMs = null;
+let zoomRaf = 0;
+// The pending wheel gesture, coalesced into one rAF repaint: the scroll element,
+// the cursor's x within its viewport, and the summed deltaY since the last frame.
+let zoomPending = null;
 // Which single session the Timeline lens plots. null ⇒ resolve via
 // pickTimelineSid (selected turn's session, else the first); a sid pins that
 // session until the user picks another or it ages out of the window. Kept
@@ -252,6 +266,7 @@ export function reset() {
   prevTimelineKeys = new Set();
   timelinePinned.clear();
   playheadT = null;
+  tlMinPxPerMs = null;
   timelineSid = null;
   filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
   filterBarBuilt = false;
@@ -467,6 +482,15 @@ function wireSelection(container) {
       const range = e.target.closest('[data-tlrange]');
       if (range) onScrub(container, range);
     });
+    // Scroll-wheel over a session's Gantt zooms the time axis (cursor-anchored);
+    // shift+wheel and horizontal trackpad deltas fall through to native pan.
+    // Non-passive so onTimelineWheel can preventDefault the page scroll.
+    lens.addEventListener('wheel', e => onTimelineWheel(container, e), { passive: false });
+    // Double-click the chart resets the zoom to the fit-to-width overview — the
+    // escape hatch after zooming deep into the trace.
+    lens.addEventListener('dblclick', e => {
+      if (e.target.closest('.timeline-scroll[data-tlscroll]')) onTimelineZoomReset(container);
+    });
     // The Conversation lens's session list is drag-resizable: a mousedown on the
     // handle starts a document-level drag that widens/narrows the sidebar live.
     lens.addEventListener('mousedown', e => {
@@ -573,6 +597,7 @@ function pickTimeline(container, sessionId) {
   if (!sessionId) return;
   timelineSid = sessionId;
   playheadT = null;
+  tlMinPxPerMs = null;
   const sidebar = container.querySelector('.tl-sidebar');
   const top = sidebar ? sidebar.scrollTop : 0;
   renderActive(container, false);
@@ -1721,7 +1746,10 @@ function timelineSummaryHTML(s) {
 
 function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
   const sid = session.session_id || '';
-  const tl = timelineAtTime(session, T, { hostW, nowMs });
+  // tlMinPxPerMs (null ⇒ default) is the scroll-wheel zoom density; buildTimeline
+  // still floors the chart to the host width, so a stale value below fit-to-width
+  // simply renders as the overview.
+  const tl = timelineAtTime(session, T, { hostW, nowMs, minPxPerMs: tlMinPxPerMs ?? undefined });
   // The rows start at y = axisH (buildTimeline), so the first row's top is the
   // axis baseline — tick labels sit above it, gridlines run from it down.
   const axisY = tl.rows.length ? tl.rows[0].y : 20;
@@ -1954,17 +1982,16 @@ function onScrub(container, range) {
   scrubRaf = requestAnimationFrame(() => { scrubRaf = 0; renderScrub(container); });
 }
 
-// renderScrub repaints ONLY the session Gantts + the clock/counts readout for
-// the current playhead T — it deliberately leaves the scrubber's range input
-// alone so the in-progress drag isn't interrupted, and preserves each Gantt's
-// horizontal scroll so seeking through time never yanks the viewport sideways.
-function renderScrub(container) {
-  // Resolve the SAME single session renderTimeline plotted and repaint ONLY it
-  // (was: every session, every frame) — this is the scrub-perf win. Counts are
-  // scoped to that one session too.
+// repaintTimelineSessions rebuilds ONLY the .timeline-sessions inner HTML for a
+// given playhead T and returns the single-session view it plotted. It's the
+// shared single-session repaint behind both scrubbing and zooming (was inlined
+// in renderScrub): resolve the SAME session renderTimeline plotted and repaint
+// ONLY it (not every session, every frame — the scrub-perf win), preserving each
+// Gantt's horizontal scroll and re-applying the cached filter dimming. It leaves
+// the scrubber's range input alone so an in-progress drag isn't interrupted.
+function repaintTimelineSessions(container, T) {
   const chosen = currentTimelineSession();
   const view = chosen ? { sessions: [chosen.session] } : { sessions: [] };
-  const T = playheadT;
   const lensHost = container.querySelector('.subview[data-subview="timeline"]');
   const host = container.querySelector('.timeline-sessions');
   if (host && lensHost) {
@@ -1972,14 +1999,101 @@ function renderScrub(container) {
     host.innerHTML = renderTimelineSessions(view.sessions, Date.now(), T, chosen ? chosen.index : 0);
     restoreState(lensHost, memo);
     // The repaint replaced the row/segment nodes with fresh, undimmed ones; re-
-    // apply the cached filter dimming (class-only, no recompute) so it survives
-    // the scrub. is-filtering lives on the parent .agents-lens, untouched here.
+    // apply the cached filter dimming (class-only, no recompute) so it survives.
+    // is-filtering lives on the parent .agents-lens, untouched here.
     if (filterMatchSet) dimNodes(host, filterMatchSet);
   }
+  return view;
+}
+
+// renderScrub repaints ONLY the session Gantts + the clock/counts readout for
+// the current playhead T — preserving each Gantt's horizontal scroll so seeking
+// through time never yanks the viewport sideways.
+function renderScrub(container) {
+  const T = playheadT;
+  const view = repaintTimelineSessions(container, T);
   const clock = container.querySelector('[data-tlclock]');
   if (clock) clock.textContent = clockTime(T);
   const counts = container.querySelector('[data-tlcounts]');
   if (counts) counts.innerHTML = countsHTML(playheadStats(view, T));
+}
+
+// ── timeline zoom (scroll-wheel over the Gantt) ────────────────────────────
+
+// onTimelineWheel turns a scroll-wheel over the Gantt into a TIME-AXIS zoom.
+// Shift+wheel and horizontal-dominant (trackpad) gestures fall through to the
+// browser's native horizontal scroll — that's PAN, which the chart already does.
+// A plain vertical wheel is captured (preventDefault stops the page scrolling
+// under it); deltas accumulate and a single rAF applies the zoom so a fast
+// scroll coalesces to one repaint. No-ops gracefully off a Gantt (e.g. the
+// static report, which has no .timeline-scroll).
+function onTimelineWheel(container, e) {
+  const sc = e.target.closest && e.target.closest('.timeline-scroll[data-tlscroll]');
+  if (!sc) return;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // → native pan
+  e.preventDefault();
+  const cursorX = e.clientX - sc.getBoundingClientRect().left;
+  if (zoomPending && zoomPending.sc === sc) {
+    zoomPending.deltaY += e.deltaY;
+    zoomPending.cursorX = cursorX;
+  } else {
+    zoomPending = { sc, sid: sc.dataset.tlscroll, cursorX, deltaY: e.deltaY };
+  }
+  if (zoomRaf) return;
+  zoomRaf = requestAnimationFrame(() => { zoomRaf = 0; applyTimelineZoom(container); });
+}
+
+// applyTimelineZoom consumes the pending wheel gesture: it multiplies the axis
+// density by 1.15^(-deltaY/100) (a perceptually-even step), clamps to the usable
+// range (floor = fit-to-width, ceiling = TL_MAX_PX_PER_MS), repaints the single
+// plotted Gantt at the new density, then sets the scroll offset so the timestamp
+// under the cursor stays pinned. The current density is read off the live chart
+// width (scrollWidth/span) so the first tick is responsive even from a stale
+// below-floor state (the chart renders AT the floor in that case).
+function applyTimelineZoom(container) {
+  const pending = zoomPending;
+  zoomPending = null;
+  if (!pending) return;
+  const chosen = currentTimelineSession();
+  if (!chosen) return;
+  const nowMs = Date.now();
+  const { span, chartHostW } = buildTimeline(chosen.session, { hostW: timelineHostW(), nowMs });
+  if (!(span > 0)) return; // zero-length session → no axis to zoom
+
+  const oldChartW = pending.sc.scrollWidth;
+  const viewportW = pending.sc.clientWidth;
+  const scrollLeft = pending.sc.scrollLeft;
+  const cur = oldChartW > 0 ? oldChartW / span : chartHostW / span;
+  const factor = Math.pow(1.15, -pending.deltaY / 100);
+  tlMinPxPerMs = zoomClampPxPerMs(cur * factor, { span, chartHostW, maxPxPerMs: TL_MAX_PX_PER_MS });
+
+  const bounds = playheadBounds({ sessions: [chosen.session] }, nowMs);
+  const T = playheadAt(bounds, nowMs);
+  repaintTimelineSessions(container, T);
+
+  // The repaint replaced the scroll node; re-query it and pin the cursor's
+  // timestamp by setting scrollLeft from the old/new content widths.
+  const newSc = container.querySelector(`.timeline-scroll[data-tlscroll="${cssEsc(pending.sid)}"]`);
+  if (newSc) {
+    newSc.scrollLeft = zoomAnchorScrollLeft({
+      cursorX: pending.cursorX, scrollLeft, viewportW,
+      oldChartW, newChartW: newSc.scrollWidth,
+    });
+  }
+}
+
+// onTimelineZoomReset returns the Gantt to the fit-to-width overview: it sets the
+// density to the floor (chartHostW/span) so the whole session fits with no
+// horizontal scroll — the double-click escape hatch from a deep zoom.
+function onTimelineZoomReset(container) {
+  const chosen = currentTimelineSession();
+  if (!chosen) return;
+  const nowMs = Date.now();
+  const { span, chartHostW } = buildTimeline(chosen.session, { hostW: timelineHostW(), nowMs });
+  if (!(span > 0)) return;
+  tlMinPxPerMs = chartHostW / span;
+  const bounds = playheadBounds({ sessions: [chosen.session] }, nowMs);
+  repaintTimelineSessions(container, playheadAt(bounds, nowMs));
 }
 
 // ── preserve scroll / open-rows across a live re-render ────────────────────
