@@ -57,6 +57,11 @@ type ToolResult struct {
 	// is either a bare string or an array of {type:"text",text} blocks; both
 	// collapse to plain text here. Capped to bound payload size.
 	Content string
+	// Timestamp is the carrying user line's `timestamp` — the wall-clock moment
+	// the tool's result arrived. It's the only per-tool time we can recover (the
+	// tool_use side stamps the whole assistant turn, not each call), so the join
+	// uses it as each tool's end. Zero when the line lacks a parseable timestamp.
+	Timestamp time.Time
 }
 
 // Turn is one assistant message — the only event type that costs money.
@@ -563,6 +568,7 @@ func peekToolResults(line []byte) []ToolResult {
 	if err := json.Unmarshal(msg.Content, &entries); err != nil {
 		return nil
 	}
+	ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
 	var out []ToolResult
 	for _, e := range entries {
 		if e.Type != "tool_result" {
@@ -572,6 +578,7 @@ func peekToolResults(line []byte) []ToolResult {
 			ToolUseID: e.ToolUseID,
 			IsError:   e.IsError,
 			Content:   truncateRunes(toolResultText(e.Content), toolResultMaxChars),
+			Timestamp: ts,
 		})
 	}
 	return out

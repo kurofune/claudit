@@ -166,6 +166,35 @@ func TestBuildAgentGraph_JoinsToolResults(t *testing.T) {
 	}
 }
 
+// Per-tool timing must survive the whole pipeline: the turn timestamp becomes
+// each tool's StartedAt and the matching tool_result line's timestamp becomes
+// its EndedAt, so the Timeline can draw a sub-span whose width is the tool's
+// wall-clock. An 8s Bash here should report an 8s [start,end].
+func TestBuildAgentGraph_SurfacesPerToolTiming(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.ToolUses = []parse.ToolUse{{ID: "toolu_1", Name: "Bash", Input: "go build"}}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "toolu_1", IsError: false, Content: "ok", Timestamp: t0.Add(8 * time.Second)},
+		},
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tool := g.Sessions[0].Main.Steps[0].Tools[0]
+	if tool.StartedAt == nil || !tool.StartedAt.Equal(t0) {
+		t.Errorf("tool StartedAt = %v, want %v", tool.StartedAt, t0)
+	}
+	if tool.EndedAt == nil || !tool.EndedAt.Equal(t0.Add(8*time.Second)) {
+		t.Errorf("tool EndedAt = %v, want %v", tool.EndedAt, t0.Add(8*time.Second))
+	}
+}
+
 func TestBuildAgentGraph_MainNodeRollsUp(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

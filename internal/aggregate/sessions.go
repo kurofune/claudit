@@ -102,6 +102,15 @@ type ToolInvocation struct {
 	// snapshot. It surfaces one decision's full blast radius (the sub-agent's
 	// own cost/tokens/errors/duration) inline on the spawning call.
 	Spawned *SpawnRollup `json:"spawned,omitempty"`
+	// StartedAt is when the call was emitted — the assistant turn's timestamp.
+	// Every tool in a turn shares it (the wire only stamps the turn, not each
+	// call). EndedAt is the matched tool_result's timestamp. Together they give
+	// per-tool wall-clock the Timeline draws as a sub-span. Pointers so a missing
+	// time serializes to null (omitted) rather than a year-1 zero the frontend
+	// would misread; both nil for older sessions lacking ids/timestamps, which
+	// makes the frontend fall back to turn-level segments.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 // SpawnRollup is the cumulative cost of a single sub-agent, attributed to the
@@ -265,7 +274,11 @@ func BuildSessionTimelines(
 			Model:     t.Model,
 			CostUSD:   cost,
 			Tokens:    tokens,
-			Tools:     distinctToolInvocations(t.ToolUses, nil, opts.Redact),
+			// The Sessions view doesn't render per-tool sub-spans (it shows
+			// turn-level DurationMs), and it joins no tool_results here, so pass
+			// a zero turnTS to leave StartedAt/EndedAt unset — only the agentflow
+			// Timeline path needs per-tool timing.
+			Tools:     distinctToolInvocations(t.ToolUses, nil, opts.Redact, time.Time{}),
 			Sidechain: t.Sidechain,
 		})
 	}
@@ -454,8 +467,8 @@ func preparePromptText(raw string, opts SessionTimelinesOptions) (string, bool) 
 // DistinctToolInvocations is the exported entry point to the same dedup +
 // detail-selection logic the session drill-down uses, so other packages
 // (e.g. agentflow) surface tool calls identically instead of drifting.
-func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool) []ToolInvocation {
-	return distinctToolInvocations(uses, results, redact)
+func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool, turnTS time.Time) []ToolInvocation {
+	return distinctToolInvocations(uses, results, redact, turnTS)
 }
 
 // distinctToolInvocations returns (Name, Detail) pairs in first-occurrence
@@ -464,9 +477,14 @@ func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 // — same tool, different work. Detail comes from the per-tool field that
 // best identifies the call (SubagentType for Agent, SkillName for Skill,
 // SlashCommand for SlashCommand, ToolUse.Detail for everything else).
-func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool) []ToolInvocation {
+func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.ToolResult, redact bool, turnTS time.Time) []ToolInvocation {
 	if len(uses) == 0 {
 		return nil
+	}
+	var startedAt *time.Time
+	if !turnTS.IsZero() {
+		ts := turnTS
+		startedAt = &ts
 	}
 	type key struct{ name, detail, input string }
 	seen := make(map[key]struct{}, len(uses))
@@ -489,7 +507,7 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		if redact && input != "" {
 			input = redactMarker(input)
 		}
-		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: input}
+		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: input, StartedAt: startedAt}
 		// Join the outcome from the matching tool_result (by tool_use id).
 		// Status is content-free so it survives redaction; Output is masked
 		// the same way Input is.
@@ -502,6 +520,13 @@ func distinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 			inv.Output = res.Content
 			if redact && inv.Output != "" {
 				inv.Output = redactMarker(inv.Output)
+			}
+			// The result line's timestamp is this tool's wall-clock end. Guard
+			// the zero time (older transcripts without line timestamps) so a
+			// missing end stays nil rather than a year-1 instant.
+			if !res.Timestamp.IsZero() {
+				end := res.Timestamp
+				inv.EndedAt = &end
 			}
 		}
 		out = append(out, inv)

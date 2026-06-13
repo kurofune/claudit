@@ -372,7 +372,7 @@ func TestDistinctToolInvocations_JoinsResults(t *testing.T) {
 		"t1": {ToolUseID: "t1", IsError: true, Content: "FAIL: boom"},
 		"t2": {ToolUseID: "t2", IsError: false, Content: "package main"},
 	}
-	got := DistinctToolInvocations(uses, results, false)
+	got := DistinctToolInvocations(uses, results, false, time.Time{})
 	if len(got) != 3 {
 		t.Fatalf("got %d invocations, want 3 (%+v)", len(got), got)
 	}
@@ -396,7 +396,7 @@ func TestDistinctToolInvocations_CarriesToolUseID(t *testing.T) {
 		{ID: "t2", Name: "Bash", Input: "go test"}, // dup of t1 → collapses
 		{ID: "t3", Name: "Read", Detail: ".go"},
 	}
-	got := DistinctToolInvocations(uses, nil, false)
+	got := DistinctToolInvocations(uses, nil, false, time.Time{})
 	if len(got) != 2 {
 		t.Fatalf("got %d invocations, want 2 (dedup)", len(got))
 	}
@@ -408,13 +408,71 @@ func TestDistinctToolInvocations_CarriesToolUseID(t *testing.T) {
 	}
 }
 
+// The tool_use side only stamps the whole assistant turn, so every tool in a
+// turn shares that turn timestamp as its start; the matched tool_result's
+// timestamp is the tool's end. Together they give per-tool wall-clock the
+// Timeline renders as a sub-span.
+func TestDistinctToolInvocations_CapturesPerToolTiming(t *testing.T) {
+	turnTS := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: "go build"},
+		{ID: "t2", Name: "Read", Detail: ".go"},
+	}
+	results := map[string]parse.ToolResult{
+		"t1": {ToolUseID: "t1", Timestamp: turnTS.Add(8 * time.Second)},
+		"t2": {ToolUseID: "t2", Timestamp: turnTS.Add(8200 * time.Millisecond)},
+	}
+	got := DistinctToolInvocations(uses, results, false, turnTS)
+	if len(got) != 2 {
+		t.Fatalf("got %d invocations, want 2", len(got))
+	}
+	if got[0].StartedAt == nil || !got[0].StartedAt.Equal(turnTS) {
+		t.Errorf("t1 StartedAt = %v, want %v", got[0].StartedAt, turnTS)
+	}
+	if got[0].EndedAt == nil || !got[0].EndedAt.Equal(turnTS.Add(8*time.Second)) {
+		t.Errorf("t1 EndedAt = %v, want %v", got[0].EndedAt, turnTS.Add(8*time.Second))
+	}
+	if got[1].EndedAt == nil || !got[1].EndedAt.Equal(turnTS.Add(8200*time.Millisecond)) {
+		t.Errorf("t2 EndedAt = %v, want %v", got[1].EndedAt, turnTS.Add(8200*time.Millisecond))
+	}
+}
+
+// Without a joinable end (no matching tool_result, or one whose line had no
+// parseable timestamp), EndedAt must stay nil — the frontend reads nil as "no
+// tool timing" and falls back to a turn-level segment instead of drawing a
+// bogus zero-width or year-1 span. StartedAt still rides along (we know when the
+// turn emitted the call even if we never saw its result).
+func TestDistinctToolInvocations_NilEndWhenNoJoinableResult(t *testing.T) {
+	turnTS := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	uses := []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: "a"},    // no result in map
+		{ID: "t2", Name: "Read", Detail: ".go"}, // result present but zero ts
+		{ID: "", Name: "Edit"},                  // no id → never joins
+	}
+	results := map[string]parse.ToolResult{
+		"t2": {ToolUseID: "t2", IsError: false, Content: "x"}, // Timestamp zero
+	}
+	got := DistinctToolInvocations(uses, results, false, turnTS)
+	if len(got) != 3 {
+		t.Fatalf("got %d invocations, want 3", len(got))
+	}
+	for i, inv := range got {
+		if inv.EndedAt != nil {
+			t.Errorf("got[%d] (%s) EndedAt = %v, want nil", i, inv.Name, inv.EndedAt)
+		}
+		if inv.StartedAt == nil || !inv.StartedAt.Equal(turnTS) {
+			t.Errorf("got[%d] (%s) StartedAt = %v, want %v", i, inv.Name, inv.StartedAt, turnTS)
+		}
+	}
+}
+
 func TestDistinctToolInvocations_PopulatesKind(t *testing.T) {
 	uses := []parse.ToolUse{
 		{ID: "t1", Name: "Agent", SubagentType: "review-triage"},
 		{ID: "t2", Name: "Bash", Input: "go test"},
 		{ID: "t3", Name: "mcp__github__create_issue"},
 	}
-	got := DistinctToolInvocations(uses, nil, false)
+	got := DistinctToolInvocations(uses, nil, false, time.Time{})
 	if len(got) != 3 {
 		t.Fatalf("got %d invocations, want 3", len(got))
 	}
@@ -431,7 +489,7 @@ func TestDistinctToolInvocations_RedactsOutput(t *testing.T) {
 	results := map[string]parse.ToolResult{
 		"t1": {ToolUseID: "t1", IsError: false, Content: "sensitive output"},
 	}
-	got := DistinctToolInvocations(uses, results, true)
+	got := DistinctToolInvocations(uses, results, true, time.Time{})
 	if len(got) != 1 {
 		t.Fatalf("got %d, want 1", len(got))
 	}

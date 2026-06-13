@@ -219,7 +219,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			Model:      t.Model,
 			CostUSD:    cost,
 			Tokens:     stepTokens,
-			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact),
+			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact, t.Timestamp),
 			Thinking:   thinking,
 			Text:       text,
 			parentUUID: t.ParentUUID,

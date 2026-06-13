@@ -583,6 +583,40 @@ func TestParseFile_ToolResults(t *testing.T) {
 	}
 }
 
+// A tool_result's wall-clock end is the timestamp of the user line that carries
+// it — the only per-tool time we can recover (the tool_use side only stamps the
+// whole assistant turn). peekToolResults must lift that line timestamp onto each
+// ToolResult so the join can compute per-tool duration.
+func TestPeekToolResults_StampsTimestamp(t *testing.T) {
+	line := `{"type":"user","timestamp":"2026-04-10T10:00:08Z","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"done"}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1 (%+v)", len(got), got)
+	}
+	want := time.Date(2026, 4, 10, 10, 0, 8, 0, time.UTC)
+	if !got[0].Timestamp.Equal(want) {
+		t.Errorf("Timestamp = %v, want %v", got[0].Timestamp, want)
+	}
+}
+
+// Older transcripts may omit the line timestamp; the result must carry a zero
+// time then (not a bogus epoch), so the join can tell "no end captured" apart
+// from a real one and the frontend falls back to turn-level segments.
+func TestPeekToolResults_ZeroTimestampWhenLineHasNone(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[` +
+		`{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"done"}` +
+		`]}}`
+	got := peekToolResults([]byte(line))
+	if len(got) != 1 {
+		t.Fatalf("peekToolResults len = %d, want 1 (%+v)", len(got), got)
+	}
+	if !got[0].Timestamp.IsZero() {
+		t.Errorf("Timestamp = %v, want zero", got[0].Timestamp)
+	}
+}
+
 func TestParseFile_StreamingNotInMemory(t *testing.T) {
 	// Smoke test that we use a Scanner (won't allocate the whole file).
 	// Verify by reading a moderately long synthetic input.
