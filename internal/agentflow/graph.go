@@ -93,6 +93,12 @@ type AgentStep struct {
 	// Tokens is this turn's usage (counted once for a coalesced message), so the
 	// drawer can show per-turn input/output/cache without re-deriving it.
 	Tokens aggregate.Tokens `json:"tokens"`
+	// ContextTokens is the prompt size fed to the model this turn —
+	// input_tokens + cache_read_tokens (the fresh prompt plus the cached prefix
+	// replayed into context). It excludes output and cache-creation. Lets the
+	// frontend chart context-window growth and per-turn cache-hit ratio without
+	// re-summing usage. Zero only when the turn reported no input/cache-read.
+	ContextTokens int64 `json:"context_tokens"`
 	// DurationMs is the wall-clock gap to the next step within the same agent,
 	// in milliseconds. Zero for the last step (no next).
 	DurationMs int64 `json:"duration_ms"`
@@ -227,15 +233,16 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			genMs = t.EndTimestamp.Sub(t.Timestamp).Milliseconds()
 		}
 		n.steps = append(n.steps, AgentStep{
-			Timestamp:  t.Timestamp,
-			Model:      t.Model,
-			CostUSD:    cost,
-			Tokens:     stepTokens,
-			GenMs:      genMs,
-			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact, t.Timestamp),
-			Thinking:   thinking,
-			Text:       text,
-			parentUUID: t.ParentUUID,
+			Timestamp:     t.Timestamp,
+			Model:         t.Model,
+			CostUSD:       cost,
+			Tokens:        stepTokens,
+			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
+			GenMs:         genMs,
+			Tools:         aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact, t.Timestamp),
+			Thinking:      thinking,
+			Text:          text,
+			parentUUID:    t.ParentUUID,
 		})
 	}
 

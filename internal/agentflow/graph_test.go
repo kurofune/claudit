@@ -340,6 +340,36 @@ func TestBuildAgentGraph_StepCarriesTokens(t *testing.T) {
 	}
 }
 
+// context_tokens is the prompt size fed to the model that turn — input plus
+// the cached prefix replayed in (cache_read) — and deliberately excludes output
+// and cache-creation. It's the size that drives context-growth charts and the
+// per-turn cache-hit ratio. Here 111 input + 555 cache_read = 666.
+func TestBuildAgentGraph_StepContextTokens(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.Usage = parse.Usage{
+		InputTokens:         111,
+		OutputTokens:        222, // excluded
+		CacheCreate5mTokens: 333, // excluded
+		CacheCreate1hTokens: 44,  // excluded
+		CacheReadTokens:     555,
+	}
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	steps := g.Sessions[0].Main.Steps
+	if len(steps) != 1 {
+		t.Fatalf("want 1 step, got %d", len(steps))
+	}
+	if steps[0].ContextTokens != 666 {
+		t.Errorf("ContextTokens = %d, want 666 (input 111 + cache_read 555)", steps[0].ContextTokens)
+	}
+}
+
 func TestBuildAgentGraph_InterStepDuration(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
