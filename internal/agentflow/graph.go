@@ -95,8 +95,14 @@ type AgentStep struct {
 	Tokens aggregate.Tokens `json:"tokens"`
 	// DurationMs is the wall-clock gap to the next step within the same agent,
 	// in milliseconds. Zero for the last step (no next).
-	DurationMs int64                      `json:"duration_ms"`
-	Tools      []aggregate.ToolInvocation `json:"tools"`
+	DurationMs int64 `json:"duration_ms"`
+	// GenMs is the model's streamed-generation span for this turn — the gap
+	// between the message's first and last JSONL line (think + emit). It's a
+	// SUBSET of DurationMs: the rest is tool execution + idle/wait. Zero when
+	// the message was a single line (legacy transcripts or a sub-second turn),
+	// which the frontend reads as "no measurable generation time".
+	GenMs int64                      `json:"gen_ms"`
+	Tools []aggregate.ToolInvocation `json:"tools"`
 	// Thinking is the turn's extended-thinking reasoning; Text is its
 	// narration. Redacted to a length marker when Options.Redact is set.
 	// Omitted from JSON when empty so tool-only turns stay lean.
@@ -214,11 +220,18 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		}
 		var stepTokens aggregate.Tokens
 		addUsage(&stepTokens, t.Usage)
+		// Model generation span: first→last streamed line of the turn. Zero
+		// for a single-line message (legacy or sub-second), never negative.
+		var genMs int64
+		if t.EndTimestamp.After(t.Timestamp) {
+			genMs = t.EndTimestamp.Sub(t.Timestamp).Milliseconds()
+		}
 		n.steps = append(n.steps, AgentStep{
 			Timestamp:  t.Timestamp,
 			Model:      t.Model,
 			CostUSD:    cost,
 			Tokens:     stepTokens,
+			GenMs:      genMs,
 			Tools:      aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact, t.Timestamp),
 			Thinking:   thinking,
 			Text:       text,

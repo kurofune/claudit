@@ -347,6 +347,47 @@ func TestParseFile_CoalescedTurnKeepsFirstLineIdentityAndAllLinks(t *testing.T) 
 	}
 }
 
+func TestParseFile_CoalescedTurnTracksLastLineTimestamp(t *testing.T) {
+	// A streamed turn's model-generation span is the wall-clock between its
+	// FIRST and LAST JSONL line. Coalescing keeps the first line's Timestamp
+	// (identity, asserted elsewhere) AND records the last line's EndTimestamp
+	// so the graph can derive gen time. Here: first line :01, last :03.
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","parentUuid":"u0","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"x"}]}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-04-10T10:00:02Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"y"}]}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-04-10T10:00:03Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+	}
+	res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("Turns = %d, want 1", len(res.Turns))
+	}
+	turn := res.Turns[0]
+	wantStart, _ := time.Parse(time.RFC3339, "2026-04-10T10:00:01Z")
+	wantEnd, _ := time.Parse(time.RFC3339, "2026-04-10T10:00:03Z")
+	if !turn.Timestamp.Equal(wantStart) {
+		t.Errorf("Timestamp = %v, want first line %v", turn.Timestamp, wantStart)
+	}
+	if !turn.EndTimestamp.Equal(wantEnd) {
+		t.Errorf("EndTimestamp = %v, want last line %v", turn.EndTimestamp, wantEnd)
+	}
+}
+
+func TestParseLine_EndTimestampDefaultsToTimestamp(t *testing.T) {
+	// A standalone (un-coalesced) assistant line has no streaming span, so its
+	// EndTimestamp must default to its Timestamp — gen time is then zero, not a
+	// zero-value time that would compute a nonsense negative span downstream.
+	tn, _, kind := ParseLine([]byte(`{"type":"assistant","uuid":"a1","timestamp":"2026-04-10T10:00:07Z","message":{"id":"m","model":"x","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"hi"}]}}`), "p")
+	if kind != LineAssistant {
+		t.Fatalf("kind = %v, want LineAssistant", kind)
+	}
+	if !tn.EndTimestamp.Equal(tn.Timestamp) {
+		t.Errorf("EndTimestamp = %v, want it to default to Timestamp %v", tn.EndTimestamp, tn.Timestamp)
+	}
+}
+
 func TestParseFile_NoMessageIDStaysOneTurnPerLine(t *testing.T) {
 	// Older transcripts (and any line that lost its message.id) carry no
 	// message.id. The fix must be a no-op there: each assistant line stays its

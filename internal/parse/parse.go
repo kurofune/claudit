@@ -77,10 +77,16 @@ type Turn struct {
 	ParentUUID string
 	Sidechain  bool
 	Timestamp  time.Time
-	CWD        string
-	Model      string
-	Usage      Usage
-	ToolUses   []ToolUse
+	// EndTimestamp is the timestamp of the LAST JSONL line of this (coalesced)
+	// message — Timestamp is the first line. Their gap is the model's streamed
+	// generation span (think + emit). For a single-line message it equals
+	// Timestamp (zero span). Defaults to Timestamp at parse so it's never the
+	// zero value, which would compute a nonsense span downstream.
+	EndTimestamp time.Time
+	CWD          string
+	Model        string
+	Usage        Usage
+	ToolUses     []ToolUse
 	// Thinking is the joined text of the assistant message's `thinking`
 	// blocks — the model's extended-thinking reasoning. Empty when none.
 	Thinking string
@@ -246,14 +252,17 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			ParentUUID: raw.ParentUUID,
 			Sidechain:  raw.Sidechain,
 			Timestamp:  ts,
-			CWD:        raw.CWD,
-			Model:      msg.Model,
-			Usage:      convertUsage(msg.Usage),
-			ToolUses:   extractToolUses(msg.Content),
-			Thinking:   thinking,
-			Text:       text,
-			Entrypoint: raw.Entrypoint,
-			SourceFile: path,
+			// A lone line has no streaming span; coalesceTurns/mergeTurn
+			// advance EndTimestamp to the message's last line.
+			EndTimestamp: ts,
+			CWD:          raw.CWD,
+			Model:        msg.Model,
+			Usage:        convertUsage(msg.Usage),
+			ToolUses:     extractToolUses(msg.Content),
+			Thinking:     thinking,
+			Text:         text,
+			Entrypoint:   raw.Entrypoint,
+			SourceFile:   path,
 		}, UserMessage{}, LineAssistant
 	case "user":
 		if raw.IsMeta || len(raw.Message) == 0 {
@@ -352,6 +361,12 @@ func coalesceTurns(turns []Turn) []Turn {
 // taken as the per-field max: the lines repeat one identical cumulative total,
 // so max counts it once while tolerating a malformed line that lost a field.
 func mergeTurn(a, b Turn) Turn {
+	// Advance the message's end to its latest line so EndTimestamp−Timestamp is
+	// the streamed-generation span. Lines arrive in order, but take the later of
+	// the two defensively (an interleaved id could merge out of order).
+	if b.EndTimestamp.After(a.EndTimestamp) {
+		a.EndTimestamp = b.EndTimestamp
+	}
 	a.Thinking = joinBlocks(a.Thinking, b.Thinking)
 	a.Text = joinBlocks(a.Text, b.Text)
 	a.ToolUses = append(a.ToolUses, b.ToolUses...)

@@ -63,6 +63,47 @@ func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_StepGenMs(t *testing.T) {
+	// A streamed turn's gen_ms is the span between its first and last JSONL
+	// line (model think + emit). Here msg_1 streams :01→:05 → gen_ms=4000; the
+	// single-line msg_2 at :10 has no measurable span → gen_ms=0. gen_ms is a
+	// subset of duration_ms (the 9s gap to the next message), not the whole gap.
+	lines := []string{
+		`{"type":"assistant","uuid":"a1","parentUuid":"u0","timestamp":"2026-04-10T10:00:01Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"reason"}]}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"a1","timestamp":"2026-04-10T10:00:05Z","sessionId":"s1","message":{"id":"msg_1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"a2","timestamp":"2026-04-10T10:00:10Z","sessionId":"s1","message":{"id":"msg_2","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"done"}]}}`,
+	}
+	res, err := parse.ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "/p/s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prices, _ := pricing.LoadDefault()
+	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks}
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Sessions) != 1 || g.Sessions[0].Main == nil {
+		t.Fatalf("expected 1 session with a main agent, got %+v", g.Sessions)
+	}
+	steps := g.Sessions[0].Main.Steps
+	if len(steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(steps))
+	}
+	if steps[0].GenMs != 4000 {
+		t.Errorf("step0 GenMs = %d, want 4000 (first→last line span)", steps[0].GenMs)
+	}
+	if steps[0].DurationMs != 9000 {
+		t.Errorf("step0 DurationMs = %d, want 9000 (gap to next message)", steps[0].DurationMs)
+	}
+	if steps[0].GenMs > steps[0].DurationMs {
+		t.Errorf("GenMs %d must not exceed DurationMs %d", steps[0].GenMs, steps[0].DurationMs)
+	}
+	if steps[1].GenMs != 0 {
+		t.Errorf("step1 GenMs = %d, want 0 (single-line message has no span)", steps[1].GenMs)
+	}
+}
+
 // writeSubagent creates a subagents/agent-<id>.jsonl path (the file itself is
 // not needed — the graph reads turns from the snapshot) plus its sibling
 // .meta.json, and returns the jsonl path to use as a turn's SourceFile.
