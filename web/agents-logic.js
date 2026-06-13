@@ -1866,12 +1866,25 @@ export function detectRetries(agent) {
 export function detectSignals(graph, opts = {}) {
   const whaleShare = opts.whaleShare > 0 ? opts.whaleShare : 0.2;
   const retryStormMin = opts.retryStormMin > 0 ? opts.retryStormMin : 3;
+  const slowToolMin = opts.slowToolMin > 0 ? opts.slowToolMin : 5;
+  const slowMultiple = opts.slowMultiple > 0 ? opts.slowMultiple : 3;
+  const errorCascadeMin = opts.errorCascadeMin > 0 ? opts.errorCascadeMin : 3;
+  const idleStallMs = opts.idleStallMs > 0 ? opts.idleStallMs : 120000;
+  // Static-safe: "now" must come from opts, never Date.now, so a static
+  // `claudit report` (which can't know the live clock) simply skips the
+  // trailing-gap check instead of inventing a stall.
+  const nowMs = (typeof opts.nowMs === 'number' && !Number.isNaN(opts.nowMs)) ? opts.nowMs : null;
+  const runawayFill = opts.runawayFill > 0 ? opts.runawayFill : 0.8;
   const signals = [];
   for (const session of (graph && graph.sessions) || []) {
     const sid = (session && session.session_id) || '';
     const agents = flattenSession(session);
     signals.push(...retryStormSignals(agents, sid, retryStormMin));
     signals.push(...costWhaleSignals(agents, sid, whaleShare));
+    signals.push(...slowToolSignals(agents, sid, slowToolMin, slowMultiple));
+    signals.push(...errorCascadeSignals(agents, sid, errorCascadeMin));
+    signals.push(...idleStallSignals(agents, sid, idleStallMs, nowMs));
+    signals.push(...runawayContextSignals(agents, sid, runawayFill));
   }
   // Worst-first. JS sort is stable, so equal-severity signals keep emission order.
   signals.sort((a, b) => b.severity - a.severity);
@@ -1902,6 +1915,163 @@ function retryStormSignals(agents, sid, retryStormMin) {
         : `${name} retried ${maxAttempt}×`;
       out.push({ kind: 'retry-storm', severity, tier, ref: `${sid}#${ai}.${worstCoord}`, summary });
     }
+  });
+  return out;
+}
+
+// slowToolSignals: flag tool calls whose wall-clock is anomalous within the
+// session — either over the session-wide p95 of all tool durations, or over
+// slowMultiple× the median for the tool's own kind (so a slow Bash among fast
+// Reads is caught even when it's not in the global top tail). Needs at least
+// slowToolMin valid-duration tools for a meaningful percentile; below that the
+// session is too small to call anything an outlier. ref is the tool (sid#ai.si:ti).
+function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
+  // Collect every tool with a real wall-clock (NaN-guarded like durationHistogram).
+  const tools = []; // { ai, si, ti, kind, name, dur }
+  agents.forEach((a, ai) => {
+    (a.steps || []).forEach((step, si) => {
+      (step.tools || []).forEach((t, ti) => {
+        if (!t) return;
+        const start = parseTime(t.started_at), end = parseTime(t.ended_at);
+        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return;
+        tools.push({ ai, si, ti, kind: t.kind || 'other', name: t.name || t.kind || 'tool', dur: end - start });
+      });
+    });
+  });
+  if (tools.length < slowToolMin) return [];
+  const p95 = percentiles(tools.map(t => t.dur), [95])[0];
+  // Per-kind medians for the relative-to-peers path.
+  const byKind = new Map();
+  for (const t of tools) {
+    if (!byKind.has(t.kind)) byKind.set(t.kind, []);
+    byKind.get(t.kind).push(t.dur);
+  }
+  const kindMedian = new Map();
+  for (const [kind, durs] of byKind) kindMedian.set(kind, percentiles(durs, [50])[0]);
+  const out = [];
+  for (const t of tools) {
+    const km = kindMedian.get(t.kind);
+    const overP95 = t.dur > p95;
+    const overKind = km > 0 && t.dur > slowMultiple * km;
+    if (!overP95 && !overKind) continue;
+    // Severity from the global p95 ratio; a kind-median-only flag (within p95)
+    // floors to a small positive value so it still sorts as a real signal.
+    let severity = p95 > 0 ? (t.dur - p95) / p95 : 0;
+    if (severity <= 0) severity = 0.05;
+    severity = Math.max(0, Math.min(1, severity));
+    const tier = severity >= 0.5 ? 'high' : severity >= 0.2 ? 'med' : 'low';
+    const secs = (t.dur / 1000).toFixed(1);
+    const summary = overP95
+      ? `${t.name} took ${secs}s — ${(t.dur / p95).toFixed(1)}× the session p95`
+      : `${t.name} took ${secs}s — ${(t.dur / km).toFixed(1)}× the typical ${t.kind}`;
+    out.push({ kind: 'slow-tool', severity, tier, ref: `${sid}#${t.ai}.${t.si}:${t.ti}`, summary });
+  }
+  return out;
+}
+
+// errorCascadeSignals: per agent, walk tools in step-then-tool (chronological)
+// order and flag any run of errorCascadeMin-or-more consecutive errored tools as
+// one signal, refed at the run's first error so click-through lands where it
+// began. A non-error tool breaks the run; runs don't cross agent boundaries.
+function errorCascadeSignals(agents, sid, errorCascadeMin) {
+  const out = [];
+  agents.forEach((a, ai) => {
+    let run = null; // { startCoord, startName, len }
+    const flush = () => {
+      if (run && run.len >= errorCascadeMin) {
+        const severity = Math.max(0, Math.min(1, (run.len - 1) / 5));
+        const tier = run.len >= 5 ? 'high' : run.len >= 4 ? 'med' : 'low';
+        const summary = `${run.len} tools errored back-to-back, starting with ${run.startName}`;
+        out.push({ kind: 'error-cascade', severity, tier, ref: `${sid}#${ai}.${run.startCoord}`, summary });
+      }
+      run = null;
+    };
+    (a.steps || []).forEach((step, si) => {
+      (step.tools || []).forEach((t, ti) => {
+        if (!t) return;
+        if (t.status === 'error') {
+          if (!run) run = { startCoord: `${si}:${ti}`, startName: t.name || t.kind || 'tool', len: 0 };
+          run.len += 1;
+        } else {
+          flush();
+        }
+      });
+    });
+    flush();
+  });
+  return out;
+}
+
+// idleStallSignals: per agent, flag a gap longer than idleStallMs between one
+// step's END (its last tool's ended_at, or its own timestamp when tool-less) and
+// the next step's START — wall-clock the agent spent idle, not working (a single
+// long-running tool is NOT a stall, since the gap is measured from when it
+// finished). When nowMs is provided, the tail from the final step's end to "now"
+// is also checked, catching a run that stalled and never resumed. ref is the step
+// that ends the idle (the resuming step, or the last step for a trailing stall).
+function idleStallSignals(agents, sid, idleStallMs, nowMs) {
+  const stepEnd = (step) => {
+    let end = parseTime(step && step.timestamp);
+    for (const t of (step && step.tools) || []) {
+      if (!t) continue;
+      const e = parseTime(t.ended_at);
+      if (!Number.isNaN(e) && (Number.isNaN(end) || e > end)) end = e;
+    }
+    return end;
+  };
+  const out = [];
+  const emit = (ai, si, gap, trailing) => {
+    const mult = gap / idleStallMs;
+    const severity = Math.max(0, Math.min(1, (mult - 1) / 9));
+    const tier = mult >= 5 ? 'high' : mult >= 2 ? 'med' : 'low';
+    const mins = (gap / 60000).toFixed(1);
+    const summary = trailing
+      ? `Idle ${mins} min after the last activity`
+      : `Idle ${mins} min between turns`;
+    out.push({ kind: 'idle-stall', severity, tier, ref: `${sid}#${ai}.${si}`, summary });
+  };
+  agents.forEach((a, ai) => {
+    const steps = a.steps || [];
+    let prevEnd = NaN, prevEndSi = -1;
+    steps.forEach((step, si) => {
+      const start = parseTime(step && step.timestamp);
+      if (!Number.isNaN(prevEnd) && !Number.isNaN(start) && start - prevEnd > idleStallMs) {
+        emit(ai, si, start - prevEnd, false);
+      }
+      const end = stepEnd(step);
+      if (!Number.isNaN(end)) { prevEnd = end; prevEndSi = si; }
+    });
+    if (nowMs != null && !Number.isNaN(prevEnd) && nowMs - prevEnd > idleStallMs) {
+      emit(ai, prevEndSi, nowMs - prevEnd, true);
+    }
+  });
+  return out;
+}
+
+// runawayContextSignals: per agent, flag a run whose context window grew to at
+// least runawayFill of its inferred capacity — the prompt nearly filled the
+// window, the runaway risk the Token panel surfaces. Reuses contextSeries for
+// the peak and the capacity-tier inference (200k vs the 1M beta, read off the
+// data since the tier isn't recorded), so a big-window run with headroom doesn't
+// trip. ref is the peak-context turn (sid#ai.si). severity IS the fill fraction.
+function runawayContextSignals(agents, sid, runawayFill) {
+  const out = [];
+  agents.forEach((a, ai) => {
+    const cs = contextSeries([a]);
+    if (!(cs.peakContext > 0) || cs.peakFill < runawayFill) return;
+    // Locate the peak turn directly (the series doesn't carry step indices).
+    let peakSi = 0, best = -1;
+    (a.steps || []).forEach((step, si) => {
+      const c = (step && step.context_tokens) || 0;
+      if (c > best) { best = c; peakSi = si; }
+    });
+    const severity = Math.max(0, Math.min(1, cs.peakFill));
+    const tier = cs.peakFill >= 0.95 ? 'high' : cs.peakFill >= 0.85 ? 'med' : 'low';
+    const peakK = Math.round(cs.peakContext / 1000);
+    const capK = Math.round(cs.capacity / 1000);
+    const pct = Math.round(cs.peakFill * 100);
+    const summary = `Context grew to ${peakK}k tokens — ${pct}% of the ${capK}k window`;
+    out.push({ kind: 'runaway-context', severity, tier, ref: `${sid}#${ai}.${peakSi}`, summary });
   });
   return out;
 }

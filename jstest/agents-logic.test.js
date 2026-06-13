@@ -1915,6 +1915,341 @@ test('detectSignals: retry-storm summary names the tool, attempt count, and deta
   assert.equal(storm.summary, 'Bash retried 3× (go test)');
 });
 
+// ── detectSignals (Phase 3b — slow-tool / error-cascade / idle-stall / runaway-context) ──
+// Same contract as 3a: { kind, severity [0,1], tier, ref, summary }. Tool wall-clock
+// uses numeric started_at/ended_at (parseTime passes numbers through).
+
+test('detectSignals: a tool whose wall-clock exceeds the session p95 emits a slow-tool at sid#ai.si:ti', () => {
+  // Five 100ms tools and one 5000ms tool. p95 of those six lands at ~3775ms, so
+  // only the 5000ms tool clears it. It lives at main step 1, tool 0 -> s1#0.1:0.
+  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { tools: [fast(), fast(), fast(), fast(), fast()] },
+        { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
+      ] },
+      children: [],
+    }],
+  };
+  const slow = detectSignals(graph).filter(s => s.kind === 'slow-tool');
+  assert.equal(slow.length, 1);
+  assert.equal(slow[0].ref, 's1#0.1:0');
+  assert.ok(slow[0].severity > 0 && slow[0].severity <= 1);
+});
+
+test('detectSignals: a session with fewer than slowToolMin timed tools yields no slow-tool', () => {
+  // Three tools, one wildly slower — but below the 5-tool floor the percentile
+  // is meaningless, so nothing is flagged. (Regression guard for the min cut.)
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ tools: [
+        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 },
+        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 },
+        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 9000 },
+      ] }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'slow-tool').length, 0);
+});
+
+test('detectSignals: a tool within global p95 but over slowMultiple× its kind median is a slow-tool', () => {
+  // Five 4000ms execs push p95 into exec territory; among the reads (median 10ms)
+  // a single 50ms read is 5× its kind median yet far below p95, so it is flagged
+  // only via the relative-to-peers path. It lives at main step 1, tool 2.
+  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
+  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { tools: [exec(), exec(), exec(), exec(), exec()] },
+        { tools: [read(10), read(10), read(50), read(10), read(10)] },
+      ] },
+      children: [],
+    }],
+  };
+  const slow = detectSignals(graph).filter(s => s.kind === 'slow-tool');
+  assert.equal(slow.length, 1);
+  assert.equal(slow[0].ref, 's1#0.1:2');
+});
+
+test('detectSignals: slow-tool tier bands by severity (over-p95 ratio)', () => {
+  // 38 tools at 100ms hold p95 ≈ 101.5; a 130ms tool is ~0.28 over (med band)
+  // and a 300ms tool is ~2× over (clamped, high band). Tools 38 and 39.
+  const base = Array.from({ length: 38 }, () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 }));
+  const tools = [...base,
+    { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 130 },
+    { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 300 }];
+  const graph = { sessions: [{ session_id: 's1', main: { kind: 'main', steps: [{ tools }] }, children: [] }] };
+  const byRef = new Map(detectSignals(graph).filter(s => s.kind === 'slow-tool').map(s => [s.ref, s]));
+  assert.equal(byRef.get('s1#0.0:39').tier, 'high'); // ~2× over p95
+  assert.equal(byRef.get('s1#0.0:38').tier, 'med');  // ~0.28 over p95
+});
+
+test('detectSignals: slow-tool summary names the tool, its seconds, and the multiple', () => {
+  // p95 path: 5000ms tool against p95 ≈ 3775ms (1.3×).
+  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
+  const overP95 = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { tools: [fast(), fast(), fast(), fast(), fast()] },
+        { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
+      ] },
+      children: [],
+    }],
+  };
+  const a = detectSignals(overP95).find(s => s.kind === 'slow-tool');
+  assert.equal(a.summary, 'Bash took 5.0s — 1.3× the session p95');
+
+  // kind-median path: a 50ms read, 5× the 10ms read median, under p95.
+  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
+  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
+  const overKind = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { tools: [exec(), exec(), exec(), exec(), exec()] },
+        { tools: [read(10), read(10), read(50), read(10), read(10)] },
+      ] },
+      children: [],
+    }],
+  };
+  const b = detectSignals(overKind).find(s => s.kind === 'slow-tool');
+  assert.equal(b.summary, 'Read took 0.1s — 5.0× the typical read');
+});
+
+test('detectSignals: errorCascadeMin consecutive errored tools emit one error-cascade at the first error', () => {
+  // Three errored Bash calls back-to-back across two steps (0:0, 0:1, 1:0).
+  const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { tools: [err(), err()] },
+        { tools: [err()] },
+      ] },
+      children: [],
+    }],
+  };
+  const cascades = detectSignals(graph).filter(s => s.kind === 'error-cascade');
+  assert.equal(cascades.length, 1);
+  assert.equal(cascades[0].ref, 's1#0.0:0'); // the cascade's first errored tool
+});
+
+test('detectSignals: two consecutive errors (below errorCascadeMin) are not a cascade', () => {
+  const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ tools: [err(), err()] }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'error-cascade').length, 0);
+});
+
+test('detectSignals: error-cascade severity and tier rise with run length (low=3, med=4, high>=5)', () => {
+  const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
+  const ok = () => ({ kind: 'exec', name: 'Bash', status: 'ok' });
+  const run = n => Array.from({ length: n }, err);
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ tools: [
+        ...run(3), ok(),   // len 3 -> low,  sev 0.4
+        ...run(4), ok(),   // len 4 -> med,  sev 0.6
+        ...run(5),         // len 5 -> high, sev 0.8
+      ] }] },
+      children: [],
+    }],
+  };
+  const bySev = new Map(detectSignals(graph)
+    .filter(s => s.kind === 'error-cascade').map(s => [s.severity, s.tier]));
+  assert.equal(bySev.get(0.4), 'low');  // (3-1)/5
+  assert.equal(bySev.get(0.6), 'med');  // (4-1)/5
+  assert.equal(bySev.get(0.8), 'high'); // (5-1)/5
+});
+
+test('detectSignals: error-cascade summary names the run length and the first tool', () => {
+  const err = name => ({ kind: 'exec', name, status: 'error' });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ tools: [err('Bash'), err('Bash'), err('Bash')] }] },
+      children: [],
+    }],
+  };
+  const cascade = detectSignals(graph).find(s => s.kind === 'error-cascade');
+  assert.equal(cascade.summary, '3 tools errored back-to-back, starting with Bash');
+});
+
+test('detectSignals: a gap over idleStallMs between two steps emits an idle-stall at the later step', () => {
+  // Step 0 ends at t=0 (no tools); step 1 starts 10 min later — well over the
+  // 2-min default. The stall is refed at the resuming step (main step 1).
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { timestamp: 0 },
+        { timestamp: 600000 },
+      ] },
+      children: [],
+    }],
+  };
+  const stalls = detectSignals(graph).filter(s => s.kind === 'idle-stall');
+  assert.equal(stalls.length, 1);
+  assert.equal(stalls[0].ref, 's1#0.1');
+  assert.ok(stalls[0].severity > 0 && stalls[0].severity <= 1);
+  assert.equal(stalls[0].tier, 'high'); // gap is 5× the threshold
+});
+
+test('detectSignals: with opts.nowMs, a dangling final step idle past the threshold emits a trailing idle-stall', () => {
+  // One step ending at t=0; "now" is 10 min later — the run stalled and never
+  // resumed. The trailing stall is refed at that last step.
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      children: [],
+    }],
+  };
+  const stalls = detectSignals(graph, { nowMs: 600000 }).filter(s => s.kind === 'idle-stall');
+  assert.equal(stalls.length, 1);
+  assert.equal(stalls[0].ref, 's1#0.0');
+});
+
+test('detectSignals: without opts.nowMs, a dangling final step yields no trailing idle-stall (static-safe)', () => {
+  // The same dangling step, but no live clock supplied — a static report must
+  // not fabricate a trailing stall (no Date.now fallback).
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'idle-stall').length, 0);
+});
+
+test('detectSignals: idle-stall summary names the idle minutes', () => {
+  const interStep = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ timestamp: 0 }, { timestamp: 600000 }] },
+      children: [],
+    }],
+  };
+  const a = detectSignals(interStep).find(s => s.kind === 'idle-stall');
+  assert.equal(a.summary, 'Idle 10.0 min between turns');
+
+  const trailing = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      children: [],
+    }],
+  };
+  const b = detectSignals(trailing, { nowMs: 600000 }).find(s => s.kind === 'idle-stall');
+  assert.equal(b.summary, 'Idle 10.0 min after the last activity');
+});
+
+test('detectSignals: context reaching runawayFill of the window emits a runaway-context at the peak step', () => {
+  // Peak context 180k of the inferred 200k window = 0.9 fill, over the 0.8
+  // default. The peak turn is main step 1, so the signal refs s1#0.1.
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { context_tokens: 50000 },
+        { context_tokens: 180000 },
+        { context_tokens: 100000 },
+      ] },
+      children: [],
+    }],
+  };
+  const run = detectSignals(graph).filter(s => s.kind === 'runaway-context');
+  assert.equal(run.length, 1);
+  assert.equal(run[0].ref, 's1#0.1');
+  assert.equal(run[0].severity, 0.9); // peakFill = 180k / 200k
+});
+
+test('detectSignals: a run staying below runawayFill yields no runaway-context', () => {
+  // Peak 100k of the 200k window = 0.5 fill, under the 0.8 default.
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ context_tokens: 50000 }, { context_tokens: 100000 }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'runaway-context').length, 0);
+});
+
+test('detectSignals: runaway-context summary names the peak tokens and the window size', () => {
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { context_tokens: 50000 },
+        { context_tokens: 180000 },
+        { context_tokens: 100000 },
+      ] },
+      children: [],
+    }],
+  };
+  const run = detectSignals(graph).find(s => s.kind === 'runaway-context');
+  assert.equal(run.summary, 'Context grew to 180k tokens — 90% of the 200k window');
+});
+
+test('detectSignals: a peak above the 200k tier infers the 1M window, so its fill stays low and no signal fires', () => {
+  // 250k exceeds the standard 200k window, so capacity is inferred as 1M; the
+  // fill is then 0.25 and nothing is flagged (the big-window run has headroom).
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ context_tokens: 250000 }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'runaway-context').length, 0);
+});
+
+test('detectSignals: a long-running tool spanning the gap is not an idle-stall', () => {
+  // Step 0 starts at t=0 but runs a tool until t=600000; step 1 starts right
+  // when it finishes. Measured from the tool's end the gap is 0 — the agent was
+  // working, not idle. (Would be a false positive if measured from step start.)
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [
+        { timestamp: 0, tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 600000 }] },
+        { timestamp: 600000 },
+      ] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'idle-stall').length, 0);
+});
+
+test('detectSignals: a successful tool breaks the run so two short error runs are not a cascade', () => {
+  // error, error, ok, error, error — two runs of 2, never 3 in a row.
+  const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
+  const ok = () => ({ kind: 'exec', name: 'Bash', status: 'ok' });
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ tools: [err(), err(), ok(), err(), err()] }] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'error-cascade').length, 0);
+});
+
 // ── conversationSegments ────────────────────────────────────────────
 test('conversationSegments splits main steps into one segment per prompt marker', () => {
   // Two prompts: A produced steps 0 and 1, B produced step 2. Each segment
