@@ -43,10 +43,13 @@ export function placeTooltip(target, tip, viewportWidth, margin = 10) {
   };
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 // Move title="" → data-tooltip="" within `root` so the native browser
 // tooltip is suppressed but the text remains for our handler. `root` may be
 // an Element or Document; it also captures the root element itself if it
-// carries a bare title.
+// carries a bare title. Handles both tooltip sources: the HTML `title`
+// ATTRIBUTE (buttons, spans, th, …) and the SVG `<title>` CHILD ELEMENT.
 function captureTitles(root) {
   if (root.nodeType === 1 && root.hasAttribute('title')) {
     if (!root.dataset.tooltip) root.dataset.tooltip = root.getAttribute('title');
@@ -58,6 +61,33 @@ function captureTitles(root) {
       el.removeAttribute('title');
     });
   }
+  captureSvgTitles(root);
+}
+
+// SVG draws its native tooltip from a <title> CHILD element, not a title
+// attribute, so the attribute pass above never sees it (the timeline Gantt
+// bars/segments/err-pips all use this form). Hoist that text onto the parent
+// shape as data-tooltip and drop the <title>: this both suppresses the native
+// SVG tooltip and lets the delegated handler find it via closest('[data-tooltip]').
+// Scoped to `root` — an added subtree on live re-renders — so it stays
+// O(subtree), never a full-document rescan (the timeline scrub replaces this
+// innerHTML every frame).
+function captureSvgTitles(root) {
+  let titles;
+  if (root.nodeType === 1 && root.namespaceURI === SVG_NS && root.localName === 'title') {
+    titles = [root];
+  } else if (root.querySelectorAll) {
+    titles = root.querySelectorAll('svg title');
+  } else {
+    return;
+  }
+  titles.forEach(t => {
+    const host = t.parentNode;
+    if (host && host.nodeType === 1 && !host.dataset.tooltip) {
+      host.dataset.tooltip = t.textContent;
+    }
+    t.remove();
+  });
 }
 
 export function init() {
