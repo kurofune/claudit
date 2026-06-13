@@ -2745,3 +2745,48 @@
     from { opacity: 0; transform: translateX(-6px); }
     to   { opacity: 1; transform: translateX(0); }
   }
+
+  /* ─── Insights lens (Phase 2) ─────────────────────────────────────────
+     A pure-aggregation dashboard on the Agents tab. No drawer (full-width
+     like Conversation); hand-rolled HTML bars reusing the .kind-* palette so
+     a kind reads the same hue here as on the Timeline and in the badges. */
+  .ins { padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-3); overflow-y: auto; }
+  .ins-controls { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+  /* Segmented control — shared by the scope toggle and the per-panel metric
+     toggle. A pill of buttons; the active one lifts to the surface. */
+  .ins-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md);
+    background: color-mix(in oklch, var(--ink) 6%, transparent); border: 1px solid var(--border); }
+  .ins-seg-btn { appearance: none; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12px; color: var(--ink-2); padding: 4px 12px; border-radius: var(--r-sm);
+    line-height: 1.4; transition: background 0.12s ease, color 0.12s ease; }
+  .ins-seg-btn:hover:not(:disabled):not(.is-active) { color: var(--ink); background: color-mix(in oklch, var(--ink) 6%, transparent); }
+  .ins-seg-btn.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); font-weight: 600; }
+  .ins-seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ins-seg-sm .ins-seg-btn { padding: 3px 10px; font-size: 11px; }
+  .ins-scope-label { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .ins-empty { color: var(--ink-2); font-size: 13px; padding: var(--s-4); text-align: center; }
+
+  .ins-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm); padding: var(--s-3); }
+  .ins-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); }
+  .ins-panel-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+  .ins-rows { display: flex; flex-direction: column; }
+
+  /* One grid per row: kind label · bar track · the three figures. The labels
+     row reuses the same grid so the column heads line up over the figures. */
+  .ins-row { display: grid; grid-template-columns: 140px minmax(80px, 1fr) 220px; align-items: center;
+    gap: var(--s-3); padding: 5px 0; }
+  .ins-row + .ins-row { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+  .ins-row-labels { padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .ins-row-labels .ins-fig { color: var(--ink-3, var(--ink-2)); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-sans); }
+  .ins-row-head { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; }
+  .ins-kind-name { font-size: 12px; color: var(--ink); font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ins-bar-wrap { height: 14px; border-radius: var(--r-sm); background: color-mix(in oklch, var(--ink) 5%, transparent); overflow: hidden; }
+  .ins-bar { display: block; height: 100%; border-radius: var(--r-sm);
+    background: var(--kc, var(--ink-2)); transition: width 0.18s ease; }
+  .ins-figs { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-2); text-align: right; }
+  .ins-fig { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+  .ins-fig.is-primary { color: var(--ink); font-weight: 600; }

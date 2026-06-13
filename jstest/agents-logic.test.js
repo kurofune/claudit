@@ -58,6 +58,7 @@ import {
   turnTimeBuckets,
   idleSegments,
   criticalSpans,
+  toolMix,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2465,4 +2466,72 @@ test('criticalSpans can mark a cost whale on a row with no measured duration', (
 test('criticalSpans tolerates a null / non-array argument', () => {
   assert.deepEqual(criticalSpans(null), { session: {}, agents: {} });
   assert.deepEqual(criticalSpans([]), { session: {}, agents: {} });
+});
+
+// ── toolMix (Insights 2a) ───────────────────────────────────────────
+test('toolMix returns [] for null/empty agents', () => {
+  assert.deepEqual(toolMix(null), []);
+  assert.deepEqual(toolMix([]), []);
+});
+
+test('toolMix groups tools by kind, summing call count (tool.count, default 1)', () => {
+  const agents = [{
+    steps: [
+      { tools: [ { kind: 'read', count: 2 }, { kind: 'exec' } ] },
+      { tools: [ { kind: 'read', count: 3 } ] },
+    ],
+  }];
+  const mix = toolMix(agents);
+  const byKind = Object.fromEntries(mix.map(r => [r.kind, r.count]));
+  assert.equal(byKind.read, 5); // 2 + 3
+  assert.equal(byKind.exec, 1); // default count
+});
+
+test('toolMix sums per-tool wall-clock (ended_at − started_at) per kind; missing timing is 0', () => {
+  const agents = [{
+    steps: [
+      { tools: [
+        { kind: 'read', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:02Z' }, // 2000ms
+        { kind: 'exec', started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:05Z' }, // 5000ms
+        { kind: 'read' }, // no timing → 0
+      ] },
+      { tools: [
+        { kind: 'read', started_at: '2026-05-01T12:00:10Z', ended_at: '2026-05-01T12:00:11Z' }, // 1000ms
+      ] },
+    ],
+  }];
+  const byKind = Object.fromEntries(toolMix(agents).map(r => [r.kind, r.durationMs]));
+  assert.equal(byKind.read, 3000); // 2000 + 0 + 1000
+  assert.equal(byKind.exec, 5000);
+});
+
+test('toolMix distributes each step cost across its tools by call-share, per kind', () => {
+  const agents = [{
+    steps: [
+      // stepCalls = 1 + 1 = 2 → each kind gets 0.30 * (1/2) = 0.15
+      { cost_usd: 0.30, tools: [ { kind: 'read', count: 1 }, { kind: 'exec', count: 1 } ] },
+      // stepCalls = 3 → read (the only tool) gets the whole 0.10
+      { cost_usd: 0.10, tools: [ { kind: 'read', count: 3 } ] },
+    ],
+  }];
+  const byKind = Object.fromEntries(toolMix(agents).map(r => [r.kind, r.costUSD]));
+  assert.ok(Math.abs(byKind.read - 0.25) < 1e-9); // 0.15 + 0.10
+  assert.ok(Math.abs(byKind.exec - 0.15) < 1e-9);
+});
+
+test('toolMix folds tools with no kind into "other"', () => {
+  const agents = [{ steps: [ { tools: [ { name: 'Mystery' }, { kind: 'other' } ] } ] }];
+  const byKind = Object.fromEntries(toolMix(agents).map(r => [r.kind, r.count]));
+  assert.equal(byKind.other, 2);
+});
+
+test('toolMix sorts rows by costUSD descending', () => {
+  const agents = [{
+    steps: [
+      { cost_usd: 0.05, tools: [ { kind: 'read', count: 1 } ] },
+      { cost_usd: 0.50, tools: [ { kind: 'exec', count: 1 } ] },
+      { cost_usd: 0.20, tools: [ { kind: 'web', count: 1 } ] },
+    ],
+  }];
+  assert.deepEqual(toolMix(agents).map(r => r.kind), ['exec', 'web', 'read']);
 });

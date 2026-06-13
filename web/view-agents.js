@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans,
+  criticalSpans, toolMix,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -85,6 +85,7 @@ const SHELL = `
     <a class="subtab"           href="#agents/tree" data-subtab="tree">Tree</a>
     <a class="subtab"           href="#agents/timeline" data-subtab="timeline">Timeline</a>
     <a class="subtab"           href="#agents/conversation" data-subtab="conversation">Conversation</a>
+    <a class="subtab"           href="#agents/insights" data-subtab="insights">Insights</a>
   </nav>
 
   <div class="trace-filter" data-trace-filter role="search" aria-label="Filter this trace"></div>
@@ -96,6 +97,7 @@ const SHELL = `
       <div class="subview" data-subview="tree"></div>
       <div class="subview" data-subview="timeline"></div>
       <div class="subview" data-subview="conversation"></div>
+      <div class="subview" data-subview="insights"></div>
     </div>
     <div class="agents-resize" data-agents-resize role="separator" aria-orientation="vertical" aria-label="Resize the detail panel"></div>
     <aside class="agents-drawer" data-drawer aria-label="Selection detail"></aside>
@@ -104,7 +106,7 @@ const SHELL = `
   <div id="agents-empty" class="empty-note" hidden>No agents in this window. Try widening <code>--since</code>/<code>--until</code>, or open a session that spawned sub-agents.</div>
 `;
 
-const SUBS = ['feed', 'tree', 'timeline', 'conversation'];
+const SUBS = ['feed', 'tree', 'timeline', 'conversation', 'insights'];
 
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
@@ -172,6 +174,16 @@ let currentHits = [];
 // re-dims them from THIS cache — a class-only pass — instead of re-running the
 // full-graph filterTrace walk every frame.
 let filterMatchSet = null;
+
+// Insights lens (Phase 2). insightsScope picks which slice of the graph the
+// aggregations cover — 'graph' (every agent in the window), 'session' (the one
+// plotted by currentTimelineSession), or 'agent' (the selected agent, via
+// selectedRef) — reusing the SAME selection state the other lenses key off so
+// the toggle stays in sync with what the user clicked elsewhere. insightsMetric
+// is which figure drives the Tool-mix bars (cost / time / calls). Both clamp to
+// a safe default when the chosen scope/metric has nothing to show.
+let insightsScope = 'graph';
+let insightsMetric = 'cost';
 
 // Conversation lens: the session list on the left is drag-resizable. Width is
 // clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
@@ -349,7 +361,7 @@ function activateSub(container, sub) {
   const body = container.querySelector('.agents-body');
   if (body) {
     body.dataset.lens = sub;
-    body.classList.toggle('is-no-drawer', sub === 'conversation');
+    body.classList.toggle('is-no-drawer', sub === 'conversation' || sub === 'insights');
   }
   const bar = container.querySelector('[data-trace-filter]');
   if (bar) bar.hidden = !lensHasFilter(sub);
@@ -366,8 +378,9 @@ function applyBodyLayout(container) {
   const body = container.querySelector('.agents-body');
   if (!body) return;
   const lens = body.dataset.lens || 'feed';
-  if (lens === 'conversation') {
-    // No shared drawer: the conversation thread reclaims the full width.
+  if (lens === 'conversation' || lens === 'insights') {
+    // No shared drawer: the conversation thread / Insights dashboard reclaims
+    // the full width.
     body.style.gridTemplateColumns = 'minmax(0, 1fr)';
     body.style.gridTemplateAreas = '"lens"';
   } else if (lens === 'tree') {
@@ -402,6 +415,7 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   else if (activeSub === 'tree') host.innerHTML = renderInspector(treeSessionOrder(host, sessions));
   else if (activeSub === 'timeline') host.innerHTML = renderTimeline(sessions);
   else if (activeSub === 'conversation') host.innerHTML = renderConversation(sessions);
+  else if (activeSub === 'insights') host.innerHTML = renderInsights(sessions);
   if (memo) restoreState(host, memo);
   // The "Active now" band is a full-width row above the feed|drawer split, so it
   // lives outside the lens host — paint it only on the Feed lens, hide it (and
@@ -472,6 +486,13 @@ function wireSelection(container) {
       // plotted (independent of the drawer selection).
       const tlSess = e.target.closest('[data-tl-sess]');
       if (tlSess) { pickTimeline(container, tlSess.dataset.tlSess); return; }
+      // The Insights lens's scope toggle re-slices the aggregations (graph /
+      // session / agent) and the metric toggle re-bars them — both a pure
+      // re-render from lastGraph, no refetch.
+      const insScope = e.target.closest('[data-ins-scope]');
+      if (insScope) { if (!insScope.disabled) { insightsScope = insScope.dataset.insScope; renderActive(container, false); } return; }
+      const insMetric = e.target.closest('[data-ins-metric]');
+      if (insMetric) { insightsMetric = insMetric.dataset.insMetric; renderActive(container, false); return; }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -1601,6 +1622,118 @@ function conversationReplyHTML(reply, sid) {
 }
 
 // ── Timeline (Gantt) lens ───────────────────────────────────────────────────
+
+// ── Insights lens (Phase 2) ─────────────────────────────────────────────────
+
+// INS_METRICS is the Tool-mix bar's metric menu: which figure drives the bar
+// width and how each column formats. Order is the column order; the first is the
+// default. get() reads a toolMix row; fmt() pre-formats for display (reusing the
+// shared formatters so the dashboard speaks the same units as every other lens).
+const INS_METRICS = [
+  { key: 'cost',  label: 'Cost',  get: r => r.costUSD,    fmt: v => fmtMoney(v) },
+  { key: 'time',  label: 'Time',  get: r => r.durationMs, fmt: v => formatElapsed(v) },
+  { key: 'count', label: 'Calls', get: r => r.count,      fmt: v => fmtNum(v) },
+];
+
+// scopedAgentNode resolves the single agent the 'agent' Insights scope covers —
+// the OWNING agent of the shared selection, derived from selectedRef so a tool /
+// turn selection still scopes to its agent. Null when nothing is selected or the
+// ref no longer resolves (e.g. after a refetch dropped that session).
+function scopedAgentNode() {
+  const pr = parseRefKey(selectedRef);
+  if (!pr) return null;
+  const sessions = (lastGraph && lastGraph.sessions) || [];
+  const session = sessions.find(s => s && (s.session_id || '') === pr.sessionId);
+  if (!session) return null;
+  return flattenSession(session)[pr.agentIndex] || null;
+}
+
+// insightsScopeAgents resolves the agent list the Insights aggregations run over
+// plus the toggle's availability flags and a human label for the active scope.
+// The chosen scope CLAMPS to 'graph' when its slice is empty (no plotted session,
+// or nothing selected) so the dashboard never renders a blank scope the toggle
+// still shows as active.
+function insightsScopeAgents() {
+  const sessions = (lastGraph && lastGraph.sessions) || [];
+  const cur = currentTimelineSession();
+  const sessionAgents = cur ? flattenSession(cur.session) : null;
+  const agentNode = scopedAgentNode();
+  const sessionAvail = !!(sessionAgents && sessionAgents.length);
+  const agentAvail = agentNode != null;
+  let scope = insightsScope;
+  if (scope === 'session' && !sessionAvail) scope = 'graph';
+  if (scope === 'agent' && !agentAvail) scope = 'graph';
+  if (scope === 'session') {
+    return { scope, agents: sessionAgents, sessionAvail, agentAvail,
+      label: `${baseName(cur.session.cwd) || '—'} · ${shortId(cur.session.session_id || '')}` };
+  }
+  if (scope === 'agent') {
+    return { scope, agents: [agentNode], sessionAvail, agentAvail, label: agentLabel(agentNode) };
+  }
+  return { scope, agents: sessions.flatMap(flattenSession), sessionAvail, agentAvail,
+    label: `${sessions.length} session${sessions.length === 1 ? '' : 's'}` };
+}
+
+// renderInsights draws the Insights dashboard: a scope toggle (graph / session /
+// agent) over the shared selection, then the Tool-mix panel — per-kind count ·
+// time · cost as horizontal bars, the bar driven by the chosen metric and rows
+// sorted worst-first by toolMix. Pure render from lastGraph (no scrub / SSE), so
+// it degrades cleanly in the static `claudit report`.
+function renderInsights(sessions) {
+  const { scope, agents, sessionAvail, agentAvail, label } = insightsScopeAgents();
+  const metric = INS_METRICS.find(m => m.key === insightsMetric) || INS_METRICS[0];
+
+  const scopeBtn = (key, text, avail) =>
+    `<button type="button" class="ins-seg-btn${scope === key ? ' is-active' : ''}" data-ins-scope="${key}"${avail ? '' : ' disabled'} aria-pressed="${scope === key}">${escHtml(text)}</button>`;
+  const head = `<div class="ins-controls">
+      <div class="ins-seg" role="group" aria-label="Insights scope">
+        ${scopeBtn('graph', 'Graph', true)}
+        ${scopeBtn('session', 'Session', sessionAvail)}
+        ${scopeBtn('agent', 'Agent', agentAvail)}
+      </div>
+      <span class="ins-scope-label" title="${escHtml(label)}">${escHtml(label)}</span>
+    </div>`;
+
+  // toolMix returns rows cost-sorted; re-sort worst-first by the ACTIVE metric so
+  // the bar column stays monotonic (the longest bar reads first) whichever metric
+  // drives it. A copy — toolMix's own ordering is left untouched.
+  const mix = toolMix(agents).slice().sort((a, b) => metric.get(b) - metric.get(a));
+  if (mix.length === 0) {
+    return `<div class="ins">${head}<div class="ins-empty">No tool calls in this scope.</div></div>`;
+  }
+
+  const colLabels = `<div class="ins-row ins-row-labels" aria-hidden="true">
+      <span class="ins-row-head"></span><span class="ins-bar-wrap"></span>
+      <span class="ins-figs">${INS_METRICS.map(m => `<span class="ins-fig${m.key === metric.key ? ' is-primary' : ''}">${escHtml(m.label)}</span>`).join('')}</span>
+    </div>`;
+
+  const max = mix.reduce((m, r) => Math.max(m, metric.get(r)), 0) || 1;
+  const rows = mix.map(r => {
+    const pct = Math.max(2, Math.round((metric.get(r) / max) * 100));
+    const fam = kindFamily(r.kind);
+    const figs = INS_METRICS.map(m =>
+      `<span class="ins-fig${m.key === metric.key ? ' is-primary' : ''}" title="${escHtml(m.label)}">${escHtml(m.fmt(m.get(r)))}</span>`).join('');
+    return `<div class="ins-row kind-${fam}">
+        <span class="ins-row-head">${kindBadge(r.kind)}<span class="ins-kind-name">${escHtml(r.kind)}</span></span>
+        <span class="ins-bar-wrap"><span class="ins-bar" style="width:${pct}%"></span></span>
+        <span class="ins-figs">${figs}</span>
+      </div>`;
+  }).join('');
+
+  const metricBtn = (m) =>
+    `<button type="button" class="ins-seg-btn${metric.key === m.key ? ' is-active' : ''}" data-ins-metric="${m.key}" aria-pressed="${metric.key === m.key}">${escHtml(m.label)}</button>`;
+  return `<div class="ins">
+    ${head}
+    <section class="ins-panel">
+      <header class="ins-panel-head">
+        <h3 class="ins-panel-title">Tool mix</h3>
+        <div class="ins-seg ins-seg-sm" role="group" aria-label="Bar metric">${INS_METRICS.map(metricBtn).join('')}</div>
+      </header>
+      ${colLabels}
+      <div class="ins-rows">${rows}</div>
+    </section>
+  </div>`;
+}
 
 // renderTimeline draws the Gantt lens: a scrubber bar on top, then one
 // horizontal Gantt per session (a real time axis, one row per agent, bar =

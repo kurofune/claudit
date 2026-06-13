@@ -647,6 +647,39 @@ export function criticalSpans(rows) {
   return { session, agents };
 }
 
+// toolMix aggregates an array of agent nodes (already scoped by the caller —
+// whole graph, one session, or one agent) into per-kind tool totals for the
+// Insights "Tool mix" panel: count · wall-clock · cost, grouped by ToolKind.
+// Pure and scope-agnostic. Returns [] for a null/empty input.
+export function toolMix(agents) {
+  if (!Array.isArray(agents)) return [];
+  const byKind = new Map();
+  for (const a of agents) {
+    for (const step of (a && a.steps) || []) {
+      const tools = (step && step.tools) || [];
+      // Cost lives only at the turn level, so spread it across the turn's tools
+      // by call-share — the honest split that sums back to the step cost. A
+      // tool-less turn (pure text) contributes no per-kind cost, by design.
+      const stepCalls = tools.reduce((n, t) => n + ((t && t.count) || (t ? 1 : 0)), 0);
+      const stepCost = (step && step.cost_usd) || 0;
+      for (const t of tools) {
+        if (!t) continue;
+        const kind = t.kind || 'other';
+        const calls = t.count || 1;
+        const row = byKind.get(kind) || { kind, count: 0, durationMs: 0, costUSD: 0 };
+        row.count += calls;
+        const start = parseTime(t.started_at);
+        const end = parseTime(t.ended_at);
+        if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) row.durationMs += end - start;
+        if (stepCalls > 0) row.costUSD += stepCost * (calls / stepCalls);
+        byKind.set(kind, row);
+      }
+    }
+  }
+  return [...byKind.values()].sort((a, b) =>
+    b.costUSD - a.costUSD || b.count - a.count || a.kind.localeCompare(b.kind));
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.
