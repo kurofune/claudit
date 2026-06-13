@@ -2529,6 +2529,43 @@
   .conv-reply-cost { margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
 
   /* ── Timeline (Gantt) lens ── */
+  /* Two-pane layout mirroring .conv-layout: a resizable session list on the left,
+     the ONE chosen session's Gantt on the right (the list switches which one). */
+  .timeline-layout {
+    display: flex; height: 84vh; min-height: 360px;
+    border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden;
+  }
+  .tl-sidebar {
+    flex: none; min-width: 0; overflow-y: auto;
+    border-right: 1px solid var(--border); background: var(--surface-2);
+    padding: var(--s-2);
+  }
+  /* The drag handle between the list and the Gantt (data-tl-resize). */
+  .tl-resize {
+    flex: none; width: 6px; cursor: col-resize; background: var(--border);
+    transition: background 0.12s ease;
+  }
+  .tl-resize:hover { background: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+  /* One session row: project on top, short id + a few triage pills below; a
+     colored left rule (--cc from data-c) ties it to the session's color slot. */
+  .tl-sess-item {
+    display: flex; flex-direction: column; gap: 2px; width: 100%;
+    background: none; border: none; text-align: left; cursor: pointer; font: inherit;
+    color: var(--ink); padding: var(--s-2); border-radius: var(--r-sm);
+    border-left: 3px solid transparent; margin-bottom: 2px;
+  }
+  .tl-sess-item:hover { background: var(--surface); }
+  .tl-sess-item.is-selected {
+    background: var(--accent-soft); border-left-color: var(--cc, var(--accent));
+  }
+  .tl-sess-item-proj { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-sess-item-meta { display: flex; flex-direction: column; gap: 2px; }
+  .tl-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-sess-item-pills { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+  .tl-sess-item-pill { color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 2px; }
+  .tl-sess-item-err { color: var(--danger, #e5484d); font-weight: 700; }
+  /* The Gantt pane (right) flexes to fill the rest and keeps its own scroll. */
+  .timeline-layout .timeline-lens { flex: 1; min-width: 0; max-height: none; padding: var(--s-2) var(--s-3); }
   .timeline-lens { overflow-y: auto; max-height: 84vh; display: flex; flex-direction: column; gap: var(--s-4); }
 
   /* Playhead scrubber — a sticky control strip pinned to the top of the lens so

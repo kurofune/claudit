@@ -137,6 +137,45 @@ export function conversationSessionList(sessions) {
   return out;
 }
 
+// timelineSessionList summarizes each session for the Timeline lens's session
+// picker — the sibling of conversationSessionList. One entry per session that
+// has a real main agent, in ORIGINAL input order (index = unfiltered position,
+// a stable color slot). Each entry carries { sessionId, cwd, index } plus the
+// whole-session rollups the picker rows triage on, by reusing sessionStats.
+// Null/main-less sessions are excluded; a null/empty input → [].
+export function timelineSessionList(sessions, nowMs = Date.now()) {
+  const list = sessions || [];
+  const out = [];
+  list.forEach((session, index) => {
+    if (!session || !session.main) return;
+    out.push({
+      sessionId: session.session_id || '',
+      cwd: session.cwd || '',
+      index,
+      ...sessionStats(session, nowMs),
+    });
+  });
+  return out;
+}
+
+// pickTimelineSid resolves which single session the Timeline lens plots, given
+// the user's explicit pick (timelineSid), the shared drawer selection
+// (selectedRef), and the current sessions. Precedence: an explicit timelineSid
+// wins while that session is still in the window; else the session of
+// selectedRef (so selecting a turn in another lens scopes the Gantt here too);
+// else the first plottable session; else null when nothing is plottable. The
+// timelineSid/selectedRef fallbacks guard against a chosen session aging out of
+// the live window — it quietly drops back to the first.
+export function pickTimelineSid(sessions, timelineSid, selectedRef) {
+  const list = timelineSessionList(sessions);
+  if (list.length === 0) return null;
+  const present = sid => list.some(e => e.sessionId === sid);
+  if (timelineSid && present(timelineSid)) return timelineSid;
+  const ref = parseRefKey(selectedRef);
+  if (ref && present(ref.sessionId)) return ref.sessionId;
+  return list[0].sessionId;
+}
+
 // clampConvSidebarWidth keeps the Conversation lens's resizable session
 // sidebar within sane bounds: a finite px is clamped to [MIN, MAX] and rounded
 // to a whole pixel; anything non-finite (NaN, undefined, null, Infinity, a
@@ -314,6 +353,76 @@ export function stepSegments(agent, opts = {}) {
       cost_usd: (step && step.cost_usd) || 0,
       durationMs: end - start,
     });
+  }
+  return segs;
+}
+
+// toolSegments is stepSegments' finer-grained sibling: where a step's tools
+// carry real wall-clock (ended_at, from the backend tool_use→tool_result join),
+// it splits that step into one sub-span per tool; where they don't (older data,
+// or a pure-thinking turn), it falls back to the step's single turn segment so
+// the row never looks empty. Same opts and segment shape as stepSegments — tool
+// segments add a `toolIndex` and a tool refKey so a click opens that exact tool.
+//
+// Tools tile contiguously from the step's start, ordered by ended_at: tool i
+// spans [previous tool's end (or step start), its own ended_at]. Because the
+// tool_use side only stamps the whole turn, this is the honest reading of serial
+// tool execution — the gaps between successive result timestamps ARE each tool's
+// wall-clock (an 8s Bash is wide; an instant Read that ran right after is a
+// sliver). Tools share their parent step's cost (the finest cost the wire gives
+// — tools aren't individually priced), which keeps the cost-heat ramp alive;
+// the render suppresses per-tool cost in labels so it never implies otherwise.
+export function toolSegments(agent, opts = {}) {
+  const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
+  const steps = (agent && agent.steps) || [];
+  const cap = until == null ? effEnd : until;
+  const segs = [];
+  for (let k = 0; k < steps.length; k++) {
+    const step = steps[k];
+    const stepStart = parseTime(step && step.timestamp);
+    if (Number.isNaN(stepStart)) continue;
+    if (cap != null && stepStart > cap) continue;
+    const dur = (step && step.duration_ms) || 0;
+    let stepEnd = dur > 0 ? stepStart + dur : effEnd;
+    if (Number.isNaN(stepEnd) || stepEnd < stepStart) stepEnd = stepStart;
+    const tools = (step && step.tools) || [];
+    const timed = [];
+    for (let i = 0; i < tools.length; i++) {
+      const end = parseTime(tools[i] && tools[i].ended_at);
+      if (!Number.isNaN(end)) timed.push({ toolIndex: i, tool: tools[i], end });
+    }
+    const stepCost = (step && step.cost_usd) || 0;
+    if (timed.length === 0) {
+      // No tool timing → one turn segment, byte-identical to stepSegments.
+      let end = stepEnd;
+      if (cap != null && end > cap) end = cap;
+      const bar = agentBar({ start: stepStart, end }, scale);
+      const hasErr = tools.some(t => t && t.status === 'error');
+      segs.push({
+        x: chartX + bar.x, w: bar.width, stepIndex: k,
+        refKey: refKey({ sessionId, agentIndex, stepIndex: k }),
+        status: hasErr ? 'error' : '', cost_usd: stepCost, durationMs: end - stepStart,
+      });
+      continue;
+    }
+    timed.sort((a, b) => a.end - b.end);
+    let prev = stepStart;
+    for (const { toolIndex, tool, end: rawEnd } of timed) {
+      const start = prev;
+      if (cap != null && start >= cap) break; // starts at/after the playhead → not begun yet, drop the rest
+      let end = rawEnd;
+      if (end < start) end = start;       // never run backwards
+      if (end > stepEnd) end = stepEnd;    // a tool can't outlast its turn
+      if (cap != null && end > cap) end = cap;
+      const bar = agentBar({ start, end }, scale);
+      segs.push({
+        x: chartX + bar.x, w: bar.width, stepIndex: k, toolIndex,
+        refKey: refKey({ sessionId, agentIndex, stepIndex: k, toolIndex }),
+        status: tool && tool.status === 'error' ? 'error' : '',
+        cost_usd: stepCost, durationMs: end - start,
+      });
+      prev = end;
+    }
   }
   return segs;
 }
@@ -616,7 +725,7 @@ export function buildTimeline(session, opts = {}) {
       x: chartX + bar.x, w: bar.width,
       y: axisH + i * rowH, h: rowH,
       labelX: pad + d * indent,
-      segments: stepSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
+      segments: toolSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
     };
   });
 
@@ -679,7 +788,7 @@ export function timelineAtTime(session, T, opts = {}) {
     const effEnd = a.status === 'running'
       ? nowMs
       : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
-    const segments = stepSegments(a, {
+    const segments = toolSegments(a, {
       scale, chartX: base.chartX, sessionId: base.sessionId,
       agentIndex: i, effEnd, until: clampEnd,
     });

@@ -27,6 +27,7 @@ import {
   timelineBounds,
   buildTimeline,
   stepSegments,
+  toolSegments,
   fitSegmentLabel,
   costHeat,
   agentPhaseAt,
@@ -41,6 +42,8 @@ import {
   conversationSegments,
   conversationReplies,
   conversationSessionList,
+  timelineSessionList,
+  pickTimelineSid,
   clampConvSidebarWidth,
   clampTreeWidth,
   clampDrawerWidth,
@@ -1354,6 +1357,81 @@ test('stepSegments carries each segment\'s visual span (end-start) as durationMs
   assert.equal(segs[1].durationMs, 600);
 });
 
+// ── toolSegments (per-tool sub-spans, falling back to turn segments) ─
+test('toolSegments falls back to one turn segment per step when no tool is timed', () => {
+  // Tools carry status but no ended_at (older data) → identical to stepSegments,
+  // and crucially WITHOUT a toolIndex key so the geometry stays byte-compatible.
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      { timestamp: 0, duration_ms: 400, cost_usd: 0.01, tools: [{ status: 'ok' }] },
+      { timestamp: 400, duration_ms: 0, cost_usd: 0.02, tools: [] },
+    ],
+  };
+  const segs = toolSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  assert.deepEqual(segs, [
+    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400 },
+    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600 },
+  ]);
+});
+
+test('toolSegments tiles a step\'s timed tools as sub-spans by ended_at', () => {
+  // Step spans 0..1000. Bash ends at 600 (slow), Read ends at 700 (quick after
+  // Bash). Tools tile contiguously from the step start: Bash [0,600], Read
+  // [600,700] — so an 8s-equivalent Bash is wide and the trailing Read a sliver.
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      {
+        timestamp: 0, duration_ms: 1000, cost_usd: 0.05,
+        tools: [
+          { name: 'Bash', status: 'ok', ended_at: 600 },
+          { name: 'Read', status: 'error', ended_at: 700 },
+        ],
+      },
+    ],
+  };
+  const segs = toolSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
+  });
+  assert.deepEqual(segs, [
+    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600 },
+    { x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: 'error', cost_usd: 0.05, durationMs: 100 },
+  ]);
+});
+
+test('toolSegments clamps tool sub-spans to the playhead cap', () => {
+  // Scrub cap at 700: Bash [0,600] is fully before it; Read straddles (ends
+  // 1200) so it truncates to [600,700]; the third tool (starts at the cap) has
+  // not begun at T and is dropped — same drop/truncate rules as turn segments.
+  const agent = {
+    kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+    steps: [
+      {
+        timestamp: 0, duration_ms: 1000, cost_usd: 0.05,
+        tools: [
+          { name: 'Bash', status: 'ok', ended_at: 600 },
+          { name: 'Read', status: 'ok', ended_at: 1200 },
+          { name: 'Edit', status: 'ok', ended_at: 1500 },
+        ],
+      },
+    ],
+  };
+  const segs = toolSegments(agent, {
+    scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000, until: 700,
+  });
+  assert.equal(segs.length, 2);
+  assert.deepEqual(segs[0], {
+    x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600,
+  });
+  // Read truncated at the cap: 600..700 → x 280, w 30, span 100ms.
+  assert.deepEqual(segs[1], {
+    x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.05, durationMs: 100,
+  });
+});
+
 test('buildTimeline attaches per-turn segments to each row', () => {
   const session = {
     session_id: 's1',
@@ -1373,6 +1451,33 @@ test('buildTimeline attaches per-turn segments to each row', () => {
   assert.deepEqual(layout.rows[0].segments, [
     { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400 },
     { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600 },
+  ]);
+});
+
+test('buildTimeline rows expose per-tool sub-spans when tools are timed', () => {
+  const session = {
+    session_id: 's1',
+    main: {
+      kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+      steps: [
+        {
+          timestamp: 0, duration_ms: 1000, cost_usd: 0.03,
+          tools: [
+            { name: 'Bash', status: 'ok', ended_at: 600 },
+            { name: 'Read', status: 'ok', ended_at: 900 },
+          ],
+        },
+      ],
+    },
+    children: [],
+  };
+  const layout = buildTimeline(session, {
+    hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+    minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+  });
+  assert.deepEqual(layout.rows[0].segments, [
+    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.03, durationMs: 600 },
+    { x: 280, w: 90, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.03, durationMs: 300 },
   ]);
 });
 
@@ -1790,6 +1895,82 @@ test('conversationSessionList returns [] for empty, null, or undefined input', (
   assert.deepEqual(conversationSessionList([]), []);
   assert.deepEqual(conversationSessionList(null), []);
   assert.deepEqual(conversationSessionList(undefined), []);
+});
+
+// ── timelineSessionList ─────────────────────────────────────────────
+test('timelineSessionList returns [] for empty, null, or undefined input', () => {
+  assert.deepEqual(timelineSessionList([]), []);
+  assert.deepEqual(timelineSessionList(null), []);
+  assert.deepEqual(timelineSessionList(undefined), []);
+});
+
+test('timelineSessionList maps sessionId/cwd/index plus the sessionStats rollups', () => {
+  // Reuse the hand-walked STATS_SESSION (durationMs 60000, agentCount 2,
+  // turnCount 3, toolCount 3, errorCount 1, tokenCount 495, cost_usd 0.47),
+  // adding a cwd so the picker has a project label.
+  const session = { ...STATS_SESSION, cwd: '/home/me/proj' };
+  const out = timelineSessionList([session], 9_999_999);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0], {
+    sessionId: 'stats-1',
+    cwd: '/home/me/proj',
+    index: 0,
+    durationMs: 60000,
+    turnCount: 3,
+    toolCount: 3,
+    errorCount: 1,
+    agentCount: 2,
+    tokenCount: 495,
+    cost_usd: 0.47,
+  });
+});
+
+test('timelineSessionList excludes null and main-less sessions', () => {
+  const withMain = { ...STATS_SESSION, session_id: 'sid-ok' };
+  const mainless = { session_id: 'sid-no', cwd: '/y', main: null };
+  const out = timelineSessionList([null, mainless, withMain, undefined], 9_999_999);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].sessionId, 'sid-ok');
+});
+
+test('timelineSessionList index reflects the ORIGINAL input position', () => {
+  const second = { ...STATS_SESSION, session_id: 'sid-2' };
+  // input[0] is null and filtered out, but the surviving session keeps index 1.
+  const out = timelineSessionList([null, second], 9_999_999);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].index, 1);
+});
+
+// ── pickTimelineSid ─────────────────────────────────────────────────
+// Two plottable sessions (each with a main), used across the resolver cases.
+const PICK_A = { ...STATS_SESSION, session_id: 'sid-a' };
+const PICK_B = { ...STATS_SESSION, session_id: 'sid-b' };
+
+test('pickTimelineSid defaults to the first list entry when timelineSid and selectedRef are null', () => {
+  assert.equal(pickTimelineSid([PICK_A, PICK_B], null, null), 'sid-a');
+});
+
+test('pickTimelineSid honors an explicit timelineSid when that session is still present', () => {
+  assert.equal(pickTimelineSid([PICK_A, PICK_B], 'sid-b', null), 'sid-b');
+});
+
+test('pickTimelineSid falls back to the first entry when timelineSid names an absent session', () => {
+  // The chosen session aged out of the window → drop back to the first.
+  assert.equal(pickTimelineSid([PICK_A, PICK_B], 'sid-gone', null), 'sid-a');
+});
+
+test('pickTimelineSid falls back to selectedRefs session when timelineSid is null', () => {
+  // A turn selected in another lens (refKey for sid-b's main) scopes the Gantt.
+  const ref = refKey({ sessionId: 'sid-b', agentIndex: 0 });
+  assert.equal(pickTimelineSid([PICK_A, PICK_B], null, ref), 'sid-b');
+});
+
+test('pickTimelineSid returns null when there are no plottable sessions', () => {
+  const ref = refKey({ sessionId: 'sid-x', agentIndex: 0 });
+  assert.equal(pickTimelineSid([], 'sid-x', ref), null);
+  assert.equal(pickTimelineSid(null, null, null), null);
+  // A main-less session is not plottable either.
+  assert.equal(pickTimelineSid([{ session_id: 'sid-x', main: null }], 'sid-x', null), null);
 });
 
 // ── clampConvSidebarWidth ───────────────────────────────────────────

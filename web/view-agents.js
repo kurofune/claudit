@@ -40,6 +40,8 @@ import {
   conversationSegments,
   conversationReplies,
   conversationSessionList,
+  timelineSessionList,
+  pickTimelineSid,
   clampConvSidebarWidth,
   clampTreeWidth,
   clampDrawerWidth,
@@ -134,6 +136,12 @@ let liveScheduled = false;
 // recompute from events ≤ T (a pure seek, never an incremental replay).
 let playheadT = null;
 let scrubRaf = 0;
+// Which single session the Timeline lens plots. null ⇒ resolve via
+// pickTimelineSid (selected turn's session, else the first); a sid pins that
+// session until the user picks another or it ages out of the window. Kept
+// separate from selectedRef so inspecting a tool sub-span (which sets
+// selectedRef) never changes which session is plotted.
+let timelineSid = null;
 
 // Trace filter (Phase 2). filterSpec is the live filter over the loaded graph;
 // when specActive, filterTrace gives the Set of matching refKeys and every lens
@@ -244,6 +252,7 @@ export function reset() {
   prevTimelineKeys = new Set();
   timelinePinned.clear();
   playheadT = null;
+  timelineSid = null;
   filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
   filterBarBuilt = false;
   hitIndex = -1;
@@ -443,6 +452,10 @@ function wireSelection(container) {
       // shows by re-pointing the shared selection at that session's main agent.
       const sess = e.target.closest('[data-conv-sess]');
       if (sess) { pickConversation(container, sess.dataset.convSess); return; }
+      // The Timeline lens's left session list switches which session's Gantt is
+      // plotted (independent of the drawer selection).
+      const tlSess = e.target.closest('[data-tl-sess]');
+      if (tlSess) { pickTimeline(container, tlSess.dataset.tlSess); return; }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -458,7 +471,10 @@ function wireSelection(container) {
     // handle starts a document-level drag that widens/narrows the sidebar live.
     lens.addEventListener('mousedown', e => {
       const handle = e.target.closest('[data-conv-resize]');
-      if (handle) { e.preventDefault(); startConvResize(container, e.clientX); }
+      if (handle) { e.preventDefault(); startConvResize(container, e.clientX); return; }
+      // The Timeline lens's session list shares the same resizable-sidebar idiom.
+      const tlHandle = e.target.closest('[data-tl-resize]');
+      if (tlHandle) { e.preventDefault(); startTimelineResize(container, e.clientX); }
     });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -546,6 +562,48 @@ function pickConversation(container, sessionId) {
   renderActive(container, false);
   const next = container.querySelector('.conv-sidebar');
   if (next) next.scrollTop = top;
+}
+
+// pickTimeline switches which session the Timeline lens plots. It pins
+// timelineSid (separate from selectedRef, so the drawer selection is
+// untouched) and snaps the playhead back to live — the scrubber window changed
+// to this session's span, so a stale paused T would be meaningless. Sidebar
+// scrollTop is preserved across the re-render the way pickConversation does.
+function pickTimeline(container, sessionId) {
+  if (!sessionId) return;
+  timelineSid = sessionId;
+  playheadT = null;
+  const sidebar = container.querySelector('.tl-sidebar');
+  const top = sidebar ? sidebar.scrollTop : 0;
+  renderActive(container, false);
+  const next = container.querySelector('.tl-sidebar');
+  if (next) next.scrollTop = top;
+}
+
+// startTimelineResize drives the Timeline sidebar's drag-to-resize. It reuses
+// the Conversation sidebar's width state (convSidebarW + clamp + persistence) —
+// the two lenses are never visible at once, so one shared width is DRY and
+// keeps both rails the same size.
+function startTimelineResize(container, startX) {
+  const sidebar = container.querySelector('.tl-sidebar');
+  if (!sidebar) return;
+  const startW = sidebar.getBoundingClientRect().width;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  const onMove = e => {
+    const w = clampConvSidebarWidth(startW + (e.clientX - startX));
+    convSidebarW = w;
+    sidebar.style.width = `${w}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    setConvSidebarWidth(convSidebarW);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 // startConvResize drives the Conversation sidebar's drag-to-resize. It sizes the
@@ -1526,13 +1584,67 @@ function conversationReplyHTML(reply, sid) {
 // container so a scrub re-renders ONLY the sessions, leaving the range input
 // (mid-drag) untouched.
 function renderTimeline(sessions) {
-  if (sessions.length === 0) return `<div class="ac-idle">No agents to plot.</div>`;
+  const list = timelineSessionList(sessions);
+  if (list.length === 0) return `<div class="ac-idle">No agents to plot.</div>`;
+  const chosen = currentTimelineSession();
+  // chosen is always non-null here (list is non-empty ⇒ pickTimelineSid resolves
+  // a sid); guard anyway so a future caller can't NPE.
+  const view = chosen ? { sessions: [chosen.session] } : { sessions: [] };
+  const curSid = chosen ? chosen.session.session_id || '' : '';
   const nowMs = Date.now();
-  const bounds = playheadBounds(lastGraph, nowMs);
+  // Scrubber window + counts are scoped to the ONE plotted session, not the
+  // whole graph — the playhead spans just this trace, and ▶/✓/○ count only its
+  // agents. This is also what removes the all-sessions repaint per scrub frame.
+  const bounds = playheadBounds(view, nowMs);
   const live = playheadT == null;
   const T = playheadAt(bounds, nowMs);
-  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(lastGraph, T)) : '';
-  return `<div class="timeline-lens">${scrubber}<div class="timeline-sessions">${renderTimelineSessions(sessions, nowMs, T)}</div></div>`;
+  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(view, T)) : '';
+  const w = convSidebarWidth();
+  return `<div class="timeline-layout">
+    <div class="tl-sidebar" style="width:${w}px" role="tablist" aria-label="Sessions">${timelineSidebarHTML(list, curSid)}</div>
+    <div class="tl-resize" data-tl-resize role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
+    <div class="timeline-lens">${scrubber}<div class="timeline-sessions">${renderTimelineSessions(view.sessions, nowMs, T, chosen ? chosen.index : 0)}</div></div>
+  </div>`;
+}
+
+// currentTimelineSession resolves the single session the Timeline plots: its
+// sid via pickTimelineSid (explicit pick → selected turn's session → first),
+// then the matching session object plus its ORIGINAL index (the stable color
+// slot). Returns null when nothing is plottable. Shared by renderTimeline and
+// renderScrub so both render and scope to the SAME session.
+function currentTimelineSession() {
+  const sessions = (lastGraph && lastGraph.sessions) || [];
+  const sid = pickTimelineSid(sessions, timelineSid, selectedRef);
+  if (!sid) return null;
+  const index = sessions.findIndex(s => s && (s.session_id || '') === sid);
+  if (index < 0) return null;
+  return { session: sessions[index], index };
+}
+
+// timelineSidebarHTML renders the left session list: one selectable row per
+// plottable session, the in-lens way to switch which Gantt is plotted. The
+// active session is highlighted; each row carries data-tl-sess so a click
+// re-points timelineSid at it. Rows lead with project/shortId and a few
+// sessionStats pills (⏱ duration · ⚠ errors · 💰 cost) so the list triages.
+function timelineSidebarHTML(list, curSid) {
+  return list.map(e => {
+    const sel = e.sessionId === curSid ? ' is-selected' : '';
+    const c = colorSlot(e.index);
+    const err = e.errorCount > 0
+      ? `<span class="tl-sess-item-pill tl-sess-item-err" title="${fmtNum(e.errorCount)} tool error${e.errorCount === 1 ? '' : 's'}">⚠️ ${fmtNum(e.errorCount)}</span>`
+      : '';
+    return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}" title="${escHtml(e.cwd || '')}">
+      <span class="tl-sess-item-proj">${escHtml(baseName(e.cwd) || '—')}</span>
+      <span class="tl-sess-item-meta">
+        <span class="tl-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
+        <span class="tl-sess-item-pills">
+          <span class="tl-sess-item-pill" title="session duration">⏱️ ${escHtml(formatElapsed(e.durationMs))}</span>
+          ${err}
+          <span class="tl-sess-item-pill" title="session cost">💰 ${escHtml(fmtMoney(e.cost_usd))}</span>
+        </span>
+      </span>
+    </button>`;
+  }).join('');
 }
 
 // playheadAt resolves the instant the Gantt renders at: the paused T, or — when
@@ -1547,13 +1659,16 @@ function playheadAt(bounds, nowMs) {
 // rendered/updated separately). prevTimelineKeys → a genuinely NEW agent fades
 // in; phase changes don't, because every agent always has a row (a pending one
 // is simply zero-width), so scrubbing never adds/removes keys.
-function renderTimelineSessions(sessions, nowMs, T) {
+// Only the chosen session is plotted, so `colorIdx` is its ORIGINAL list index
+// (the stable color slot) — passed through to the session-head data-c so the
+// card keeps the same hue it had when every session was stacked.
+function renderTimelineSessions(sessions, nowMs, T, colorIdx = 0) {
   const hostW = timelineHostW();
   const sel = resolveRef(lastGraph, selectedRef);
   const selAgentKey = sel ? refKey({ sessionId: sel.session.session_id, agentIndex: sel.agentIndex }) : null;
   const seen = prevTimelineKeys;
   const next = new Set();
-  const html = sessions.map((s, si) => timelineSessionHTML(s, si, hostW, nowMs, T, selAgentKey, seen, next)).join('');
+  const html = sessions.map(s => timelineSessionHTML(s, colorIdx, hostW, nowMs, T, selAgentKey, seen, next)).join('');
   prevTimelineKeys = next;
   return html;
 }
@@ -1682,12 +1797,14 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
   const errPip = errs > 0 && r.phase !== 'pending'
     ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
     : '';
-  // Per-turn segments tile the bar on the time axis — each carries its step's
-  // refKey, so a click selects that turn in the drawer (the bar/rowbg under them
-  // have no data-ref and fall through to selecting the whole agent). When a row
-  // has segments the lifetime bar drops to a faint rail behind them (.has-segs);
-  // a row with no timed steps (older data, or a run before its first turn) keeps
-  // the solid bar so it never looks empty.
+  // Segments tile the bar on the time axis at the finest grain the data allows:
+  // one sub-span per TOOL where the backend captured tool wall-clock (toolIndex
+  // set, data-ref = that tool → a click opens the tool in the drawer), else one
+  // per TURN (data-ref = the step). The bar/rowbg under them have no data-ref and
+  // fall through to selecting the whole agent. When a row has segments the
+  // lifetime bar drops to a faint rail behind them (.has-segs); a row with no
+  // timed steps (older data, or a run before its first turn) keeps the solid bar
+  // so it never looks empty.
   // Each turn segment encodes time as width (Phase 1), now also cost as fill
   // intensity (a per-session heat ramp) and — on wide-enough segments — its
   // duration (and cost, when there's room) as an inline label. A segment that
@@ -1697,17 +1814,33 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
   const segs = r.segments || [];
   const hasSegs = segs.length ? ' has-segs' : '';
   const segLabelY = (barY + barH / 2 + 3).toFixed(1);
+  const steps = (agent && agent.steps) || [];
   const segHTML = segs.map(s => {
     const ssel = s.refKey === selectedRef ? ' is-selected' : '';
     const isErr = s.status === 'error';
     const serr = isErr ? ' is-error' : '';
-    const costText = s.cost_usd ? fmtMoney(s.cost_usd) : '';
-    const tip = `Turn ${s.stepIndex + 1} · ${formatElapsed(s.durationMs)}${costText ? ` · ${costText}` : ''}`;
+    const durText = formatElapsed(s.durationMs);
+    // A tool sub-span (toolIndex set) names the tool and shows duration only —
+    // tools aren't individually priced (the heat still reflects the parent turn's
+    // cost via s.cost_usd), so a per-tool cost would be misleading. A turn segment
+    // keeps the Phase-2 "Turn N · dur · cost" tip and cost-bearing label.
+    const isTool = s.toolIndex != null;
+    let tip, costText;
+    if (isTool) {
+      const tool = ((steps[s.stepIndex] || {}).tools || [])[s.toolIndex] || {};
+      const name = tool.name || 'tool';
+      const detail = tool.detail ? ` · ${tool.detail}` : '';
+      tip = `${name}${detail} · ${durText}${isErr ? ' · error' : ''}`;
+      costText = '';
+    } else {
+      costText = s.cost_usd ? fmtMoney(s.cost_usd) : '';
+      tip = `Turn ${s.stepIndex + 1} · ${durText}${costText ? ` · ${costText}` : ''}`;
+    }
     const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
     const rect = `<rect class="tl-seg${serr}${ssel}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
     // Inline label: the richest of "dur · cost" / "dur" that fits the segment
     // width; '' when too narrow. pointer-events:none keeps the click on the rect.
-    const text = fitSegmentLabel(s.w, formatElapsed(s.durationMs), costText);
+    const text = fitSegmentLabel(s.w, durText, costText);
     const label = text
       ? `<text class="tl-seg-label" x="${(s.x + s.w / 2).toFixed(1)}" y="${segLabelY}">${escHtml(text)}</text>`
       : '';
@@ -1737,9 +1870,12 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
 function timelineHostW() {
   const host = document.querySelector('#view-agents .subview[data-subview="timeline"]');
   const w = host ? host.clientWidth : 0;
-  // Leave room for the session card's padding/border; clamp so the fit-width
-  // floor stays readable when the lens is narrow.
-  return Math.max(420, (w > 0 ? w : 760) - 28);
+  // The Gantt now occupies only the pane to the right of the session sidebar, so
+  // discount the sidebar + drag handle (6px) from the available width — else the
+  // chart floors too wide and overflows the pane. Leave room for the session
+  // card's padding/border; clamp so the fit-width floor stays readable.
+  const rail = convSidebarWidth() + 6;
+  return Math.max(420, (w > 0 ? w : 760) - rail - 28);
 }
 
 // syncTimelineScroll applies the live-edge follow after a (re)render: a session
@@ -1823,13 +1959,17 @@ function onScrub(container, range) {
 // alone so the in-progress drag isn't interrupted, and preserves each Gantt's
 // horizontal scroll so seeking through time never yanks the viewport sideways.
 function renderScrub(container) {
-  const sessions = (lastGraph && lastGraph.sessions) || [];
+  // Resolve the SAME single session renderTimeline plotted and repaint ONLY it
+  // (was: every session, every frame) — this is the scrub-perf win. Counts are
+  // scoped to that one session too.
+  const chosen = currentTimelineSession();
+  const view = chosen ? { sessions: [chosen.session] } : { sessions: [] };
   const T = playheadT;
   const lensHost = container.querySelector('.subview[data-subview="timeline"]');
   const host = container.querySelector('.timeline-sessions');
   if (host && lensHost) {
     const memo = captureState(lensHost);
-    host.innerHTML = renderTimelineSessions(sessions, Date.now(), T);
+    host.innerHTML = renderTimelineSessions(view.sessions, Date.now(), T, chosen ? chosen.index : 0);
     restoreState(lensHost, memo);
     // The repaint replaced the row/segment nodes with fresh, undimmed ones; re-
     // apply the cached filter dimming (class-only, no recompute) so it survives
@@ -1839,14 +1979,14 @@ function renderScrub(container) {
   const clock = container.querySelector('[data-tlclock]');
   if (clock) clock.textContent = clockTime(T);
   const counts = container.querySelector('[data-tlcounts]');
-  if (counts) counts.innerHTML = countsHTML(playheadStats(lastGraph, T));
+  if (counts) counts.innerHTML = countsHTML(playheadStats(view, T));
 }
 
 // ── preserve scroll / open-rows across a live re-render ────────────────────
 
 function captureState(host) {
   const m = { scrolls: {}, tlScroll: {}, nodes: {} };
-  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar').forEach(el => {
+  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar, .tl-sidebar').forEach(el => {
     m.scrolls[scrollKey(el)] = el.scrollTop;
   });
   // Per-session horizontal Gantt offset, so a live update that rebuilds the SVG
@@ -1904,7 +2044,7 @@ function captureTreeAnchor(itree) {
 }
 
 function restoreState(host, m) {
-  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar').forEach(el => {
+  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar, .tl-sidebar').forEach(el => {
     const v = m.scrolls[scrollKey(el)];
     if (v != null) el.scrollTop = v;
   });
