@@ -2057,14 +2057,17 @@ function tokTurnsSvg(bins) {
 // render from the scoped agents (no scrub / SSE), so it degrades cleanly in the
 // static `claudit report`.
 function renderTokenPanel(agents) {
-  const { turns, series, peakContext, cacheHit, totals } = contextSeries(agents);
+  const { turns, series, peakContext, cacheHit, capacity, peakFill, totals } = contextSeries(agents);
   const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Token &amp; context</h3></header>`;
   if (turns === 0) {
     return `<section class="ins-panel">${head}<div class="ins-empty">No token usage in this scope.</div></section>`;
   }
 
-  const stat = (k, v) => `<span class="ins-stat"><span class="ins-stat-k">${k}</span><span class="ins-stat-v">${escHtml(v)}</span></span>`;
-  const stats = `<div class="ins-stats">${stat('cache hit', fmtPct1(cacheHit))}${stat('peak ctx', fmtCompact(peakContext))}<span class="ins-stat ins-stat-n">${fmtNum(turns)} turns</span></div>`;
+  // peakFill = how full the (inferred) context window got — peak prompt ÷ window.
+  const capLabel = fmtCompact(capacity);
+  const fillTitle = `Peak prompt was ${fmtCompact(peakContext)} of the inferred ${capLabel} context window (${fmtPct1(peakFill)} full)`;
+  const stat = (k, v, title) => `<span class="ins-stat"${title ? ` title="${escHtml(title)}"` : ''}><span class="ins-stat-k">${k}</span><span class="ins-stat-v">${escHtml(v)}</span></span>`;
+  const stats = `<div class="ins-stats">${stat('cache hit', fmtPct1(cacheHit))}${stat('peak ctx', `${fmtCompact(peakContext)} (${fmtPct1(peakFill)})`, fillTitle)}<span class="ins-stat ins-stat-n">${fmtNum(turns)} turns</span></div>`;
 
   // Downsample so a long run stays legible (and cheap to render) — sub-pixel bars
   // and tens of thousands of SVG nodes help no one. binSeries folds nothing away.
@@ -2076,7 +2079,7 @@ function renderTokenPanel(agents) {
   const last = series[series.length - 1].context;
   const ctxFig = `<figure class="ins-tok-fig">
       ${tokCtxSvg(bins, peakContext)}
-      <figcaption class="ins-tok-cap">Context window over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> · last ${escHtml(fmtCompact(last))}</figcaption>
+      <figcaption class="ins-tok-cap">Context over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> of ${escHtml(capLabel)} window (${escHtml(fmtPct1(peakFill))}) · last ${escHtml(fmtCompact(last))}</figcaption>
     </figure>`;
 
   // Token totals composition — a four-band stacked bar (output→hot, input→warn,

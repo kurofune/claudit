@@ -865,7 +865,16 @@ export function errorRates(agents, opts = {}) {
 //   peakContext — max context across the series (0 when empty)
 //   cacheHit    — overall cacheRead / (cacheRead + input + cacheWrite), 0 when
 //                 the denominator is 0
+//   capacity    — inferred context-window size: 1M when any prompt exceeded the
+//                 standard 200k tier, else 200k (the tier isn't in the transcript)
+//   peakFill    — peakContext / capacity: how full the window got (0 when empty)
 //   totals      — summed { input, output, cacheWrite, cacheRead, total }
+// Context-window tiers used to express how full the window got (peakFill). The
+// standard Claude window is 200k; the extended beta is 1M. See the inference note
+// in contextSeries — the tier isn't recorded in the transcript.
+export const STD_CONTEXT_WINDOW = 200000;
+export const EXT_CONTEXT_WINDOW = 1000000;
+
 export function contextSeries(agents, opts = {}) {
   const series = [];
   let peakContext = 0;
@@ -892,9 +901,17 @@ export function contextSeries(agents, opts = {}) {
     return x.t - y.t;
   });
   const promptTotal = totals.cacheRead + totals.input + totals.cacheWrite;
+  // The transcript doesn't record the model's context-window size (the 1M-beta
+  // tag isn't in the data), so infer the tier from the data itself: a prompt that
+  // exceeded the standard 200k window can only have run on the 1M tier. A run that
+  // stayed under 200k is reported against the standard window — we can't tell a
+  // never-filled 1M session apart from a 200k one, and the standard tier is the
+  // honest default.
+  const capacity = peakContext > STD_CONTEXT_WINDOW ? EXT_CONTEXT_WINDOW : STD_CONTEXT_WINDOW;
   return {
     turns: series.length, series, peakContext,
     cacheHit: promptTotal ? totals.cacheRead / promptTotal : 0,
+    capacity, peakFill: capacity ? peakContext / capacity : 0,
     totals,
   };
 }

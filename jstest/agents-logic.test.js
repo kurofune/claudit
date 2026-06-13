@@ -2836,10 +2836,25 @@ test('errorRates tolerates null agents, null steps, and null tool entries', () =
 test('contextSeries returns a zeroed/empty result for null/empty agents', () => {
   const empty = {
     turns: 0, series: [], peakContext: 0, cacheHit: 0,
+    capacity: 200000, peakFill: 0,
     totals: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 },
   };
   assert.deepEqual(contextSeries(null), empty);
   assert.deepEqual(contextSeries([]), empty);
+});
+
+test('contextSeries infers the standard 200k window and reports peakFill when peak <= 200k', () => {
+  const agents = [{ steps: [{ context_tokens: 50000 }, { context_tokens: 120000 }] }];
+  const r = contextSeries(agents);
+  assert.equal(r.capacity, 200000);
+  assert.equal(r.peakFill, 120000 / 200000);   // 0.6
+});
+
+test('contextSeries infers the 1M window when a prompt exceeded the standard 200k', () => {
+  const agents = [{ steps: [{ context_tokens: 180000 }, { context_tokens: 397000 }] }];
+  const r = contextSeries(agents);
+  assert.equal(r.capacity, 1000000);
+  assert.equal(r.peakFill, 397000 / 1000000);   // 0.397
 });
 
 test('contextSeries folds each step\'s Go-named token fields, combining 5m+1h cache writes', () => {
