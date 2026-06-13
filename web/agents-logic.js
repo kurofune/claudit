@@ -352,6 +352,7 @@ export function stepSegments(agent, opts = {}) {
       status: hasErr ? 'error' : '',
       cost_usd: (step && step.cost_usd) || 0,
       durationMs: end - start,
+      kind: 'step',
     });
   }
   return segs;
@@ -402,6 +403,7 @@ export function toolSegments(agent, opts = {}) {
         x: chartX + bar.x, w: bar.width, stepIndex: k,
         refKey: refKey({ sessionId, agentIndex, stepIndex: k }),
         status: hasErr ? 'error' : '', cost_usd: stepCost, durationMs: end - stepStart,
+        kind: 'step',
       });
       continue;
     }
@@ -420,6 +422,7 @@ export function toolSegments(agent, opts = {}) {
         refKey: refKey({ sessionId, agentIndex, stepIndex: k, toolIndex }),
         status: tool && tool.status === 'error' ? 'error' : '',
         cost_usd: stepCost, durationMs: end - start,
+        kind: (tool && tool.kind) || 'other',
       });
       prev = end;
     }
@@ -461,6 +464,73 @@ export function costHeat(cost, maxCost, opts = {}) {
   if (max <= 0 || c <= 0) return 0;
   const frac = Math.min(1, c / max);
   return frac ** gamma;
+}
+
+// KIND_FAMILIES is the set of palette families the Timeline colors segments by —
+// the normalized ToolKind enum plus the 'agent'/'step' pseudo-kinds. It mirrors
+// the `.kind-*` CSS classes (each setting --kc) reused from the Feed/Tree badges
+// 1:1, so a kind reads identically in every lens. Anything outside it is
+// uncategorized → 'other'.
+const KIND_FAMILIES = new Set([
+  'read', 'web', 'exec', 'edit', 'skill', 'mcp', 'command', 'todo', 'other', 'step', 'agent',
+]);
+
+// KIND_ORDER is the canonical legend order: the loud/common tool kinds first, the
+// procedural ones and the 'step' (turn) fallback last — so the scrubber legend
+// keeps a stable order rather than reshuffling with each session's kind mix.
+const KIND_ORDER = ['read', 'edit', 'exec', 'web', 'skill', 'mcp', 'command', 'todo', 'step', 'other'];
+
+// segKindColor normalizes a segment's kind to its `.kind-*` palette family: a
+// known kind passes through, anything unknown/missing falls to 'other'. The
+// Timeline renders `kind-${segKindColor(seg.kind)}` so hue carries the kind while
+// cost-heat demotes to a secondary (saturation) channel and error-red still wins.
+// DOM-free twin of view-agents' kindFamily (which also drives the glyph monograms).
+export function segKindColor(kind) {
+  return KIND_FAMILIES.has(kind) ? kind : 'other';
+}
+
+// pctOfAgent returns a segment's share of its agent's total runtime as a rounded
+// integer percent (0..100) — the "(xx% of agent)" clause the richer tooltip adds.
+// A zero/negative part is 0; a zero/invalid whole returns null so the caller drops
+// the clause rather than dividing by zero.
+export function pctOfAgent(partMs, wholeMs) {
+  if (!(wholeMs > 0)) return null;
+  if (!(partMs > 0)) return 0;
+  return Math.min(100, Math.round((partMs / wholeMs) * 100));
+}
+
+// segTooltip assembles the Timeline segment's hover string from already-formatted
+// pieces (mirroring fitSegmentLabel's "caller pre-formats" contract, so this stays
+// DOM- and format-free): `head · dur (pct% of agent) · cost · tokens`. Empty pieces
+// are dropped; a null pct drops the parenthetical; an error appends a trailing
+// marker. Richer hover, NOT richer in-bar labels — bars are a poor text channel.
+export function segTooltip({ head = '', durText = '', pct = null, costText = '', tokensText = '', isError = false } = {}) {
+  const parts = [];
+  if (head) parts.push(head);
+  if (durText) parts.push(pct != null ? `${durText} (${pct}% of agent)` : durText);
+  if (costText) parts.push(costText);
+  if (tokensText) parts.push(tokensText);
+  let s = parts.join(' · ');
+  if (isError) s += s ? ' · error' : 'error';
+  return s;
+}
+
+// timelineKinds lists the distinct segment kinds present in a session, in
+// canonical legend order, for the scrubber's kind legend. It mirrors toolSegments'
+// timed-vs-untimed decision exactly: a step with ≥1 tool carrying ended_at
+// contributes each timed tool's kind; a step with none falls back to the 'step'
+// (turn) color — so the legend names exactly the colors the Gantt actually draws.
+export function timelineKinds(session) {
+  const seen = new Set();
+  for (const a of flattenSession(session)) {
+    for (const step of (a.steps || [])) {
+      const tools = (step && step.tools) || [];
+      const timed = tools.filter(t => t && !Number.isNaN(parseTime(t.ended_at)));
+      if (timed.length === 0) seen.add('step');
+      else for (const t of timed) seen.add(segKindColor(t.kind));
+    }
+  }
+  return KIND_ORDER.filter(k => seen.has(k));
 }
 
 // agentElapsedMs returns how long an agent has been active. A running

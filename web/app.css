@@ -2572,7 +2572,7 @@
      it stays reachable while the session Gantts scroll beneath it. */
   .tl-scrubber {
     position: sticky; top: 0; z-index: 2;
-    display: flex; align-items: center; gap: var(--s-3);
+    display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3);
     padding: var(--s-2) var(--s-3);
     background: color-mix(in oklch, var(--surface) 92%, transparent);
     backdrop-filter: blur(6px);
@@ -2600,6 +2600,23 @@
   .tlc-active { color: var(--accent-2); }
   .tlc-done { color: var(--ink-2); }
   .tlc-pending { color: color-mix(in oklch, var(--ink-2) 65%, transparent); }
+  /* Kind legend: wraps to its own line under the scrubber controls, mapping each
+     segment color to its tool kind. Reuses the .kind-* palette — the swatch reads
+     the --kc the kind class sets, so the key and the bars can't drift apart. */
+  .tl-legend {
+    flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center;
+    gap: var(--s-1) var(--s-3); margin-top: 2px; padding-top: var(--s-2);
+    border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  }
+  .tl-leg-item {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--t-1); color: var(--ink-2); text-transform: capitalize;
+  }
+  .tl-leg-sw {
+    width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto;
+    background: var(--kc, var(--ink-2));
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink) 12%, transparent);
+  }
   .timeline-sess { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); padding: var(--s-2) var(--s-3) var(--s-3); }
   .timeline-sess-head {
     display: flex; align-items: baseline; gap: var(--s-2);
@@ -2672,14 +2689,13 @@
      without changing hue (kind identity survives). Error overrides the fill at
      higher specificity, so a failed turn is red whatever its cost. */
   .tl-seg {
-    --seg-hot: var(--ink);
+    /* --kc is set by the .kind-* class on the rect (same palette as the Feed/Tree
+       badges); fall back to --ink for a segment with no kind class. */
+    --seg-hot: var(--kc, var(--ink));
     fill: color-mix(in oklch, var(--seg-hot) calc(var(--seg-heat, 0) * 44% + 30%), var(--surface));
     stroke: var(--surface); stroke-width: 0.5;
     cursor: pointer; transition: fill 0.12s ease, stroke 0.12s ease;
   }
-  .tl-main .tl-seg { --seg-hot: var(--accent); }
-  .tl-sub .tl-seg { --seg-hot: var(--ink); }
-  .tl-row.is-running .tl-seg { --seg-hot: var(--accent-2); }
   .tl-seg:hover { filter: brightness(1.15); }
   .tl-seg.is-error { fill: var(--danger, #e5484d); stroke: color-mix(in oklch, var(--danger, #e5484d) 50%, var(--surface)); }
   .tl-seg.is-selected { stroke: var(--accent); stroke-width: 1.5; }

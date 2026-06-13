@@ -35,7 +35,7 @@ import {
   agentLabel, buildEventFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
-  fitSegmentLabel, costHeat,
+  fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -1623,7 +1623,9 @@ function renderTimeline(sessions) {
   const bounds = playheadBounds(view, nowMs);
   const live = playheadT == null;
   const T = playheadAt(bounds, nowMs);
-  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(view, T)) : '';
+  // The kind legend names the colors the Gantt actually draws for THIS session.
+  const kinds = chosen ? timelineKinds(chosen.session) : [];
+  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(view, T), kinds) : '';
   const w = convSidebarWidth();
   return `<div class="timeline-layout">
     <div class="tl-sidebar" style="width:${w}px" role="tablist" aria-label="Sessions">${timelineSidebarHTML(list, curSid)}</div>
@@ -1701,7 +1703,7 @@ function renderTimelineSessions(sessions, nowMs, T, colorIdx = 0) {
 // scrubberHTML is the sticky control strip: a "● live" toggle, a range input
 // spanning the whole trace window, and a clock + active/done/pending readout —
 // all "as of" the playhead T.
-function scrubberHTML(bounds, T, live, stats) {
+function scrubberHTML(bounds, T, live, stats, kinds = []) {
   const span = bounds.endMs - bounds.startMs;
   const val = Math.max(0, Math.min(span, T - bounds.startMs));
   return `<div class="tl-scrubber">
@@ -1710,7 +1712,19 @@ function scrubberHTML(bounds, T, live, stats) {
       data-tlrange data-tlstart="${bounds.startMs}" aria-label="Scrub the timeline to a point in time"/>
     <span class="tl-clock" data-tlclock>${escHtml(clockTime(T))}</span>
     <span class="tl-counts" data-tlcounts>${countsHTML(stats)}</span>
+    ${kindLegendHTML(kinds)}
   </div>`;
+}
+
+// kindLegendHTML renders the segment-color key for the Timeline: one swatch +
+// label per kind the plotted session draws, in canonical order (from
+// timelineKinds), reusing the .kind-* palette (the swatch reads var(--kc)). Empty
+// string when the session has no segments — no legend, no clutter.
+function kindLegendHTML(kinds) {
+  if (!kinds || kinds.length === 0) return '';
+  const items = kinds.map(k =>
+    `<span class="tl-leg-item kind-${kindFamily(k)}" title="${escHtml(k)} segments"><span class="tl-leg-sw" aria-hidden="true"></span>${escHtml(k)}</span>`).join('');
+  return `<span class="tl-legend" aria-label="Segment colors by tool kind">${items}</span>`;
 }
 
 function countsHTML(s) {
@@ -1843,29 +1857,42 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
   const hasSegs = segs.length ? ' has-segs' : '';
   const segLabelY = (barY + barH / 2 + 3).toFixed(1);
   const steps = (agent && agent.steps) || [];
+  // The segment's share of its agent's whole runtime, for the "(xx% of agent)"
+  // clause — a fixed denominator so every segment in a row reads against the same
+  // total. Done agents report end−start; a running one counts to now.
+  const agentDurMs = agentElapsedMs(agent, Date.now());
   const segHTML = segs.map(s => {
     const ssel = s.refKey === selectedRef ? ' is-selected' : '';
     const isErr = s.status === 'error';
     const serr = isErr ? ' is-error' : '';
     const durText = formatElapsed(s.durationMs);
-    // A tool sub-span (toolIndex set) names the tool and shows duration only —
-    // tools aren't individually priced (the heat still reflects the parent turn's
-    // cost via s.cost_usd), so a per-tool cost would be misleading. A turn segment
-    // keeps the Phase-2 "Turn N · dur · cost" tip and cost-bearing label.
+    const pct = pctOfAgent(s.durationMs, agentDurMs);
+    const step = steps[s.stepIndex] || {};
+    const tokens = agentTokens(step).total;
+    const tokensText = tokens ? `${fmtCompact(tokens)} tok` : '';
+    // Hue comes from the tool kind (or 'step' for a turn segment), reusing the
+    // same .kind-* palette as the Feed/Tree badges; cost-heat (--seg-heat) stays
+    // a secondary saturation channel and an error overrides the fill to red.
+    const kindCls = ` kind-${segKindColor(s.kind)}`;
+    // A tool sub-span (toolIndex set) leads with the tool name·detail and shows
+    // duration·tokens only — tools aren't individually priced (the heat still
+    // reflects the parent turn's cost), so a per-tool cost would mislead. A turn
+    // segment leads with "Turn N" and carries cost too. Both gain the %-of-agent
+    // and token context — richer hover, while the in-bar label stays minimal.
     const isTool = s.toolIndex != null;
     let tip, costText;
     if (isTool) {
-      const tool = ((steps[s.stepIndex] || {}).tools || [])[s.toolIndex] || {};
+      const tool = (step.tools || [])[s.toolIndex] || {};
       const name = tool.name || 'tool';
       const detail = tool.detail ? ` · ${tool.detail}` : '';
-      tip = `${name}${detail} · ${durText}${isErr ? ' · error' : ''}`;
+      tip = segTooltip({ head: `${name}${detail}`, durText, pct, tokensText, isError: isErr });
       costText = '';
     } else {
       costText = s.cost_usd ? fmtMoney(s.cost_usd) : '';
-      tip = `Turn ${s.stepIndex + 1} · ${durText}${costText ? ` · ${costText}` : ''}`;
+      tip = segTooltip({ head: `Turn ${s.stepIndex + 1}`, durText, pct, costText, tokensText, isError: isErr });
     }
     const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
-    const rect = `<rect class="tl-seg${serr}${ssel}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
     // Inline label: the richest of "dur · cost" / "dur" that fits the segment
     // width; '' when too narrow. pointer-events:none keeps the click on the rect.
     const text = fitSegmentLabel(s.w, durText, costText);

@@ -51,6 +51,10 @@ import {
   treeFollowMode,
   zoomClampPxPerMs,
   zoomAnchorScrollLeft,
+  segKindColor,
+  pctOfAgent,
+  segTooltip,
+  timelineKinds,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -1298,11 +1302,11 @@ test('stepSegments lays out each timed step as a segment on the scale', () => {
   assert.equal(segs.length, 2);
   // step0: 0..400 → x 100, w 120, span 400ms
   assert.deepEqual(segs[0], {
-    x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400,
+    x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400, kind: 'step',
   });
   // step1 (duration 0) extends to effEnd 1000: 400..1000 → x 220, w 180, span 600ms
   assert.deepEqual(segs[1], {
-    x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600,
+    x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600, kind: 'step',
   });
 });
 
@@ -1374,8 +1378,8 @@ test('toolSegments falls back to one turn segment per step when no tool is timed
     scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
   });
   assert.deepEqual(segs, [
-    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400 },
-    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600 },
+    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400, kind: 'step' },
+    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600, kind: 'step' },
   ]);
 });
 
@@ -1399,8 +1403,8 @@ test('toolSegments tiles a step\'s timed tools as sub-spans by ended_at', () => 
     scale: segScale, chartX: 100, sessionId: 's1', agentIndex: 0, effEnd: 1000,
   });
   assert.deepEqual(segs, [
-    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600 },
-    { x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: 'error', cost_usd: 0.05, durationMs: 100 },
+    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600, kind: 'other' },
+    { x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: 'error', cost_usd: 0.05, durationMs: 100, kind: 'other' },
   ]);
 });
 
@@ -1426,11 +1430,11 @@ test('toolSegments clamps tool sub-spans to the playhead cap', () => {
   });
   assert.equal(segs.length, 2);
   assert.deepEqual(segs[0], {
-    x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600,
+    x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.05, durationMs: 600, kind: 'other',
   });
   // Read truncated at the cap: 600..700 → x 280, w 30, span 100ms.
   assert.deepEqual(segs[1], {
-    x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.05, durationMs: 100,
+    x: 280, w: 30, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.05, durationMs: 100, kind: 'other',
   });
 });
 
@@ -1451,8 +1455,8 @@ test('buildTimeline attaches per-turn segments to each row', () => {
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
   });
   assert.deepEqual(layout.rows[0].segments, [
-    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400 },
-    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600 },
+    { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400, kind: 'step' },
+    { x: 220, w: 180, stepIndex: 1, refKey: 's1#0.1', status: '', cost_usd: 0.02, durationMs: 600, kind: 'step' },
   ]);
 });
 
@@ -1478,8 +1482,8 @@ test('buildTimeline rows expose per-tool sub-spans when tools are timed', () => 
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
   });
   assert.deepEqual(layout.rows[0].segments, [
-    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.03, durationMs: 600 },
-    { x: 280, w: 90, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.03, durationMs: 300 },
+    { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.03, durationMs: 600, kind: 'other' },
+    { x: 280, w: 90, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.03, durationMs: 300, kind: 'other' },
   ]);
 });
 
@@ -2202,4 +2206,115 @@ test('zoomAnchorScrollLeft returns 0 when the old width is degenerate', () => {
   assert.equal(zoomAnchorScrollLeft({
     cursorX: 100, scrollLeft: 0, viewportW: 500, oldChartW: 0, newChartW: 1000,
   }), 0);
+});
+
+// ── segKindColor (kind → palette family for the Timeline) ───────────
+test('segKindColor passes a known tool kind through unchanged', () => {
+  for (const k of ['read', 'web', 'exec', 'edit', 'skill', 'mcp', 'command', 'todo', 'other']) {
+    assert.equal(segKindColor(k), k);
+  }
+});
+
+test('segKindColor passes the agent/step pseudo-kinds through', () => {
+  assert.equal(segKindColor('agent'), 'agent');
+  assert.equal(segKindColor('step'), 'step');
+});
+
+test('segKindColor falls back to other for an unknown/missing kind', () => {
+  assert.equal(segKindColor('bogus'), 'other');
+  assert.equal(segKindColor(''), 'other');
+  assert.equal(segKindColor(undefined), 'other');
+  assert.equal(segKindColor(null), 'other');
+});
+
+// ── pctOfAgent (a segment's share of its agent's runtime) ───────────
+test('pctOfAgent returns the rounded integer percent of the whole', () => {
+  assert.equal(pctOfAgent(250, 1000), 25);
+  assert.equal(pctOfAgent(1, 3), 33);   // 33.33 → 33
+  assert.equal(pctOfAgent(2, 3), 67);   // 66.66 → 67
+});
+
+test('pctOfAgent clamps a part larger than the whole to 100', () => {
+  assert.equal(pctOfAgent(1500, 1000), 100);
+});
+
+test('pctOfAgent is 0 for a zero/negative part', () => {
+  assert.equal(pctOfAgent(0, 1000), 0);
+  assert.equal(pctOfAgent(-5, 1000), 0);
+});
+
+test('pctOfAgent returns null when the whole is zero/invalid', () => {
+  assert.equal(pctOfAgent(100, 0), null);
+  assert.equal(pctOfAgent(100, -1), null);
+  assert.equal(pctOfAgent(100, NaN), null);
+});
+
+// ── segTooltip (richer hover string, not richer in-bar labels) ──────
+test('segTooltip joins head, dur(% of agent), cost and tokens with dots', () => {
+  assert.equal(
+    segTooltip({ head: 'Bash · build', durText: '1m 5s', pct: 24, costText: '$0.0021', tokensText: '12.3k tok' }),
+    'Bash · build · 1m 5s (24% of agent) · $0.0021 · 12.3k tok',
+  );
+});
+
+test('segTooltip omits the percent when pct is null', () => {
+  assert.equal(
+    segTooltip({ head: 'Turn 3', durText: '5s', pct: null, costText: '$0.01', tokensText: '900 tok' }),
+    'Turn 3 · 5s · $0.01 · 900 tok',
+  );
+});
+
+test('segTooltip skips empty cost/tokens pieces', () => {
+  assert.equal(
+    segTooltip({ head: 'Read · x.go', durText: '120ms', pct: 3, costText: '', tokensText: '' }),
+    'Read · x.go · 120ms (3% of agent)',
+  );
+});
+
+test('segTooltip appends an error marker last', () => {
+  assert.equal(
+    segTooltip({ head: 'Read · x.go', durText: '120ms', pct: 3, costText: '', tokensText: '', isError: true }),
+    'Read · x.go · 120ms (3% of agent) · error',
+  );
+});
+
+// ── timelineKinds (distinct segment kinds, for the scrubber legend) ─
+test('timelineKinds collects a session\'s tool kinds in canonical order', () => {
+  const session = {
+    session_id: 's1',
+    main: {
+      kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+      steps: [
+        { timestamp: 0, duration_ms: 500, tools: [
+          { kind: 'exec', ended_at: 200 },
+          { kind: 'read', ended_at: 400 },
+        ] },
+        { timestamp: 500, duration_ms: 0, tools: [{ kind: 'edit', ended_at: 700 }] },
+      ],
+    },
+    children: [],
+  };
+  // canonical order is read, edit, exec, … so the legend never reshuffles.
+  assert.deepEqual(timelineKinds(session), ['read', 'edit', 'exec']);
+});
+
+test('timelineKinds reports step for a turn with no timed tools', () => {
+  const session = {
+    session_id: 's1',
+    main: {
+      kind: 'main', started_at: 0, ended_at: 1000, status: 'done',
+      steps: [
+        { timestamp: 0, duration_ms: 500, tools: [] },              // pure-think turn
+        { timestamp: 500, duration_ms: 0, tools: [{ kind: 'read' }] }, // untimed tool
+      ],
+    },
+    children: [],
+  };
+  // no ended_at anywhere → both turns fall back to a 'step' segment.
+  assert.deepEqual(timelineKinds(session), ['step']);
+});
+
+test('timelineKinds is empty for a null/agent-less session', () => {
+  assert.deepEqual(timelineKinds(null), []);
+  assert.deepEqual(timelineKinds({ session_id: 's1' }), []);
 });
