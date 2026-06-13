@@ -27,7 +27,7 @@
 // pure, unit-tested helpers in agents-logic.js.
 
 import { fetchAgents } from './api.js';
-import { fmtMoney, fmtNum, fmtCompact, escHtml } from './format.js';
+import { fmtMoney, fmtNum, fmtCompact, fmtPct1, escHtml } from './format.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix, percentiles, durationHistogram,
+  criticalSpans, toolMix, percentiles, durationHistogram, costPareto,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -498,6 +498,10 @@ function wireSelection(container) {
       // only "lands" on a filter-bearing lens.
       const insBucket = e.target.closest('[data-ins-bucket]');
       if (insBucket) { applyBucketFilter(container, (insBucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
+      // A Cost-Pareto row/headline filters the trace to turns at/above its dollar
+      // threshold and jumps to the Timeline — same land-on-a-filter-lens idiom.
+      const insCut = e.target.closest('[data-ins-cost-cut]');
+      if (insCut) { applyCostFilter(container, insCut.dataset.insCostCut); return; }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -531,6 +535,8 @@ function wireSelection(container) {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const bucket = e.target.closest('[data-ins-bucket]');
       if (bucket) { e.preventDefault(); applyBucketFilter(container, (bucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
+      const cut = e.target.closest('[data-ins-cost-cut]');
+      if (cut) { e.preventDefault(); applyCostFilter(container, cut.dataset.insCostCut); return; }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -899,6 +905,23 @@ function stepHit(container, dir) {
 function applyBucketFilter(container, kinds) {
   if (!kinds || kinds.length === 0) return;
   filterSpec = { text: '', kinds: kinds.slice(), errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
+  hitIndex = -1;
+  syncFilterBar(container);
+  location.hash = '#agents/timeline';
+}
+
+// applyCostFilter is the Cost-Pareto sibling of applyBucketFilter: a row (or the
+// headline) names a dollar threshold, and we set the trace's minCostUSD to it and
+// route to the Timeline so the dimming Insights can't show lands on a
+// filter-bearing lens — "show me every turn at least this expensive." A
+// non-positive threshold is a no-op (those rows aren't clickable anyway).
+function applyCostFilter(container, minCostUSD) {
+  // Floor (never round up) to sub-cent precision so the field shows a clean
+  // threshold AND the `>=` filter still admits the clicked turn — rounding up
+  // would push the boundary past it and exclude the very turn that was clicked.
+  const v = Math.floor(Number(minCostUSD) * 1e4) / 1e4;
+  if (!(v > 0)) return;
+  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: v };
   hitIndex = -1;
   syncFilterBar(container);
   location.hash = '#agents/timeline';
@@ -1769,6 +1792,7 @@ function renderInsights(sessions) {
       <div class="ins-rows">${rows}</div>
     </section>
     ${renderLatencyPanel(agents)}
+    ${renderParetoPanel(agents)}
   </div>`;
 }
 
@@ -1828,6 +1852,55 @@ function renderLatencyPanel(agents) {
         ${stats}
       </div>
       <div class="ins-rows ins-lat-rows">${rows}</div>
+    </section>`;
+}
+
+// renderParetoPanel draws the third Insights panel: a Cost-Pareto view of where
+// the money goes. A headline callout names the concentration ("top N% of turns
+// drive X% of spend"), then a ranked list of the priciest turns — each row a
+// cost bar with a rising cumulative-share tick (the hand-rolled Pareto line).
+// Both the headline and each row are click-through: they set the trace's
+// minCostUSD to that turn's cost (the headline uses the decile threshold) and
+// jump to the Timeline, dimming everything cheaper — Insights has no dimming of
+// its own. Pure render from the scoped agents (no scrub / SSE), so it degrades
+// cleanly in the static report.
+function renderParetoPanel(agents) {
+  const { total, count, rows, headline } = costPareto(agents);
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Cost Pareto</h3></header>`;
+  if (count === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty">No turn cost in this scope.</div></section>`;
+  }
+
+  const cut = (v, label) => ` role="button" tabindex="0" data-ins-cost-cut="${v}" title="Filter the trace to turns ≥ ${escHtml(fmtMoney(v))} and show on the Timeline${label ? ` (${escHtml(label)})` : ''}"`;
+  const callout = `<button type="button" class="ins-pareto-headline"${cut(headline.thresholdCost, 'isolate the whales')}>
+      Top <b>${headline.turnsPct}%</b> of turns (${fmtNum(headline.turnCount)} of ${fmtNum(count)}) drive <b>${escHtml(fmtPct1(headline.spendShare))}</b> of spend
+    </button>`;
+
+  const maxCost = rows.reduce((m, r) => Math.max(m, r.cost), 0) || 1;
+  const list = rows.map(r => {
+    const pct = Math.max(3, Math.round((r.cost / maxCost) * 100));
+    return `<div class="ins-pareto-row is-clickable"${cut(r.cost, '')}>
+        <span class="ins-pareto-rank">#${r.rank}</span>
+        <span class="ins-pareto-who" title="${escHtml(r.agentLabel)}">${escHtml(r.agentLabel)}</span>
+        <span class="ins-bar-wrap">
+          <span class="ins-bar ins-pareto-bar" style="width:${pct}%"></span>
+          <span class="ins-pareto-cum" style="left:${(r.cumShare * 100).toFixed(1)}%" title="cumulative ${escHtml(fmtPct1(r.cumShare))} of spend"></span>
+        </span>
+        <span class="ins-figs">
+          <span class="ins-fig is-primary">${escHtml(fmtMoney(r.cost))}</span>
+          <span class="ins-fig ins-pareto-cumfig" title="cumulative share">${escHtml(fmtPct1(r.cumShare))}</span>
+        </span>
+      </div>`;
+  }).join('');
+
+  const stats = `<div class="ins-stats"><span class="ins-stat ins-stat-n">${escHtml(fmtMoney(total))} · ${fmtNum(count)} turns</span></div>`;
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Cost Pareto</h3>
+        ${stats}
+      </div>
+      ${callout}
+      <div class="ins-rows ins-pareto-rows">${list}</div>
     </section>`;
 }
 

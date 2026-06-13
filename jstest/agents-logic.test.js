@@ -62,6 +62,7 @@ import {
   percentiles,
   durationHistogram,
   DURATION_EDGES,
+  costPareto,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2632,4 +2633,85 @@ test('durationHistogram defaults to the log-scale DURATION_EDGES when no opts gi
   const bucketWith = ms => h.buckets.find(b => b.lo <= ms && ms < b.hi);
   assert.deepEqual(bucketWith(300), { lo: 250, hi: 500, count: 1, kinds: ['read'] });
   assert.deepEqual(bucketWith(45000), { lo: 30000, hi: 60000, count: 1, kinds: ['exec'] });
+});
+
+// ── costPareto (Insights 2c) ────────────────────────────────────────
+test('costPareto returns a zeroed/empty result for null/empty agents', () => {
+  const empty = { total: 0, count: 0, rows: [], headline: null };
+  assert.deepEqual(costPareto(null), empty);
+  assert.deepEqual(costPareto([]), empty);
+});
+
+test('costPareto ignores turns with no positive cost', () => {
+  const agents = [{ steps: [
+    { cost_usd: 0 },
+    { cost_usd: 0.5 },
+    { /* missing cost_usd */ },
+    { cost_usd: -1 },
+  ] }];
+  const p = costPareto(agents);
+  assert.equal(p.count, 1);
+  assert.equal(p.total, 0.5);
+});
+
+test('costPareto sums total and counts across all agents', () => {
+  const agents = [
+    { steps: [{ cost_usd: 1 }, { cost_usd: 2 }] },
+    { steps: [{ cost_usd: 3 }] },
+  ];
+  const p = costPareto(agents);
+  assert.equal(p.count, 3);
+  assert.equal(p.total, 6);
+});
+
+test('costPareto ranks rows by cost descending with 1-based rank, cost, agentLabel', () => {
+  const agents = [
+    { kind: 'main', steps: [{ cost_usd: 1 }, { cost_usd: 5 }] },
+    { kind: 'sub', agent_type: 'Explore', steps: [{ cost_usd: 3 }] },
+  ];
+  const rows = costPareto(agents).rows;
+  assert.deepEqual(rows.map(r => r.rank), [1, 2, 3]);
+  assert.deepEqual(rows.map(r => r.cost), [5, 3, 1]);
+  assert.deepEqual(rows.map(r => r.agentLabel), ['main', 'Explore', 'main']);
+});
+
+test('costPareto carries per-row share and running cumulative share', () => {
+  const agents = [{ steps: [{ cost_usd: 5 }, { cost_usd: 3 }, { cost_usd: 2 }] }];
+  const rows = costPareto(agents).rows; // total 10, ranked [5,3,2]
+  assert.deepEqual(rows.map(r => r.share), [0.5, 0.3, 0.2]);
+  assert.deepEqual(rows.map(r => r.cumShare), [0.5, 0.8, 1.0]);
+});
+
+test('costPareto caps rows at opts.topN (default 10) but total/count span every turn', () => {
+  const steps = Array.from({ length: 15 }, (_, i) => ({ cost_usd: i + 1 })); // 1..15, total 120
+  const p = costPareto([{ steps }]);            // default topN = 10
+  assert.equal(p.count, 15);
+  assert.equal(p.total, 120);
+  assert.equal(p.rows.length, 10);
+  assert.equal(p.rows[0].cost, 15);             // ranking still over the full set
+  assert.equal(p.rows[9].rank, 10);
+  // cumShare keeps accumulating against the full total, not just the shown rows
+  assert.ok(p.rows[9].cumShare < 1);
+  const p3 = costPareto([{ steps }], { topN: 3 });
+  assert.equal(p3.rows.length, 3);
+  assert.equal(p3.count, 15);
+});
+
+test('costPareto headline: top headlinePct% of turns (ceil, >=1) drives spendShare, with thresholdCost', () => {
+  // 10 turns costing 10,9,...,1 → total 55. Top 10% = ceil(10*0.1)=1 turn (cost 10).
+  const steps = Array.from({ length: 10 }, (_, i) => ({ cost_usd: 10 - i }));
+  const h = costPareto([{ steps }], { headlinePct: 10 }).headline;
+  assert.equal(h.turnsPct, 10);
+  assert.equal(h.turnCount, 1);
+  assert.equal(h.spendShare, 10 / 55);
+  assert.equal(h.thresholdCost, 10);           // cheapest turn still inside the top slice
+});
+
+test('costPareto headline rounds the slice up and thresholdCost is the slice boundary', () => {
+  // 10 turns, top 25% = ceil(10*0.25)=3 turns: costs 10+9+8=27 of 55.
+  const steps = Array.from({ length: 10 }, (_, i) => ({ cost_usd: 10 - i }));
+  const h = costPareto([{ steps }], { headlinePct: 25 }).headline;
+  assert.equal(h.turnCount, 3);
+  assert.equal(h.spendShare, 27 / 55);
+  assert.equal(h.thresholdCost, 8);
 });

@@ -729,6 +729,58 @@ export function durationHistogram(agents, opts = {}) {
   return { buckets, values };
 }
 
+// costPareto ranks an agent array's costed turns (steps with positive cost_usd)
+// worst-first for the Insights "Cost Pareto" panel and measures how concentrated
+// the spend is. Cost lives only at the turn level (same convention toolMix uses),
+// so a turn is the honest unit. Pure and scope-agnostic — the caller passes the
+// already-scoped agents (whole graph, one session, or one agent). Returns:
+//   { total, count, rows, headline }
+//   total      — summed cost over every costed turn
+//   count      — how many costed turns there are
+//   rows       — top-N turns (opts.topN, default 10), each
+//                { rank (1-based), cost, agentLabel, share, cumShare }; share is
+//                the turn's fraction of total, cumShare the running cumulative
+//                fraction over the FULL ranking (so the curve is honest even
+//                though rows are truncated)
+//   headline   — the concentration callout, null when there are no costed turns:
+//                { turnsPct, turnCount, spendShare, thresholdCost } — the top
+//                `turnsPct`% of turns (rounded up, ≥1) account for spendShare of
+//                spend; thresholdCost is the cheapest turn still inside that slice
+//                (the minCostUSD cut that isolates the whales).
+export function costPareto(agents, opts = {}) {
+  const topN = opts.topN != null ? opts.topN : 10;
+  const headlinePct = opts.headlinePct != null ? opts.headlinePct : 10;
+  const turns = [];
+  let total = 0;
+  for (const a of (Array.isArray(agents) ? agents : [])) {
+    for (const step of (a && a.steps) || []) {
+      const cost = (step && step.cost_usd) || 0;
+      if (!(cost > 0)) continue;
+      turns.push({ cost, agentLabel: agentLabel(a) });
+      total += cost;
+    }
+  }
+  turns.sort((x, y) => y.cost - x.cost);
+  let cumCost = 0;
+  const rows = turns.map((t, i) => {
+    cumCost += t.cost;
+    return {
+      rank: i + 1, cost: t.cost, agentLabel: t.agentLabel,
+      share: t.cost / total, cumShare: cumCost / total,
+    };
+  });
+  // Headline: the top `headlinePct`% of turns (rounded UP, at least one) and the
+  // share of spend they concentrate. thresholdCost is the cheapest turn still
+  // inside that slice — the minCostUSD cut that isolates the whales.
+  let headline = null;
+  if (rows.length) {
+    const turnCount = Math.max(1, Math.ceil(rows.length * headlinePct / 100));
+    const edge = rows[turnCount - 1];
+    headline = { turnsPct: headlinePct, turnCount, spendShare: edge.cumShare, thresholdCost: edge.cost };
+  }
+  return { total, count: turns.length, rows: rows.slice(0, topN), headline };
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.

@@ -2808,3 +2808,31 @@
   .ins-lat-label { font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .ins-lat-bar { background: var(--accent); }
   .ins-lat-count { text-align: right; font-size: 12px; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+
+  /* Cost Pareto — a clickable headline callout, then ranked turn rows whose bars
+     carry a rising cumulative-share tick (the hand-rolled Pareto line). */
+  .ins-pareto-headline { display: block; width: 100%; text-align: left; cursor: pointer;
+    margin: 0 0 var(--s-3); padding: 8px 12px; font: inherit; font-size: 13px; color: var(--ink-2);
+    background: color-mix(in oklch, var(--accent) 7%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent); border-radius: var(--r-md);
+    transition: background 0.12s ease; }
+  .ins-pareto-headline b { color: var(--ink); font-weight: 600; }
+  .ins-pareto-headline:hover { background: color-mix(in oklch, var(--accent) 13%, transparent); }
+  .ins-pareto-headline:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* rank · who · bar track · figs — same rhythm as .ins-row. */
+  .ins-pareto-row { display: grid; grid-template-columns: 28px 96px minmax(80px, 1fr) 132px; align-items: center;
+    gap: var(--s-3); padding: 5px 0; border-radius: var(--r-sm); }
+  .ins-pareto-row + .ins-pareto-row { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+  .ins-pareto-row.is-clickable { cursor: pointer; }
+  .ins-pareto-row.is-clickable:hover { background: color-mix(in oklch, var(--accent) 8%, transparent); }
+  .ins-pareto-row.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ins-pareto-rank { font-size: 11px; color: var(--ink-3, var(--ink-2)); font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums; }
+  .ins-pareto-who { font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The bar track is positioned so the cumulative tick can sit absolutely over it. */
+  .ins-pareto-row .ins-bar-wrap { position: relative; overflow: visible; }
+  .ins-pareto-bar { background: var(--accent); }
+  .ins-pareto-cum { position: absolute; top: -2px; bottom: -2px; width: 2px; transform: translateX(-1px);
+    background: var(--ink); border-radius: 1px; }
+  .ins-pareto-row .ins-figs { grid-template-columns: 1fr 1fr; }
+  .ins-pareto-cumfig { color: var(--ink-3, var(--ink-2)); }
