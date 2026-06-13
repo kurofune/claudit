@@ -38,6 +38,7 @@ import {
   specActive,
   filterTrace,
   detectRetries,
+  detectSignals,
   spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -1738,6 +1739,180 @@ test('detectRetries: calls with a different (kind,name,detail) key are not group
     }],
   };
   assert.equal(detectRetries(agent).size, 0);
+});
+
+// ── detectSignals (Phase 3a — anomaly detection) ────────────────────
+// Signals are { kind, severity (number [0,1]), tier ('high'|'med'|'low'),
+// ref (a refKey), summary }. detectSignals(graph, opts) returns them sorted
+// worst-first by severity. Detectors so far: cost-whale, retry-storm.
+
+test('detectSignals: returns [] for a null or empty-sessions graph', () => {
+  assert.deepEqual(detectSignals(null), []);
+  assert.deepEqual(detectSignals({ sessions: [] }), []);
+});
+
+test('detectSignals: a turn costing >= the whale share of session total emits a cost-whale at sid#ai.si with severity = share', () => {
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ cost_usd: 0.10 }, { cost_usd: 0.90 }] },
+      children: [],
+    }],
+  };
+  const signals = detectSignals(graph);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0].kind, 'cost-whale');
+  assert.equal(signals[0].ref, 's1#0.1');
+  assert.equal(signals[0].severity, 0.9);
+});
+
+test('detectSignals: turns below the whale share are excluded even alongside a whale', () => {
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      // six 0.05 turns (share 0.05 each) sit below 0.2; only the 0.70 turn is a whale.
+      main: { kind: 'main', steps: [
+        { cost_usd: 0.05 }, { cost_usd: 0.05 }, { cost_usd: 0.05 },
+        { cost_usd: 0.05 }, { cost_usd: 0.05 }, { cost_usd: 0.05 },
+        { cost_usd: 0.70 },
+      ] },
+      children: [],
+    }],
+  };
+  const whales = detectSignals(graph).filter(s => s.kind === 'cost-whale');
+  assert.equal(whales.length, 1);
+  assert.equal(whales[0].ref, 's1#0.6');
+});
+
+test('detectSignals: cost-whale tier is high/med/low by share band', () => {
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ cost_usd: 0.5 }, { cost_usd: 0.3 }, { cost_usd: 0.2 }] },
+      children: [],
+    }],
+  };
+  const byRef = new Map(detectSignals(graph).map(s => [s.ref, s]));
+  assert.equal(byRef.get('s1#0.0').tier, 'high'); // share 0.5
+  assert.equal(byRef.get('s1#0.1').tier, 'med');  // share 0.3
+  assert.equal(byRef.get('s1#0.2').tier, 'low');  // share 0.2
+});
+
+test('detectSignals: whale share is per-session, not against the whole-graph total', () => {
+  const graph = {
+    sessions: [
+      // Session A is tiny: each 0.1 turn is half of A's 0.2 total (a whale).
+      // Against the graph total (10.2) these would be ~1% and vanish.
+      { session_id: 'sA', main: { kind: 'main', steps: [{ cost_usd: 0.1 }, { cost_usd: 0.1 }] }, children: [] },
+      { session_id: 'sB', main: { kind: 'main', steps: [{ cost_usd: 10.0 }] }, children: [] },
+    ],
+  };
+  const byRef = new Map(detectSignals(graph).map(s => [s.ref, s]));
+  assert.equal(byRef.get('sA#0.0').severity, 0.5);
+  assert.equal(byRef.get('sA#0.1').severity, 0.5);
+});
+
+test('detectSignals: a retry group reaching retryStormMin attempts emits a retry-storm at the worst attempt', () => {
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: { kind: 'main', steps: [
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // 0:0 attempt 1
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // 1:0 attempt 2
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },    // 2:0 attempt 3
+      ] },
+      children: [],
+    }],
+  };
+  const storms = detectSignals(graph).filter(s => s.kind === 'retry-storm');
+  assert.equal(storms.length, 1);
+  assert.equal(storms[0].ref, 'sX#0.2:0'); // the highest-attempt tool, not the first call
+  assert.equal(storms[0].severity, 0.4);   // (3 - 1) / 5
+});
+
+test('detectSignals: a lone retry (2 attempts, below retryStormMin) is not a storm', () => {
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: { kind: 'main', steps: [
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // attempt 1
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },    // attempt 2
+      ] },
+      children: [],
+    }],
+  };
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'retry-storm').length, 0);
+});
+
+test('detectSignals: retry-storm tier rises with attempt count (low=3, med=4, high>=5)', () => {
+  const err = d => ({ cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: d, status: 'error' }] });
+  const ok = d => ({ cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: d, status: 'ok' }] });
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: { kind: 'main', steps: [
+        err('a'), ok('a'), ok('a'),                   // group a: 3 attempts -> low
+        err('b'), ok('b'), ok('b'), ok('b'),          // group b: 4 attempts -> med
+        err('c'), ok('c'), ok('c'), ok('c'), ok('c'), // group c: 5 attempts -> high
+      ] },
+      children: [],
+    }],
+  };
+  const bySev = new Map(detectSignals(graph)
+    .filter(s => s.kind === 'retry-storm').map(s => [s.severity, s.tier]));
+  assert.equal(bySev.get(0.4), 'low');  // (3-1)/5
+  assert.equal(bySev.get(0.6), 'med');  // (4-1)/5
+  assert.equal(bySev.get(0.8), 'high'); // (5-1)/5
+});
+
+test('detectSignals: signals are sorted worst-first by severity across mixed kinds', () => {
+  // Emission order puts the retry-storm (severity 0.4) BEFORE the cost-whale
+  // (severity 0.9); sorting must flip them so the whale leads.
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: { kind: 'main', steps: [
+        { cost_usd: 0.1, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // 0:0 retry seed
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },    // 1:0
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },       // 2:0 -> storm sev 0.4
+        { cost_usd: 0.9 },                                                                                // 3 -> whale sev 0.9
+      ] },
+      children: [],
+    }],
+  };
+  const signals = detectSignals(graph);
+  assert.equal(signals.length, 2);
+  assert.equal(signals[0].kind, 'cost-whale');  // 0.9 leads
+  assert.equal(signals[1].kind, 'retry-storm'); // 0.4 trails
+  assert.ok(signals[0].severity >= signals[1].severity);
+});
+
+test('detectSignals: cost-whale summary names the turn cost and its share', () => {
+  const graph = {
+    sessions: [{
+      session_id: 's1',
+      main: { kind: 'main', steps: [{ cost_usd: 0.10 }, { cost_usd: 0.90 }] },
+      children: [],
+    }],
+  };
+  const whale = detectSignals(graph).find(s => s.kind === 'cost-whale');
+  assert.equal(whale.summary, 'Turn cost $0.90 — 90% of session spend');
+});
+
+test('detectSignals: retry-storm summary names the tool, attempt count, and detail', () => {
+  const graph = {
+    sessions: [{
+      session_id: 'sX',
+      main: { kind: 'main', steps: [
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },
+        { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },
+      ] },
+      children: [],
+    }],
+  };
+  const storm = detectSignals(graph).find(s => s.kind === 'retry-storm');
+  assert.equal(storm.summary, 'Bash retried 3× (go test)');
 });
 
 // ── conversationSegments ────────────────────────────────────────────

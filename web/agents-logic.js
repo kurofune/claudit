@@ -1855,3 +1855,74 @@ export function detectRetries(agent) {
   });
   return out;
 }
+
+// detectSignals is the single entry point for Phase 3 anomaly detection: it runs
+// the pure detectors over the whole graph and returns their findings sorted
+// worst-first. Each signal is { kind, severity, tier, ref, summary }: severity is
+// a [0,1] "badness" magnitude (the cross-kind sort key), tier ('high'|'med'|'low')
+// is the detector's own banding for pip styling, ref is a refKey (sid#ai /
+// sid#ai.si / sid#ai.si:ti) so the existing select()/filter machinery can land on
+// it, and summary is a self-contained sentence for the panel/tooltip.
+export function detectSignals(graph, opts = {}) {
+  const whaleShare = opts.whaleShare > 0 ? opts.whaleShare : 0.2;
+  const retryStormMin = opts.retryStormMin > 0 ? opts.retryStormMin : 3;
+  const signals = [];
+  for (const session of (graph && graph.sessions) || []) {
+    const sid = (session && session.session_id) || '';
+    const agents = flattenSession(session);
+    signals.push(...retryStormSignals(agents, sid, retryStormMin));
+    signals.push(...costWhaleSignals(agents, sid, whaleShare));
+  }
+  // Worst-first. JS sort is stable, so equal-severity signals keep emission order.
+  signals.sort((a, b) => b.severity - a.severity);
+  return signals;
+}
+
+// retryStormSignals: per agent, collapse detectRetries' per-attempt map into one
+// signal per group (keyed by the first call's coord), refed at the worst
+// (highest-attempt) call so click-through lands on the storm's peak. Emits only
+// groups reaching retryStormMin attempts.
+function retryStormSignals(agents, sid, retryStormMin) {
+  const out = [];
+  agents.forEach((a, ai) => {
+    const groups = new Map(); // ofRef -> { maxAttempt, worstCoord }
+    for (const [coord, { attempt, ofRef }] of detectRetries(a)) {
+      const g = groups.get(ofRef);
+      if (!g || attempt > g.maxAttempt) groups.set(ofRef, { maxAttempt: attempt, worstCoord: coord });
+    }
+    for (const { maxAttempt, worstCoord } of groups.values()) {
+      if (maxAttempt < retryStormMin) continue;
+      const severity = Math.max(0, Math.min(1, (maxAttempt - 1) / 5));
+      const tier = maxAttempt >= 5 ? 'high' : maxAttempt >= 4 ? 'med' : 'low';
+      const [si, ti] = worstCoord.split(':').map(Number);
+      const tool = ((a.steps[si] || {}).tools || [])[ti] || {};
+      const name = tool.name || tool.kind || 'tool';
+      const summary = tool.detail
+        ? `${name} retried ${maxAttempt}× (${tool.detail})`
+        : `${name} retried ${maxAttempt}×`;
+      out.push({ kind: 'retry-storm', severity, tier, ref: `${sid}#${ai}.${worstCoord}`, summary });
+    }
+  });
+  return out;
+}
+
+// costWhaleSignals: per session, flag each turn whose cost is at least whaleShare
+// of the session's total step cost. severity is the share itself; ref is the
+// turn (sid#ai.si). Shares are normalized within the session, never the graph.
+function costWhaleSignals(agents, sid, whaleShare) {
+  let total = 0;
+  for (const a of agents) for (const step of (a.steps || [])) total += (step && step.cost_usd) || 0;
+  if (total <= 0) return [];
+  const out = [];
+  agents.forEach((a, ai) => {
+    (a.steps || []).forEach((step, si) => {
+      const cost = (step && step.cost_usd) || 0;
+      const share = cost / total;
+      if (share < whaleShare) return;
+      const tier = share >= 0.5 ? 'high' : share >= 0.3 ? 'med' : 'low';
+      const summary = `Turn cost $${cost.toFixed(2)} — ${Math.round(share * 100)}% of session spend`;
+      out.push({ kind: 'cost-whale', severity: share, tier, ref: `${sid}#${ai}.${si}`, summary });
+    });
+  });
+  return out;
+}
