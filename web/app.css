@@ -2836,3 +2836,38 @@
     background: var(--ink); border-radius: 1px; }
   .ins-pareto-row .ins-figs { grid-template-columns: 1fr 1fr; }
   .ins-pareto-cumfig { color: var(--ink-3, var(--ink-2)); }
+
+  /* Error breakdown — a danger-tinted headline, per-kind error-rate bars (same
+     row rhythm as .ins-row), then a compact "failing tools" chip list by name. */
+  .ins-err-headline { display: block; width: 100%; text-align: left; cursor: pointer;
+    margin: 0 0 var(--s-3); padding: 8px 12px; font: inherit; font-size: 13px; color: var(--ink-2);
+    background: color-mix(in oklch, var(--danger, #e5484d) 8%, transparent);
+    border: 1px solid color-mix(in oklch, var(--danger, #e5484d) 26%, transparent); border-radius: var(--r-md);
+    transition: background 0.12s ease; }
+  .ins-err-headline b { color: var(--ink); font-weight: 600; }
+  .ins-err-headline:hover { background: color-mix(in oklch, var(--danger, #e5484d) 15%, transparent); }
+  .ins-err-headline:focus-visible { outline: 2px solid var(--danger, #e5484d); outline-offset: 1px; }
+  .ins-err-clean { color: var(--ink-2); }
+  /* kind label · bar track · figs — same grid as .ins-row, narrower fig column. */
+  .ins-err-row { display: grid; grid-template-columns: 140px minmax(80px, 1fr) 132px; align-items: center;
+    gap: var(--s-3); padding: 5px 0; border-radius: var(--r-sm); }
+  .ins-err-row + .ins-err-row { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+  .ins-err-row.is-clickable { cursor: pointer; }
+  .ins-err-row.is-clickable:hover { background: color-mix(in oklch, var(--danger, #e5484d) 7%, transparent); }
+  .ins-err-row.is-clickable:focus-visible { outline: 2px solid var(--danger, #e5484d); outline-offset: -2px; }
+  .ins-err-bar { background: var(--danger, #e5484d); }
+  .ins-err-row .ins-figs { grid-template-columns: 1fr 1fr; }
+  /* Failing-tools list — a wrapping row of name+count chips, by tool name. */
+  .ins-err-worst-head { margin: var(--s-3) 0 var(--s-2); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--ink-3, var(--ink-2)); font-family: var(--font-sans); }
+  .ins-err-worst { display: flex; flex-direction: column; }
+  .ins-err-tool { display: flex; align-items: center; gap: var(--s-2); padding: 5px 0; border-radius: var(--r-sm); }
+  .ins-err-tool + .ins-err-tool { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+  .ins-err-tool.is-clickable { cursor: pointer; }
+  .ins-err-tool.is-clickable:hover { background: color-mix(in oklch, var(--danger, #e5484d) 7%, transparent); }
+  .ins-err-tool.is-clickable:focus-visible { outline: 2px solid var(--danger, #e5484d); outline-offset: -2px; }
+  .ins-err-tool-name { font-size: 12px; color: var(--ink); font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+  .ins-err-tool-fig { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono); white-space: nowrap; }
+  .ins-err-tool-fig b { color: var(--danger, #e5484d); font-weight: 600; }

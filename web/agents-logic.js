@@ -781,6 +781,62 @@ export function costPareto(agents, opts = {}) {
   return { total, count: turns.length, rows: rows.slice(0, topN), headline };
 }
 
+// errorRates measures how often tools fail, for the Insights "Error breakdown"
+// panel. Pure and scope-agnostic — the caller passes the already-scoped agents
+// (whole graph, one session, or one agent). The unit is the tool ROW, not the
+// collapsed Count: distinctToolInvocations keys the collapse on (name, detail,
+// input) and stamps one Status per surviving row (sessions.go), so a row is the
+// only honest carrier of an outcome. An errored row is `status === 'error'`;
+// every other status (ok / '' / missing) counts toward the denominator only.
+// Returns:
+//   { total, errors, rate, rows, worst }
+//   total   — tool rows observed
+//   errors  — rows whose status is 'error'
+//   rate    — errors / total (0 when total is 0)
+//   rows    — per-ToolKind breakdown, ONLY kinds with >=1 error, each
+//             { kind, total, errors, rate } (total spans that kind's clean rows
+//             too), sorted errors desc → rate desc → kind asc
+//   worst   — the failing-tools list: per tool NAME, only names with >=1 error,
+//             each { name, kind, total, errors, rate }, same sort by name, capped
+//             at opts.topN (default 8). A name with no kind folds to 'other',
+//             a nameless tool to '(unnamed)'.
+export function errorRates(agents, opts = {}) {
+  const topN = opts.topN != null ? opts.topN : 8;
+  let total = 0, errors = 0;
+  const byKind = new Map();
+  const byName = new Map();
+  for (const a of (Array.isArray(agents) ? agents : [])) {
+    for (const step of (a && a.steps) || []) {
+      for (const t of (step && step.tools) || []) {
+        if (!t) continue;
+        const errored = t.status === 'error';
+        total += 1;
+        if (errored) errors += 1;
+        const kind = t.kind || 'other';
+        const kr = byKind.get(kind) || { kind, total: 0, errors: 0, rate: 0 };
+        kr.total += 1;
+        if (errored) kr.errors += 1;
+        byKind.set(kind, kr);
+        const name = t.name || '(unnamed)';
+        const nr = byName.get(name) || { name, kind, total: 0, errors: 0, rate: 0 };
+        nr.total += 1;
+        if (errored) nr.errors += 1;
+        byName.set(name, nr);
+      }
+    }
+  }
+  const rows = [...byKind.values()]
+    .filter(r => r.errors > 0)
+    .map(r => ({ ...r, rate: r.errors / r.total }))
+    .sort((a, b) => b.errors - a.errors || b.rate - a.rate || a.kind.localeCompare(b.kind));
+  const worst = [...byName.values()]
+    .filter(r => r.errors > 0)
+    .map(r => ({ ...r, rate: r.errors / r.total }))
+    .sort((a, b) => b.errors - a.errors || b.rate - a.rate || a.name.localeCompare(b.name))
+    .slice(0, topN);
+  return { total, errors, rate: total ? errors / total : 0, rows, worst };
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.

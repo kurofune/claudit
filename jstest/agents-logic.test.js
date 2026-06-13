@@ -63,6 +63,7 @@ import {
   durationHistogram,
   DURATION_EDGES,
   costPareto,
+  errorRates,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2714,4 +2715,117 @@ test('costPareto headline rounds the slice up and thresholdCost is the slice bou
   assert.equal(h.turnCount, 3);
   assert.equal(h.spendShare, 27 / 55);
   assert.equal(h.thresholdCost, 8);
+});
+
+test('errorRates returns a zeroed/empty result for null/empty agents', () => {
+  const empty = { total: 0, errors: 0, rate: 0, rows: [], worst: [] };
+  assert.deepEqual(errorRates(null), empty);
+  assert.deepEqual(errorRates([]), empty);
+});
+
+test('errorRates counts total tool rows and errored rows; non-error statuses count toward total only', () => {
+  const agents = [{ steps: [
+    { tools: [
+      { name: 'Bash', kind: 'exec', status: 'error' },
+      { name: 'Read', kind: 'read', status: 'ok' },
+      { name: 'Edit', kind: 'edit' },              // no status → not an error
+      { name: 'Bash', kind: 'exec', status: 'error' },
+    ] },
+  ] }];
+  const e = errorRates(agents);
+  assert.equal(e.total, 4);
+  assert.equal(e.errors, 2);
+  assert.equal(e.rate, 0.5);
+});
+
+test('errorRates groups rows by kind, only kinds with >=1 error, total spans non-errored rows of that kind', () => {
+  const agents = [{ steps: [
+    { tools: [
+      { name: 'Bash', kind: 'exec', status: 'error' },
+      { name: 'Bash', kind: 'exec', status: 'ok' },    // same kind, clean → counts in exec.total
+      { name: 'Read', kind: 'read', status: 'ok' },     // clean kind → excluded from rows
+      { name: 'Read', kind: 'read', status: 'ok' },
+    ] },
+  ] }];
+  const rows = errorRates(agents).rows;
+  assert.deepEqual(rows, [{ kind: 'exec', total: 2, errors: 1, rate: 0.5 }]);
+});
+
+test('errorRates sorts rows by errors desc, then rate desc, then kind asc', () => {
+  // Insertion order (fetch, edit, read, exec) is the REVERSE of the expected
+  // sorted order, so a no-op (insertion-order) result would fail this.
+  const agents = [{ steps: [{ tools: [
+    // fetch: 2 errors of 8 → rate .25 (same errors as read/edit, lower rate → last)
+    ...Array.from({ length: 2 }, () => ({ kind: 'fetch', status: 'error' })),
+    ...Array.from({ length: 6 }, () => ({ kind: 'fetch', status: 'ok' })),
+    // edit: 2 errors of 4 → rate .5
+    ...Array.from({ length: 2 }, () => ({ kind: 'edit', status: 'error' })),
+    ...Array.from({ length: 2 }, () => ({ kind: 'edit', status: 'ok' })),
+    // read: 2 errors of 2 → rate 1.0
+    ...Array.from({ length: 2 }, () => ({ kind: 'read', status: 'error' })),
+    // exec: 3 errors of 6 → rate .5 (most errors → first)
+    ...Array.from({ length: 3 }, () => ({ kind: 'exec', status: 'error' })),
+    ...Array.from({ length: 3 }, () => ({ kind: 'exec', status: 'ok' })),
+  ] }] }];
+  const rows = errorRates(agents).rows;
+  // exec (3 errors) first; then the 2-error kinds by rate desc: read(1.0), edit(.5), fetch(.25)
+  assert.deepEqual(rows.map(r => r.kind), ['exec', 'read', 'edit', 'fetch']);
+});
+
+test('errorRates folds tools with no kind into "other"', () => {
+  const agents = [{ steps: [{ tools: [
+    { name: 'mystery', status: 'error' },             // no kind
+    { name: 'mystery2', status: 'ok' },               // no kind
+  ] }] }];
+  const rows = errorRates(agents).rows;
+  assert.deepEqual(rows, [{ kind: 'other', total: 2, errors: 1, rate: 0.5 }]);
+});
+
+test('errorRates worst lists erroring tools by name with kind, sorted errors desc / rate desc / name asc', () => {
+  const agents = [{ steps: [{ tools: [
+    // Apple: 1 error of 2 → rate .5
+    { name: 'Apple', kind: 'exec', status: 'error' },
+    { name: 'Apple', kind: 'exec', status: 'ok' },
+    // Beta: 2 errors of 2 → rate 1.0 (most errors → first)
+    { name: 'Beta', kind: 'read', status: 'error' },
+    { name: 'Beta', kind: 'read', status: 'error' },
+    // Cherry: 1 error of 1 → rate 1.0 (ties Apple on errors, higher rate → before Apple)
+    { name: 'Cherry', kind: 'edit', status: 'error' },
+    // Daisy: clean → excluded
+    { name: 'Daisy', kind: 'fetch', status: 'ok' },
+  ] }] }];
+  const worst = errorRates(agents).worst;
+  assert.deepEqual(worst, [
+    { name: 'Beta', kind: 'read', total: 2, errors: 2, rate: 1 },
+    { name: 'Cherry', kind: 'edit', total: 1, errors: 1, rate: 1 },
+    { name: 'Apple', kind: 'exec', total: 2, errors: 1, rate: 0.5 },
+  ]);
+});
+
+test('errorRates caps worst at opts.topN (default 8) but overall + rows span every tool', () => {
+  // 12 distinct erroring tool names, all kind 'exec', each 1 error.
+  const tools = Array.from({ length: 12 }, (_, i) => ({
+    name: `T${String(i).padStart(2, '0')}`, kind: 'exec', status: 'error',
+  }));
+  const e = errorRates([{ steps: [{ tools }] }]);
+  assert.equal(e.total, 12);
+  assert.equal(e.errors, 12);
+  assert.equal(e.worst.length, 8);                 // default cap
+  assert.equal(e.rows[0].errors, 12);              // per-kind row spans all 12
+  const e3 = errorRates([{ steps: [{ tools }] }], { topN: 3 });
+  assert.equal(e3.worst.length, 3);
+  assert.equal(e3.total, 12);
+});
+
+test('errorRates tolerates null agents, null steps, and null tool entries', () => {
+  const agents = [
+    null,
+    { steps: null },
+    { steps: [null, { tools: null }, { tools: [null, { kind: 'exec', name: 'Bash', status: 'error' }, null] }] },
+  ];
+  const e = errorRates(agents);
+  assert.equal(e.total, 1);
+  assert.equal(e.errors, 1);
+  assert.deepEqual(e.rows, [{ kind: 'exec', total: 1, errors: 1, rate: 1 }]);
+  assert.deepEqual(e.worst, [{ name: 'Bash', kind: 'exec', total: 1, errors: 1, rate: 1 }]);
 });

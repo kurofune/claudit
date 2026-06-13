@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix, percentiles, durationHistogram, costPareto,
+  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -502,6 +502,11 @@ function wireSelection(container) {
       // threshold and jumps to the Timeline — same land-on-a-filter-lens idiom.
       const insCut = e.target.closest('[data-ins-cost-cut]');
       if (insCut) { applyCostFilter(container, insCut.dataset.insCostCut); return; }
+      // An Error-breakdown bar/headline/tool filters the trace to errored tools
+      // (optionally one kind) and jumps to the Timeline — same land-on-a-filter-
+      // lens idiom. data-ins-kinds is empty for the "all errors" headline.
+      const insErr = e.target.closest('[data-ins-err]');
+      if (insErr) { applyErrorFilter(container, (insErr.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
       const el = e.target.closest('[data-ref]');
@@ -537,6 +542,8 @@ function wireSelection(container) {
       if (bucket) { e.preventDefault(); applyBucketFilter(container, (bucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       const cut = e.target.closest('[data-ins-cost-cut]');
       if (cut) { e.preventDefault(); applyCostFilter(container, cut.dataset.insCostCut); return; }
+      const err = e.target.closest('[data-ins-err]');
+      if (err) { e.preventDefault(); applyErrorFilter(container, (err.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -922,6 +929,19 @@ function applyCostFilter(container, minCostUSD) {
   const v = Math.floor(Number(minCostUSD) * 1e4) / 1e4;
   if (!(v > 0)) return;
   filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: v };
+  hitIndex = -1;
+  syncFilterBar(container);
+  location.hash = '#agents/timeline';
+}
+
+// applyErrorFilter is the Error-breakdown sibling of applyBucketFilter: it turns
+// on errorsOnly (optionally pinned to one tool kind from a per-kind bar / failing
+// tool) and routes to the Timeline so the dimming Insights can't show lands on a
+// filter-bearing lens — "show me every errored tool (of this kind)." Empty kinds
+// means "all errors", which is still a valid filter (unlike applyBucketFilter,
+// whose empty-kinds case constrains nothing).
+function applyErrorFilter(container, kinds) {
+  filterSpec = { text: '', kinds: (kinds || []).slice(), errorsOnly: true, minDurationMs: 0, minCostUSD: 0 };
   hitIndex = -1;
   syncFilterBar(container);
   location.hash = '#agents/timeline';
@@ -1793,6 +1813,7 @@ function renderInsights(sessions) {
     </section>
     ${renderLatencyPanel(agents)}
     ${renderParetoPanel(agents)}
+    ${renderErrorPanel(agents)}
   </div>`;
 }
 
@@ -1901,6 +1922,77 @@ function renderParetoPanel(agents) {
       </div>
       ${callout}
       <div class="ins-rows ins-pareto-rows">${list}</div>
+    </section>`;
+}
+
+// renderErrorPanel draws the fourth Insights panel: where tools fail. A headline
+// callout names the overall error rate, then per-ToolKind bars (width ∝ that
+// kind's error rate on an absolute 0–100% scale, so a 5% bar reads small) and a
+// compact "failing tools" list naming the worst offenders by tool name. Every
+// clickable target sets the trace's errorsOnly filter (a kind bar / tool row also
+// pins that kind) and jumps to the Timeline, where the dimming Insights can't
+// show actually lands. Pure render from the scoped agents (no scrub / SSE), so it
+// degrades cleanly in the static report.
+function renderErrorPanel(agents) {
+  const { total, errors, rate, rows, worst } = errorRates(agents);
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Errors</h3></header>`;
+  if (total === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty">No tool calls in this scope.</div></section>`;
+  }
+  if (errors === 0) {
+    return `<section class="ins-panel">
+        <div class="ins-panel-head ins-panel-head--split">
+          <h3 class="ins-panel-title">Errors</h3>
+          <div class="ins-stats"><span class="ins-stat ins-stat-n">${fmtNum(total)} calls</span></div>
+        </div>
+        <div class="ins-empty ins-err-clean">No tool errors — all ${fmtNum(total)} calls clean.</div>
+      </section>`;
+  }
+
+  // The overall callout filters to every errored tool (no kind pin).
+  const allErr = ` role="button" tabindex="0" data-ins-err data-ins-kinds="" title="Filter the trace to errored tools and show on the Timeline"`;
+  const callout = `<button type="button" class="ins-err-headline"${allErr}>
+      <b>${fmtNum(errors)}</b> of <b>${fmtNum(total)}</b> tool calls errored (<b>${escHtml(fmtPct1(rate))}</b>)
+    </button>`;
+
+  // Per-kind bars — width is the kind's error rate on an absolute 0–100% scale
+  // (clamped to a visible floor), the figs carry the E/T count and the rate.
+  const kindRows = rows.map(r => {
+    const pct = Math.max(3, Math.round(r.rate * 100));
+    const fam = kindFamily(r.kind);
+    const cut = ` role="button" tabindex="0" data-ins-err data-ins-kinds="${escHtml(r.kind)}" title="Filter the trace to errored ${escHtml(r.kind)} tools and show on the Timeline"`;
+    return `<div class="ins-err-row kind-${fam} is-clickable"${cut}>
+        <span class="ins-row-head">${kindBadge(r.kind)}<span class="ins-kind-name">${escHtml(r.kind)}</span></span>
+        <span class="ins-bar-wrap"><span class="ins-bar ins-err-bar" style="width:${pct}%"></span></span>
+        <span class="ins-figs">
+          <span class="ins-fig">${fmtNum(r.errors)}/${fmtNum(r.total)}</span>
+          <span class="ins-fig is-primary">${escHtml(fmtPct1(r.rate))}</span>
+        </span>
+      </div>`;
+  }).join('');
+
+  // Failing-tools list — by tool NAME (finer than kind), a compact chip row.
+  const worstList = worst.map(w => {
+    const cut = ` role="button" tabindex="0" data-ins-err data-ins-kinds="${escHtml(w.kind)}" title="Filter the trace to errored ${escHtml(w.kind)} tools and show on the Timeline"`;
+    return `<div class="ins-err-tool is-clickable"${cut}>
+        ${kindBadge(w.kind)}
+        <span class="ins-err-tool-name" title="${escHtml(w.name)}">${escHtml(w.name)}</span>
+        <span class="ins-err-tool-fig"><b>${fmtNum(w.errors)}</b> ${w.errors === 1 ? 'error' : 'errors'} · ${escHtml(fmtPct1(w.rate))}</span>
+      </div>`;
+  }).join('');
+  const worstBlock = worst.length
+    ? `<div class="ins-err-worst-head">Failing tools</div><div class="ins-err-worst">${worstList}</div>`
+    : '';
+
+  const stats = `<div class="ins-stats"><span class="ins-stat"><span class="ins-stat-k">rate</span><span class="ins-stat-v">${escHtml(fmtPct1(rate))}</span></span><span class="ins-stat ins-stat-n">${fmtNum(total)} calls</span></div>`;
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Errors</h3>
+        ${stats}
+      </div>
+      ${callout}
+      <div class="ins-rows ins-err-rows">${kindRows}</div>
+      ${worstBlock}
     </section>`;
 }
 
