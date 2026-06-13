@@ -430,6 +430,85 @@ export function toolSegments(agent, opts = {}) {
   return segs;
 }
 
+// turnTimeBuckets decomposes one assistant turn into the honest 3-bucket split
+// "model generate/think · tool exec · wait/idle" (Phase 1b, on Phase 0a's
+// gen_ms). genMs is the streamed-generation span (step.gen_ms); toolMs is the
+// sum of the serial tool-exec spans read off the SAME ended_at-chain toolSegments
+// tiles bars from — tools ordered by ended_at, each spanning from the previous
+// tool's end (or the turn start) to its own end, clamped inside the turn; idleMs
+// is whatever wall-clock is left (duration_ms − gen − tool), floored at 0.
+// Pre-0a fallback: when gen_ms is missing/0 we can't separate generation from
+// wait, so idleMs stays 0 — no attribution beats mislabelling generation as idle.
+export function turnTimeBuckets(step) {
+  const genMs = Math.max(0, (step && step.gen_ms) || 0);
+  const durMs = Math.max(0, (step && step.duration_ms) || 0);
+  const stepStart = parseTime(step && step.timestamp);
+  let toolMs = 0;
+  if (!Number.isNaN(stepStart)) {
+    const stepEnd = stepStart + durMs;
+    const ends = ((step && step.tools) || [])
+      .map(t => parseTime(t && t.ended_at))
+      .filter(e => !Number.isNaN(e))
+      .sort((a, b) => a - b);
+    let prev = stepStart;
+    for (let end of ends) {
+      const start = prev;
+      if (end < start) end = start;       // never run backwards
+      if (end > stepEnd) end = stepEnd;    // a tool can't outlast its turn
+      toolMs += end - start;
+      prev = end;
+    }
+  }
+  const idleMs = genMs > 0 ? Math.max(0, durMs - genMs - toolMs) : 0;
+  return { genMs, toolMs, idleMs };
+}
+
+// idleSegments draws the wait/idle gap as a distinct span at the trailing edge of
+// each turn — the "tool-end → next turn" dead air where the agent was neither
+// generating nor running a tool, so "where did the time go" is visible in the
+// Gantt. Width is turnTimeBuckets' idleMs; the span sits flush against the turn's
+// end (== the next turn's start) so it reads as the lull before the next turn.
+// Honest-only: a pre-0a turn (no gen_ms) yields idleMs 0 → no span is drawn.
+// Same opts/playhead-cap contract as toolSegments; refKey points at the step (no
+// toolIndex) so a click selects that turn. Kept separate from toolSegments so the
+// idle rail renders behind/around the tool bars without disturbing their tiling.
+export function idleSegments(agent, opts = {}) {
+  const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
+  const steps = (agent && agent.steps) || [];
+  const cap = until == null ? effEnd : until;
+  const segs = [];
+  for (let k = 0; k < steps.length; k++) {
+    const step = steps[k];
+    const { idleMs } = turnTimeBuckets(step);
+    if (!(idleMs > 0)) continue;
+    // "tool-end → next turn": only a turn that ran a timed tool has a tool-end to
+    // anchor the gap, and only then does toolSegments leave the trailing region
+    // uncovered (an untimed turn draws one full-width segment, occluding the gap).
+    const tools = (step && step.tools) || [];
+    if (!tools.some(t => !Number.isNaN(parseTime(t && t.ended_at)))) continue;
+    const stepStart = parseTime(step && step.timestamp);
+    if (Number.isNaN(stepStart)) continue;
+    const dur = (step && step.duration_ms) || 0;
+    let stepEnd = dur > 0 ? stepStart + dur : effEnd;
+    if (Number.isNaN(stepEnd) || stepEnd < stepStart) continue;
+    let start = stepEnd - idleMs;
+    if (start < stepStart) start = stepStart;
+    let end = stepEnd;
+    if (cap != null) {
+      if (start >= cap) continue;   // idle not yet reached at the playhead → drop
+      if (end > cap) end = cap;
+    }
+    if (end <= start) continue;
+    const bar = agentBar({ start, end }, scale);
+    segs.push({
+      x: chartX + bar.x, w: bar.width, stepIndex: k,
+      refKey: refKey({ sessionId, agentIndex, stepIndex: k }),
+      kind: 'idle', durationMs: end - start,
+    });
+  }
+  return segs;
+}
+
 // fitSegmentLabel picks the richest inline label that fits inside a timeline
 // segment `width` px wide: "<dur> · <cost>" when both fit, else just "<dur>"
 // when that fits, else '' (the segment is too narrow → stay tooltip-only). The
@@ -531,6 +610,41 @@ export function timelineKinds(session) {
     }
   }
   return KIND_ORDER.filter(k => seen.has(k));
+}
+
+// criticalSpans flags the standout spans the Timeline outlines so the eye lands
+// on "where time/money went" without reading every bar: per SESSION the single
+// longest-duration segment and the single highest-cost turn across all agents,
+// and per AGENT the same two within each row. Returns refKeys only (DOM-free) —
+// the view places a subtle ▲/outline like the existing .tl-err-pip. Ties resolve
+// to the first occurrence (stable across refetches). A segment with no positive
+// duration contributes no longest mark; one with no positive cost no whale mark,
+// so a row can carry a whale without a longest (and vice versa). Input is
+// buildTimeline's rows (each { key, segments:[{ refKey, durationMs, cost_usd }] }).
+export function criticalSpans(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const agents = {};
+  let allLongest = null, allWhale = null;
+  for (const row of list) {
+    if (!row) continue;
+    const segs = row.segments || [];
+    let longest = null, whale = null;
+    for (const s of segs) {
+      if (!s) continue;
+      if (s.durationMs > 0 && (!longest || s.durationMs > longest.durationMs)) longest = s;
+      if (s.cost_usd > 0 && (!whale || s.cost_usd > whale.cost_usd)) whale = s;
+    }
+    const entry = {};
+    if (longest) entry.longestRef = longest.refKey;
+    if (whale) entry.whaleRef = whale.refKey;
+    if (longest || whale) agents[row.key] = entry;
+    if (longest && (!allLongest || longest.durationMs > allLongest.durationMs)) allLongest = longest;
+    if (whale && (!allWhale || whale.cost_usd > allWhale.cost_usd)) allWhale = whale;
+  }
+  const session = {};
+  if (allLongest) session.longestRef = allLongest.refKey;
+  if (allWhale) session.whaleRef = allWhale.refKey;
+  return { session, agents };
 }
 
 // agentElapsedMs returns how long an agent has been active. A running
@@ -796,6 +910,7 @@ export function buildTimeline(session, opts = {}) {
       y: axisH + i * rowH, h: rowH,
       labelX: pad + d * indent,
       segments: toolSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
+      idleSegments: idleSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
     };
   });
 
@@ -883,7 +998,7 @@ export function timelineAtTime(session, T, opts = {}) {
     const start = parseTime(a.started_at);
     const phase = agentPhaseAt(a, T);
     if (phase === 'pending') {
-      return { ...base.rows[i], w: 0, phase: 'pending', running: false, segments: [] };
+      return { ...base.rows[i], w: 0, phase: 'pending', running: false, segments: [], idleSegments: [] };
     }
     let clampEnd;
     if (phase === 'active') {
@@ -896,11 +1011,15 @@ export function timelineAtTime(session, T, opts = {}) {
     const effEnd = a.status === 'running'
       ? nowMs
       : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
-    const segments = toolSegments(a, {
+    const segOpts = {
       scale, chartX: base.chartX, sessionId: base.sessionId,
       agentIndex: i, effEnd, until: clampEnd,
-    });
-    return { ...base.rows[i], w: bar.width, phase, running: phase === 'active', segments };
+    };
+    const segments = toolSegments(a, segOpts);
+    return {
+      ...base.rows[i], w: bar.width, phase, running: phase === 'active',
+      segments, idleSegments: idleSegments(a, segOpts),
+    };
   });
   const playheadX = T < base.startMs ? null : base.chartX + scale.x(T);
   return { ...base, rows, playheadX, atMs: T };

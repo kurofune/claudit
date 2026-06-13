@@ -36,6 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
+  criticalSpans,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -1790,7 +1791,11 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   for (const r of tl.rows) for (const s of (r.segments || [])) {
     if (s.cost_usd > maxSegCost) maxSegCost = s.cost_usd;
   }
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost));
+  // Critical-path marks: the longest span and cost-whale turn, per session and
+  // per agent. The session pair gets the loud ▲; the per-agent pair a subtle
+  // outline. crit.refs maps a segment refKey → which mark(s) to draw on it.
+  const crit = criticalMarks(tl.rows);
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
@@ -1822,7 +1827,31 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
 // is-selected / is-new / tl-pending classes so state shows on both sides of the
 // freeze line. A row's phase comes from the playhead: 'active' draws the pulse
 // at the (clamped) bar end, 'pending' ghosts the label (the bar is zero-width).
-function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) {
+// criticalMarks folds criticalSpans' refKey lists into a refKey→{longest, whale,
+// session} map the row renderer queries per segment. Session-level marks (the
+// loud ▲) and agent-level marks (a subtle outline) share the map; `session` is
+// set only for the across-session standouts. A segment that is both the longest
+// span and the cost whale carries both flags.
+function criticalMarks(rows) {
+  const c = criticalSpans(rows);
+  const refs = new Map();
+  const flag = (ref, key, isSession) => {
+    if (!ref) return;
+    const m = refs.get(ref) || { longest: false, whale: false, session: false };
+    m[key] = true;
+    if (isSession) m.session = true;
+    refs.set(ref, m);
+  };
+  for (const e of Object.values(c.agents)) {
+    flag(e.longestRef, 'longest', false);
+    flag(e.whaleRef, 'whale', false);
+  }
+  flag(c.session.longestRef, 'longest', true);
+  flag(c.session.whaleRef, 'whale', true);
+  return refs;
+}
+
+function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map()) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
@@ -1861,6 +1890,31 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
   // clause — a fixed denominator so every segment in a row reads against the same
   // total. Done agents report end−start; a running one counts to now.
   const agentDurMs = agentElapsedMs(agent, Date.now());
+  // Idle/wait gaps (Phase 1b): a hatched span at each turn's trailing edge for
+  // the dead air between its last tool and the next turn, drawn BEHIND the tool
+  // segments so "where did the time go" reads at a glance. Click selects the
+  // turn. Honest-only — pre-0a turns (no gen_ms) emit none.
+  const idleHTML = (r.idleSegments || []).map(s => {
+    const idur = formatElapsed(s.durationMs);
+    const ipct = pctOfAgent(s.durationMs, agentDurMs);
+    const itip = segTooltip({ head: 'idle / wait', durText: idur, pct: ipct });
+    const isel = s.refKey === selectedRef ? ' is-selected' : '';
+    return `<rect class="tl-idle${isel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(itip)}</title></rect>`;
+  }).join('');
+  // Critical-path overlays (Phase 1c): a non-filled outline over the longest span
+  // / cost-whale turn so it never fights the segment's own fill or state stroke.
+  // Session standouts also get a ▲ above the bar (rare → loud); per-agent marks
+  // are the outline alone. pointer-events:none so the click still hits the rect.
+  const critHTML = segs.map(s => {
+    const m = crit.get(s.refKey);
+    if (!m) return '';
+    const cls = `tl-crit${m.longest ? ' is-long' : ''}${m.whale ? ' is-whale' : ''}${m.session ? ' is-session' : ''}`;
+    const outline = `<rect class="${cls}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2" pointer-events="none"/>`;
+    if (!m.session) return outline;
+    const what = [m.longest ? 'longest span' : '', m.whale ? 'cost whale' : ''].filter(Boolean).join(' · ');
+    const mark = `<text class="tl-crit-mark${m.whale ? ' is-whale' : ''}" x="${(s.x + s.w / 2).toFixed(1)}" y="${(barY - 2).toFixed(1)}" text-anchor="middle" pointer-events="none">▲<title>session ${escHtml(what)}</title></text>`;
+    return outline + mark;
+  }).join('');
   const segHTML = segs.map(s => {
     const ssel = s.refKey === selectedRef ? ' is-selected' : '';
     const isErr = s.status === 'error';
@@ -1916,7 +1970,9 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0) 
     <rect class="tl-bar" x="${r.x.toFixed(1)}" y="${barY}" width="${r.w.toFixed(1)}" height="${barH}" rx="3">
       <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
     </rect>
+    ${idleHTML}
     ${segHTML}
+    ${critHTML}
     ${r.running ? `<circle class="tl-pulse" cx="${cx}" cy="${cy}" r="3.5"/>` : ''}
   </g>`;
   return { gutter, chart };

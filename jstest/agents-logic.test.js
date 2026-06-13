@@ -55,6 +55,9 @@ import {
   pctOfAgent,
   segTooltip,
   timelineKinds,
+  turnTimeBuckets,
+  idleSegments,
+  criticalSpans,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2317,4 +2320,149 @@ test('timelineKinds reports step for a turn with no timed tools', () => {
 test('timelineKinds is empty for a null/agent-less session', () => {
   assert.deepEqual(timelineKinds(null), []);
   assert.deepEqual(timelineKinds({ session_id: 's1' }), []);
+});
+
+// ── turnTimeBuckets (per-turn think/generate · tool-exec · idle split) ─
+test('turnTimeBuckets splits a turn into gen, serial tool exec, and idle', () => {
+  // gen 200; tools tile from stepStart: [0..300]=300, [300..500]=200 → tool 500;
+  // idle = 1000 − 200 − 500 = 300.
+  const step = { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [
+    { ended_at: 300 }, { ended_at: 500 },
+  ] };
+  assert.deepEqual(turnTimeBuckets(step), { genMs: 200, toolMs: 500, idleMs: 300 });
+});
+
+test('turnTimeBuckets sorts tools by ended_at before chaining, like toolSegments', () => {
+  const step = { timestamp: 0, duration_ms: 1000, gen_ms: 0, tools: [
+    { ended_at: 600 }, { ended_at: 300 },
+  ] };
+  // sorted: [0..300]=300, [300..600]=300 → tool 600.
+  assert.equal(turnTimeBuckets(step).toolMs, 600);
+});
+
+test('turnTimeBuckets attributes NO idle when gen_ms is missing (pre-0a fallback)', () => {
+  // No gen_ms → we can't honestly separate generate from wait, so idle stays 0
+  // rather than mislabelling generation time as idle.
+  const step = { timestamp: 0, duration_ms: 1000, tools: [{ ended_at: 400 }] };
+  assert.deepEqual(turnTimeBuckets(step), { genMs: 0, toolMs: 400, idleMs: 0 });
+});
+
+test('turnTimeBuckets floors idle at 0 when gen + tool exceed the turn', () => {
+  const step = { timestamp: 0, duration_ms: 500, gen_ms: 400, tools: [{ ended_at: 300 }] };
+  assert.deepEqual(turnTimeBuckets(step), { genMs: 400, toolMs: 300, idleMs: 0 });
+});
+
+test('turnTimeBuckets clamps a tool that outlasts its turn to the turn end', () => {
+  const step = { timestamp: 0, duration_ms: 400, gen_ms: 0, tools: [{ ended_at: 900 }] };
+  assert.equal(turnTimeBuckets(step).toolMs, 400);
+});
+
+test('turnTimeBuckets puts all leftover into idle for a tool-less turn with gen', () => {
+  const step = { timestamp: 0, duration_ms: 1000, gen_ms: 250, tools: [] };
+  assert.deepEqual(turnTimeBuckets(step), { genMs: 250, toolMs: 0, idleMs: 750 });
+});
+
+test('turnTimeBuckets is all-zero for a zero-duration (last) step and tolerates null', () => {
+  assert.deepEqual(turnTimeBuckets({ timestamp: 0, duration_ms: 0, gen_ms: 0, tools: [] }), { genMs: 0, toolMs: 0, idleMs: 0 });
+  assert.deepEqual(turnTimeBuckets(null), { genMs: 0, toolMs: 0, idleMs: 0 });
+});
+
+// ── idleSegments (the wait/idle gap drawn flush before the next turn) ──
+test('idleSegments draws a trailing span of width idleMs ending at the turn end', () => {
+  const agent = { steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300, kind: 'exec' }] },
+  ] };
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 1000, minBlock: 0 });
+  const segs = idleSegments(agent, { scale, chartX: 0, sessionId: 's', agentIndex: 0, effEnd: 1000 });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].kind, 'idle');
+  assert.equal(segs[0].stepIndex, 0);
+  // idle = 1000 − 200 − 300 = 500 → span [500, 1000].
+  assert.equal(Math.round(segs[0].x), 500);
+  assert.equal(Math.round(segs[0].w), 500);
+  assert.equal(segs[0].refKey, refKey({ sessionId: 's', agentIndex: 0, stepIndex: 0 }));
+});
+
+test('idleSegments draws nothing when gen_ms is missing (no idle attribution)', () => {
+  const agent = { steps: [
+    { timestamp: 0, duration_ms: 1000, tools: [{ ended_at: 300, kind: 'exec' }] },
+  ] };
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 1000, minBlock: 0 });
+  assert.deepEqual(idleSegments(agent, { scale, chartX: 0, effEnd: 1000 }), []);
+});
+
+test('idleSegments draws nothing for an untimed turn (no tool-end to anchor the gap)', () => {
+  // gen 200, dur 1000, but no tool carries ended_at → toolSegments draws one
+  // full-width turn segment that would occlude any gap, so emit none.
+  const agent = { steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ kind: 'read' }] },
+  ] };
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 1000, minBlock: 0 });
+  assert.deepEqual(idleSegments(agent, { scale, chartX: 0, effEnd: 1000 }), []);
+});
+
+test('idleSegments truncates an idle span straddling the playhead cap', () => {
+  const agent = { steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300, kind: 'exec' }] },
+  ] };
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 1000, minBlock: 0 });
+  const segs = idleSegments(agent, { scale, chartX: 0, effEnd: 1000, until: 700 });
+  // idle [500, 1000] capped at 700 → [500, 700].
+  assert.equal(segs.length, 1);
+  assert.equal(Math.round(segs[0].x), 500);
+  assert.equal(Math.round(segs[0].w), 200);
+});
+
+test('idleSegments drops an idle span that has not been reached at the playhead', () => {
+  const agent = { steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300, kind: 'exec' }] },
+  ] };
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 1000, minBlock: 0 });
+  // cap 400 is before the idle start (500) → nothing.
+  assert.deepEqual(idleSegments(agent, { scale, chartX: 0, effEnd: 1000, until: 400 }), []);
+});
+
+// ── criticalSpans (longest span + cost whale, per agent and per session) ─
+test('criticalSpans marks the longest span and cost whale per agent and per session', () => {
+  const rows = [
+    { key: 'A', segments: [
+      { refKey: 'a0', durationMs: 100, cost_usd: 0.01 },
+      { refKey: 'a1', durationMs: 500, cost_usd: 0.05 },
+    ] },
+    { key: 'B', segments: [
+      { refKey: 'b0', durationMs: 900, cost_usd: 0.02 },
+    ] },
+  ];
+  const c = criticalSpans(rows);
+  assert.deepEqual(c.agents.A, { longestRef: 'a1', whaleRef: 'a1' });
+  assert.deepEqual(c.agents.B, { longestRef: 'b0', whaleRef: 'b0' });
+  // session: longest span is b0 (900ms); cost whale is a1 ($0.05).
+  assert.deepEqual(c.session, { longestRef: 'b0', whaleRef: 'a1' });
+});
+
+test('criticalSpans resolves ties to the first occurrence', () => {
+  const rows = [{ key: 'A', segments: [
+    { refKey: 'a0', durationMs: 100, cost_usd: 0.01 },
+    { refKey: 'a1', durationMs: 100, cost_usd: 0.01 },
+  ] }];
+  assert.deepEqual(criticalSpans(rows).agents.A, { longestRef: 'a0', whaleRef: 'a0' });
+});
+
+test('criticalSpans ignores zero-duration / zero-cost segments', () => {
+  const rows = [{ key: 'A', segments: [{ refKey: 'a0', durationMs: 0, cost_usd: 0 }] }];
+  const c = criticalSpans(rows);
+  assert.equal(c.agents.A, undefined);
+  assert.deepEqual(c.session, {});
+});
+
+test('criticalSpans can mark a cost whale on a row with no measured duration', () => {
+  const rows = [{ key: 'A', segments: [{ refKey: 'a0', durationMs: 0, cost_usd: 0.03 }] }];
+  const c = criticalSpans(rows);
+  assert.deepEqual(c.agents.A, { whaleRef: 'a0' });
+  assert.deepEqual(c.session, { whaleRef: 'a0' });
+});
+
+test('criticalSpans tolerates a null / non-array argument', () => {
+  assert.deepEqual(criticalSpans(null), { session: {}, agents: {} });
+  assert.deepEqual(criticalSpans([]), { session: {}, agents: {} });
 });

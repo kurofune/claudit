@@ -2712,6 +2712,29 @@
   /* Red error pip on a bar whose agent hit ≥1 tool error — a thin surface ring
      keeps it legible on both the accent-soft (main) and plain (sub) bar fills. */
   .tl-err-pip { fill: var(--danger, #e5484d); stroke: var(--surface); stroke-width: 1.5; }
+  /* Idle / wait gap (Phase 1b): the dead air between a turn's last tool and the
+     next turn. Drawn empty — a faint wash + dashed outline — so it reads as "no
+     work here" against the solid kind-colored tool segments. Honest-only: only
+     turns with a measured gen_ms (Phase 0a) contribute one. */
+  .tl-idle {
+    fill: color-mix(in oklch, var(--ink) 6%, transparent);
+    stroke: color-mix(in oklch, var(--ink) 28%, transparent);
+    stroke-width: 0.75; stroke-dasharray: 2 2;
+    cursor: pointer; transition: fill 0.12s ease;
+  }
+  .tl-idle:hover { fill: color-mix(in oklch, var(--ink) 13%, transparent); }
+  .tl-idle.is-selected { stroke: var(--accent); stroke-dasharray: none; stroke-width: 1.25; }
+  /* Critical-path overlays (Phase 1c): an unfilled outline over the longest span
+     (cool, --accent-2) and the cost-whale turn (warm, --warn) so the standouts
+     pop without disturbing the segment's own fill/state stroke. A segment that is
+     both reads as the whale (warm wins, later rule). The across-session standouts
+     thicken the outline and add a ▲ above the bar — rare, so it stays loud. */
+  .tl-crit { fill: none; stroke-width: 1.25; pointer-events: none; }
+  .tl-crit.is-long { stroke: color-mix(in oklch, var(--accent-2) 65%, transparent); }
+  .tl-crit.is-whale { stroke: color-mix(in oklch, var(--warn) 75%, transparent); }
+  .tl-crit.is-session { stroke-width: 2; }
+  .tl-crit-mark { fill: var(--accent-2); font-size: 8px; pointer-events: none; }
+  .tl-crit-mark.is-whale { fill: var(--warn); }
   /* An agent that hasn't started yet at the playhead: its bar is zero-width, so
      ghost the label to show the lane is reserved for a not-yet-spawned agent. */
   .tl-row.tl-pending .tl-label { opacity: 0.4; }
