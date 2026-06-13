@@ -2871,3 +2871,32 @@
   .ins-err-tool-fig { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
     font-family: var(--font-mono); white-space: nowrap; }
   .ins-err-tool-fig b { color: var(--danger, #e5484d); font-weight: 600; }
+
+  /* Token & context — a context-growth area sparkline, a four-band token
+     composition bar (the cache-read band doubles as the cache-hit readout,
+     reusing the Tokens-view .tok-area-* colors), and per-turn token bars split
+     by cache-read share. Read-only: no click-through (no token dimension in the
+     trace filter). */
+  .ins-tok-svg { width: 100%; display: block; }
+  .ins-tok-fig { margin: 0; }
+  .ins-tok-ctx-svg { height: 56px; }
+  .ins-tok-turns-svg { height: 40px; }
+  .ins-tok-ctx-area { fill: color-mix(in oklch, var(--accent-2) 20%, transparent); }
+  .ins-tok-ctx-line { stroke: var(--accent-2); stroke-width: 1.5; stroke-linejoin: round; }
+  /* Read (cheap) reads clearly cool-green and fresh (paid) clearly warm, so a
+     mostly-cached run shows as a green wall with small warm caps — the "almost
+     everything was cached" story the muted Tokens-view palette would hide here. */
+  .ins-tok-bar-read { fill: var(--accent-2); }
+  .ins-tok-bar-fresh { fill: var(--warn); }
+  .ins-tok-cap { margin-top: 4px; font-size: 11px; color: var(--ink-3, var(--ink-2)); }
+  .ins-tok-cap b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* Four-band composition bar — each band's width is its share of total tokens;
+     color comes from the shared .tok-area-* classes via currentColor. */
+  .ins-tok-comp { display: flex; height: 10px; margin: var(--s-3) 0 var(--s-2);
+    border-radius: var(--r-pill, 5px); overflow: hidden; background: var(--surface-2); }
+  .ins-tok-band { display: block; height: 100%; background: currentColor; }
+  .ins-tok-legend { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); }
+  .ins-tok-leg-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums; }
+  .ins-tok-leg-item b { color: var(--ink); font-weight: 600; }
+  .ins-tok-sw { width: 9px; height: 9px; border-radius: 2px; background: currentColor; flex: none; }

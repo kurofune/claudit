@@ -837,6 +837,101 @@ export function errorRates(agents, opts = {}) {
   return { total, errors, rate: total ? errors / total : 0, rows, worst };
 }
 
+// contextSeries summarizes token usage and context-window growth across the
+// scoped agents, for the Insights "Token & context" panel. Pure and scope-
+// agnostic (whole graph, one session, or one agent) — same contract as the
+// sibling aggregations (toolMix / costPareto / errorRates). It flattens every
+// agent's steps into ONE series ordered by step timestamp (NaN timestamps sort
+// stably to the end), each point carrying that turn's context size and token
+// breakdown. Token field names are the Go-marshalled (untagged) Tokens shape —
+// InputTokens etc. — folded to {input, output, cacheWrite, cacheRead} via
+// agentTokens (5m + 1h cache-creation combine into cacheWrite).
+//
+// "context" is the step's context_tokens (input + cache_read: the prompt size
+// fed to the model that turn). It grows as the conversation accumulates and
+// drops at compaction, so the series traces the context window over the run.
+// "cacheHit" is cacheRead / (cacheRead + input + cacheWrite): the share of the
+// prompt served cheaply from cache — the same formula the Cache view uses. The
+// overall cacheHit aggregates the totals; it is NOT the mean of per-turn ratios
+// (a cheap turn shouldn't weigh the same as an expensive one).
+//
+// Returns:
+//   { turns, series, peakContext, cacheHit, totals }
+//   turns       — number of steps in the series (points plotted)
+//   series      — chronological, each { t, context, input, output, cacheWrite,
+//                 cacheRead, total, cacheHit, agentLabel }; t is epoch ms (NaN
+//                 when the step had no parseable timestamp). total is the four-
+//                 band sum (matches agentTokens).
+//   peakContext — max context across the series (0 when empty)
+//   cacheHit    — overall cacheRead / (cacheRead + input + cacheWrite), 0 when
+//                 the denominator is 0
+//   totals      — summed { input, output, cacheWrite, cacheRead, total }
+export function contextSeries(agents, opts = {}) {
+  const series = [];
+  let peakContext = 0;
+  const totals = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
+  for (const a of (Array.isArray(agents) ? agents : [])) {
+    const label = agentLabel(a);
+    for (const step of (a && a.steps) || []) {
+      const tok = agentTokens(step);
+      const context = (step && step.context_tokens) || 0;
+      if (context > peakContext) peakContext = context;
+      totals.input += tok.input; totals.output += tok.output;
+      totals.cacheWrite += tok.cacheWrite; totals.cacheRead += tok.cacheRead;
+      totals.total += tok.total;
+      const promptTokens = tok.cacheRead + tok.input + tok.cacheWrite;
+      const cacheHit = promptTokens ? tok.cacheRead / promptTokens : 0;
+      series.push({ t: parseTime(step && step.timestamp), context, input: tok.input, output: tok.output, cacheWrite: tok.cacheWrite, cacheRead: tok.cacheRead, total: tok.total, cacheHit, agentLabel: label });
+    }
+  }
+  // Chronological across agents; NaN timestamps sort stably to the end. JS sort
+  // is stable, so equal-t points keep agent-then-step insertion order.
+  series.sort((x, y) => {
+    if (Number.isNaN(x.t)) return Number.isNaN(y.t) ? 0 : 1;
+    if (Number.isNaN(y.t)) return -1;
+    return x.t - y.t;
+  });
+  const promptTotal = totals.cacheRead + totals.input + totals.cacheWrite;
+  return {
+    turns: series.length, series, peakContext,
+    cacheHit: promptTotal ? totals.cacheRead / promptTotal : 0,
+    totals,
+  };
+}
+
+// binSeries downsamples a contextSeries result to at most maxBins points so the
+// Token panel's per-turn bars and context sparkline stay legible (and cheap to
+// render) at graph scope, where a run can hold tens of thousands of turns. Each
+// bin aggregates consecutive turns: context is the MAX in the bin (preserving the
+// growth envelope and compaction peaks the line should show), the token bands SUM
+// (so the bars represent that slice's real volume), and count records how many
+// turns folded in. When the series already fits, every turn is its own bin
+// (count 1). No turn is dropped — render code must not silently truncate.
+export function binSeries(series, maxBins) {
+  const src = Array.isArray(series) ? series : [];
+  const cap = maxBins > 0 ? maxBins : 1;
+  if (src.length <= cap) {
+    return src.map(p => ({
+      context: p.context, input: p.input, output: p.output,
+      cacheWrite: p.cacheWrite, cacheRead: p.cacheRead, total: p.total, count: 1,
+    }));
+  }
+  const binSize = Math.ceil(src.length / cap);
+  const bins = [];
+  for (let i = 0; i < src.length; i += binSize) {
+    const slice = src.slice(i, i + binSize);
+    const bin = { context: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0, count: 0 };
+    for (const p of slice) {
+      if (p.context > bin.context) bin.context = p.context;  // max preserves the growth envelope
+      bin.input += p.input; bin.output += p.output;
+      bin.cacheWrite += p.cacheWrite; bin.cacheRead += p.cacheRead;
+      bin.total += p.total; bin.count += 1;
+    }
+    bins.push(bin);
+  }
+  return bins;
+}
+
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.

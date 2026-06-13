@@ -36,7 +36,7 @@ import {
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates,
+  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -1814,6 +1814,7 @@ function renderInsights(sessions) {
     ${renderLatencyPanel(agents)}
     ${renderParetoPanel(agents)}
     ${renderErrorPanel(agents)}
+    ${renderTokenPanel(agents)}
   </div>`;
 }
 
@@ -1993,6 +1994,122 @@ function renderErrorPanel(agents) {
       ${callout}
       <div class="ins-rows ins-err-rows">${kindRows}</div>
       ${worstBlock}
+    </section>`;
+}
+
+// tokCtxSvg draws the context-growth area sparkline: context per bin over the run
+// (bins from binSeries, each carrying the max context it spans), filled from a
+// zero baseline with a stroked top line. viewBox units are stretched to the panel
+// width (preserveAspectRatio="none"), so the line uses a non-scaling stroke to
+// keep an even weight and the chart reads as one continuous curve — the sawtooth
+// of accumulation then compaction. A single point draws a flat line. Pure
+// geometry from the (already chronological) bins; `peak` scales the y-axis.
+function tokCtxSvg(bins, peak) {
+  const W = 100, H = 36, pad = 1.5, usable = H - pad * 2;
+  const n = bins.length;
+  const px = i => (n > 1 ? (i / (n - 1)) * W : W / 2);
+  const py = c => H - pad - (peak > 0 ? (c / peak) * usable : 0);
+  let line, area;
+  if (n === 1) {
+    const y = py(bins[0].context).toFixed(2);
+    line = `M0,${y} L${W},${y}`;
+    area = `M0,${H} L0,${y} L${W},${y} L${W},${H} Z`;
+  } else {
+    const pts = bins.map((p, i) => `${px(i).toFixed(2)},${py(p.context).toFixed(2)}`);
+    line = `M${pts.join(' L')}`;
+    area = `M0,${H} L${pts.join(' L')} L${W},${H} Z`;
+  }
+  return `<svg class="ins-tok-svg ins-tok-ctx-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-hidden="true">
+      <path class="ins-tok-ctx-area" d="${area}"/>
+      <path class="ins-tok-ctx-line" d="${line}" fill="none" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+}
+
+// tokTurnsSvg draws the per-turn token bars: one bar per bin, height ∝ that bin's
+// total tokens, split into the cache-read share (cheap, bottom) and the fresh
+// tokens on top (input + cache-write + output) so the bar strip doubles as a
+// per-turn cache-health read. Axis-aligned rects stretch cleanly under
+// preserveAspectRatio="none". Pure geometry from the chronological bins.
+function tokTurnsSvg(bins) {
+  const W = 100, H = 28;
+  const maxTotal = bins.reduce((m, p) => Math.max(m, p.total), 0) || 1;
+  const n = bins.length;
+  const bw = W / n;
+  const w = (bw * (n > 60 ? 1 : 0.86)).toFixed(3);
+  const bars = bins.map((p, i) => {
+    const x = (i * bw).toFixed(3);
+    const hTotal = (p.total / maxTotal) * H;
+    const hRead = (p.cacheRead / maxTotal) * H;
+    const rest = `<rect class="ins-tok-bar-fresh" x="${x}" y="${(H - hTotal).toFixed(2)}" width="${w}" height="${(hTotal - hRead).toFixed(2)}"/>`;
+    const read = hRead > 0 ? `<rect class="ins-tok-bar-read" x="${x}" y="${(H - hRead).toFixed(2)}" width="${w}" height="${hRead.toFixed(2)}"/>` : '';
+    return rest + read;
+  }).join('');
+  return `<svg class="ins-tok-svg ins-tok-turns-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-hidden="true">${bars}</svg>`;
+}
+
+// renderTokenPanel draws the fifth Insights panel: token usage and context-window
+// growth. A context-growth area sparkline (how the prompt accumulates and resets
+// at compaction), a cache-hit readout, and per-turn token bars split by cache-read
+// share. Reads contextSeries over the scoped agents. Unlike the other panels this
+// one is read-only: the trace filter has no token / context dimension to "land" on
+// (it filters by kind / cost / duration / errors), and selecting a single turn
+// isn't an Insights idiom — so there's no click-through, just a diagnostic. Pure
+// render from the scoped agents (no scrub / SSE), so it degrades cleanly in the
+// static `claudit report`.
+function renderTokenPanel(agents) {
+  const { turns, series, peakContext, cacheHit, totals } = contextSeries(agents);
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Token &amp; context</h3></header>`;
+  if (turns === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty">No token usage in this scope.</div></section>`;
+  }
+
+  const stat = (k, v) => `<span class="ins-stat"><span class="ins-stat-k">${k}</span><span class="ins-stat-v">${escHtml(v)}</span></span>`;
+  const stats = `<div class="ins-stats">${stat('cache hit', fmtPct1(cacheHit))}${stat('peak ctx', fmtCompact(peakContext))}<span class="ins-stat ins-stat-n">${fmtNum(turns)} turns</span></div>`;
+
+  // Downsample so a long run stays legible (and cheap to render) — sub-pixel bars
+  // and tens of thousands of SVG nodes help no one. binSeries folds nothing away.
+  const TOK_MAX_BINS = 120;
+  const bins = binSeries(series, TOK_MAX_BINS);
+  const binned = bins.length < turns;
+  const perBin = binned ? Math.ceil(turns / bins.length) : 1;
+
+  const last = series[series.length - 1].context;
+  const ctxFig = `<figure class="ins-tok-fig">
+      ${tokCtxSvg(bins, peakContext)}
+      <figcaption class="ins-tok-cap">Context window over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> · last ${escHtml(fmtCompact(last))}</figcaption>
+    </figure>`;
+
+  // Token totals composition — a four-band stacked bar (output→hot, input→warn,
+  // cache-write→accent, cache-read→accent-2) sharing the Tokens-view color
+  // language, so the cache-read band IS the visual cache-hit readout.
+  const tt = totals.total || 1;
+  const band = (cls, val, label) => {
+    const pct = (val / tt) * 100;
+    return pct > 0 ? `<span class="ins-tok-band ${cls}" style="width:${pct.toFixed(2)}%" title="${escHtml(label)}: ${escHtml(fmtCompact(val))} (${escHtml(fmtPct1(val / tt))})"></span>` : '';
+  };
+  const comp = `<div class="ins-tok-comp" role="img" aria-label="Token composition">
+      ${band('tok-area-cread', totals.cacheRead, 'cache read')}${band('tok-area-input', totals.input, 'input')}${band('tok-area-cwrite', totals.cacheWrite, 'cache write')}${band('tok-area-output', totals.output, 'output')}
+    </div>`;
+  const leg = (cls, label, val) => `<span class="ins-tok-leg-item"><span class="ins-tok-sw ${cls}"></span>${label} <b>${escHtml(fmtCompact(val))}</b></span>`;
+  const legend = `<div class="ins-tok-legend">
+      ${leg('tok-area-cread', 'cache read', totals.cacheRead)}${leg('tok-area-input', 'input', totals.input)}${leg('tok-area-cwrite', 'cache write', totals.cacheWrite)}${leg('tok-area-output', 'output', totals.output)}
+    </div>`;
+
+  const perLabel = binned ? `per ~${fmtNum(perBin)} turns (binned)` : 'per turn';
+  const turnsFig = `<figure class="ins-tok-fig">
+      ${tokTurnsSvg(bins)}
+      <figcaption class="ins-tok-cap">Tokens ${perLabel} · bottom band is cache read (cheap), top is fresh</figcaption>
+    </figure>`;
+
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Token &amp; context</h3>
+        ${stats}
+      </div>
+      ${ctxFig}
+      ${comp}
+      ${legend}
+      ${turnsFig}
     </section>`;
 }
 

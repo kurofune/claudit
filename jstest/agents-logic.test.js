@@ -64,6 +64,8 @@ import {
   DURATION_EDGES,
   costPareto,
   errorRates,
+  contextSeries,
+  binSeries,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -2828,4 +2830,148 @@ test('errorRates tolerates null agents, null steps, and null tool entries', () =
   assert.equal(e.errors, 1);
   assert.deepEqual(e.rows, [{ kind: 'exec', total: 1, errors: 1, rate: 1 }]);
   assert.deepEqual(e.worst, [{ name: 'Bash', kind: 'exec', total: 1, errors: 1, rate: 1 }]);
+});
+
+// ── contextSeries (Insights 2e) ─────────────────────────────────────
+test('contextSeries returns a zeroed/empty result for null/empty agents', () => {
+  const empty = {
+    turns: 0, series: [], peakContext: 0, cacheHit: 0,
+    totals: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 },
+  };
+  assert.deepEqual(contextSeries(null), empty);
+  assert.deepEqual(contextSeries([]), empty);
+});
+
+test('contextSeries folds each step\'s Go-named token fields, combining 5m+1h cache writes', () => {
+  const agents = [{ steps: [{
+    tokens: { InputTokens: 100, OutputTokens: 30, CacheCreate5mTokens: 7, CacheCreate1hTokens: 3, CacheReadTokens: 60 },
+  }] }];
+  const pt = contextSeries(agents).series[0];
+  assert.equal(pt.input, 100);
+  assert.equal(pt.output, 30);
+  assert.equal(pt.cacheWrite, 10);   // 7 + 3
+  assert.equal(pt.cacheRead, 60);
+  assert.equal(pt.total, 200);       // 100 + 30 + 10 + 60
+});
+
+test('contextSeries reads per-turn context from context_tokens and reports peakContext as the max', () => {
+  const agents = [{ steps: [
+    { context_tokens: 1200 },
+    { context_tokens: 8000 },
+    { context_tokens: 3500 },
+  ] }];
+  const r = contextSeries(agents);
+  assert.deepEqual(r.series.map(p => p.context), [1200, 8000, 3500]);
+  assert.equal(r.peakContext, 8000);
+});
+
+test('contextSeries per-turn cacheHit is cacheRead/(cacheRead+input+cacheWrite), 0 when the denominator is 0', () => {
+  const agents = [{ steps: [
+    { tokens: { InputTokens: 100, CacheCreate5mTokens: 10, CacheReadTokens: 60 } },  // 60/(60+100+10)
+    { tokens: { OutputTokens: 50 } },                                                // denom 0 → 0
+  ] }];
+  const series = contextSeries(agents).series;
+  assert.equal(series[0].cacheHit, 60 / 170);
+  assert.equal(series[1].cacheHit, 0);
+});
+
+test('contextSeries overall cacheHit aggregates totals (not the mean of per-turn ratios)', () => {
+  const agents = [{ steps: [
+    { tokens: { InputTokens: 10, CacheReadTokens: 90 } },   // per-turn 0.9, denom 100
+    { tokens: { InputTokens: 300, CacheReadTokens: 0 } },   // per-turn 0,   denom 300
+  ] }];
+  // mean-of-ratios would be 0.45; aggregate is 90/(100+300) = 0.225
+  assert.equal(contextSeries(agents).cacheHit, 0.225);
+});
+
+test('contextSeries totals sum every band across all steps and all agents', () => {
+  const agents = [
+    { steps: [{ tokens: { InputTokens: 10, OutputTokens: 1, CacheCreate5mTokens: 2, CacheReadTokens: 5 } }] },
+    { steps: [{ tokens: { InputTokens: 20, OutputTokens: 3, CacheCreate1hTokens: 4, CacheReadTokens: 7 } }] },
+  ];
+  const t = contextSeries(agents).totals;
+  assert.deepEqual(t, { input: 30, output: 4, cacheWrite: 6, cacheRead: 12, total: 52 });
+});
+
+test('contextSeries orders the series chronologically across agents, carrying t (epoch ms) and agentLabel', () => {
+  // Insertion order (300,100 then 200) deliberately differs from time order so a
+  // missing sort can't pass by coincidence.
+  const agents = [
+    { kind: 'main', steps: [
+      { timestamp: '2026-01-01T00:00:03Z', context_tokens: 3 },
+      { timestamp: '2026-01-01T00:00:01Z', context_tokens: 1 },
+    ] },
+    { kind: 'sub', agent_type: 'Explore', steps: [
+      { timestamp: '2026-01-01T00:00:02Z', context_tokens: 2 },
+    ] },
+  ];
+  const series = contextSeries(agents).series;
+  assert.deepEqual(series.map(p => p.context), [1, 2, 3]);          // sorted by time
+  assert.deepEqual(series.map(p => p.agentLabel), ['main', 'Explore', 'main']);
+  assert.deepEqual(series.map(p => p.t), [
+    Date.parse('2026-01-01T00:00:01Z'),
+    Date.parse('2026-01-01T00:00:02Z'),
+    Date.parse('2026-01-01T00:00:03Z'),
+  ]);
+});
+
+test('contextSeries keeps a step with no/garbage timestamp, sets t=NaN, and orders it last', () => {
+  // The undated step is inserted FIRST so a wrong impl that kept insertion order
+  // (or dropped it) would be caught.
+  const agents = [{ steps: [
+    { context_tokens: 9 },                                  // no timestamp → t NaN
+    { timestamp: '2026-01-01T00:00:05Z', context_tokens: 5 },
+  ] }];
+  const r = contextSeries(agents);
+  assert.equal(r.turns, 2);                                 // undated step still counted
+  assert.deepEqual(r.series.map(p => p.context), [5, 9]);   // dated first, undated last
+  assert.ok(Number.isNaN(r.series[1].t));
+});
+
+test('contextSeries tolerates null agents, null steps, and missing token tuples', () => {
+  const agents = [
+    null,
+    { steps: null },
+    { steps: [null, { context_tokens: 4 }, { tokens: { CacheReadTokens: 6, InputTokens: 4 } }] },
+  ];
+  const r = contextSeries(agents);
+  assert.equal(r.turns, 3);                                        // 3 real steps survive
+  assert.equal(r.peakContext, 4);
+  assert.deepEqual(r.totals, { input: 4, output: 0, cacheWrite: 0, cacheRead: 6, total: 10 });
+  assert.equal(r.cacheHit, 6 / 10);                                // 6 / (6 + 4)
+});
+
+// ── binSeries (Insights 2e — render downsampling) ───────────────────
+test('binSeries returns an empty array for an empty series', () => {
+  assert.deepEqual(binSeries([], 10), []);
+});
+
+test('binSeries returns one bin per turn (count 1, values preserved) when length <= maxBins', () => {
+  const series = [
+    { context: 100, input: 10, output: 1, cacheWrite: 2, cacheRead: 5, total: 18 },
+    { context: 200, input: 20, output: 3, cacheWrite: 0, cacheRead: 7, total: 30 },
+  ];
+  assert.deepEqual(binSeries(series, 10), [
+    { context: 100, input: 10, output: 1, cacheWrite: 2, cacheRead: 5, total: 18, count: 1 },
+    { context: 200, input: 20, output: 3, cacheWrite: 0, cacheRead: 7, total: 30, count: 1 },
+  ]);
+});
+
+test('binSeries buckets consecutive turns when length > maxBins: context is the max, bands sum, count is #turns', () => {
+  const mk = (context, k) => ({ context, input: k, output: k, cacheWrite: k, cacheRead: k, total: k * 4 });
+  const series = [mk(100, 1), mk(300, 2), mk(200, 3), mk(150, 4)];  // 4 turns
+  assert.deepEqual(binSeries(series, 2), [
+    { context: 300, input: 3, output: 3, cacheWrite: 3, cacheRead: 3, total: 12, count: 2 },  // turns 1+2, max 300
+    { context: 200, input: 7, output: 7, cacheWrite: 7, cacheRead: 7, total: 28, count: 2 },  // turns 3+4, max 200
+  ]);
+});
+
+test('binSeries never emits more than maxBins bins, and every turn lands in exactly one bin', () => {
+  const mk = i => ({ context: i, input: 1, output: 0, cacheWrite: 0, cacheRead: 0, total: 1 });
+  for (const [n, cap] of [[10, 3], [10, 4], [10, 7], [100, 12], [1000, 120]]) {
+    const series = Array.from({ length: n }, (_, i) => mk(i));
+    const bins = binSeries(series, cap);
+    assert.ok(bins.length <= cap, `n=${n} cap=${cap} → ${bins.length} bins`);
+    assert.equal(bins.reduce((s, b) => s + b.count, 0), n);   // no turn dropped or double-counted
+  }
 });
