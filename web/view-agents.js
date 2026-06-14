@@ -37,7 +37,7 @@ import {
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
   criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
-  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, spawnTargetIndex,
+  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, detectSignals, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
   conversationSessionList,
@@ -1796,12 +1796,23 @@ function renderInsights(sessions) {
       <span class="ins-scope-label" title="${escHtml(label)}">${escHtml(label)}</span>
     </div>`;
 
+  // The Signals panel is the audit headline — anomalies first. It is GRAPH-WIDE
+  // by design (scope-independent): detectSignals emits real cross-session refKeys,
+  // so the panel surfaces every flagged anomaly in the window and click-through
+  // jumps to it wherever it lives; re-scoping it would mean a synthetic sub-graph
+  // whose renumbered agent indices break those refs. nowMs is the live clock in
+  // serve mode and ABSENT in the static report (where the page can't know the
+  // wall-clock), keeping the static-safe contract — idle-stall's trailing-gap
+  // check degrades cleanly when nowMs is omitted.
+  const nowMs = isServeMode() ? Date.now() : undefined;
+  const signalsPanel = renderSignalsPanel(detectSignals(lastGraph, { nowMs }));
+
   // toolMix returns rows cost-sorted; re-sort worst-first by the ACTIVE metric so
   // the bar column stays monotonic (the longest bar reads first) whichever metric
   // drives it. A copy — toolMix's own ordering is left untouched.
   const mix = toolMix(agents).slice().sort((a, b) => metric.get(b) - metric.get(a));
   if (mix.length === 0) {
-    return `<div class="ins">${head}<div class="ins-empty">No tool calls in this scope.</div></div>`;
+    return `<div class="ins">${head}${signalsPanel}<div class="ins-empty">No tool calls in this scope.</div></div>`;
   }
 
   const colLabels = `<div class="ins-row ins-row-labels" aria-hidden="true">
@@ -1826,6 +1837,7 @@ function renderInsights(sessions) {
     `<button type="button" class="ins-seg-btn${metric.key === m.key ? ' is-active' : ''}" data-ins-metric="${m.key}" aria-pressed="${metric.key === m.key}">${escHtml(m.label)}</button>`;
   return `<div class="ins">
     ${head}
+    ${signalsPanel}
     <section class="ins-panel">
       <header class="ins-panel-head">
         <h3 class="ins-panel-title">Tool mix</h3>
@@ -1840,6 +1852,49 @@ function renderInsights(sessions) {
     ${renderTokenPanel(agents)}
     ${renderGroupPanel(agents)}
   </div>`;
+}
+
+// renderSignalsPanel draws the Signals panel — the anomaly headline of the
+// Agents audit. detectSignals already returns findings worst-first by SEVERITY
+// (the cross-kind sort key), so rows render in that order verbatim — NOT
+// re-sorted by tier. Each row carries a tier-colored pip (high/med/low — the
+// detector's own banding, for pip color only), the self-contained summary
+// sentence (rendered as-is — no fmt* re-formatting), and the kind. Every row is
+// click-through: data-ref holds the refKey, so the shared data-ref delegate (the
+// same one every lens uses) lands selection on that agent/step/tool — no bespoke
+// handler. Pure render; in the static report detectSignals ran without nowMs, so
+// the list simply omits any trailing idle-stall and degrades cleanly.
+const SIG_CAP = 50;
+function renderSignalsPanel(signals) {
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Signals</h3></header>`;
+  if (!signals || signals.length === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty ins-sig-clean">No anomalies detected — nothing flagged in this window.</div></section>`;
+  }
+  // A heavy window can flag thousands of anomalies; rendering them all is a dead
+  // DOM. Cap the list at the SIG_CAP worst (the array is already severity-sorted)
+  // and disclose the remainder — never silently truncate.
+  const shown = signals.slice(0, SIG_CAP);
+  const overflow = signals.length - shown.length;
+  const rows = shown.map(s => {
+    const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
+    return `<div class="ins-sig-row sig-${tier} is-clickable" role="button" tabindex="0" data-ref="${escHtml(s.ref)}" title="Jump to this ${escHtml(s.kind)}">
+        <span class="ins-sig-pip" aria-hidden="true"></span>
+        <span class="ins-sig-summary">${escHtml(s.summary)}</span>
+        <span class="ins-sig-kind">${escHtml(s.kind)}</span>
+      </div>`;
+  }).join('');
+  const more = overflow > 0
+    ? `<div class="ins-sig-more">+ ${fmtNum(overflow)} more, worst-first — showing the top ${SIG_CAP}</div>`
+    : '';
+  const stats = `<div class="ins-stats"><span class="ins-stat ins-stat-n">${fmtNum(signals.length)} signal${signals.length === 1 ? '' : 's'}</span></div>`;
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Signals</h3>
+        ${stats}
+      </div>
+      <div class="ins-rows ins-sig-rows">${rows}</div>
+      ${more}
+    </section>`;
 }
 
 // fmtDur renders a millisecond latency at the resolution tool spans actually

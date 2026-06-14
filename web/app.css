@@ -2914,3 +2914,28 @@
   .ins-grp-row.is-clickable { cursor: pointer; }
   .ins-grp-row.is-clickable:hover { background: color-mix(in oklch, var(--accent) 8%, transparent); }
   .ins-grp-row.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* Signals panel — the anomaly headline (Phase 3c). One row per detected
+     signal, rendered worst-first (detectSignals' severity order). A tier-colored
+     pip (high=danger, med=amber, low=muted) · the self-contained summary · the
+     kind. Each row is click-through to its refKey via the shared data-ref
+     delegate, so it borrows the same accent hover/focus affordance as the other
+     interactive Insights rows — here tinted by the row's own --sig-c. */
+  .ins-sig-rows { display: flex; flex-direction: column; }
+  .ins-sig-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center;
+    gap: var(--s-3); padding: 7px var(--s-2); border-radius: var(--r-sm); }
+  .ins-sig-row + .ins-sig-row { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+  .ins-sig-row.sig-high { --sig-c: var(--danger, #e5484d); }
+  .ins-sig-row.sig-med  { --sig-c: var(--c-4); }
+  .ins-sig-row.sig-low  { --sig-c: var(--ink-2); }
+  .ins-sig-pip { width: 9px; height: 9px; border-radius: 50%; background: var(--sig-c, var(--ink-2));
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--sig-c, var(--ink-2)) 16%, transparent); }
+  .ins-sig-summary { font-size: 13px; color: var(--ink); min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ins-sig-kind { font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); white-space: nowrap; }
+  .ins-sig-row.is-clickable { cursor: pointer; }
+  .ins-sig-row.is-clickable:hover { background: color-mix(in oklch, var(--sig-c, var(--accent)) 9%, transparent); }
+  .ins-sig-row.is-clickable:focus-visible { outline: 2px solid var(--sig-c, var(--accent)); outline-offset: -2px; }
+  .ins-sig-clean { color: var(--accent-2); }
+  .ins-sig-more { font-size: 11px; color: var(--ink-2); padding: var(--s-2) var(--s-2) 0;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); margin-top: 2px; }
