@@ -1889,8 +1889,8 @@ function renderInsights(sessions) {
       ${colLabels}
       <div class="ins-rows">${rows}</div>
     </section>
-    ${renderLatencyPanel(agents)}
     ${renderParetoPanel(agents)}
+    ${renderLatencyPanel(agents)}
     ${renderErrorPanel(agents)}
     ${renderTokenPanel(agents)}
     ${renderGroupPanel(agents)}
@@ -1935,6 +1935,7 @@ function renderSignalsPanel(signals) {
         <h3 class="ins-panel-title">Signals</h3>
         ${stats}
       </div>
+      <p class="ins-panel-note">Anomalies across the whole graph, worst first — <b>not</b> re-scoped by the Graph / Session / Agent toggle (every other panel is). Click any signal to jump to it on the Timeline.</p>
       <div class="ins-rows ins-sig-rows">${rows}</div>
       ${more}
     </section>`;
@@ -2043,6 +2044,7 @@ function renderParetoPanel(agents) {
         <h3 class="ins-panel-title">Cost Pareto</h3>
         ${stats}
       </div>
+      <p class="ins-panel-note">How concentrated your spend is: the priciest turns ranked first, with a running cumulative-share line. Tells you whether a few “whale” turns drive the cost or it’s spread evenly. Click a row to filter the Timeline to turns at least that expensive.</p>
       ${callout}
       <div class="ins-rows ins-pareto-rows">${list}</div>
     </section>`;

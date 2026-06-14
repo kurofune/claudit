@@ -2808,6 +2808,8 @@
   /* Latency panel — a horizontal histogram of per-tool wall-clock (one row per
      duration bucket) with a p50/p95/max readout in the header. */
   .ins-panel-head--split { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); flex-wrap: wrap; }
+  .ins-panel-note { margin: 0 0 var(--s-3); font-size: 12px; line-height: 1.45; color: var(--ink-2); max-width: 68ch; }
+  .ins-panel-note b { color: var(--ink); font-weight: 600; }
   .ins-stats { display: inline-flex; align-items: baseline; gap: var(--s-3); }
   .ins-stat { display: inline-flex; align-items: baseline; gap: 4px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   .ins-stat-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3, var(--ink-2)); font-family: var(--font-sans); }
