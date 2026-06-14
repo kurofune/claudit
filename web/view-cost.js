@@ -59,9 +59,9 @@ const SHELL = `
   <nav class="subtabs" aria-label="Cost sections">
     <a class="subtab is-active" href="#cost/model"   data-subtab="model">By model</a>
     <a class="subtab"           href="#cost/project" data-subtab="project">By project</a>
-    <a class="subtab"           href="#cost/subagents" data-subtab="subagents">Subagents</a>
+    <a class="subtab"           href="#cost/subagents" data-subtab="subagents">By subagents</a>
     <a class="subtab"           href="#cost/skill"   data-subtab="skill">By skill &amp; slash command</a>
-    <a class="subtab"           href="#cost/prompt"  data-subtab="prompt">Top expensive prompts</a>
+    <a class="subtab"           href="#cost/prompt"  data-subtab="prompt">By top expensive prompts</a>
   </nav>
 
   <div class="subview is-active" data-subview="model">
