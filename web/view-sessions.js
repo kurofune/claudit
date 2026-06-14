@@ -28,6 +28,7 @@ import {
   paginate,
   pageForIndex,
 } from './sessions-logic.js';
+import { baseName } from './agents-logic.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -257,6 +258,7 @@ function sessionCardHTML(s, colorSlot, tab) {
   const sid = escHtml(s.session_id || '');
   const cwd = s.cwd || '';
   const cwdEsc = escHtml(cwd);
+  const proj = escHtml(baseName(cwd) || '');
   const turns = s.turns || 0;
   const ep = s.entrypoint || '';
   const kind = classifyEntrypoint(ep); // 'sdk' | 'interactive'
@@ -274,10 +276,10 @@ function sessionCardHTML(s, colorSlot, tab) {
   return `<details class="session-card" id="session-${sid}" data-session="${sid}">
     <summary>
       <span class="s-head">
-        <span class="s-id" data-c="${colorSlot}" title="${sid}">${sid}</span>
+        <span class="s-id" data-c="${colorSlot}" title="${cwdEsc}">${proj === '' ? '&mdash;' : proj}</span>
         ${badge}
       </span>
-      <span class="s-cwd" title="${cwdEsc}">${cwd === '' ? '&mdash;' : cwdEsc}</span>
+      <span class="s-cwd" title="${sid}">${sid === '' ? '&mdash;' : sid}</span>
       <span class="s-stats">
         <span>${turns} turn${turns === 1 ? '' : 's'}</span>
         <span class="s-cost">${escHtml(fmtMoney(s.cost_usd || 0))}</span>
