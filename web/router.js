@@ -26,12 +26,6 @@ export function activate(route) {
   views.forEach(v => v.classList.toggle('is-active', v.dataset.view === route.view));
   const navItems = document.querySelectorAll('.nav-item');
   navItems.forEach(n => n.classList.toggle('is-active', n.dataset.view === route.view));
-  // Views that own a local filter bar ([data-own-filter]) hide the
-  // legacy global bar so no two bars show mid-migration. Removed once
-  // the global bar is gone (last migration step).
-  const active = [...views].find(v => v.dataset.view === route.view);
-  const globalBar = document.querySelector('.controls:not(.view-filter)');
-  if (globalBar) globalBar.hidden = !!(active && active.hasAttribute('data-own-filter'));
   return route;
 }
 

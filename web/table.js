@@ -30,17 +30,13 @@ export function rowSearchText(r) {
   return s.toLowerCase();
 }
 
-// getFilterParams reads the filter + min-cost inputs. During the
-// per-view filter migration a view passes its own scope (the element
-// carrying [data-own-filter]); we read that scope's .vf-text/.vf-cost
-// inputs and fall back to the legacy global #filter/#mincost bar for
-// views not yet migrated. Centralized so filterRows() and the legacy
-// bare-anchor handlers stay in sync if the input selectors change.
+// getFilterParams reads a view's own filter + min-cost inputs. The
+// passed scope is the element carrying [data-own-filter]; we read that
+// scope's .vf-text/.vf-cost inputs. Centralized so filterRows() and
+// wireViewFilters() stay in sync if the input selectors change.
 export function getFilterParams(scope) {
-  let fEl = scope && scope.querySelector('.vf-text');
-  let mEl = scope && scope.querySelector('.vf-cost');
-  if (!fEl) fEl = document.getElementById('filter');   // legacy global bar
-  if (!mEl) mEl = document.getElementById('mincost');
+  const fEl = scope && scope.querySelector('.vf-text');
+  const mEl = scope && scope.querySelector('.vf-cost');
   const q = (fEl ? fEl.value : '').trim().toLowerCase();
   const minCost = parseFloat((mEl ? mEl.value : '0') || '0') || 0;
   return { q, minCost };
@@ -221,43 +217,6 @@ export function buildRows(table, rows, mapper) {
     table.dataset.tableWired = '1';
   }
   renderTable(table);
-}
-
-// applyFiltersAll re-renders every active paged table after a filter
-// or min-cost input event. Called by the global filter wire-up in
-// wireGlobalFilters().
-export function applyFiltersAll() {
-  document.querySelectorAll('table[data-table]').forEach(table => {
-    const st = tableStates.get(table);
-    if (!st) return;
-    st.page = 0;
-    renderTable(table);
-  });
-  // Render-once details rows (the drill-down tables) use a class-based
-  // hide rather than the state machine. Mirrors the legacy code.
-  const { q, minCost } = getFilterParams();
-  document.querySelectorAll('details tbody tr').forEach(tr => {
-    const cost = parseFloat(tr.dataset.cost || '0');
-    const text = tr.textContent.toLowerCase();
-    const matches = (!q || text.includes(q)) && (cost >= minCost);
-    tr.classList.toggle('hidden', !matches);
-  });
-}
-
-// wireGlobalFilters binds the #filter + #mincost inputs once. Safe to
-// call repeatedly — the wired sentinel guards against double-binding
-// when SSE-driven repaints re-import the module's effects.
-export function wireGlobalFilters() {
-  const fEl = document.getElementById('filter');
-  const mEl = document.getElementById('mincost');
-  if (fEl && !fEl.dataset.tableWired) {
-    fEl.addEventListener('input', applyFiltersAll);
-    fEl.dataset.tableWired = '1';
-  }
-  if (mEl && !mEl.dataset.tableWired) {
-    mEl.addEventListener('input', applyFiltersAll);
-    mEl.dataset.tableWired = '1';
-  }
 }
 
 // wireViewFilters binds a single view's own .vf-text/.vf-cost inputs
