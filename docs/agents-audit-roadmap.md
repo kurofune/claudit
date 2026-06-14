@@ -53,6 +53,46 @@ phase remain as future work.
 
 ---
 
+## Successor program — Honeycomb-grade observability (Phases 0–3)
+
+Captured 2026-06-13. Successor to the Phoenix roadmap above. That work made the
+Agents tab **one trace you can interrogate**; this work makes it **one trace that
+interrogates itself** — surfacing where time and money went, what the agent was
+doing, and what's anomalous, the way Honeycomb's BubbleUp does. Same conventions:
+pure logic in `web/agents-logic.js` (TDD'd in `jstest/agents-logic.test.js`), DOM in
+`web/view-agents.js`, backend in `internal/{parse,agentflow,aggregate}`; the Agents
+view stays **serve-only** (no static-report parity) and every detector takes `nowMs`
+from the view layer, never `Date.now()`.
+
+**Status:** All phases complete — 0 ✅, 1 ✅, 2 ✅, 3 ✅ (2026-06-13). Fully shipped
+and verified end-to-end: 378 jstest + `go test ./...` green, a serve-mode playwright
+sweep across the Timeline and Insights lenses, and a static-report
+graceful-degradation check (Agents view absent by design, no console errors).
+
+- **Phase 0 — backend enrichment.** Per-turn model-generate time `gen_ms` on
+  `AgentStep` (last−first assistant line; commit 14eaa1b); tool I/O size + collapsed
+  invocation `count` on `ToolInvocation` (commit f0582d2); per-turn `context_tokens`
+  = input + cache_read (commit 887f9ac). The substrate the frontend phases read.
+- **Phase 1 — Timeline → trace waterfall.** Segments colored by tool `kind` reusing
+  the Feed/Tree `.kind-*` palette + richer hover (`kind · dur · cost · tokens`)
+  (commit d51b3f5); idle/gap spans from `gen_ms` + critical-path / cost-whale marks
+  (commit ff2f201).
+- **Phase 2 — Insights lens.** A fifth `#agents/insights` lens with a scope toggle
+  (graph / session / agent), all pure aggregations rendered as hand-rolled SVG:
+  Tool mix (2a, commit 1b66a07), Latency distribution + p50/p95 (2b, commit 8cfc87e),
+  Cost Pareto (2c, commit 66e43f6), Error breakdown (2d, commit ee05eb6), Token &
+  context growth + cache-hit + peak-% (2e, commits 387da22, 9e10e56), Group-by
+  dimension picker (2f, commit d1cb596).
+- **Phase 3 — anomaly detection.** Single `detectSignals(graph, opts)` →
+  worst-first `[{kind, severity, ref, summary}]`: cost-whale + retry-storm core
+  (3a, commit 2652395), then slow-tool / error-cascade / idle-stall / runaway-context
+  (3b, commit c191441). Surfaced two ways — an Insights "Signals" panel listing them
+  worst-first with click-to-select (3c, commit 571d29c) and inline `▲` pips in the
+  Timeline gutter beside the error pip, each click-through to its ref (3d, commit
+  8dc4d22).
+
+---
+
 ## Why these five (the Phoenix borrow, distilled)
 
 We surveyed Arize Phoenix's tracing model. Phoenix is OpenTelemetry-native — every
