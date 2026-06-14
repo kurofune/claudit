@@ -119,6 +119,11 @@ let lastGraph = null;
 let activeSub = 'feed';
 let tickerId = null;
 let selectedRef = null;
+// pendingJumpRef carries a ref across a lens-switch navigation (e.g. a Signals
+// row click on the drawer-less Insights lens jumping to the Timeline). paint()
+// reads it to FORCE a drawer repaint (a plain lens switch skips it) and scroll
+// the target into view once the destination lens is in the DOM, then clears it.
+let pendingJumpRef = null;
 
 // fullCache keys loaded-full tool I/O by tool_use id → { input?, output? }.
 // When the user clicks "show full", the untruncated content is cached here and
@@ -343,7 +348,13 @@ export async function paint(route) {
   const lensSwitch = painted;
   ensureFilterBar(container);
   activateSub(container, activeSub);
-  renderActive(container, false, !lensSwitch);
+  // A pending cross-lens jump (e.g. Signals → Timeline) changed the selection
+  // on a drawer-less lens, so force the drawer repaint a plain lens switch skips.
+  renderActive(container, false, !lensSwitch || pendingJumpRef != null);
+  if (pendingJumpRef != null) {
+    scrollRefIntoView(container, pendingJumpRef);
+    pendingJumpRef = null;
+  }
   updateNavMetric(graphStats(lastGraph));
   painted = true;
   navPainted = true;
@@ -525,6 +536,12 @@ function wireSelection(container) {
       }
       // The Tree lens pages its sessions; "show more" reveals the next page.
       if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
+      // A Signals row lives on the drawer-less Insights lens, so it can't select
+      // in place — it jumps to the Timeline at its ref (see gotoSignalRef). The
+      // Timeline pip's "+N" overflow glyph routes to the Signals panel itself.
+      const sigRow = e.target.closest('.ins-sig-row');
+      if (sigRow && sigRow.dataset.ref) { gotoSignalRef(container, sigRow.dataset.ref); return; }
+      if (e.target.closest('[data-goto-insights]')) { location.hash = '#agents/insights'; return; }
       const el = e.target.closest('[data-ref]');
       if (el) select(container, el.dataset.ref);
     });
@@ -567,6 +584,9 @@ function wireSelection(container) {
         else applyBucketFilter(container, (grp.dataset.insKinds || '').split(',').filter(Boolean));
         return;
       }
+      const sigRow = e.target.closest('.ins-sig-row');
+      if (sigRow && sigRow.dataset.ref) { e.preventDefault(); gotoSignalRef(container, sigRow.dataset.ref); return; }
+      if (e.target.closest('[data-goto-insights]')) { e.preventDefault(); location.hash = '#agents/insights'; return; }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -668,6 +688,29 @@ function pickTimeline(container, sessionId) {
   renderActive(container, false);
   const next = container.querySelector('.tl-sidebar');
   if (next) next.scrollTop = top;
+}
+
+// gotoSignalRef makes a Signals-panel row click actually "jump to" its anomaly.
+// The Insights lens has no drawer (is-no-drawer), so a bare select() there lands
+// the selection nowhere visible — the bug this fixes. Instead we point the shared
+// selection at the signal's ref, pin the Timeline to the ref's session, and route
+// to the Timeline (a drawer-bearing lens with the matching pip), mirroring the
+// other Insights jumps (applyBucketFilter et al. route to '#agents/timeline').
+// pendingJumpRef tells paint() to force the drawer repaint + scroll on arrival.
+function gotoSignalRef(container, ref) {
+  if (!ref) return;
+  const p = parseRefKey(ref);
+  if (p && p.sessionId) { timelineSid = p.sessionId; playheadT = null; tlMinPxPerMs = null; }
+  selectedRef = ref;
+  pendingJumpRef = ref;
+  location.hash = '#agents/timeline';
+}
+
+// scrollRefIntoView centers the element carrying `ref` in the active lens, if it
+// has one (a tool-granular ref may have no own row — the drawer still shows it).
+function scrollRefIntoView(container, ref) {
+  const el = container.querySelector(`.agents-lens [data-ref="${ref}"]`);
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 // startTimelineResize drives the Timeline sidebar's drag-to-resize. It reuses
@@ -2593,7 +2636,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
     return `<path class="tl-sig-pip sig-${p.tier}" data-ref="${escHtml(p.ref)}" d="${d}"><title>${escHtml(p.summary)}</title></path>`;
   }).join('');
   const moreHTML = sigOverflow > 0
-    ? `<text class="tl-sig-more" x="${(pipBaseX - sigPips.length * 9).toFixed(1)}" y="${(pipCy + 3).toFixed(1)}" text-anchor="end">+${sigOverflow}<title>${sigOverflow} more signal${sigOverflow === 1 ? '' : 's'} — see Insights → Signals</title></text>`
+    ? `<text class="tl-sig-more" data-goto-insights role="button" tabindex="0" x="${(pipBaseX - sigPips.length * 9).toFixed(1)}" y="${(pipCy + 3).toFixed(1)}" text-anchor="end">+${sigOverflow}<title>${sigOverflow} more signal${sigOverflow === 1 ? '' : 's'} — open Insights → Signals</title></text>`
     : '';
   // Segments tile the bar on the time axis at the finest grain the data allows:
   // one sub-span per TOOL where the backend captured tool wall-clock (toolIndex

@@ -2723,7 +2723,9 @@
   .tl-sig-pip.sig-low  { fill: var(--ink-2); }
   /* +N overflow when an agent flags more anomalies than the gutter shows; the full
      list is in Insights → Signals. Falls through to selecting the agent on click. */
-  .tl-sig-more { fill: var(--ink-2); font-size: 9px; font-weight: 600; cursor: default; }
+  .tl-sig-more { fill: var(--ink-2); font-size: 9px; font-weight: 600; cursor: pointer; }
+  .tl-sig-more:hover { fill: var(--accent); text-decoration: underline; }
+  .tl-sig-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* Idle / wait gap (Phase 1b): the dead air between a turn's last tool and the
      next turn. Drawn empty — a faint wash + dashed outline — so it reads as "no
      work here" against the solid kind-colored tool segments. Honest-only: only
