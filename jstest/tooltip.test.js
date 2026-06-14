@@ -71,6 +71,35 @@ test('placeTooltip clamps to the right viewport edge', () => {
   assert.equal(p.arrowX, 995 - 894); // center 995 minus clamped left
 });
 
+test('placeTooltip centers on an explicit anchorX (cursor) instead of the target center', () => {
+  // A very wide target (e.g. a full-width timeline bar) whose geometric
+  // center is far from the cursor: anchoring on the cursor keeps the
+  // tooltip — and its arrow — over the spot actually being hovered.
+  const target = { top: 300, bottom: 320, left: 100, width: 800 };
+  const p = placeTooltip(target, tip, 1000, 10, 250);
+  // anchor 250 → left = 250 - 50 = 200; arrow points back to 250.
+  assert.equal(p.left, 200);
+  assert.equal(p.arrowX, 50);
+});
+
+test('placeTooltip with a wide target but no anchorX still centers on the target (off-screen center clamps right)', () => {
+  // Reproduces the bug shape: a bar wider than the viewport. Without an
+  // anchor, the center (510) drives placement; with the right-edge clamp
+  // the tooltip pins to the far right regardless of cursor — which is why
+  // callers pass anchorX for wide targets.
+  const target = { top: 300, bottom: 320, left: 10, width: 1000 };
+  const p = placeTooltip(target, tip, 1000);
+  assert.equal(p.left, 510 - 50); // center 510, no clamp needed here
+});
+
+test('placeTooltip clamps an anchorX past the right edge', () => {
+  const target = { top: 300, bottom: 320, left: 100, width: 800 };
+  const p = placeTooltip(target, tip, 1000, 10, 980);
+  // max left = 1000 - 100 - 6 = 894; arrow = anchor 980 - 894 = 86.
+  assert.equal(p.left, 894);
+  assert.equal(p.arrowX, 86);
+});
+
 test('placeTooltip rounds all numeric outputs', () => {
   const target = { top: 300.4, bottom: 320, left: 401, width: 21 };
   const p = placeTooltip(target, tip, 1000);

@@ -24,17 +24,24 @@ export function tooltipHTML(text) {
 // above the target; flips below when there's no headroom. Centers
 // horizontally on the target, clamped to the viewport with a 6px margin;
 // arrowX is the arrow's offset from the (clamped) left edge so it keeps
-// pointing at the true target center.
-export function placeTooltip(target, tip, viewportWidth, margin = 10) {
+// pointing at the anchor point.
+//
+// anchorX overrides the horizontal anchor: when supplied (the cursor x),
+// the tooltip centers on it instead of the target's geometric center. This
+// is what keeps a very wide target — e.g. a full-width, zoomed timeline bar
+// whose center can sit off-screen — anchored over the spot being hovered
+// rather than clamped to the viewport edge.
+export function placeTooltip(target, tip, viewportWidth, margin = 10, anchorX = null) {
   let top = target.top - tip.height - margin;
   let side = 'top';
   if (top < 6) {
     top = target.bottom + margin;
     side = 'bottom';
   }
-  let left = target.left + target.width / 2 - tip.width / 2;
+  const cx = anchorX == null ? target.left + target.width / 2 : anchorX;
+  let left = cx - tip.width / 2;
   left = Math.max(6, Math.min(left, viewportWidth - tip.width - 6));
-  const arrowX = (target.left + target.width / 2) - left;
+  const arrowX = cx - left;
   return {
     top: Math.round(top),
     left: Math.round(left),
@@ -137,25 +144,37 @@ export function init() {
     attributeFilter: ['title'],
   });
 
-  function position(el) {
+  function position(el, pointerX) {
     const r = el.getBoundingClientRect();
     const tipR = tip.getBoundingClientRect();
-    const p = placeTooltip(r, tipR, window.innerWidth);
+    // For a target much wider than the tooltip (a full-width timeline bar or
+    // segment), centering on its geometric center is wrong — that center can
+    // sit off-screen and clamp the tooltip to the viewport edge. Anchor to
+    // the cursor instead, clamped within the target so the arrow stays on it.
+    let anchorX = null;
+    if (pointerX != null && r.width > tipR.width * 2) {
+      anchorX = Math.max(r.left, Math.min(pointerX, r.right));
+    }
+    const p = placeTooltip(r, tipR, window.innerWidth, 10, anchorX);
     tip.style.top = `${p.top}px`;
     tip.style.left = `${p.left}px`;
     tip.style.setProperty('--arrow-x', `${p.arrowX}px`);
     tip.dataset.side = p.side;
   }
 
-  function show(el) {
+  function show(el, pointerX) {
     const text = el.dataset.tooltip;
     if (!text) return;
+    // Opt-out: a subtree marked [data-no-tooltip] suppresses the popover for
+    // everything inside it (the Tree lens's rail, where row hovers were just
+    // noise). The native title is still migrated away, so nothing else shows.
+    if (el.closest('[data-no-tooltip]')) return;
     activeEl = el;
     tip.innerHTML = tooltipHTML(text);
     tip.classList.add('is-visible');
     // Two-frame trick: render → measure → position → reveal.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (activeEl === el) position(el);
+      if (activeEl === el) position(el, pointerX);
     }));
   }
   function hide() {
@@ -168,7 +187,8 @@ export function init() {
     if (!el) return;
     clearTimeout(hideTimer);
     clearTimeout(showTimer);
-    showTimer = setTimeout(() => show(el), 220);
+    const pointerX = e.clientX;
+    showTimer = setTimeout(() => show(el, pointerX), 220);
   }
   function onLeave(e) {
     const el = e.target.closest('[data-tooltip]');

@@ -1492,7 +1492,7 @@ function feMetric(cost, ms, tokens) {
 function renderInspector(sessions) {
   const sel = resolveRef(lastGraph, selectedRef);
   if (!sessions.length) {
-    return `<div class="itree"><div class="ac-idle">No agents in this window.</div></div>`;
+    return `<div class="itree" data-no-tooltip><div class="ac-idle">No agents in this window.</div></div>`;
   }
   // Render only the newest `treeLimit` sessions, but always far enough to include
   // the selected one (a ‹ › filter step can target a session past the cap).
@@ -1502,7 +1502,7 @@ function renderInspector(sessions) {
   const more = sessions.length > shown
     ? `<button type="button" class="itree-more" data-tree-more>Show ${Math.min(TREE_PAGE, sessions.length - shown)} more · ${fmtNum(sessions.length - shown)} older ${sessions.length - shown === 1 ? 'session' : 'sessions'} hidden</button>`
     : '';
-  return `<div class="itree" role="tree" aria-label="Agents">${tree}${more}</div>`;
+  return `<div class="itree" role="tree" aria-label="Agents" data-no-tooltip>${tree}${more}</div>`;
 }
 
 function itreeSessionHTML(session, si, sel) {
@@ -1726,8 +1726,8 @@ function conversationSidebarHTML(list, curSid) {
     const sel = e.sessionId === curSid ? ' is-selected' : '';
     const c = colorSlot(e.index);
     const turns = `${fmtNum(e.replyCount)} ${e.replyCount === 1 ? 'reply' : 'replies'}`;
-    return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}" title="${escHtml(e.cwd || '')}">
-      <span class="conv-sess-item-proj">${escHtml(baseName(e.cwd) || '—')}</span>
+    return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}">
+      <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
       <span class="conv-sess-item-meta">
         <span class="conv-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
         <span class="conv-sess-item-turns">${turns}</span>
@@ -2408,8 +2408,8 @@ function timelineSidebarHTML(list, curSid) {
     const err = e.errorCount > 0
       ? `<span class="tl-sess-item-pill tl-sess-item-err" title="${fmtNum(e.errorCount)} tool error${e.errorCount === 1 ? '' : 's'}">⚠️ ${fmtNum(e.errorCount)}</span>`
       : '';
-    return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}" title="${escHtml(e.cwd || '')}">
-      <span class="tl-sess-item-proj">${escHtml(baseName(e.cwd) || '—')}</span>
+    return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}">
+      <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
       <span class="tl-sess-item-meta">
         <span class="tl-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
         <span class="tl-sess-item-pills">

@@ -2513,7 +2513,9 @@
   .conv-sess-item.is-selected {
     background: var(--accent-soft); border-left-color: var(--cc, var(--accent));
   }
-  .conv-sess-item-proj { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Shrink-wrap to the name text so its tooltip fires only over the project
+     name, not the empty space beside it (see .tl-sess-item-proj). */
+  .conv-sess-item-proj { font-weight: 600; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-sess-item-meta { display: flex; align-items: baseline; gap: var(--s-2); }
   .conv-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-sess-item-turns { margin-left: auto; flex: none; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
@@ -2585,7 +2587,10 @@
   .tl-sess-item.is-selected {
     background: var(--accent-soft); border-left-color: var(--cc, var(--accent));
   }
-  .tl-sess-item-proj { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Shrink-wrap to the name text (not the full card width) so its tooltip
+     only fires directly over the project name, never the empty space beside
+     it; max-width keeps long names truncating with an ellipsis. */
+  .tl-sess-item-proj { font-weight: 600; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tl-sess-item-meta { display: flex; flex-direction: column; gap: 2px; }
   .tl-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tl-sess-item-pills { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
