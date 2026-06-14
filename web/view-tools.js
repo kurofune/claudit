@@ -7,7 +7,7 @@ import { fetchTools, fetchTrends, fetchCost } from './api.js';
 import { fmtNum, fmtMoney, escHtml, truncate, pct } from './format.js';
 import { trendSpark } from './charts.js';
 import {
-  buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
+  buildRows, withTrend, injectTrendColumn, wireViewFilters, rowPassesFilter,
 } from './table.js';
 import { hbarListSkeleton, tableBodySkeleton } from './skeleton.js';
 
@@ -61,6 +61,10 @@ function drillHTML(tools, byToolDetail) {
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('tools')}Tools</h1></header>
+  <div class="controls view-filter" role="search">
+    <label>Filter rows: <input class="vf-text" type="search" placeholder="model, path, command…"></label>
+    <label>Min cost: <input class="vf-cost" type="number" value="0" step="0.01" min="0"></label>
+  </div>
 
   <details class="guide">
     <summary>What "tool cost" means</summary>
@@ -207,7 +211,15 @@ export async function paint(route) {
     drillEl.innerHTML = drillHTML(toolsWithDetail, detail);
   }
 
-  wireGlobalFilters();
+  // Local filter wiring. The by-tool hbar is row-derived, so it
+  // re-renders from the same filtered rows as the table; totalCost stays
+  // the bar denominator (percentages still read against whole-corpus
+  // spend). The drill-down details rows are toggled by wireViewFilters.
+  const applyChartFilter = ({ q, minCost }) => {
+    const keep = r => rowPassesFilter(r, q, minCost);
+    if (barsEl) barsEl.innerHTML = toolBarsHTML(byTool.filter(keep), totalCost);
+  };
+  wireViewFilters(container, applyChartFilter);
   activateSubview(container, route.sub);
 
   const topTool = byTool[0];
