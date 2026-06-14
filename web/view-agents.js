@@ -2498,6 +2498,14 @@ function timelineSummaryHTML(s) {
 // per row by phase, not by signal data), so a stale nowMs across scrub frames is
 // harmless.
 const TL_SIG_CAP = 3;
+// Row geometry overrides for the single-session Gantt (buildTimeline defaults are
+// 24 / 130, tuned for the old multi-session stack). TL_ROW_H drives bar height
+// (barH = rowH - 10); TL_LABEL_W is the frozen label column / gutter width, and
+// TL_LABEL_CHARS is the matching char budget for the in-SVG label (no native
+// ellipsis in <text>, so we clip in JS — keep it in step with TL_LABEL_W).
+const TL_ROW_H = 34;
+const TL_LABEL_W = 190;
+const TL_LABEL_CHARS = 24;
 let tlSigCache = null; // { session, byAgent }
 function timelineSignalPips(session, sid) {
   if (tlSigCache && tlSigCache.session === session) return tlSigCache.byAgent;
@@ -2512,7 +2520,13 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   // tlMinPxPerMs (null ⇒ default) is the scroll-wheel zoom density; buildTimeline
   // still floors the chart to the host width, so a stale value below fit-to-width
   // simply renders as the overview.
-  const tl = timelineAtTime(session, T, { hostW, nowMs, minPxPerMs: tlMinPxPerMs ?? undefined });
+  // We show one session at a time, so there's vertical room: taller rows (TL_ROW_H)
+  // give the bars real presence, and a wider label column (TL_LABEL_W) stops agent
+  // names like "Djinn review-leak-detector" from clipping to "Djinn review-le…".
+  const tl = timelineAtTime(session, T, {
+    hostW, nowMs, minPxPerMs: tlMinPxPerMs ?? undefined,
+    rowH: TL_ROW_H, labelW: TL_LABEL_W,
+  });
   // The rows start at y = axisH (buildTimeline), so the first row's top is the
   // axis baseline — tick labels sit above it, gridlines run from it down.
   const axisY = tl.rows.length ? tl.rows[0].y : 20;
@@ -2733,7 +2747,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   const labelY = (r.y + r.h / 2 + 4).toFixed(1);
   const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
-    <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, 16))}</text>
+    <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, TL_LABEL_CHARS))}</text>
     ${errPip}
     ${sigHTML}
     ${moreHTML}
