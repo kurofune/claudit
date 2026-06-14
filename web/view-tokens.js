@@ -10,7 +10,7 @@
 import { fetchTokens } from './api.js';
 import { fmtNum, fmtCompact, escHtml } from './format.js';
 import { tokensStackedChart, wireChartInteractivity } from './charts.js';
-import { buildRows, wireGlobalFilters } from './table.js';
+import { buildRows, wireViewFilters } from './table.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -77,6 +77,11 @@ function tokTable(dataTable, labelKey, labelHead, labelTitle) {
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('tokens')}Tokens</h1></header>
+  <div class="controls view-filter" role="search">
+    <label>Filter rows: <input class="vf-text" type="search" placeholder="model, path, command…"></label>
+    <label>Min cost: <input class="vf-cost" type="number" value="0" step="0.01" min="0"></label>
+  </div>
+
   <details class="guide">
     <summary>How to read this section</summary>
     <div class="body">
@@ -227,7 +232,10 @@ export async function paint(route) {
     return [`<span title="${escHtml(full)}">${escHtml(head)}</span>`, false];
   });
 
-  wireGlobalFilters();
+  // Tokens filters tables only — its composition bar and volume trend
+  // are corpus-headline charts, so no onApply (they must not respond to
+  // the row filter). wireViewFilters re-renders the breakdown tables.
+  wireViewFilters(container);
   activateSubview(container, route && route.sub);
 
   const el = document.getElementById('nav-metric-tokens');
