@@ -8,7 +8,7 @@ import { fetchCache, fetchTrends } from './api.js';
 import { fmtNum, fmtMoney, hitRatioPill, escHtml, truncate } from './format.js';
 import { trendSparkHit } from './charts.js';
 import {
-  buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
+  buildRows, withTrend, injectTrendColumn, wireViewFilters,
 } from './table.js';
 import { tableBodySkeleton, summaryBandSkeleton } from './skeleton.js';
 
@@ -16,6 +16,10 @@ const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-$
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('cache')}Cache efficiency</h1></header>
+  <div class="controls view-filter" role="search">
+    <label>Filter rows: <input class="vf-text" type="search" placeholder="project, session, subagent…"></label>
+    <label>Min cost: <input class="vf-cost" type="number" value="0" step="0.01" min="0"></label>
+  </div>
 
   <details class="guide">
     <summary>Why miss tokens matter — and what you can do about them</summary>
@@ -251,7 +255,10 @@ export async function paint(route) {
     [escHtml(fmtMoney(r.CostUSD)), true],
   ]);
 
-  wireGlobalFilters();
+  // Cache filters tables only — the hit-ratio summary band is a corpus
+  // headline, so no onApply (it must not respond to the row filter).
+  // wireViewFilters re-renders the four breakdown tables.
+  wireViewFilters(container);
   activateSubview(container, route.sub);
 
   // Sidebar metric — overall hit-ratio tier pill.
