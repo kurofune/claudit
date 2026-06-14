@@ -2369,7 +2369,8 @@
   .itree-sess-body { padding: 2px var(--s-2) var(--s-2); }
   /* Caret rotates as the node opens; shared by session and agent rows. */
   .itree-caret {
-    flex: none; color: var(--ink-2); font-size: var(--t-1);
+    flex: none; color: var(--ink-2); font-size: 0.95rem; line-height: 1;
+    width: 0.95em; text-align: center;
     display: inline-block; transition: transform 0.12s ease;
   }
   .itree-sess[open] > summary .itree-caret,
