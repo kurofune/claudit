@@ -30,25 +30,36 @@ export function rowSearchText(r) {
   return s.toLowerCase();
 }
 
-// getFilterParams reads the global filter + min-cost inputs (rendered
-// in the SPA shell at #panel > .controls). Centralized here so
-// filterRows() and the legacy bare-anchor handlers stay in sync if
-// the input ids ever change.
-export function getFilterParams() {
-  const fEl = document.getElementById('filter');
-  const mEl = document.getElementById('mincost');
+// getFilterParams reads the filter + min-cost inputs. During the
+// per-view filter migration a view passes its own scope (the element
+// carrying [data-own-filter]); we read that scope's .vf-text/.vf-cost
+// inputs and fall back to the legacy global #filter/#mincost bar for
+// views not yet migrated. Centralized so filterRows() and the legacy
+// bare-anchor handlers stay in sync if the input selectors change.
+export function getFilterParams(scope) {
+  let fEl = scope && scope.querySelector('.vf-text');
+  let mEl = scope && scope.querySelector('.vf-cost');
+  if (!fEl) fEl = document.getElementById('filter');   // legacy global bar
+  if (!mEl) mEl = document.getElementById('mincost');
   const q = (fEl ? fEl.value : '').trim().toLowerCase();
   const minCost = parseFloat((mEl ? mEl.value : '0') || '0') || 0;
   return { q, minCost };
 }
 
-function filterRows(st) {
-  const { q, minCost } = getFilterParams();
-  return st.rows.filter(r => {
-    if (minCost > 0 && (r.CostUSD || 0) < minCost) return false;
-    if (q && !rowSearchText(r).includes(q)) return false;
-    return true;
-  });
+// rowPassesFilter is the pure predicate behind every filtered list —
+// the table state machine and view-specific chart re-renders share it
+// so a row is included/excluded identically everywhere. A missing
+// CostUSD counts as 0; the min-cost bound is inclusive (>=).
+export function rowPassesFilter(r, q, minCost) {
+  if (minCost > 0 && (r.CostUSD || 0) < minCost) return false;
+  if (q && !rowSearchText(r).includes(q)) return false;
+  return true;
+}
+
+function filterRows(st, table) {
+  const scope = table ? table.closest('[data-own-filter]') : null;
+  const { q, minCost } = getFilterParams(scope);
+  return st.rows.filter(r => rowPassesFilter(r, q, minCost));
 }
 
 // sortRows returns a stable-ish sorted shallow copy. null/undefined
@@ -100,7 +111,7 @@ function ensurePager(table) {
   pager.querySelector('[data-pager-action="next"]').addEventListener('click', () => {
     const st = tableStates.get(table);
     if (!st) return;
-    const totalPages = Math.max(1, Math.ceil(filterRows(st).length / st.pageSize));
+    const totalPages = Math.max(1, Math.ceil(filterRows(st, table).length / st.pageSize));
     if (st.page < totalPages - 1) { st.page++; renderTable(table); }
   });
   return pager;
@@ -110,7 +121,7 @@ export function renderTable(table) {
   const st = tableStates.get(table);
   if (!st) return;
 
-  const filtered = filterRows(st);
+  const filtered = filterRows(st, table);
   const sorted = sortRows(filtered, st.sortKey, st.sortDir);
   const totalRows = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / st.pageSize));
@@ -247,6 +258,38 @@ export function wireGlobalFilters() {
     mEl.addEventListener('input', applyFiltersAll);
     mEl.dataset.tableWired = '1';
   }
+}
+
+// wireViewFilters binds a single view's own .vf-text/.vf-cost inputs
+// (inside `scope`, the element carrying [data-own-filter]). On input it
+// re-renders that scope's paged tables (resetting to page 0), toggles
+// its drill-down `details tbody tr` rows, then calls onApply({q,minCost})
+// so the view can re-render any row-derived charts (e.g. Cost's
+// model/project hbars). Idempotent via a dataset.vfWired sentinel so
+// repeated calls across SSE repaints don't stack listeners.
+export function wireViewFilters(scope, onApply) {
+  if (!scope) return;
+  const apply = () => {
+    const { q, minCost } = getFilterParams(scope);
+    scope.querySelectorAll('table[data-table]').forEach(table => {
+      const st = tableStates.get(table);
+      if (!st) return;
+      st.page = 0;
+      renderTable(table);
+    });
+    scope.querySelectorAll('details tbody tr').forEach(tr => {
+      const cost = parseFloat(tr.dataset.cost || '0');
+      const text = tr.textContent.toLowerCase();
+      const matches = (!q || text.includes(q)) && (cost >= minCost);
+      tr.classList.toggle('hidden', !matches);
+    });
+    if (onApply) onApply({ q, minCost });
+  };
+  scope.querySelectorAll('.vf-text, .vf-cost').forEach(el => {
+    if (el.dataset.vfWired) return;
+    el.addEventListener('input', apply);
+    el.dataset.vfWired = '1';
+  });
 }
 
 // injectTrendColumn adds a "Trend" header cell to a sortable table

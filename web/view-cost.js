@@ -9,7 +9,7 @@ import { fetchCost, fetchTrends, fetchSubagents } from './api.js';
 import { fmtMoney, fmtPct, fmtNum, fmtDate, escHtml, truncate, pct } from './format.js';
 import { trendSpark } from './charts.js';
 import {
-  buildRows, withTrend, injectTrendColumn, wireGlobalFilters,
+  buildRows, withTrend, injectTrendColumn, wireViewFilters, rowPassesFilter,
 } from './table.js';
 import { hbarListSkeleton, tableBodySkeleton, stackedSkeleton } from './skeleton.js';
 
@@ -43,6 +43,10 @@ function projectBarsHTML(rows, totalCost) {
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('cost')}Cost</h1></header>
+  <div class="controls view-filter" role="search">
+    <label>Filter rows: <input class="vf-text" type="search" placeholder="model, path, command…"></label>
+    <label>Min cost: <input class="vf-cost" type="number" value="0" step="0.01" min="0"></label>
+  </div>
   <details class="guide">
     <summary>How to read this section</summary>
     <div class="body">
@@ -372,7 +376,17 @@ export async function paint(route) {
     ]);
   }
 
-  wireGlobalFilters();
+  // Local filter wiring. The model/project hbars are row-derived, so
+  // they re-render from the same filtered rows as the tables; totalCost
+  // stays the bar denominator (the percentages still read against
+  // whole-corpus spend). The stacked main/side bar is a corpus headline
+  // chart and is intentionally left untouched.
+  const applyChartFilter = ({ q, minCost }) => {
+    const keep = r => rowPassesFilter(r, q, minCost);
+    if (barsModel) barsModel.innerHTML = modelBarsHTML(byModel.filter(keep), totalCost);
+    if (barsProject) barsProject.innerHTML = projectBarsHTML(byProject.filter(keep), totalCost);
+  };
+  wireViewFilters(container, applyChartFilter);
   activateSubview(container, route.sub);
 
   // Sidebar metric — top model by cost. Mirrors the legacy navMetrics().

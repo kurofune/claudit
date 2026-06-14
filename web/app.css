@@ -807,6 +807,10 @@
     .totals .metric,
     .hotspot { animation: none; }
   }
+  /* [hidden] sets display:none, but .controls' own display:flex would
+     override it (author rule beats the UA [hidden] rule). Re-assert it
+     so the router can hide the global bar on views that own a filter. */
+  .controls[hidden] { display: none; }
   .controls {
     display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap;
     background: var(--surface);
