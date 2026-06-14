@@ -17,6 +17,7 @@ import {
   buildFlowLayout,
   baseName,
   agentTokens,
+  currentToolKind,
   refKey,
   parseRefKey,
   deepestRefs,
@@ -440,6 +441,33 @@ test('buildEventFeed done events carry the agent-level token total', () => {
   assert.ok(done, 'expected a done event');
   // Agent tuple: 100 + 50 + (10 + 5) + 200 = 365.
   assert.equal(done.tokens, 365);
+});
+
+// ── currentToolKind ─────────────────────────────────────────────────
+test('currentToolKind returns the kind of the last tool in the last step that has tools', () => {
+  const agent = {
+    steps: [
+      { tools: [{ name: 'Bash', kind: 'exec' }] },
+      { tools: [{ name: 'Read', kind: 'read' }, { name: 'Edit', kind: 'edit' }] },
+    ],
+  };
+  assert.equal(currentToolKind(agent), 'edit');
+});
+
+test('currentToolKind walks back past trailing tool-less steps', () => {
+  const agent = {
+    steps: [
+      { tools: [{ name: 'Bash', kind: 'exec' }] },
+      { tools: [] },
+    ],
+  };
+  assert.equal(currentToolKind(agent), 'exec');
+});
+
+test('currentToolKind is empty for a null/step-less agent or a missing kind', () => {
+  assert.equal(currentToolKind(null), '');
+  assert.equal(currentToolKind({}), '');
+  assert.equal(currentToolKind({ steps: [{ tools: [{ name: 'X' }] }] }), '');
 });
 
 // ── buildFlowLayout ─────────────────────────────────────────────────
@@ -1963,7 +1991,7 @@ test('detectSignals: retry-storm summary names the tool, attempt count, and deta
   assert.equal(storm.summary, 'Bash retried 3× (go test)');
 });
 
-// ── detectSignals (Phase 3b — slow-tool / error-cascade / idle-stall / runaway-context) ──
+// ── detectSignals (Phase 3b — slow-tool / error-cascade / idle-stall) ──
 // Same contract as 3a: { kind, severity [0,1], tier, ref, summary }. Tool wall-clock
 // uses numeric started_at/ended_at (parseTime passes numbers through).
 
@@ -2206,9 +2234,9 @@ test('detectSignals: idle-stall summary names the idle minutes', () => {
   assert.equal(b.summary, 'Idle 10.0 min after the last activity');
 });
 
-test('detectSignals: context reaching runawayFill of the window emits a runaway-context at the peak step', () => {
-  // Peak context 180k of the inferred 200k window = 0.9 fill, over the 0.8
-  // default. The peak turn is main step 1, so the signal refs s1#0.1.
+test('detectSignals never emits a runaway-context signal (the inferred-window guess was removed)', () => {
+  // Even a prompt that nearly fills the standard tier yields no context signal:
+  // the window size is unknowable from the transcript, so we no longer guess it.
   const graph = {
     sessions: [{
       session_id: 's1',
@@ -2217,50 +2245,6 @@ test('detectSignals: context reaching runawayFill of the window emits a runaway-
         { context_tokens: 180000 },
         { context_tokens: 100000 },
       ] },
-      children: [],
-    }],
-  };
-  const run = detectSignals(graph).filter(s => s.kind === 'runaway-context');
-  assert.equal(run.length, 1);
-  assert.equal(run[0].ref, 's1#0.1');
-  assert.equal(run[0].severity, 0.9); // peakFill = 180k / 200k
-});
-
-test('detectSignals: a run staying below runawayFill yields no runaway-context', () => {
-  // Peak 100k of the 200k window = 0.5 fill, under the 0.8 default.
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [{ context_tokens: 50000 }, { context_tokens: 100000 }] },
-      children: [],
-    }],
-  };
-  assert.equal(detectSignals(graph).filter(s => s.kind === 'runaway-context').length, 0);
-});
-
-test('detectSignals: runaway-context summary names the peak tokens and the window size', () => {
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [
-        { context_tokens: 50000 },
-        { context_tokens: 180000 },
-        { context_tokens: 100000 },
-      ] },
-      children: [],
-    }],
-  };
-  const run = detectSignals(graph).find(s => s.kind === 'runaway-context');
-  assert.equal(run.summary, 'Context grew to 180k tokens — 90% of the 200k window');
-});
-
-test('detectSignals: a peak above the 200k tier infers the 1M window, so its fill stays low and no signal fires', () => {
-  // 250k exceeds the standard 200k window, so capacity is inferred as 1M; the
-  // fill is then 0.25 and nothing is flagged (the big-window run has headroom).
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [{ context_tokens: 250000 }] },
       children: [],
     }],
   };
@@ -3472,25 +3456,19 @@ test('errorRates tolerates null agents, null steps, and null tool entries', () =
 test('contextSeries returns a zeroed/empty result for null/empty agents', () => {
   const empty = {
     turns: 0, series: [], peakContext: 0, cacheHit: 0,
-    capacity: 200000, peakFill: 0,
     totals: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 },
   };
   assert.deepEqual(contextSeries(null), empty);
   assert.deepEqual(contextSeries([]), empty);
 });
 
-test('contextSeries infers the standard 200k window and reports peakFill when peak <= 200k', () => {
-  const agents = [{ steps: [{ context_tokens: 50000 }, { context_tokens: 120000 }] }];
-  const r = contextSeries(agents);
-  assert.equal(r.capacity, 200000);
-  assert.equal(r.peakFill, 120000 / 200000);   // 0.6
-});
-
-test('contextSeries infers the 1M window when a prompt exceeded the standard 200k', () => {
-  const agents = [{ steps: [{ context_tokens: 180000 }, { context_tokens: 397000 }] }];
-  const r = contextSeries(agents);
-  assert.equal(r.capacity, 1000000);
-  assert.equal(r.peakFill, 397000 / 1000000);   // 0.397
+test('contextSeries reports the absolute peak prompt size (no inferred window %)', () => {
+  // The transcript records neither the context-window size nor the 1M-beta flag,
+  // so contextSeries exposes only the real peak — never a guessed fill fraction.
+  const r = contextSeries([{ steps: [{ context_tokens: 180000 }, { context_tokens: 397000 }] }]);
+  assert.equal(r.peakContext, 397000);
+  assert.equal(r.capacity, undefined);
+  assert.equal(r.peakFill, undefined);
 });
 
 test('contextSeries folds each step\'s Go-named token fields, combining 5m+1h cache writes', () => {

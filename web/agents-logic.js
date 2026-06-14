@@ -862,18 +862,14 @@ export function errorRates(agents, opts = {}) {
 //                 cacheRead, total, cacheHit, agentLabel }; t is epoch ms (NaN
 //                 when the step had no parseable timestamp). total is the four-
 //                 band sum (matches agentTokens).
-//   peakContext — max context across the series (0 when empty)
+//   peakContext — max context across the series (0 when empty), an ABSOLUTE
+//                 prompt size. We deliberately do NOT derive a "% of window":
+//                 the transcript records neither the context-window size nor the
+//                 1M-beta flag, so any denominator would be a guess that
+//                 overstates fill whenever a run's prompts stayed under 200k.
 //   cacheHit    — overall cacheRead / (cacheRead + input + cacheWrite), 0 when
 //                 the denominator is 0
-//   capacity    — inferred context-window size: 1M when any prompt exceeded the
-//                 standard 200k tier, else 200k (the tier isn't in the transcript)
-//   peakFill    — peakContext / capacity: how full the window got (0 when empty)
 //   totals      — summed { input, output, cacheWrite, cacheRead, total }
-// Context-window tiers used to express how full the window got (peakFill). The
-// standard Claude window is 200k; the extended beta is 1M. See the inference note
-// in contextSeries — the tier isn't recorded in the transcript.
-export const STD_CONTEXT_WINDOW = 200000;
-export const EXT_CONTEXT_WINDOW = 1000000;
 
 export function contextSeries(agents, opts = {}) {
   const series = [];
@@ -901,17 +897,9 @@ export function contextSeries(agents, opts = {}) {
     return x.t - y.t;
   });
   const promptTotal = totals.cacheRead + totals.input + totals.cacheWrite;
-  // The transcript doesn't record the model's context-window size (the 1M-beta
-  // tag isn't in the data), so infer the tier from the data itself: a prompt that
-  // exceeded the standard 200k window can only have run on the 1M tier. A run that
-  // stayed under 200k is reported against the standard window — we can't tell a
-  // never-filled 1M session apart from a 200k one, and the standard tier is the
-  // honest default.
-  const capacity = peakContext > STD_CONTEXT_WINDOW ? EXT_CONTEXT_WINDOW : STD_CONTEXT_WINDOW;
   return {
     turns: series.length, series, peakContext,
     cacheHit: promptTotal ? totals.cacheRead / promptTotal : 0,
-    capacity, peakFill: capacity ? peakContext / capacity : 0,
     totals,
   };
 }
@@ -1483,6 +1471,19 @@ export function agentTokens(agent) {
   return { input, output, cacheWrite, cacheRead, total: input + output + cacheWrite + cacheRead };
 }
 
+// currentToolKind returns the normalized ToolKind ("exec"/"read"/…) of an
+// agent's most recent tool call — the last tool of the last step that has any,
+// mirroring the backend's lastToolName but yielding the kind so a running-agent
+// card can reuse the feed's badge + color. '' when there's no tool or no kind.
+export function currentToolKind(agent) {
+  const steps = (agent && agent.steps) || [];
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const tools = (steps[i] && steps[i].tools) || [];
+    if (tools.length) return (tools[tools.length - 1] || {}).kind || '';
+  }
+  return '';
+}
+
 // refKey serializes a selection ref to a stable string. Forms:
 //   agent  "<sessionId>#<agentIndex>"
 //   step   "<sessionId>#<agentIndex>.<stepIndex>"
@@ -1877,7 +1878,6 @@ export function detectSignals(graph, opts = {}) {
   // `claudit report` (which can't know the live clock) simply skips the
   // trailing-gap check instead of inventing a stall.
   const nowMs = (typeof opts.nowMs === 'number' && !Number.isNaN(opts.nowMs)) ? opts.nowMs : null;
-  const runawayFill = opts.runawayFill > 0 ? opts.runawayFill : 0.8;
   const signals = [];
   for (const session of (graph && graph.sessions) || []) {
     const sid = (session && session.session_id) || '';
@@ -1887,7 +1887,6 @@ export function detectSignals(graph, opts = {}) {
     signals.push(...slowToolSignals(agents, sid, slowToolMin, slowMultiple));
     signals.push(...errorCascadeSignals(agents, sid, errorCascadeMin));
     signals.push(...idleStallSignals(agents, sid, idleStallMs, nowMs));
-    signals.push(...runawayContextSignals(agents, sid, runawayFill));
   }
   // Worst-first. JS sort is stable, so equal-severity signals keep emission order.
   signals.sort((a, b) => b.severity - a.severity);
@@ -2047,34 +2046,6 @@ function idleStallSignals(agents, sid, idleStallMs, nowMs) {
     if (nowMs != null && !Number.isNaN(prevEnd) && nowMs - prevEnd > idleStallMs) {
       emit(ai, prevEndSi, nowMs - prevEnd, true);
     }
-  });
-  return out;
-}
-
-// runawayContextSignals: per agent, flag a run whose context window grew to at
-// least runawayFill of its inferred capacity — the prompt nearly filled the
-// window, the runaway risk the Token panel surfaces. Reuses contextSeries for
-// the peak and the capacity-tier inference (200k vs the 1M beta, read off the
-// data since the tier isn't recorded), so a big-window run with headroom doesn't
-// trip. ref is the peak-context turn (sid#ai.si). severity IS the fill fraction.
-function runawayContextSignals(agents, sid, runawayFill) {
-  const out = [];
-  agents.forEach((a, ai) => {
-    const cs = contextSeries([a]);
-    if (!(cs.peakContext > 0) || cs.peakFill < runawayFill) return;
-    // Locate the peak turn directly (the series doesn't carry step indices).
-    let peakSi = 0, best = -1;
-    (a.steps || []).forEach((step, si) => {
-      const c = (step && step.context_tokens) || 0;
-      if (c > best) { best = c; peakSi = si; }
-    });
-    const severity = Math.max(0, Math.min(1, cs.peakFill));
-    const tier = cs.peakFill >= 0.95 ? 'high' : cs.peakFill >= 0.85 ? 'med' : 'low';
-    const peakK = Math.round(cs.peakContext / 1000);
-    const capK = Math.round(cs.capacity / 1000);
-    const pct = Math.round(cs.peakFill * 100);
-    const summary = `Context grew to ${peakK}k tokens — ${pct}% of the ${capK}k window`;
-    out.push({ kind: 'runaway-context', severity, tier, ref: `${sid}#${ai}.${peakSi}`, summary });
   });
   return out;
 }

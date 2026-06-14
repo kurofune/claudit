@@ -33,7 +33,7 @@ import { setLiveHandler } from './sse.js';
 import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
   agentLabel, buildEventFeed, parseTime,
-  refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, baseName,
+  refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, currentToolKind, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
   criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
@@ -1394,25 +1394,28 @@ function activeCardHTML(session, agent, idx) {
   const c = colorSlot(idx);
   const sel = ref === selectedRef ? ' is-selected' : '';
   const label = agentLabel(agent);
+  const kind = currentToolKind(agent);
   const tool = agent.current_tool
-    ? `<div class="acard-tool"><span class="acard-tool-name">${escHtml(agent.current_tool)}</span></div>`
+    ? `<div class="acard-tool">${kindBadge(kind)}<span class="acard-tool-name kind-${kindFamily(kind)}">${escHtml(agent.current_tool)}</span></div>`
     : `<div class="acard-tool acard-tool-idle">working…</div>`;
   const desc = agent.kind !== 'main' && agent.description
     ? `<div class="acard-desc" title="${escHtml(agent.description)}">${escHtml(agent.description)}</div>` : '';
   const steps = (agent.steps || []).length;
   const tokens = agentTokens(agent).total;
+  // Project leads as the card title; the agent name sits beneath it. The tool
+  // and metric reuse the feed's iconography/hues so the two views read alike.
   return `<article class="acard is-running${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
     <div class="acard-head">
       <span class="acard-pulse"></span>
-      <span class="acard-label">${escHtml(label)}</span>
-      <span class="acard-proj" title="${escHtml(session.cwd || '')}">${escHtml(baseName(session.cwd))}</span>
+      <span class="acard-proj" title="${escHtml(session.cwd || '')}">${escHtml(baseName(session.cwd) || '—')}</span>
       ${elapsedSpan(agent, 'acard-elapsed')}
     </div>
+    <div class="acard-label" title="${escHtml(label)}">${escHtml(label)}</div>
     ${desc}
     ${tool}
     <div class="acard-meta">
       <span>${fmtNum(steps)} step${steps === 1 ? '' : 's'}</span>
-      ${tokens ? `<span>${fmtCompact(tokens)} tok</span>` : ''}
+      ${tokens ? `<span class="acard-tok">${fmtCompact(tokens)} tok</span>` : ''}
       <span class="acard-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
     </div>
   </article>`;
@@ -1445,7 +1448,7 @@ function feedRowHTML(e) {
   return `<div class="fe-row fe-${e.kind}${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
     <span class="fe-time">${escHtml(time)}</span>
     ${feCtx(e)}
-    <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 14))}</span>
+    <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 24))}</span>
     ${glyph}
     <span class="fe-body">${body}</span>
     ${metric}
@@ -2196,17 +2199,18 @@ function tokTurnsSvg(bins) {
 // render from the scoped agents (no scrub / SSE), so it degrades cleanly in the
 // static `claudit report`.
 function renderTokenPanel(agents) {
-  const { turns, series, peakContext, cacheHit, capacity, peakFill, totals } = contextSeries(agents);
+  const { turns, series, peakContext, cacheHit, totals } = contextSeries(agents);
   const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Token &amp; context</h3></header>`;
   if (turns === 0) {
     return `<section class="ins-panel">${head}<div class="ins-empty">No token usage in this scope.</div></section>`;
   }
 
-  // peakFill = how full the (inferred) context window got — peak prompt ÷ window.
-  const capLabel = fmtCompact(capacity);
-  const fillTitle = `Peak prompt was ${fmtCompact(peakContext)} of the inferred ${capLabel} context window (${fmtPct1(peakFill)} full)`;
+  // Peak prompt size is shown as an absolute figure — not a "% of window" — since
+  // the transcript records neither the model's context-window size nor the 1M-beta
+  // flag, so any denominator would be a guess (it overstates fill whenever a run's
+  // prompts stayed under the 200k tier boundary).
   const stat = (k, v, title) => `<span class="ins-stat"${title ? ` title="${escHtml(title)}"` : ''}><span class="ins-stat-k">${k}</span><span class="ins-stat-v">${escHtml(v)}</span></span>`;
-  const stats = `<div class="ins-stats">${stat('cache hit', fmtPct1(cacheHit))}${stat('peak ctx', `${fmtCompact(peakContext)} (${fmtPct1(peakFill)})`, fillTitle)}<span class="ins-stat ins-stat-n">${fmtNum(turns)} turns</span></div>`;
+  const stats = `<div class="ins-stats">${stat('cache hit', fmtPct1(cacheHit))}${stat('peak ctx', fmtCompact(peakContext), 'Largest prompt fed to the model in this scope')}<span class="ins-stat ins-stat-n">${fmtNum(turns)} turns</span></div>`;
 
   // Downsample so a long run stays legible (and cheap to render) — sub-pixel bars
   // and tens of thousands of SVG nodes help no one. binSeries folds nothing away.
@@ -2218,7 +2222,7 @@ function renderTokenPanel(agents) {
   const last = series[series.length - 1].context;
   const ctxFig = `<figure class="ins-tok-fig">
       ${tokCtxSvg(bins, peakContext)}
-      <figcaption class="ins-tok-cap">Context over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> of ${escHtml(capLabel)} window (${escHtml(fmtPct1(peakFill))}) · last ${escHtml(fmtCompact(last))}</figcaption>
+      <figcaption class="ins-tok-cap">Context over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> · last ${escHtml(fmtCompact(last))}</figcaption>
     </figure>`;
 
   // Token totals composition — a four-band stacked bar (output→hot, input→warn,

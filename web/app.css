@@ -2254,7 +2254,7 @@
   /* Active-now cards. */
   .mc-active-grid {
     display: grid; gap: var(--s-2);
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
   .acard {
     border: 1px solid var(--border);
@@ -2263,39 +2263,45 @@
     padding: var(--s-2) var(--s-3); display: flex; flex-direction: column; gap: var(--s-1);
   }
   .acard.is-running { box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent-2) 22%, transparent); }
-  .acard-head { display: flex; align-items: center; gap: var(--s-2); }
+  .acard-head { display: flex; align-items: baseline; gap: var(--s-2); }
   .acard-pulse {
-    width: 8px; height: 8px; border-radius: 50%; flex: none;
+    width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center;
     background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite;
   }
-  .acard-label { font-weight: 600; color: var(--ink); }
+  /* Project leads as the card title — plain bold text, no pill. */
   .acard-proj {
-    font-size: var(--t-1); color: var(--ink-2);
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-pill); padding: 1px 7px;
-    max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600; color: var(--ink); font-size: var(--t-3);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Agent name sits beneath the project title, one notch quieter. */
+  .acard-label {
+    color: var(--ink-2); font-weight: 600; font-size: var(--t-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .acard { cursor: pointer; }
   .acard.is-selected { box-shadow: 0 0 0 2px var(--accent); }
   .acard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .acard-elapsed {
-    margin-left: auto; font-variant-numeric: tabular-nums;
-    color: var(--accent-2); font-weight: 600; font-size: var(--t-2);
+    margin-left: auto; flex: none; font-variant-numeric: tabular-nums;
+    color: var(--warn); font-weight: 600; font-size: var(--t-2);
   }
   .acard-desc { font-size: var(--t-2); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Tool indicator: feed-style badge + kind-colored name, no surrounding box. */
   .acard-tool {
+    display: flex; align-items: center; gap: var(--s-1);
     font-family: var(--font-mono); font-size: var(--t-2);
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r-sm); padding: 2px 6px; color: var(--ink);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    overflow: hidden; white-space: nowrap;
   }
+  .acard-tool .kind-badge { width: 16px; height: 16px; }
   .acard-tool-idle { color: var(--ink-2); font-style: italic; }
-  .acard-tool-name { font-weight: 600; }
+  .acard-tool-name { color: var(--kc, var(--ink)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
   .acard-meta {
     display: flex; align-items: center; gap: var(--s-3);
     font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums;
   }
-  .acard-meta .acard-cost { margin-left: auto; color: var(--ink); font-weight: 600; }
+  /* Same three hues as the live-feed metric: tokens blue, cost green. */
+  .acard-meta .acard-tok { color: var(--accent); }
+  .acard-meta .acard-cost { margin-left: auto; color: var(--accent-2); font-weight: 600; }
 
   /* Live feed. */
   /* The feed owns the column tracks; every row is a subgrid spanning them, so
@@ -2307,7 +2313,7 @@
     border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--surface); font-family: var(--font-mono); font-size: var(--t-2);
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) 14ch auto minmax(0, 2.2fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.3fr) auto minmax(0, 2.2fr) auto;
     align-content: start; column-gap: var(--s-2);
   }
   .agent-feed:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
