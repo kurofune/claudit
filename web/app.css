@@ -2305,7 +2305,7 @@
   }
   .agent-feed:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .fe-row {
-    display: grid; grid-template-columns: auto 14ch auto minmax(0, 1fr) auto;
+    display: grid; grid-template-columns: auto 14ch minmax(0, 1fr) auto minmax(0, 2.2fr) auto;
     align-items: baseline; gap: var(--s-2);
     padding: 3px var(--s-3); border-bottom: 1px solid var(--border);
     border-left: 3px solid var(--cc, var(--border));
@@ -2318,6 +2318,13 @@
   .fe-metric { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .fe-time { color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .fe-agent { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* project › thread provenance — the cross-session feed mixes rows from every
+     open session, so each names where it came from. Dim + truncating so it
+     stays subordinate to the agent name and body. */
+  .fe-ctx { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-1); }
+  .fe-ctx-proj { color: var(--ink); }
+  .fe-ctx-sep { color: var(--ink-3, var(--ink-2)); margin: 0 0.35em; }
+  .fe-ctx-thread { font-variant-numeric: tabular-nums; }
   .fe-glyph { width: 1.2em; text-align: center; }
   .fe-ok { color: var(--ok, var(--accent-2)); }
   .fe-err { color: var(--danger, #e5484d); }

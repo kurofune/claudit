@@ -395,6 +395,53 @@ test('buildEventFeed tool events inherit the PARENT step cost_usd/duration_ms', 
   assert.equal(read.durationMs, 1200);
 });
 
+// One session with a cwd, per-step tokens, and an agent-level token tuple so
+// the feed can show project→thread context and a per-row token count.
+const FEED_TOK_GRAPH = {
+  sessions: [{
+    session_id: 'sess-abc123def456',
+    cwd: '/Users/x/Projects/claudit',
+    main: {
+      kind: 'main', status: 'done', cost_usd: 1.0,
+      started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:05Z',
+      tokens: { InputTokens: 100, OutputTokens: 50, CacheCreate5mTokens: 10, CacheCreate1hTokens: 5, CacheReadTokens: 200 },
+      steps: [
+        {
+          timestamp: '2026-05-01T12:00:00Z', cost_usd: 0.02, duration_ms: 300,
+          tokens: { InputTokens: 80, OutputTokens: 40, CacheCreate5mTokens: 10, CacheReadTokens: 120 },
+          tools: [{ name: 'Bash', kind: 'exec', status: 'ok' }],
+        },
+      ],
+    },
+    children: [],
+  }],
+};
+
+test('buildEventFeed carries the session cwd on every event so rows can show project→thread', () => {
+  const feed = buildEventFeed(FEED_TOK_GRAPH);
+  assert.ok(feed.length > 0);
+  for (const e of feed) {
+    assert.equal(e.cwd, '/Users/x/Projects/claudit', `cwd missing on ${e.kind} event`);
+    assert.equal(e.sessionId, 'sess-abc123def456');
+  }
+});
+
+test('buildEventFeed tool events carry the parent step token total', () => {
+  const feed = buildEventFeed(FEED_TOK_GRAPH);
+  const tool = feed.find(e => e.kind === 'tool' && e.tool === 'Bash');
+  assert.ok(tool, 'expected a Bash tool event');
+  // Step tuple: 80 + 40 + 10 + 120 = 250.
+  assert.equal(tool.tokens, 250);
+});
+
+test('buildEventFeed done events carry the agent-level token total', () => {
+  const feed = buildEventFeed(FEED_TOK_GRAPH);
+  const done = feed.find(e => e.kind === 'done');
+  assert.ok(done, 'expected a done event');
+  // Agent tuple: 100 + 50 + (10 + 5) + 200 = 365.
+  assert.equal(done.tokens, 365);
+});
+
 // ── buildFlowLayout ─────────────────────────────────────────────────
 test('buildFlowLayout centers the main node and links each child', () => {
   const session = {

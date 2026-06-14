@@ -1096,6 +1096,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
   const events = [];
   for (const s of sessions) {
     const sid = (s && s.session_id) || '';
+    const cwd = (s && s.cwd) || '';
     flattenSession(s).forEach((a, idx) => {
       if (!a) return;
       const label = agentLabel(a);
@@ -1104,7 +1105,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const st = parseTime(a.started_at);
         if (!Number.isNaN(st)) {
           events.push({
-            kind: 'spawn', t: st, sessionId: sid, agentIndex: idx,
+            kind: 'spawn', t: st, sessionId: sid, cwd, agentIndex: idx,
             agentLabel: label, description: a.description || '',
           });
         }
@@ -1115,12 +1116,13 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         (step.tools || []).forEach((tool, toolIndex) => {
           if (!tool) return;
           events.push({
-            kind: 'tool', t, sessionId: sid, agentIndex: idx, agentLabel: label,
+            kind: 'tool', t, sessionId: sid, cwd, agentIndex: idx, agentLabel: label,
             tool: tool.name || '', toolKind: tool.kind || '', detail: tool.detail || '',
             input: tool.input || '', status: tool.status || '',
             output: tool.output || '',
             stepIndex, toolIndex,
             cost_usd: step.cost_usd || 0, durationMs: step.duration_ms || 0,
+            tokens: agentTokens(step).total,
           });
         });
       });
@@ -1130,8 +1132,9 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const et = parseTime(a.ended_at);
         if (!Number.isNaN(et)) {
           events.push({
-            kind: 'done', t: et, sessionId: sid, agentIndex: idx,
+            kind: 'done', t: et, sessionId: sid, cwd, agentIndex: idx,
             agentLabel: label, steps: (a.steps || []).length, cost_usd: a.cost_usd || 0,
+            tokens: agentTokens(a).total,
           });
         }
       }

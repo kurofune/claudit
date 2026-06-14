@@ -1434,29 +1434,42 @@ function feedRowHTML(e) {
   } else if (e.kind === 'done') {
     glyph = '<span class="fe-glyph fe-done">✓</span>';
     body = `<span class="fe-verb">done</span> <span class="fe-dim">${fmtNum(e.steps)} step${e.steps === 1 ? '' : 's'}</span>`;
-    metric = feMetric(e.cost_usd, 0);
+    metric = feMetric(e.cost_usd, 0, e.tokens);
   } else {
     if (e.status === 'error') glyph = '<span class="fe-glyph fe-err">✗</span>';
     else if (e.status === 'ok') glyph = '<span class="fe-glyph fe-ok">✓</span>';
     const arg = e.input || e.detail;
     body = `${kindBadge(e.toolKind)}<span class="fe-tool kind-${kindFamily(e.toolKind)}">${escHtml(e.tool)}</span>${arg ? ` <span class="fe-arg" title="${escHtml(e.input || e.detail)}">${escHtml(clip(arg, 72))}</span>` : ''}`;
-    metric = feMetric(e.cost_usd, e.durationMs);
+    metric = feMetric(e.cost_usd, e.durationMs, e.tokens);
   }
   return `<div class="fe-row fe-${e.kind}${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
     <span class="fe-time">${escHtml(time)}</span>
     <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 14))}</span>
+    ${feCtx(e)}
     ${glyph}
     <span class="fe-body">${body}</span>
     ${metric}
   </div>`;
 }
 
-// feMetric is the compact per-row cost·duration chip — the feed doubles as a
-// spend/latency heat-map. Renders nothing when both are zero.
-function feMetric(cost, ms) {
+// feCtx names the project→thread a feed row belongs to — the cross-session feed
+// interleaves rows from every open session, so each one shows where it came
+// from: the cwd's project folder and the short session id. The full path and
+// id ride on the title for disambiguation when basenames collide.
+function feCtx(e) {
+  const proj = baseName(e.cwd) || '—';
+  const thread = shortId(e.sessionId || '');
+  const title = `${e.cwd || ''}${thread ? ` · ${e.sessionId}` : ''}`;
+  return `<span class="fe-ctx" title="${escHtml(title)}"><span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
+}
+
+// feMetric is the compact per-row cost·duration·tokens chip — the feed doubles
+// as a spend/latency/token heat-map. Renders nothing when all are empty.
+function feMetric(cost, ms, tokens) {
   const parts = [];
   if (cost) parts.push(fmtMoney(cost));
   if (ms) parts.push(formatElapsed(ms));
+  if (tokens) parts.push(`${fmtCompact(tokens)} tok`);
   return parts.length ? `<span class="fe-metric">${escHtml(parts.join(' · '))}</span>` : '';
 }
 
