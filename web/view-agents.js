@@ -37,7 +37,7 @@ import {
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
   criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
-  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, detectSignals, spawnTargetIndex,
+  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, detectSignals, signalPipsByAgent, spawnTargetIndex,
   conversationSegments,
   conversationReplies,
   conversationSessionList,
@@ -2442,6 +2442,26 @@ function timelineSummaryHTML(s) {
     `<span class="tlc tlc-cost" title="session cost">💰 ${escHtml(fmtMoney(s.cost_usd))}</span>`;
 }
 
+// Timeline signal pips (Phase 3d): the per-agent anomaly markers drawn in the
+// Gantt gutter come from the SAME detectSignals output the Insights → Signals
+// panel uses, scoped to the ONE plotted session. detectSignals is pure but not
+// free, and renderScrub repaints the sessions every rAF frame of a scrub drag, so
+// the result is memoized by session-object identity — a data reload swaps the
+// session reference and invalidates it; scrubbing the same session reuses it. nowMs
+// keeps the static-safe contract (serve → live clock, static → undefined), the same
+// as the Signals panel; pip presence doesn't depend on the playhead T (it's gated
+// per row by phase, not by signal data), so a stale nowMs across scrub frames is
+// harmless.
+const TL_SIG_CAP = 3;
+let tlSigCache = null; // { session, byAgent }
+function timelineSignalPips(session, sid) {
+  if (tlSigCache && tlSigCache.session === session) return tlSigCache.byAgent;
+  const nowMs = isServeMode() ? Date.now() : undefined;
+  const byAgent = signalPipsByAgent(detectSignals({ sessions: [session] }, { nowMs }), sid, TL_SIG_CAP);
+  tlSigCache = { session, byAgent };
+  return byAgent;
+}
+
 function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
   const sid = session.session_id || '';
   // tlMinPxPerMs (null ⇒ default) is the scroll-wheel zoom density; buildTimeline
@@ -2478,7 +2498,10 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   // per agent. The session pair gets the loud ▲; the per-agent pair a subtle
   // outline. crit.refs maps a segment refKey → which mark(s) to draw on it.
   const crit = criticalMarks(tl.rows);
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit));
+  // Per-agent anomaly pips for this session's gutter (Phase 3d), memoized so a
+  // scrub drag's per-frame repaint doesn't re-run detectSignals.
+  const sigPips = timelineSignalPips(session, sid);
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit, sigPips.get(r.rowIndex)));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
@@ -2534,7 +2557,7 @@ function criticalMarks(rows) {
   return refs;
 }
 
-function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map()) {
+function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map(), sig = null) {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
@@ -2550,6 +2573,27 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   const errs = (agent && agent.error_count) || 0;
   const errPip = errs > 0 && r.phase !== 'pending'
     ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
+    : '';
+  // Signal pips (Phase 3d): one small ▲ per detected anomaly on this agent, tier-
+  // colored, in the frozen gutter just left of the err-pip (same off-screen-proof
+  // rationale). They share the err-pip's pending gate — a not-yet-started row can't
+  // have anomalies at T. Each pip carries data-ref = the signal's exact refKey
+  // (agent/step/tool), so a click routes through the shared data-ref delegate and
+  // lands selection on the anomaly — no bespoke handler. Worst-first (the list is
+  // severity-ordered), capped at TL_SIG_CAP with a +N overflow glyph; the full list
+  // lives in Insights → Signals.
+  const sigPips = (sig && r.phase !== 'pending') ? sig.pips : [];
+  const sigOverflow = (sig && r.phase !== 'pending') ? sig.overflow : 0;
+  const pipCy = r.y + r.h / 2;
+  // Reserve the err-pip's slot (chartX-7) so pips never collide with it; step left.
+  const pipBaseX = tl.chartX - 7 - (errs > 0 && r.phase !== 'pending' ? 9 : 0);
+  const sigHTML = sigPips.map((p, i) => {
+    const px = pipBaseX - i * 9;
+    const d = `M ${px.toFixed(1)} ${(pipCy - 4).toFixed(1)} L ${(px - 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} L ${(px + 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} Z`;
+    return `<path class="tl-sig-pip sig-${p.tier}" data-ref="${escHtml(p.ref)}" d="${d}"><title>${escHtml(p.summary)}</title></path>`;
+  }).join('');
+  const moreHTML = sigOverflow > 0
+    ? `<text class="tl-sig-more" x="${(pipBaseX - sigPips.length * 9).toFixed(1)}" y="${(pipCy + 3).toFixed(1)}" text-anchor="end">+${sigOverflow}<title>${sigOverflow} more signal${sigOverflow === 1 ? '' : 's'} — see Insights → Signals</title></text>`
     : '';
   // Segments tile the bar on the time axis at the finest grain the data allows:
   // one sub-span per TOOL where the backend captured tool wall-clock (toolIndex
@@ -2646,6 +2690,8 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
     <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, 16))}</text>
     ${errPip}
+    ${sigHTML}
+    ${moreHTML}
     <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
   </g>`;
   const chart = `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">

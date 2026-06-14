@@ -2712,6 +2712,18 @@
   /* Red error pip on a bar whose agent hit ≥1 tool error — a thin surface ring
      keeps it legible on both the accent-soft (main) and plain (sub) bar fills. */
   .tl-err-pip { fill: var(--danger, #e5484d); stroke: var(--surface); stroke-width: 1.5; }
+  /* Signal pips (Phase 3d): one ▲ per detected anomaly on an agent, in the frozen
+     gutter just left of the err-pip. Tier-colored to match the Insights → Signals
+     palette (high=danger, med=c-4, low=ink-2); a thin surface ring keeps them
+     legible on either bar fill. Clickable — data-ref routes the shared select(). */
+  .tl-sig-pip { stroke: var(--surface); stroke-width: 1; cursor: pointer; transition: opacity 0.12s ease; }
+  .tl-sig-pip:hover { opacity: 0.75; }
+  .tl-sig-pip.sig-high { fill: var(--danger, #e5484d); }
+  .tl-sig-pip.sig-med  { fill: var(--c-4); }
+  .tl-sig-pip.sig-low  { fill: var(--ink-2); }
+  /* +N overflow when an agent flags more anomalies than the gutter shows; the full
+     list is in Insights → Signals. Falls through to selecting the agent on click. */
+  .tl-sig-more { fill: var(--ink-2); font-size: 9px; font-weight: 600; cursor: default; }
   /* Idle / wait gap (Phase 1b): the dead air between a turn's last tool and the
      next turn. Drawn empty — a faint wash + dashed outline — so it reads as "no
      work here" against the solid kind-colored tool segments. Honest-only: only

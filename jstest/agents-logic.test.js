@@ -39,6 +39,7 @@ import {
   filterTrace,
   detectRetries,
   detectSignals,
+  signalPipsByAgent,
   spawnTargetIndex,
   conversationSegments,
   conversationReplies,
@@ -2248,6 +2249,83 @@ test('detectSignals: a successful tool breaks the run so two short error runs ar
     }],
   };
   assert.equal(detectSignals(graph).filter(s => s.kind === 'error-cascade').length, 0);
+});
+
+// ── signalPipsByAgent (Phase 3d — Timeline gutter pips) ──────────────
+// signalPipsByAgent buckets detectSignals output into per-agent pip lists for
+// the ONE session the Timeline plots. Returns Map<agentIndex, { pips, overflow }>.
+test('signalPipsByAgent: returns an empty Map for non-array signals or a falsy sessionId', () => {
+  assert.equal(signalPipsByAgent(null, 's1').size, 0);
+  assert.equal(signalPipsByAgent(undefined, 's1').size, 0);
+  assert.equal(signalPipsByAgent([{ ref: 's1#0', tier: 'high', summary: 'x', kind: 'cost-whale' }], '').size, 0);
+});
+
+test('signalPipsByAgent: groups signals by agent index, preserving worst-first input order, with {ref, tier, summary, kind} pips', () => {
+  // detectSignals returns severity-sorted; the bucketer must keep that order so
+  // the kept pips per agent are the worst. Agent 0 gets two (in order), agent 2 one.
+  const signals = [
+    { ref: 's1#0.3', tier: 'high', summary: 'whale', kind: 'cost-whale' },
+    { ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', kind: 'slow-tool' },
+    { ref: 's1#0.5', tier: 'low', summary: 'retry', kind: 'retry-storm' },
+  ];
+  const byAgent = signalPipsByAgent(signals, 's1');
+  assert.deepEqual([...byAgent.keys()].sort(), [0, 2]);
+  assert.deepEqual(byAgent.get(0), {
+    pips: [
+      { ref: 's1#0.3', tier: 'high', summary: 'whale', kind: 'cost-whale' },
+      { ref: 's1#0.5', tier: 'low', summary: 'retry', kind: 'retry-storm' },
+    ],
+    overflow: 0,
+  });
+  assert.deepEqual(byAgent.get(2), {
+    pips: [{ ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', kind: 'slow-tool' }],
+    overflow: 0,
+  });
+});
+
+test('signalPipsByAgent: excludes signals whose ref belongs to a different session', () => {
+  // The Timeline plots one session; a signal for s2 must not leak into s1's pips,
+  // even though both reference agent index 0.
+  const signals = [
+    { ref: 's1#0.1', tier: 'high', summary: 'mine', kind: 'cost-whale' },
+    { ref: 's2#0.1', tier: 'high', summary: 'theirs', kind: 'cost-whale' },
+  ];
+  const byAgent = signalPipsByAgent(signals, 's1');
+  assert.equal(byAgent.size, 1);
+  assert.deepEqual(byAgent.get(0).pips.map(p => p.summary), ['mine']);
+});
+
+test('signalPipsByAgent: skips signals with a malformed or missing ref', () => {
+  const signals = [
+    { ref: 's1#0.1', tier: 'high', summary: 'good', kind: 'cost-whale' },
+    { ref: 'garbage', tier: 'high', summary: 'bad', kind: 'cost-whale' },
+    { ref: undefined, tier: 'high', summary: 'none', kind: 'cost-whale' },
+  ];
+  const byAgent = signalPipsByAgent(signals, 's1');
+  assert.equal(byAgent.size, 1);
+  assert.deepEqual(byAgent.get(0).pips.map(p => p.summary), ['good']);
+});
+
+test('signalPipsByAgent: caps an agent at `cap` pips and reports the rest as overflow', () => {
+  // A heavy agent can flag many anomalies; the gutter keeps the worst `cap` and
+  // discloses the remainder as a count (the full list lives in Insights → Signals).
+  const signals = [0, 1, 2, 3, 4].map(i =>
+    ({ ref: `s1#0.${i}`, tier: 'low', summary: `s${i}`, kind: 'slow-tool' }));
+  const e = signalPipsByAgent(signals, 's1', 3).get(0);
+  assert.deepEqual(e.pips.map(p => p.summary), ['s0', 's1', 's2']);
+  assert.equal(e.overflow, 2);
+});
+
+test('signalPipsByAgent: normalizes an unknown or missing tier to low (so the pip always has a color class)', () => {
+  const signals = [
+    { ref: 's1#0.0', tier: 'high', summary: 'a', kind: 'cost-whale' },
+    { ref: 's1#1.0', tier: 'weird', summary: 'b', kind: 'cost-whale' },
+    { ref: 's1#2.0', summary: 'c', kind: 'cost-whale' },
+  ];
+  const byAgent = signalPipsByAgent(signals, 's1');
+  assert.equal(byAgent.get(0).pips[0].tier, 'high');
+  assert.equal(byAgent.get(1).pips[0].tier, 'low');
+  assert.equal(byAgent.get(2).pips[0].tier, 'low');
 });
 
 // ── conversationSegments ────────────────────────────────────────────

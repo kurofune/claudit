@@ -2096,3 +2096,32 @@ function costWhaleSignals(agents, sid, whaleShare) {
   });
   return out;
 }
+
+// signalPipsByAgent buckets detectSignals output into per-agent pip lists for the
+// Timeline gutter: it keeps only signals whose ref belongs to `sessionId` (the one
+// Gantt being plotted) and groups them by agentIndex. Because detectSignals already
+// returns findings worst-first by severity, the grouping preserves that order — so
+// each agent's kept pips are its worst. A heavy agent can flag many anomalies, so
+// each list is capped at `cap`; the remainder is reported as `overflow` (never
+// silently dropped — the Insights → Signals panel holds the full list). Malformed
+// or cross-session refs are skipped, and each pip's tier is normalized to
+// high|med|low so the renderer always has a color class. Returns
+// Map<agentIndex, { pips: [{ ref, tier, summary, kind }], overflow }>.
+export function signalPipsByAgent(signals, sessionId, cap = 3) {
+  const byAgent = new Map();
+  if (!Array.isArray(signals) || !sessionId) return byAgent;
+  const lim = cap > 0 ? cap : 3;
+  for (const s of signals) {
+    const p = parseRefKey(s && s.ref);
+    if (!p || p.sessionId !== sessionId) continue;
+    let e = byAgent.get(p.agentIndex);
+    if (!e) { e = { pips: [], overflow: 0 }; byAgent.set(p.agentIndex, e); }
+    if (e.pips.length < lim) {
+      const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
+      e.pips.push({ ref: s.ref, tier, summary: s.summary, kind: s.kind });
+    } else {
+      e.overflow += 1;
+    }
+  }
+  return byAgent;
+}
