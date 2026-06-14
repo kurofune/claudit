@@ -1444,8 +1444,8 @@ function feedRowHTML(e) {
   }
   return `<div class="fe-row fe-${e.kind}${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
     <span class="fe-time">${escHtml(time)}</span>
-    <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 14))}</span>
     ${feCtx(e)}
+    <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 14))}</span>
     ${glyph}
     <span class="fe-body">${body}</span>
     ${metric}
@@ -1464,13 +1464,15 @@ function feCtx(e) {
 }
 
 // feMetric is the compact per-row cost·duration·tokens chip — the feed doubles
-// as a spend/latency/token heat-map. Renders nothing when all are empty.
+// as a spend/latency/token heat-map. Each figure gets its own hue (money /
+// time / tokens) so the eye can pick one dimension out of the stream. Renders
+// nothing when all are empty.
 function feMetric(cost, ms, tokens) {
   const parts = [];
-  if (cost) parts.push(fmtMoney(cost));
-  if (ms) parts.push(formatElapsed(ms));
-  if (tokens) parts.push(`${fmtCompact(tokens)} tok`);
-  return parts.length ? `<span class="fe-metric">${escHtml(parts.join(' · '))}</span>` : '';
+  if (cost) parts.push(`<span class="fe-m-cost">${escHtml(fmtMoney(cost))}</span>`);
+  if (ms) parts.push(`<span class="fe-m-dur">${escHtml(formatElapsed(ms))}</span>`);
+  if (tokens) parts.push(`<span class="fe-m-tok">${escHtml(fmtCompact(tokens))} tok</span>`);
+  return parts.length ? `<span class="fe-metric">${parts.join('<span class="fe-m-sep">·</span>')}</span>` : '';
 }
 
 // ── Tree lens (formerly Inspector) ──────────────────────────────────────────
