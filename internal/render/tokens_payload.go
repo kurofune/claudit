@@ -52,6 +52,7 @@ type TokensPayload struct {
 	Trend       []aggregate.TrendPoint `json:"trend"`
 	ByModel     []TokenModelRow        `json:"by_model"`
 	ByProject   []TokenBreakdownRow    `json:"by_project"`
+	BySubagent  []TokenBreakdownRow    `json:"by_subagent"`
 	BySkill     []TokenBreakdownRow    `json:"by_skill"`
 	ByPrompt    []TokenBreakdownRow    `json:"by_prompt"`
 	// Period is the bucket granularity of Trend — read by the SPA to
@@ -115,6 +116,7 @@ func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 		Trend:       a.TrendTotals(),
 		ByModel:     byModel,
 		ByProject:   projectTokenRows(a, grand),
+		BySubagent:  subagentTokenRows(a, grand),
 		BySkill:     skillTokenRows(a, grand),
 		ByPrompt:    promptTokenRows(a, grand),
 		Period:      a.Period(),
@@ -155,6 +157,16 @@ func projectTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow 
 	rows := make([]TokenBreakdownRow, 0, len(buckets))
 	for _, b := range buckets {
 		rows = append(rows, breakdownRow(b.Project, "", b.Tokens, grand))
+	}
+	sortByTotalDesc(rows)
+	return rows
+}
+
+func subagentTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow {
+	buckets := a.BySubagent()
+	rows := make([]TokenBreakdownRow, 0, len(buckets))
+	for _, b := range buckets {
+		rows = append(rows, breakdownRow(b.Type, "", b.Tokens, grand))
 	}
 	sortByTotalDesc(rows)
 	return rows

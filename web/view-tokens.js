@@ -84,7 +84,7 @@ const SHELL = `
         <li><strong>Total tokens</strong> is every token across all five categories — the number people usually mean by "tokens burned." It is dominated by <strong>cache read</strong>, the conversation history re-read from cache on every turn, which bills at ~10% of fresh input.</li>
         <li><strong>Composition</strong> demystifies that headline: a 90%-cache-read total is mostly the same context counted over and over, not 90% of real work. <strong>Output</strong> is the most expensive category per token; <strong>cache write</strong> is context first sent (cache miss); <strong>input</strong> is fresh non-cached prompt tokens.</li>
         <li><strong>Volume over time</strong> stacks the four categories per period so you can spot a day where output spiked or cache reads ballooned.</li>
-        <li><strong>Breakdown tabs</strong> slice the same tokens four ways — <strong>by model</strong>, <strong>by project</strong>, <strong>by skill &amp; slash command</strong>, and <strong>top prompts</strong> — each row split into input / output / cache write / cache read. These are the token-centric twins of the Cost tab's tables.</li>
+        <li><strong>Breakdown tabs</strong> slice the same tokens five ways — <strong>by model</strong>, <strong>by project</strong>, <strong>by subagents</strong>, <strong>by skill &amp; slash command</strong>, and <strong>by top prompts</strong> — each row split into input / output / cache write / cache read. These are the token-centric twins of the Cost tab's tables.</li>
       </ul>
     </div>
   </details>
@@ -106,8 +106,9 @@ const SHELL = `
   <nav class="subtabs" aria-label="Token breakdown sections">
     <a class="subtab is-active" href="#tokens/model"   data-subtab="model">By model</a>
     <a class="subtab"           href="#tokens/project" data-subtab="project">By project</a>
+    <a class="subtab"           href="#tokens/subagents" data-subtab="subagents">By subagents</a>
     <a class="subtab"           href="#tokens/skill"   data-subtab="skill">By skill &amp; slash command</a>
-    <a class="subtab"           href="#tokens/prompt"  data-subtab="prompt">Top prompts</a>
+    <a class="subtab"           href="#tokens/prompt"  data-subtab="prompt">By top prompts</a>
   </nav>
 
   <div class="subview is-active" data-subview="model">
@@ -115,6 +116,9 @@ const SHELL = `
   </div>
   <div class="subview" data-subview="project">
     ${tokTable('tokproject', 'label', 'Project', 'Working directory the session ran in (its CWD when Claude Code was launched).')}
+  </div>
+  <div class="subview" data-subview="subagents">
+    ${tokTable('toksubagent', 'label', 'Subagent', 'Subagent type (the agent name from ~/.claude/agents or the built-in Agent tool); unknown types fold into one row.')}
   </div>
   <div class="subview" data-subview="skill">
     ${tokTable('tokskill', 'label', 'Key', 'Skill name or slash-command (e.g. /review, skill:tdd) that was invoked.')}
@@ -195,6 +199,7 @@ export async function paint(route) {
   const comp = data.composition || [];
   const byModel = data.by_model || [];
   const byProject = data.by_project || [];
+  const bySubagent = data.by_subagent || [];
   const bySkill = data.by_skill || [];
   const byPrompt = data.by_prompt || [];
   const trend = data.trend || [];
@@ -214,6 +219,7 @@ export async function paint(route) {
   paintTokTable(container, 'tokmodel', byModel, r => [escHtml(r.model), false]);
   paintTokTable(container, 'tokproject', byProject, r =>
     [`<span class="truncate path" title="${escHtml(r.label)}">${escHtml(r.label)}</span>`, false]);
+  paintTokTable(container, 'toksubagent', bySubagent, r => [escHtml(r.label), false]);
   paintTokTable(container, 'tokskill', bySkill, r => [`<code>${escHtml(r.label)}</code>`, false]);
   paintTokTable(container, 'tokprompt', byPrompt, r => {
     const full = r.sample || r.label || '';

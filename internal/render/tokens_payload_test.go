@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -25,10 +26,57 @@ func TestBuildTokens_ShapeAndKeys(t *testing.T) {
 		"trend",
 		"by_model",
 		"by_project",
+		"by_subagent",
 		"by_skill",
 		"by_prompt",
 		"period",
 	})
+}
+
+// TestBuildTokens_BySubagentMatchesAggregator: the by_subagent breakdown
+// carries one row per subagent type with the full token split from its
+// aggregator bucket, and rows are ordered by total tokens descending.
+func TestBuildTokens_BySubagentMatchesAggregator(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := aggregate.New(prices)
+	t0 := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+
+	add := func(sub, src string, in, out int) {
+		tn := mkTurn("claude-opus-4-7", "/p/x", in, out, t0)
+		tn.Sidechain = true
+		tn.SourceFile = src
+		a.AddWithSubagent(tn, func(parse.Turn) (string, string) { return sub, "" })
+	}
+	add("Explore", "agent-1.jsonl", 1_000_000, 200_000)
+	add("general-purpose", "agent-2.jsonl", 10_000, 2_000)
+
+	p := BuildTokens(a)
+
+	if len(p.BySubagent) != 2 {
+		t.Fatalf("by_subagent rows = %d, want 2", len(p.BySubagent))
+	}
+	if p.BySubagent[0].Total < p.BySubagent[1].Total {
+		t.Errorf("by_subagent not sorted by total desc: %d then %d",
+			p.BySubagent[0].Total, p.BySubagent[1].Total)
+	}
+	bySub := map[string]aggregate.SubagentBucket{}
+	for _, b := range a.BySubagent() {
+		bySub[b.Type] = b
+	}
+	for _, row := range p.BySubagent {
+		b, ok := bySub[row.Label]
+		if !ok {
+			t.Errorf("by_subagent row %q has no matching bucket", row.Label)
+			continue
+		}
+		if row.Input != b.InputTokens || row.Output != b.OutputTokens ||
+			row.CacheRead != b.CacheReadTokens || row.Total != b.Total() {
+			t.Errorf("subagent %q row mismatch: %+v vs bucket %+v", row.Label, row, b.Tokens)
+		}
+	}
 }
 
 // TestBuildTokens_BreakdownRowsMatchAggregator: the by_project / by_skill
