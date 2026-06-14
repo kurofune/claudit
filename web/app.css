@@ -2313,7 +2313,7 @@
     border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--surface); font-family: var(--font-mono); font-size: var(--t-2);
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.3fr) auto minmax(0, 2.2fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto minmax(0, 2.2fr) auto;
     align-content: start; column-gap: var(--s-2);
   }
   .agent-feed:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
