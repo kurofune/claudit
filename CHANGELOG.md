@@ -2,6 +2,47 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-06-15
+
+This release reframes claudit from a spend report into a **session audit**: the new **Agents** view is a full trace viewer for what your agents actually did — every turn, tool call, sub-agent, and anomaly — alongside the existing cost/token/cache accounting.
+
+### Added
+
+- **The Agents view — a full session trace viewer.** A new top-level tab turns the raw `.jsonl` transcript into something you can read and audit, with five lenses over one shared selection and detail drawer:
+  - **Feed** — a live, newest-first stream of agent activity; currently-running agents pin to the top as sticky "live" rows and update in place every couple of seconds in `claudit serve` (no reload; your scroll, selection, and open panels stay put).
+  - **Tree** — the drill-down: pick any agent and read its step-by-step tool log, with sub-agents nested under the call that spawned them, per-turn reasoning, and the exact input each tool sent and the output it got back (✓/✗). Cost and error counts roll up onto parent nodes and sessions.
+  - **Timeline** — a Gantt on a real time axis: one row per agent, indented by who spawned whom, bar width = lifetime, overlap = concurrency. Bars are tiled into per-turn segments colored by tool kind, with inline duration/cost labels and cost-heat shading, idle-gap and critical-path marks, a draggable **playhead scrubber** that replays trace state at any instant T, and cursor-anchored scroll-wheel zoom.
+  - **Conversation** — the prompt-by-prompt thread for a single session, with a session picker.
+  - **Detail drawer** — whatever you click (agent, turn, or tool) fills a resizable right-hand panel: input, output, status, reasoning, tokens, cost, model, duration. Full tool I/O loads on demand from disk and stays sticky across live repaints.
+
+  Backing this, the parser/aggregator now capture per-turn reasoning and model generation time (`gen_ms`), join tool outcomes and per-tool wall-clock into the trace, tag every tool call with a `ToolKind`, record per-turn context tokens and tool-I/O size, and resolve sub-agent spawns to navigable parent/child links with cost rollups and post-error retry-chain detection.
+
+- **Insights lens — an analytical dashboard over the trace.** Each section is its own tab: **Signals**, **Tool mix**, **Cost Pareto**, **Latency**, **Errors**, **Token & context**, and **Group by** (kind/model/agent/status). A Graph / Session / Agent scope toggle re-slices every panel except the graph-wide Signals.
+
+- **Signals — automatic anomaly detection.** The Signals tab surfaces a worst-first list of flagged anomalies — cost whales, retry storms, slow tools, error cascades, idle stalls, and runaway context growth — each click-through jumping to the offending spot on the Timeline; the Timeline also draws inline signal pips on the affected rows.
+
+- **Per-view filter bars.** Cost, Tokens, Cache, and Tools each gained their own local filter bar, and the Agents view has a trace filter with cross-lens dimming — replacing the single global filter that silently claimed to filter everything.
+
+- **Tokens view breakdown tabs.** Token usage now breaks down **by model / project / skill / prompt / subagents**.
+
+- **Pricing: Fable 5 and Mythos 5 rate cards** added to the bundled defaults.
+
+### Changed
+
+- **Subagents moved into a Cost subtab.** The standalone Subagents view is gone; its content is now a tab under Cost. Cost and Tokens breakdown tabs were relabeled with a consistent `By …` prefix.
+- **Custom tooltip popover everywhere.** Native `title=`/SVG tooltips were replaced with a single styled popover (it renders `code` spans, escapes HTML, and clamps to the viewport); wide targets anchor the tooltip to the cursor.
+
+### Removed
+
+- **The Sessions view** has been removed — it is superseded by the Agents trace viewer, which covers the same "what happened in this session" question with far more depth. Its now-dead modules, fetch helpers, and the legacy `#sessions/…` route were removed.
+- **The global floating filter bar** was removed from the static report shell — it had no wiring and falsely advertised filtering every section. Use the per-view filters instead.
+
+### Fixed
+
+- **Assistant lines sharing a `message.id` now coalesce into one turn** in the parser, so a streamed multi-part assistant message is counted and displayed as a single turn instead of several.
+- **Faster full-corpus load:** each JSONL line is now decoded once during the initial parse instead of repeatedly.
+- **Signals click-through** reliably lands on the Timeline, and the Timeline's "+N" signal-pip overflow opens the Insights → Signals tab.
+
 ## [1.5.0] — 2026-05-30
 
 ### Added
