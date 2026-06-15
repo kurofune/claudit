@@ -2254,6 +2254,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .mc-dot-live, .live-pulse, .tl-row.is-running .tl-pulse, .insp-dot.is-running { animation: none; }
+    .tl-seg.is-jumped, .tl-row.is-jumped .tl-bar { animation: none; }
     .timeline-sess .tl-row.is-new { animation: none; }
   }
 
@@ -2733,7 +2734,23 @@
   }
   .tl-seg:hover { filter: brightness(1.15); }
   .tl-seg.is-error { fill: var(--danger, #e5484d); stroke: color-mix(in oklch, var(--danger, #e5484d) 50%, var(--surface)); }
-  .tl-seg.is-selected { stroke: var(--accent); stroke-width: 1.5; }
+  /* Selected segment: a thick accent outline plus a soft glow so even a
+     hair-thin (few-px) segment stays findable on a dense Gantt. */
+  .tl-seg.is-selected {
+    stroke: var(--accent); stroke-width: 2.5;
+    filter: drop-shadow(0 0 3px color-mix(in oklch, var(--accent) 65%, transparent));
+  }
+  /* Jump landing pulse: a one-shot glow on the element a cross-lens jump
+     (Signals → Timeline) lands on, drawing the eye to the spot; it then settles
+     into the persistent .is-selected outline above. Applies to a tool segment
+     or, for an agent-level jump, the row's bar. */
+  @keyframes tl-jump-flash {
+    0%   { stroke: var(--accent); stroke-width: 5;
+           filter: drop-shadow(0 0 9px var(--accent)); }
+    100% { stroke: var(--accent); stroke-width: 2.5;
+           filter: drop-shadow(0 0 0 transparent); }
+  }
+  .tl-seg.is-jumped, .tl-row.is-jumped .tl-bar { animation: tl-jump-flash 0.6s ease-out 3; }
   /* Inline duration/cost label on wide-enough segments. A surface-colored halo
      (paint-order:stroke) keeps it legible whether the segment fill is faded
      (cheap) or vivid (expensive); pointer-events:none so clicks hit the rect. */
@@ -2814,6 +2831,20 @@
   .ins-seg-sm .ins-seg-btn { padding: 3px 10px; font-size: 11px; }
   .ins-scope-label { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Section tab strip — one tab per Insights panel. Underline-style tabs (the
+     same idiom as the lens .subtabs, scaled down) so the active section reads
+     at a glance without competing with the panel content below. */
+  .ins-tabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--border); }
+  .ins-tab { appearance: none; background: transparent; border: 0; cursor: pointer;
+    font: inherit; font-size: 12px; font-weight: 500; color: var(--ink-2);
+    padding: var(--s-2) var(--s-3); margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    transition: color 0.12s ease, border-color 0.12s ease; }
+  .ins-tab:hover:not(.is-active) { color: var(--ink); }
+  .ins-tab.is-active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .ins-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) { .ins-tab { transition: none; } }
 
   .ins-empty { color: var(--ink-2); font-size: 13px; padding: var(--s-4); text-align: center; }
 

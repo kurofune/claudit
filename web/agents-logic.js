@@ -6,8 +6,7 @@
 // This is the swappable-UI insurance: view-agents.js does only DOM/SVG
 // and pulls every number from here, so a redesign rewrites the view
 // against the same contract without touching tested math. Unit-tested
-// under `node --test` in jstest/agents-logic.test.js, mirroring how
-// sessions-logic.js holds the Sessions view's pure helpers.
+// under `node --test` in jstest/agents-logic.test.js.
 
 // parseTime coerces a payload timestamp to epoch milliseconds. Numbers
 // pass through (tests use them); ISO-8601 strings parse via Date.parse;

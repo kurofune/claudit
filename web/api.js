@@ -48,7 +48,6 @@ function offlineLookup(path) {
     case '/cache':     return data.cache;
     case '/tools':     return data.tools;
     case '/subagents': return data.subagents;
-    case '/sessions':  return data.sessions;
     case '/anomalies': return data.anomalies;
     case '/agents':    return data.agents;
   }
@@ -59,12 +58,6 @@ function offlineLookup(path) {
     const params = new URLSearchParams(path.slice(q));
     const dim = params.get('dim');
     if (dim && data.trends && data.trends[dim]) return data.trends[dim];
-  }
-  // /sessions/<id>/timeline
-  const m = bare.match(/^\/sessions\/(.+)\/timeline$/);
-  if (m && data.session_timelines) {
-    const tl = data.session_timelines[m[1]];
-    if (tl) return tl;
   }
   throw new Error('offline: no inline payload for ' + path);
 }
@@ -92,7 +85,6 @@ export const fetchTokens = () => getJSON('/tokens');
 export const fetchCache = () => getJSON('/cache');
 export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');
-export const fetchSessions = () => getJSON('/sessions');
 export const fetchAnomalies = () => getJSON('/anomalies');
 export const fetchAgents = () => getJSON('/agents');
 // fetchAgentToolFull pulls the untruncated input/output for one tool_use back
@@ -103,5 +95,3 @@ export const fetchAgentToolFull = (sessionId, toolId) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&tool=' + encodeURIComponent(toolId));
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));
-export const fetchSessionTimeline = (id) =>
-  getJSON('/sessions/' + encodeURIComponent(id) + '/timeline');

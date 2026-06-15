@@ -19,7 +19,7 @@ import (
 )
 
 // TestStatic_UsesSPAShellStructure: the static report mirrors the
-// SPA shell at web/index.html — nav with six tabs, main panel with
+// SPA shell at web/index.html — nav tabs with a main panel holding
 // one <section class="view"> per tab. The SPA bundle relies on
 // these IDs to mount.
 func TestStatic_UsesSPAShellStructure(t *testing.T) {
@@ -33,7 +33,6 @@ func TestStatic_UsesSPAShellStructure(t *testing.T) {
 		`id="view-overview"`,
 		`id="view-cost"`,
 		`id="view-tokens"`,
-		`id="view-sessions"`,
 		`id="view-cache"`,
 		`id="view-tools"`,
 	} {
@@ -246,7 +245,7 @@ func TestStatic_DataBundleParsesAsJSON(t *testing.T) {
 }
 
 // TestStatic_PreservesURLContract: bookmarks of the form #cost,
-// #sessions/<id>, etc. continue to work after the cutover. The
+// #cost/model, etc. continue to work after the cutover. The
 // SPA's router parses location.hash and toggles the matching
 // view. Asserting structural presence — the actual routing logic
 // is covered by the SPA's runtime tests in serve mode.
@@ -261,7 +260,6 @@ func TestStatic_PreservesURLContract(t *testing.T) {
 		`href="#overview"`,
 		`href="#cost"`,
 		`href="#tokens"`,
-		`href="#sessions"`,
 		`href="#cache"`,
 		`href="#tools"`,
 	} {

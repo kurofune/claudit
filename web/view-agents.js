@@ -123,6 +123,12 @@ let selectedRef = null;
 // reads it to FORCE a drawer repaint (a plain lens switch skips it) and scroll
 // the target into view once the destination lens is in the DOM, then clears it.
 let pendingJumpRef = null;
+// jumpFlashRef is the ref a cross-lens jump just landed on; the Timeline render
+// stamps an `is-jumped` class on its segment/row so a one-shot CSS pulse draws
+// the eye to the spot. State-driven (not an imperative class-add) so it survives
+// the re-renders a smooth scroll-into-view triggers; cleared after the pulse.
+let jumpFlashRef = null;
+let jumpFlashTimer = null;
 
 // fullCache keys loaded-full tool I/O by tool_use id → { input?, output? }.
 // When the user clicks "show full", the untruncated content is cached here and
@@ -191,6 +197,10 @@ let insightsMetric = 'cost';
 // Group-by panel: which dimension buckets the tool rows (kind / model / agent /
 // status). Clamps to 'kind' via INS_GROUP_DIMS when an unknown value sneaks in.
 let insightsGroupDim = 'kind';
+// Which Insights section is showing. Each panel is its own tab under the
+// Insights lens (see INS_TABS / renderInsights); clamps to the first tab when
+// an unknown key sneaks in. Signals leads since it's the audit headline.
+let insightsTab = 'signals';
 
 // Conversation lens: the session list on the left is drag-resizable. Width is
 // clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
@@ -347,11 +357,15 @@ export async function paint(route) {
   const lensSwitch = painted;
   ensureFilterBar(container);
   activateSub(container, activeSub);
-  // A pending cross-lens jump (e.g. Signals → Timeline) changed the selection
-  // on a drawer-less lens, so force the drawer repaint a plain lens switch skips.
-  renderActive(container, false, !lensSwitch || pendingJumpRef != null);
-  if (pendingJumpRef != null) {
-    scrollRefIntoView(container, pendingJumpRef);
+  // A pending cross-lens jump (e.g. Signals → Timeline) changed the selection on
+  // a drawer-less lens. Stamp the jump's ref BEFORE rendering so the destination
+  // lens paints its `is-jumped` pulse, force the drawer repaint a plain lens
+  // switch skips, then scroll the target into view.
+  const jumpRef = pendingJumpRef;
+  if (jumpRef != null) armJumpFlash(container, jumpRef);
+  renderActive(container, false, !lensSwitch || jumpRef != null);
+  if (jumpRef != null) {
+    scrollRefIntoView(container, jumpRef);
     pendingJumpRef = null;
   }
   updateNavMetric(graphStats(lastGraph));
@@ -490,6 +504,10 @@ function wireSelection(container) {
       // plotted (independent of the drawer selection).
       const tlSess = e.target.closest('[data-tl-sess]');
       if (tlSess) { pickTimeline(container, tlSess.dataset.tlSess); return; }
+      // The Insights lens's section tabs switch which panel shows — a pure
+      // re-render from lastGraph, no refetch.
+      const insTab = e.target.closest('[data-ins-tab]');
+      if (insTab) { insightsTab = insTab.dataset.insTab; renderActive(container, false); return; }
       // The Insights lens's scope toggle re-slices the aggregations (graph /
       // session / agent) and the metric toggle re-bars them — both a pure
       // re-render from lastGraph, no refetch.
@@ -531,7 +549,7 @@ function wireSelection(container) {
       // Timeline pip's "+N" overflow glyph routes to the Signals panel itself.
       const sigRow = e.target.closest('.ins-sig-row');
       if (sigRow && sigRow.dataset.ref) { gotoSignalRef(container, sigRow.dataset.ref); return; }
-      if (e.target.closest('[data-goto-insights]')) { location.hash = '#agents/insights'; return; }
+      if (e.target.closest('[data-goto-insights]')) { insightsTab = 'signals'; location.hash = '#agents/insights'; return; }
       const el = e.target.closest('[data-ref]');
       if (el) select(container, el.dataset.ref);
     });
@@ -576,7 +594,7 @@ function wireSelection(container) {
       }
       const sigRow = e.target.closest('.ins-sig-row');
       if (sigRow && sigRow.dataset.ref) { e.preventDefault(); gotoSignalRef(container, sigRow.dataset.ref); return; }
-      if (e.target.closest('[data-goto-insights]')) { e.preventDefault(); location.hash = '#agents/insights'; return; }
+      if (e.target.closest('[data-goto-insights]')) { e.preventDefault(); insightsTab = 'signals'; location.hash = '#agents/insights'; return; }
       const el = e.target.closest('[data-ref]');
       if (el) { e.preventDefault(); select(container, el.dataset.ref); }
     });
@@ -686,6 +704,22 @@ function gotoSignalRef(container, ref) {
 function scrollRefIntoView(container, ref) {
   const el = container.querySelector(`.agents-lens [data-ref="${ref}"]`);
   if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// armJumpFlash marks `ref` as the just-jumped-to spot so the next render stamps
+// an `is-jumped` pulse on it (see timelineRowHTML), then clears that state after
+// the pulse — wiping any lingering class without a re-render. Driving the pulse
+// from render state (rather than adding the class imperatively) is what makes it
+// survive the re-render a smooth scrollRefIntoView triggers: the landing spot is
+// often a hair-thin tool segment, and an imperative class gets blown away by
+// that follow-up render before it can be seen.
+function armJumpFlash(container, ref) {
+  jumpFlashRef = ref;
+  clearTimeout(jumpFlashTimer);
+  jumpFlashTimer = setTimeout(() => {
+    jumpFlashRef = null;
+    container.querySelectorAll('.is-jumped').forEach(el => el.classList.remove('is-jumped'));
+  }, 1900);
 }
 
 // startTimelineResize drives the Timeline sidebar's drag-to-resize. It reuses
@@ -1811,43 +1845,85 @@ function insightsScopeAgents() {
     label: `${sessions.length} session${sessions.length === 1 ? '' : 's'}` };
 }
 
-// renderInsights draws the Insights dashboard: a scope toggle (graph / session /
-// agent) over the shared selection, then the Tool-mix panel — per-kind count ·
-// time · cost as horizontal bars, the bar driven by the chosen metric and rows
-// sorted worst-first by toolMix. Pure render from lastGraph (no scrub / SSE), so
-// it degrades cleanly in the static `claudit report`.
+// INS_TABS is the Insights section list — each panel is its own tab. Order is
+// the tab order; the first (Signals, the audit headline) is the default. `scoped`
+// flags whether the panel re-slices by the Graph / Session / Agent toggle —
+// Signals is graph-wide (see renderSignalsPanel), so its tab hides the toggle.
+// `render` is the panel renderer: scoped panels take the resolved agent list;
+// Signals is dispatched specially in renderInsights (it reads lastGraph, not the
+// scoped slice).
+const INS_TABS = [
+  { key: 'signals', label: 'Signals',         scoped: false },
+  { key: 'toolmix', label: 'Tool mix',        scoped: true,  render: renderToolMixPanel },
+  { key: 'pareto',  label: 'Cost Pareto',     scoped: true,  render: renderParetoPanel },
+  { key: 'latency', label: 'Latency',         scoped: true,  render: renderLatencyPanel },
+  { key: 'errors',  label: 'Errors',          scoped: true,  render: renderErrorPanel },
+  { key: 'tokens',  label: 'Token & context', scoped: true,  render: renderTokenPanel },
+  { key: 'groups',  label: 'Group by',        scoped: true,  render: renderGroupPanel },
+];
+
+// renderInsights draws the Insights dashboard: a tab strip (one tab per section),
+// a scope toggle (graph / session / agent) over the shared selection, and the
+// active section's panel. Each panel re-scopes by the toggle EXCEPT Signals,
+// which is graph-wide — so its tab hides the toggle. Pure render from lastGraph
+// (no scrub / SSE), so it degrades cleanly in the static `claudit report`.
 function renderInsights(sessions) {
   const { scope, agents, sessionAvail, agentAvail, label } = insightsScopeAgents();
-  const metric = INS_METRICS.find(m => m.key === insightsMetric) || INS_METRICS[0];
+  const tab = INS_TABS.find(t => t.key === insightsTab) || INS_TABS[0];
 
+  const tabBtn = (t) =>
+    `<button type="button" class="ins-tab${t.key === tab.key ? ' is-active' : ''}" data-ins-tab="${t.key}" role="tab" aria-selected="${t.key === tab.key}">${escHtml(t.label)}</button>`;
+  const tabNav = `<nav class="ins-tabs" role="tablist" aria-label="Insights sections">${INS_TABS.map(tabBtn).join('')}</nav>`;
+
+  // The scope toggle re-slices every scoped panel; Signals is graph-wide, so it
+  // never shows on that tab.
   const scopeBtn = (key, text, avail) =>
     `<button type="button" class="ins-seg-btn${scope === key ? ' is-active' : ''}" data-ins-scope="${key}"${avail ? '' : ' disabled'} aria-pressed="${scope === key}">${escHtml(text)}</button>`;
-  const head = `<div class="ins-controls">
+  const scopeHead = tab.scoped ? `<div class="ins-controls">
       <div class="ins-seg" role="group" aria-label="Insights scope">
         ${scopeBtn('graph', 'Graph', true)}
         ${scopeBtn('session', 'Session', sessionAvail)}
         ${scopeBtn('agent', 'Agent', agentAvail)}
       </div>
       <span class="ins-scope-label" title="${escHtml(label)}">${escHtml(label)}</span>
-    </div>`;
+    </div>` : '';
 
-  // The Signals panel is the audit headline — anomalies first. It is GRAPH-WIDE
-  // by design (scope-independent): detectSignals emits real cross-session refKeys,
-  // so the panel surfaces every flagged anomaly in the window and click-through
-  // jumps to it wherever it lives; re-scoping it would mean a synthetic sub-graph
-  // whose renumbered agent indices break those refs. nowMs is the live clock in
-  // serve mode and ABSENT in the static report (where the page can't know the
-  // wall-clock), keeping the static-safe contract — idle-stall's trailing-gap
-  // check degrades cleanly when nowMs is omitted.
-  const nowMs = isServeMode() ? Date.now() : undefined;
-  const signalsPanel = renderSignalsPanel(detectSignals(lastGraph, { nowMs }));
+  let panel;
+  if (tab.key === 'signals') {
+    // Signals is GRAPH-WIDE by design (scope-independent): detectSignals emits
+    // real cross-session refKeys, so the panel surfaces every flagged anomaly in
+    // the window and click-through jumps to it wherever it lives; re-scoping it
+    // would mean a synthetic sub-graph whose renumbered agent indices break those
+    // refs. nowMs is the live clock in serve mode and ABSENT in the static report
+    // (where the page can't know the wall-clock), keeping the static-safe
+    // contract — idle-stall's trailing-gap check degrades cleanly when omitted.
+    const nowMs = isServeMode() ? Date.now() : undefined;
+    panel = renderSignalsPanel(detectSignals(lastGraph, { nowMs }));
+  } else {
+    panel = tab.render(agents);
+  }
+
+  return `<div class="ins">${tabNav}${scopeHead}${panel}</div>`;
+}
+
+// renderToolMixPanel draws the Tool-mix panel: per-kind count · time · cost as
+// horizontal bars, the bar driven by the chosen metric and rows sorted
+// worst-first by toolMix. Pure render from the scoped agents (no scrub / SSE).
+function renderToolMixPanel(agents) {
+  const metric = INS_METRICS.find(m => m.key === insightsMetric) || INS_METRICS[0];
+  const metricBtn = (m) =>
+    `<button type="button" class="ins-seg-btn${metric.key === m.key ? ' is-active' : ''}" data-ins-metric="${m.key}" aria-pressed="${metric.key === m.key}">${escHtml(m.label)}</button>`;
+  const head = `<header class="ins-panel-head">
+      <h3 class="ins-panel-title">Tool mix</h3>
+      <div class="ins-seg ins-seg-sm" role="group" aria-label="Bar metric">${INS_METRICS.map(metricBtn).join('')}</div>
+    </header>`;
 
   // toolMix returns rows cost-sorted; re-sort worst-first by the ACTIVE metric so
   // the bar column stays monotonic (the longest bar reads first) whichever metric
   // drives it. A copy — toolMix's own ordering is left untouched.
   const mix = toolMix(agents).slice().sort((a, b) => metric.get(b) - metric.get(a));
   if (mix.length === 0) {
-    return `<div class="ins">${head}${signalsPanel}<div class="ins-empty">No tool calls in this scope.</div></div>`;
+    return `<section class="ins-panel">${head}<div class="ins-empty">No tool calls in this scope.</div></section>`;
   }
 
   const colLabels = `<div class="ins-row ins-row-labels" aria-hidden="true">
@@ -1868,25 +1944,11 @@ function renderInsights(sessions) {
       </div>`;
   }).join('');
 
-  const metricBtn = (m) =>
-    `<button type="button" class="ins-seg-btn${metric.key === m.key ? ' is-active' : ''}" data-ins-metric="${m.key}" aria-pressed="${metric.key === m.key}">${escHtml(m.label)}</button>`;
-  return `<div class="ins">
-    ${head}
-    ${signalsPanel}
-    <section class="ins-panel">
-      <header class="ins-panel-head">
-        <h3 class="ins-panel-title">Tool mix</h3>
-        <div class="ins-seg ins-seg-sm" role="group" aria-label="Bar metric">${INS_METRICS.map(metricBtn).join('')}</div>
-      </header>
+  return `<section class="ins-panel">
+      ${head}
       ${colLabels}
       <div class="ins-rows">${rows}</div>
-    </section>
-    ${renderParetoPanel(agents)}
-    ${renderLatencyPanel(agents)}
-    ${renderErrorPanel(agents)}
-    ${renderTokenPanel(agents)}
-    ${renderGroupPanel(agents)}
-  </div>`;
+    </section>`;
 }
 
 // renderSignalsPanel draws the Signals panel — the anomaly headline of the
@@ -1927,7 +1989,7 @@ function renderSignalsPanel(signals) {
         <h3 class="ins-panel-title">Signals</h3>
         ${stats}
       </div>
-      <p class="ins-panel-note">Anomalies across the whole graph, worst first — <b>not</b> re-scoped by the Graph / Session / Agent toggle (every other panel is). Click any signal to jump to it on the Timeline.</p>
+      <p class="ins-panel-note">Anomalies across the whole graph, worst first — always graph-wide, so the Graph / Session / Agent scope on the other tabs doesn’t apply here. Click any signal to jump to it on the Timeline.</p>
       <div class="ins-rows ins-sig-rows">${rows}</div>
       ${more}
     </section>`;
@@ -2725,7 +2787,8 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
       tip = segTooltip({ head: `Turn ${s.stepIndex + 1}`, durText, pct, costText, tokensText, isError: isErr });
     }
     const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
-    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+    const sjump = s.refKey === jumpFlashRef ? ' is-jumped' : '';
+    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}${sjump}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
     // Inline label: the richest of "dur · cost" / "dur" that fits the segment
     // width; '' when too narrow. pointer-events:none keeps the click on the rect.
     const text = fitSegmentLabel(s.w, durText, costText);
@@ -2734,7 +2797,8 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
       : '';
     return rect + label;
   }).join('');
-  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}`;
+  const rjump = r.key === jumpFlashRef ? ' is-jumped' : '';
+  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}${rjump}`;
   const meta = r.phase === 'pending' ? 'not started yet'
     : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
   const labelY = (r.y + r.h / 2 + 4).toFixed(1);

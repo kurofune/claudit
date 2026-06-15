@@ -2,12 +2,11 @@
 //   #overview              → Overview tab
 //   #cost                  → Cost tab (root)
 //   #cost/model            → Cost tab, model subview
-//   #sessions/<id>         → Sessions tab, expand session <id>
 //
 // The fat HTML used the same shape, so old bookmarks keep working
 // when the cutover phase flips / to the SPA.
 
-const KNOWN_VIEWS = new Set(['overview', 'cost', 'tokens', 'sessions', 'cache', 'tools', 'agents']);
+const KNOWN_VIEWS = new Set(['overview', 'cost', 'tokens', 'cache', 'tools', 'agents']);
 
 export function parseHash() {
   const raw = (window.location.hash || '#overview').slice(1);

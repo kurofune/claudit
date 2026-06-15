@@ -12,7 +12,6 @@ import { paint as paintCost, paintNav as paintNavCost } from './view-cost.js';
 import { paint as paintTokens, paintNav as paintNavTokens } from './view-tokens.js';
 import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js';
 import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
-import { paint as paintSessions, paintNav as paintNavSessions } from './view-sessions.js';
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
@@ -26,7 +25,6 @@ const VIEW_PAINTERS = {
   tokens: paintTokens,
   cache: paintCache,
   tools: paintTools,
-  sessions: paintSessions,
   agents: paintAgents,
 };
 
@@ -90,7 +88,7 @@ paintNavSkeletons(parseHash().view === 'overview');
 // Pills fed by the five paintNavs below — nav-metric-overview and
 // date-range are owned by view-overview.js and reset there on error.
 const NAV_SKEL_IDS = [
-  'nav-metric-cost', 'nav-metric-tokens', 'nav-metric-sessions',
+  'nav-metric-cost', 'nav-metric-tokens',
   'nav-metric-cache', 'nav-metric-tools',
   'nav-metric-agents',
 ];
@@ -99,7 +97,6 @@ Promise.all([
   paintNavTokens(),
   paintNavCache(),
   paintNavTools(),
-  paintNavSessions(),
   paintNavAgents(),
 ])
   .catch(err => console.error('nav metric prefetch failed:', err))

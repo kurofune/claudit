@@ -79,14 +79,6 @@ export function sessionListSkeleton(n = 8) {
   return `<div class="skel-list">${cards.join('')}</div>`;
 }
 
-// Per-session timeline skeleton — a few prompt-block-shaped rows that
-// stand in for the lazy-fetched timeline body.
-export function timelineSkeleton(n = 3) {
-  const rows = [];
-  for (let i = 0; i < n; i++) rows.push(skel('skel-card'));
-  return `<div class="skel-list">${rows.join('')}</div>`;
-}
-
 // Helper — fill all skeleton placeholders in nav metrics + date range.
 // Pairs with skeletonResetIfPending() so a failed paintNav reverts the
 // pill to "—" rather than shimmering forever.
@@ -104,7 +96,6 @@ const SKEL_ATTR = 'data-skel';
 export function paintNavSkeletons(includeOverview) {
   const ids = [
     'nav-metric-cost',
-    'nav-metric-sessions',
     'nav-metric-cache',
     'nav-metric-tools',
     'nav-metric-agents',
