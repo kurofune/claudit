@@ -2070,6 +2070,14 @@
     border: 1px solid var(--border); border-radius: var(--r-lg);
     background: var(--surface-2); padding: var(--s-3);
   }
+  /* On the Feed lens the left column carries a "LIVE FEED" section header above
+     its box, so the feed box starts one header-row lower than the drawer. Lower
+     the drawer by that header's footprint (top margin + ~19px label row + bottom
+     margin) so the two columns line up at the top edge. Feed lens only — Tree/
+     Timeline have no such header. */
+  .agents-body[data-lens="feed"] .agents-drawer {
+    margin-top: calc(var(--s-3) + 19px + var(--s-2));
+  }
   /* Drag handle for the lens|drawer split (data-agents-resize). On the Tree lens
      it resizes the left rail; on Feed/Timeline it resizes the right drawer. Shown
      on every lens that has a drawer (all but Conversation); sticky so it tracks
@@ -2256,8 +2264,10 @@
     grid-column: 1 / -1;
     position: sticky; top: 0; z-index: 2;
     background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    box-shadow: 0 1px 0 var(--border);
+    /* A bold green divider clearly fences the live roster off from the static
+       history scrolling beneath it; the soft glow lifts the band off the feed. */
+    border-bottom: 2px solid var(--accent-2);
+    box-shadow: 0 4px 12px -4px color-mix(in oklch, var(--accent-2) 50%, transparent);
   }
   .feed-live-head {
     display: flex; align-items: center; gap: var(--s-2);
@@ -2300,7 +2310,9 @@
      per-row grid let the flexible tracks drift, misaligning the glyph/body).
      Order: time · project›thread · agent · glyph · body · metric. */
   .agent-feed {
-    max-height: 60vh; overflow-y: auto;
+    /* Fill down to near the viewport bottom (the chrome above the feed — nav,
+       banner, subtabs, filter, LIVE FEED header — is ~320px tall on desktop). */
+    max-height: calc(100vh - 320px); min-height: 50vh; overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--surface); font-family: var(--font-mono); font-size: var(--t-2);
     display: grid;
