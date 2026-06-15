@@ -32,7 +32,7 @@ import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
   flattenSession, agentElapsedMs, formatElapsed, graphStats,
-  agentLabel, buildEventFeed, parseTime,
+  agentLabel, buildEventFeed, buildLiveFeed, parseTime,
   refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, currentToolKind, baseName,
   looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
@@ -91,7 +91,6 @@ const SHELL = `
   <div class="trace-filter" data-trace-filter role="search" aria-label="Filter this trace"></div>
 
   <div class="agents-body">
-    <section class="agents-active" data-active-band aria-label="Agents running now" hidden></section>
     <div class="agents-lens">
       <div class="subview is-active" data-subview="feed"></div>
       <div class="subview" data-subview="tree"></div>
@@ -403,11 +402,10 @@ function applyBodyLayout(container) {
     body.style.gridTemplateAreas = '"lens resize drawer"';
   } else {
     // Feed/Timeline: a wide lens with the drawer as a fixed RIGHT column the
-    // handle resizes. Feed alone carries the full-width Active-now band on top.
+    // handle resizes. Running agents now ride as sticky "live rows" inside the
+    // feed itself, so the lens and drawer both start at the top edge.
     body.style.gridTemplateColumns = `minmax(0, 1fr) 6px ${drawerWidth()}px`;
-    body.style.gridTemplateAreas = lens === 'feed'
-      ? '"active active active" "lens resize drawer"'
-      : '"lens resize drawer"';
+    body.style.gridTemplateAreas = '"lens resize drawer"';
   }
 }
 
@@ -431,14 +429,6 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   else if (activeSub === 'conversation') host.innerHTML = renderConversation(sessions);
   else if (activeSub === 'insights') host.innerHTML = renderInsights(sessions);
   if (memo) restoreState(host, memo);
-  // The "Active now" band is a full-width row above the feed|drawer split, so it
-  // lives outside the lens host — paint it only on the Feed lens, hide it (and
-  // collapse its grid row) on the others.
-  const band = container.querySelector('[data-active-band]');
-  if (band) {
-    band.hidden = activeSub !== 'feed';
-    band.innerHTML = activeSub === 'feed' ? renderActiveBand(sessions) : '';
-  }
   // The Gantt's horizontal scroll (live-edge follow + restored history offset)
   // can only be set on real DOM, so it runs after innerHTML is in place.
   if (activeSub === 'timeline') syncTimelineScroll(container);
@@ -597,21 +587,6 @@ function wireSelection(container) {
     // The Tree lens's agent bodies are lazy — fill/clear them as nodes expand or
     // collapse. `toggle` doesn't bubble, so catch it in the capture phase.
     lens.addEventListener('toggle', onTreeToggle, true);
-  }
-  // The "Active now" band sits outside .agents-lens (it spans the full body
-  // width above the split), so its cards don't reach the lens click delegate —
-  // give it its own, routing card clicks/keys to the same shared selection.
-  const band = container.querySelector('[data-active-band]');
-  if (band) {
-    band.addEventListener('click', e => {
-      const el = e.target.closest('[data-ref]');
-      if (el) select(container, el.dataset.ref);
-    });
-    band.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      const el = e.target.closest('[data-ref]');
-      if (el) { e.preventDefault(); select(container, el.dataset.ref); }
-    });
   }
   // The lens|drawer split handle lives in .agents-body, outside the lens, so its
   // drag is wired on the body wrapper (which is stable across lens re-renders).
@@ -1354,27 +1329,13 @@ function drTokens(t) {
 
 // ── Feed lens (formerly Mission Control) ────────────────────────────────────
 
-// renderActiveBand draws the "Active now" cards for the full-width band that
-// sits ABOVE the feed|drawer split (so the feed and the detail drawer align at
-// the top instead of the drawer floating up beside this short row). Lives in
-// .agents-active, painted only on the Feed lens; renderControl owns the feed.
-function renderActiveBand(sessions) {
-  const live = [];
-  sessions.forEach(s => flattenSession(s).forEach((a, i) => {
-    if (a && a.status === 'running') live.push({ s, a, i });
-  }));
-
-  const activeHTML = live.length === 0
-    ? `<div class="ac-idle">No agents running right now. The feed below is the recent history; it'll come alive the moment one starts.</div>`
-    : live
-      .sort((x, y) => agentElapsedMs(y.a, Date.now()) - agentElapsedMs(x.a, Date.now()))
-      .map(x => activeCardHTML(x.s, x.a, x.i)).join('');
-
-  return `
-    <div class="mc-section-head"><span class="mc-dot-live"></span>Active now <span class="mc-count">${live.length}</span></div>
-    <div class="mc-active-grid">${activeHTML}</div>`;
-}
-
+// renderControl draws the Feed lens: one scrolling .agent-feed box whose top
+// stratum is a STICKY band of "live rows" — one per currently-running agent —
+// pinned above the reverse-chronological event history that scrolls beneath it.
+// (This replaces the old full-width Active-now card band; the live roster now
+// lives inside the feed so the lens and detail drawer align at the top edge.)
+// The live rows share the feed's iconography/hues; a left-rail green pulse +
+// live-ticking timer marks them as alive against the static history rows.
 function renderControl(sessions) {
   const feed = buildEventFeed(lastGraph, { limit: 250 });
   const feedHTML = feed.length === 0
@@ -1384,41 +1345,44 @@ function renderControl(sessions) {
   return `
     <section class="mc-feed">
       <div class="mc-section-head">Live feed <span class="mc-count">${feed.length}</span></div>
-      <div class="agent-feed" tabindex="0">${feedHTML}</div>
+      <div class="agent-feed" tabindex="0">${liveStratumHTML()}${feedHTML}</div>
     </section>`;
 }
 
-function activeCardHTML(session, agent, idx) {
-  const sid = (session && session.session_id) || '';
-  const ref = refKey({ sessionId: sid, agentIndex: idx });
-  const c = colorSlot(idx);
+// liveStratumHTML is the sticky top band of the feed: a "RUNNING · n" header
+// plus one live row per running agent. Renders nothing when nothing is running,
+// so the feed collapses to pure history. It's a single grid item spanning all
+// the feed's columns, with position:sticky pinning it as the history scrolls.
+function liveStratumHTML() {
+  const live = buildLiveFeed(lastGraph);
+  if (!live.length) return '';
+  return `<div class="feed-live">
+    <div class="feed-live-head"><span class="mc-dot-live"></span>Running <span class="mc-count">${live.length}</span></div>
+    ${live.map(liveRowHTML).join('')}
+  </div>`;
+}
+
+function liveRowHTML(d) {
+  const ref = refKey({ sessionId: d.sessionId, agentIndex: d.agentIndex });
+  const c = colorSlot(d.agentIndex);
   const sel = ref === selectedRef ? ' is-selected' : '';
-  const label = agentLabel(agent);
-  const kind = currentToolKind(agent);
-  const tool = agent.current_tool
-    ? `<div class="acard-tool">${kindBadge(kind)}<span class="acard-tool-name kind-${kindFamily(kind)}">${escHtml(agent.current_tool)}</span></div>`
-    : `<div class="acard-tool acard-tool-idle">working…</div>`;
-  const desc = agent.kind !== 'main' && agent.description
-    ? `<div class="acard-desc" title="${escHtml(agent.description)}">${escHtml(agent.description)}</div>` : '';
-  const steps = (agent.steps || []).length;
-  const tokens = agentTokens(agent).total;
-  // Project leads as the card title; the agent name sits beneath it. The tool
-  // and metric reuse the feed's iconography/hues so the two views read alike.
-  return `<article class="acard is-running${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-    <div class="acard-head">
-      <span class="acard-pulse"></span>
-      <span class="acard-proj" title="${escHtml(session.cwd || '')}">${escHtml(baseName(session.cwd) || '—')}</span>
-      ${elapsedSpan(agent, 'acard-elapsed')}
-    </div>
-    <div class="acard-label" title="${escHtml(label)}">${escHtml(label)}</div>
-    ${desc}
-    ${tool}
-    <div class="acard-meta">
-      <span>${fmtNum(steps)} step${steps === 1 ? '' : 's'}</span>
-      ${tokens ? `<span class="acard-tok">${fmtCompact(tokens)} tok</span>` : ''}
-      <span class="acard-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
-    </div>
-  </article>`;
+  const tool = d.currentTool
+    ? `${kindBadge(d.currentToolKind)}<span class="fe-tool kind-${kindFamily(d.currentToolKind)}">${escHtml(d.currentTool)}</span>`
+    : `<span class="live-idle">working…</span>`;
+  const desc = d.kind !== 'main' && d.description
+    ? ` <span class="live-desc" title="${escHtml(d.description)}">${escHtml(d.description)}</span>` : '';
+  const cost = d.cost_usd ? `<span class="live-cost">${escHtml(fmtMoney(d.cost_usd))}</span>` : '';
+  // A live-ticking elapsed timer, fed by the same data-elapsed contract
+  // tickTimers rewrites against the wall clock (running → counts up from start).
+  const elapsed = `<span class="live-elapsed" data-elapsed data-start="${Number.isFinite(d.startedAt) ? d.startedAt : ''}" data-end="" data-running="1">${escHtml(formatElapsed(d.elapsedMs))}</span>`;
+  return `<div class="live-row${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
+    <span class="live-pulse" aria-label="running"></span>
+    ${feCtx(d)}
+    <span class="live-agent" title="${escHtml(d.agentLabel)}">${escHtml(clip(d.agentLabel, 24))}</span>
+    <span class="live-body">${tool}${desc}</span>
+    ${elapsed}
+    ${cost}
+  </div>`;
 }
 
 function feedRowHTML(e) {

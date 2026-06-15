@@ -14,6 +14,7 @@ import {
   graphStats,
   agentLabel,
   buildEventFeed,
+  buildLiveFeed,
   buildFlowLayout,
   baseName,
   agentTokens,
@@ -441,6 +442,74 @@ test('buildEventFeed done events carry the agent-level token total', () => {
   assert.ok(done, 'expected a done event');
   // Agent tuple: 100 + 50 + (10 + 5) + 200 = 365.
   assert.equal(done.tokens, 365);
+});
+
+// ── buildLiveFeed ───────────────────────────────────────────────────
+// Two running agents (different elapsed) plus a finished one. NOW is past
+// every start so elapsed is deterministic for the sort assertion.
+const LIVE_NOW = Date.parse('2026-05-01T12:01:00Z');
+const LIVE_GRAPH = {
+  sessions: [{
+    session_id: 's1', cwd: '/home/u/proj',
+    main: {
+      kind: 'main', status: 'running', cost_usd: 0.5,
+      started_at: '2026-05-01T12:00:00Z', // running 60s — longest
+      steps: [
+        { timestamp: '2026-05-01T12:00:10Z', tools: [{ name: 'Bash', kind: 'exec' }] },
+        { timestamp: '2026-05-01T12:00:40Z', tools: [{ name: 'Read', kind: 'read' }], current_tool: 'Read' },
+      ],
+      current_tool: 'Read',
+    },
+    children: [
+      {
+        kind: 'subagent', agent_type: 'Explore', description: 'map the code',
+        status: 'running', cost_usd: 0.2,
+        started_at: '2026-05-01T12:00:30Z', // running 30s — shorter
+        steps: [{ timestamp: '2026-05-01T12:00:35Z', tools: [{ name: 'Grep', kind: 'read' }] }],
+        current_tool: 'Grep',
+      },
+      {
+        kind: 'subagent', agent_type: 'general-purpose', status: 'done',
+        started_at: '2026-05-01T12:00:05Z', ended_at: '2026-05-01T12:00:20Z',
+        steps: [{ timestamp: '2026-05-01T12:00:10Z', tools: [{ name: 'Edit', kind: 'edit' }] }],
+      },
+    ],
+  }],
+};
+
+test('buildLiveFeed returns only running agents, longest-running first', () => {
+  const live = buildLiveFeed(LIVE_GRAPH, LIVE_NOW);
+  assert.equal(live.length, 2); // the done general-purpose child is excluded
+  assert.equal(live[0].agentLabel, 'main');       // 60s elapsed
+  assert.equal(live[1].agentLabel, 'Explore');    // 30s elapsed
+  assert.ok(live[0].elapsedMs >= live[1].elapsedMs, 'not sorted by elapsed desc');
+  assert.equal(live[0].elapsedMs, 60000);
+  assert.equal(live[1].elapsedMs, 30000);
+});
+
+test('buildLiveFeed descriptors carry the fields a live row renders', () => {
+  const live = buildLiveFeed(LIVE_GRAPH, LIVE_NOW);
+  const main = live[0];
+  assert.equal(main.sessionId, 's1');
+  assert.equal(main.cwd, '/home/u/proj');
+  assert.equal(main.agentIndex, 0);            // flatten index: main first
+  assert.equal(main.kind, 'main');
+  assert.equal(main.currentTool, 'Read');
+  assert.equal(main.currentToolKind, 'read');  // kind of the last tool in the last tool-bearing step
+  assert.equal(main.cost_usd, 0.5);
+  assert.equal(main.steps, 2);
+  assert.equal(main.startedAt, Date.parse('2026-05-01T12:00:00Z'));
+  assert.equal(main.status, 'running');
+
+  const explore = live[1];
+  assert.equal(explore.agentIndex, 1);
+  assert.equal(explore.description, 'map the code');
+  assert.equal(explore.currentTool, 'Grep');
+});
+
+test('buildLiveFeed tolerates an empty or null graph', () => {
+  assert.deepEqual(buildLiveFeed({ sessions: [] }, LIVE_NOW), []);
+  assert.deepEqual(buildLiveFeed(null, LIVE_NOW), []);
 });
 
 // ── currentToolKind ─────────────────────────────────────────────────

@@ -1134,6 +1134,38 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
   return limit > 0 ? events.slice(0, limit) : events;
 }
 
+// buildLiveFeed collects every currently-running agent across the graph into
+// the descriptors the Feed lens pins as sticky "live rows" at the top of the
+// feed (replacing the old full-width Active-now band). Pure + DOM-free so it's
+// unit-testable; the view turns each descriptor into a one-line row.
+// Sorted longest-running first — the agent that's been going longest (often the
+// one worth watching) sits at the top. Each descriptor carries the agent's
+// flatten index (0=main, 1.. children) so the row colors/links consistently
+// with the rest of the tab, plus the started_at/status the live timer ticks on.
+export function buildLiveFeed(graph, nowMs = Date.now()) {
+  const sessions = (graph && graph.sessions) || [];
+  const live = [];
+  for (const s of sessions) {
+    const sid = (s && s.session_id) || '';
+    const cwd = (s && s.cwd) || '';
+    flattenSession(s).forEach((a, idx) => {
+      if (!a || a.status !== 'running') return;
+      live.push({
+        sessionId: sid, cwd, agentIndex: idx,
+        agentLabel: agentLabel(a), kind: a.kind || '',
+        description: a.description || '',
+        currentTool: a.current_tool || '', currentToolKind: currentToolKind(a),
+        startedAt: parseTime(a.started_at), status: 'running',
+        elapsedMs: agentElapsedMs(a, nowMs),
+        cost_usd: a.cost_usd || 0, tokens: agentTokens(a).total,
+        steps: (a.steps || []).length,
+      });
+    });
+  }
+  live.sort((x, y) => y.elapsedMs - x.elapsedMs);
+  return live;
+}
+
 // timelineBounds returns the [startMs, endMs] time window a Gantt timeline
 // should span over a set of agents. Each agent's effective end is "now" if
 // it's still running, else its parseable ended_at, else (NaN end) its own

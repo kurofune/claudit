@@ -2052,19 +2052,16 @@
      .agents-drawer is the single shared master-detail panel — clicking any
      row/card/node in any lens repaints it. The drawer sticks while the lens
      scrolls. Desktop-only, so a fixed-width drawer beside a wide lens is fine. */
-  /* Three named areas: a full-width "active" band on top (the Feed lens's
-     Active-now cards), then the lens | resize-handle | drawer split below. The
-     exact tracks/areas are set inline per lens by applyBodyLayout (the band row
-     only exists on Feed; Tree flips which side is the fixed rail); this is the
-     first-paint default. align-items:start lets the drawer stick as the lens
-     scrolls. */
+  /* The lens | resize-handle | drawer split. The exact tracks/areas are set
+     inline per lens by applyBodyLayout (Tree flips which side is the fixed
+     rail); this is the first-paint default. align-items:start lets the drawer
+     stick as the lens scrolls. Running agents ride as sticky "live rows" inside
+     the Feed lens itself, so there's no longer a full-width band row on top. */
   .agents-body {
     display: grid; gap: var(--s-3); align-items: start;
     grid-template-columns: minmax(0, 1fr) 6px 360px;
-    grid-template-areas: "active active active" "lens resize drawer";
+    grid-template-areas: "lens resize drawer";
   }
-  .agents-active { grid-area: active; min-width: 0; }
-  .agents-active[hidden] { display: none; }
   .agents-lens { grid-area: lens; min-width: 0; }
   .agents-drawer {
     grid-area: drawer;
@@ -2247,61 +2244,55 @@
     50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-2) 0%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mc-dot-live, .acard-pulse, .tl-row.is-running .tl-pulse, .insp-dot.is-running { animation: none; }
+    .mc-dot-live, .live-pulse, .tl-row.is-running .tl-pulse, .insp-dot.is-running { animation: none; }
     .timeline-sess .tl-row.is-new { animation: none; }
   }
 
-  /* Active-now cards. */
-  .mc-active-grid {
-    display: grid; gap: var(--s-2);
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  /* ── Live stratum: the sticky band of running agents pinned to the top of
+     the feed, above the scrolling history. One grid item spanning all the
+     feed's columns; position:sticky keeps it parked at the top as history
+     scrolls beneath. An opaque background lets history slide under it. */
+  .feed-live {
+    grid-column: 1 / -1;
+    position: sticky; top: 0; z-index: 2;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 0 var(--border);
   }
-  .acard {
-    border: 1px solid var(--border);
+  .feed-live-head {
+    display: flex; align-items: center; gap: var(--s-2);
+    padding: var(--s-1) var(--s-3);
+    font-size: var(--t-1); text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--ink-2);
+    background: color-mix(in oklch, var(--accent-2) 6%, var(--surface));
+    border-bottom: 1px solid var(--border);
+  }
+  /* A live row: left-rail green pulse · project›thread · agent · tool · live
+     timer · cost. Its own grid (not the history subgrid) — it's a distinct
+     "alive" stratum, deliberately not column-aligned to the static history.
+     The per-agent color rides the 3px left rule (--cc from data-c). */
+  .live-row {
+    display: grid; align-items: baseline; column-gap: var(--s-2);
+    grid-template-columns: auto minmax(0, auto) auto minmax(0, 1fr) auto auto;
+    padding: 4px var(--s-3);
     border-left: 3px solid var(--cc, var(--accent-2));
-    border-radius: var(--r-md); background: var(--surface);
-    padding: var(--s-2) var(--s-3); display: flex; flex-direction: column; gap: var(--s-1);
+    cursor: pointer;
   }
-  .acard.is-running { box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent-2) 22%, transparent); }
-  .acard-head { display: flex; align-items: baseline; gap: var(--s-2); }
-  .acard-pulse {
+  .live-row + .live-row { border-top: 1px solid var(--border); }
+  .live-row:hover { background: var(--surface-2); }
+  .live-row.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .live-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .live-pulse {
     width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center;
     background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite;
   }
-  /* Project leads as the card title — plain bold text, no pill. */
-  .acard-proj {
-    font-weight: 600; color: var(--ink); font-size: var(--t-3);
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  /* Agent name sits beneath the project title, one notch quieter. */
-  .acard-label {
-    color: var(--ink-2); font-weight: 600; font-size: var(--t-2);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .acard { cursor: pointer; }
-  .acard.is-selected { box-shadow: 0 0 0 2px var(--accent); }
-  .acard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .acard-elapsed {
-    margin-left: auto; flex: none; font-variant-numeric: tabular-nums;
-    color: var(--warn); font-weight: 600; font-size: var(--t-2);
-  }
-  .acard-desc { font-size: var(--t-2); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Tool indicator: feed-style badge + kind-colored name, no surrounding box. */
-  .acard-tool {
-    display: flex; align-items: center; gap: var(--s-1);
-    font-family: var(--font-mono); font-size: var(--t-2);
-    overflow: hidden; white-space: nowrap;
-  }
-  .acard-tool .kind-badge { width: 16px; height: 16px; }
-  .acard-tool-idle { color: var(--ink-2); font-style: italic; }
-  .acard-tool-name { color: var(--kc, var(--ink)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-  .acard-meta {
-    display: flex; align-items: center; gap: var(--s-3);
-    font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums;
-  }
-  /* Same three hues as the live-feed metric: tokens blue, cost green. */
-  .acard-meta .acard-tok { color: var(--accent); }
-  .acard-meta .acard-cost { margin-left: auto; color: var(--accent-2); font-weight: 600; }
+  .live-agent { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .live-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .live-body .kind-badge { width: 16px; height: 16px; vertical-align: -3px; margin-right: var(--s-1); }
+  .live-idle { color: var(--ink-2); font-style: italic; }
+  .live-desc { color: var(--ink-2); }
+  .live-elapsed { font-variant-numeric: tabular-nums; color: var(--warn); font-weight: 600; }
+  .live-cost { font-variant-numeric: tabular-nums; color: var(--accent-2); font-weight: 600; }
 
   /* Live feed. */
   /* The feed owns the column tracks; every row is a subgrid spanning them, so
