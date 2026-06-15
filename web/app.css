@@ -2264,10 +2264,9 @@
     grid-column: 1 / -1;
     position: sticky; top: 0; z-index: 2;
     background: var(--surface);
-    /* A bold green divider clearly fences the live roster off from the static
-       history scrolling beneath it; the soft glow lifts the band off the feed. */
-    border-bottom: 2px solid var(--accent-2);
-    box-shadow: 0 4px 12px -4px color-mix(in oklch, var(--accent-2) 50%, transparent);
+    /* A thick neutral divider fences the live roster off from the static
+       history scrolling beneath it — weight, not color, does the work. */
+    border-bottom: 4px solid var(--border);
   }
   .feed-live-head {
     display: flex; align-items: center; gap: var(--s-2);
@@ -2310,9 +2309,10 @@
      per-row grid let the flexible tracks drift, misaligning the glyph/body).
      Order: time · project›thread · agent · glyph · body · metric. */
   .agent-feed {
-    /* Fill down to near the viewport bottom (the chrome above the feed — nav,
-       banner, subtabs, filter, LIVE FEED header — is ~320px tall on desktop). */
-    max-height: calc(100vh - 320px); min-height: 50vh; overflow-y: auto;
+    /* Bottom-align the feed box with the resize divider (and the drawer), which
+       run 86vh tall from the top of the body. The feed starts one "LIVE FEED"
+       header-footprint lower (s-3 + ~19px label + s-2), so subtract that. */
+    max-height: calc(86vh - var(--s-3) - 19px - var(--s-2)); min-height: 50vh; overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--r-md);
     background: var(--surface); font-family: var(--font-mono); font-size: var(--t-2);
     display: grid;
