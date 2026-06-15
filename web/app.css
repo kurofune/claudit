@@ -2015,7 +2015,8 @@
     color: var(--ink-2); font-variant-numeric: tabular-nums;
   }
   .tf-num input {
-    width: 6ch; padding: 3px 4px; border: 1px solid var(--border);
+    /* Wide enough for ~4 glyphs (e.g. "3.15") plus the native number spinner. */
+    width: 10ch; padding: 3px 6px; border: 1px solid var(--border);
     border-radius: var(--r-sm); background: var(--surface); color: var(--ink);
     font-family: var(--font-mono); font-size: var(--t-1);
   }
@@ -2257,11 +2258,14 @@
   }
 
   /* ── Live stratum: the sticky band of running agents pinned to the top of
-     the feed, above the scrolling history. One grid item spanning all the
-     feed's columns; position:sticky keeps it parked at the top as history
-     scrolls beneath. An opaque background lets history slide under it. */
+     the feed, above the scrolling history. A grid item spanning all the feed's
+     columns that is ALSO a subgrid of them, so its live rows (each a nested
+     subgrid) line up cell-for-cell with the history rows beneath. position:
+     sticky keeps it parked at the top; an opaque background lets history slide
+     under it. */
   .feed-live {
     grid-column: 1 / -1;
+    display: grid; grid-template-columns: subgrid;
     position: sticky; top: 0; z-index: 2;
     background: var(--surface);
     /* A thick neutral divider fences the live roster off from the static
@@ -2269,6 +2273,7 @@
     border-bottom: 4px solid var(--border);
   }
   .feed-live-head {
+    grid-column: 1 / -1;
     display: flex; align-items: center; gap: var(--s-2);
     padding: var(--s-1) var(--s-3);
     font-size: var(--t-1); text-transform: uppercase; letter-spacing: 0.05em;
@@ -2276,14 +2281,14 @@
     background: color-mix(in oklch, var(--accent-2) 6%, var(--surface));
     border-bottom: 1px solid var(--border);
   }
-  /* A live row: left-rail green pulse · project›thread · agent · tool · live
-     timer · cost. Its own grid (not the history subgrid) — it's a distinct
-     "alive" stratum, deliberately not column-aligned to the static history.
-     The per-agent color rides the 3px left rule (--cc from data-c). */
+  /* A live row mirrors a history .fe-row exactly: same subgrid columns, padding
+     and per-agent left rule, so the running roster aligns with the history. A
+     green pulse fills the time column (no timestamp yet) and the metric carries
+     a live-ticking duration. */
   .live-row {
-    display: grid; align-items: baseline; column-gap: var(--s-2);
-    grid-template-columns: auto minmax(0, auto) auto minmax(0, 1fr) auto auto;
-    padding: 4px var(--s-3);
+    grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
+    align-items: baseline; column-gap: var(--s-2);
+    padding: 3px var(--s-3);
     border-left: 3px solid var(--cc, var(--accent-2));
     cursor: pointer;
   }
@@ -2291,17 +2296,12 @@
   .live-row:hover { background: var(--surface-2); }
   .live-row.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
   .live-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .live-pulse-cell { display: inline-flex; align-items: center; align-self: center; }
   .live-pulse {
-    width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center;
+    width: 8px; height: 8px; border-radius: 50%; flex: none;
     background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite;
   }
-  .live-agent { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .live-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .live-body .kind-badge { width: 16px; height: 16px; vertical-align: -3px; margin-right: var(--s-1); }
   .live-idle { color: var(--ink-2); font-style: italic; }
-  .live-desc { color: var(--ink-2); }
-  .live-elapsed { font-variant-numeric: tabular-nums; color: var(--warn); font-weight: 600; }
-  .live-cost { font-variant-numeric: tabular-nums; color: var(--accent-2); font-weight: 600; }
 
   /* Live feed. */
   /* The feed owns the column tracks; every row is a subgrid spanning them, so

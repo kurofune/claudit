@@ -1362,6 +1362,12 @@ function liveStratumHTML() {
   </div>`;
 }
 
+// A live row mirrors a history feedRowHTML cell-for-cell — same six subgrid
+// columns (time · ctx · agent · glyph · body · metric) — so the running roster
+// lines up with the history beneath it. The differences that mark it "live": a
+// green pulse in the time column instead of a timestamp, and a metric whose
+// duration is a live-ticking elapsed timer (cost · elapsed · tokens, same hues
+// and token figure as a history row).
 function liveRowHTML(d) {
   const ref = refKey({ sessionId: d.sessionId, agentIndex: d.agentIndex });
   const c = colorSlot(d.agentIndex);
@@ -1370,18 +1376,22 @@ function liveRowHTML(d) {
     ? `${kindBadge(d.currentToolKind)}<span class="fe-tool kind-${kindFamily(d.currentToolKind)}">${escHtml(d.currentTool)}</span>`
     : `<span class="live-idle">working…</span>`;
   const desc = d.kind !== 'main' && d.description
-    ? ` <span class="live-desc" title="${escHtml(d.description)}">${escHtml(d.description)}</span>` : '';
-  const cost = d.cost_usd ? `<span class="live-cost">${escHtml(fmtMoney(d.cost_usd))}</span>` : '';
-  // A live-ticking elapsed timer, fed by the same data-elapsed contract
-  // tickTimers rewrites against the wall clock (running → counts up from start).
-  const elapsed = `<span class="live-elapsed" data-elapsed data-start="${Number.isFinite(d.startedAt) ? d.startedAt : ''}" data-end="" data-running="1">${escHtml(formatElapsed(d.elapsedMs))}</span>`;
+    ? ` <span class="fe-arg" title="${escHtml(d.description)}">${escHtml(clip(d.description, 72))}</span>` : '';
+  // Metric mirrors feMetric (cost · dur · tok), but "dur" is a live-ticking
+  // elapsed timer fed by the same data-elapsed contract tickTimers rewrites
+  // against the wall clock (running → counts up from start).
+  const parts = [];
+  if (d.cost_usd) parts.push(`<span class="fe-m-cost">${escHtml(fmtMoney(d.cost_usd))}</span>`);
+  parts.push(`<span class="fe-m-dur" data-elapsed data-start="${Number.isFinite(d.startedAt) ? d.startedAt : ''}" data-end="" data-running="1">${escHtml(formatElapsed(d.elapsedMs))}</span>`);
+  if (d.tokens) parts.push(`<span class="fe-m-tok">${escHtml(fmtCompact(d.tokens))} tok</span>`);
+  const metric = `<span class="fe-metric">${parts.join('<span class="fe-m-sep">·</span>')}</span>`;
   return `<div class="live-row${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-    <span class="live-pulse" aria-label="running"></span>
+    <span class="fe-time live-pulse-cell"><span class="live-pulse" aria-label="running"></span></span>
     ${feCtx(d)}
-    <span class="live-agent" title="${escHtml(d.agentLabel)}">${escHtml(clip(d.agentLabel, 24))}</span>
-    <span class="live-body">${tool}${desc}</span>
-    ${elapsed}
-    ${cost}
+    <span class="fe-agent" title="${escHtml(d.agentLabel)}">${escHtml(clip(d.agentLabel, 24))}</span>
+    <span class="fe-glyph"></span>
+    <span class="fe-body">${tool}${desc}</span>
+    ${metric}
   </div>`;
 }
 
