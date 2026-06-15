@@ -248,6 +248,16 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return Turn{}, UserMessage{}, LineMalformed
 	}
+	return classifyRaw(&raw, path)
+}
+
+// classifyRaw turns an already-decoded rawLine into the Turn or
+// UserMessage it represents. Split out of ParseLine so ParseFile can
+// decode each line exactly once and reuse that rawLine for the parent
+// link and tool-result extraction too — the per-line JSON decode is the
+// dominant cost on a full-corpus load, so re-unmarshaling the same line
+// three times (here, peekParentLink, peekToolResults) was the bottleneck.
+func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 	switch raw.Type {
 	case "assistant":
 		if len(raw.Message) == 0 {
@@ -261,7 +271,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			return Turn{}, UserMessage{}, LineUnknown
 		}
 		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
-		thinking, text := extractAssistantText(msg.Content)
+		thinking, text, toolUses := extractAssistantContent(msg.Content)
 		return Turn{
 			SessionID:  raw.SessionID,
 			MessageID:  msg.ID,
@@ -275,7 +285,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 			CWD:          raw.CWD,
 			Model:        msg.Model,
 			Usage:        convertUsage(msg.Usage),
-			ToolUses:     extractToolUses(msg.Content),
+			ToolUses:     toolUses,
 			Thinking:     thinking,
 			Text:         text,
 			Entrypoint:   raw.Entrypoint,
@@ -316,7 +326,20 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
-		t, u, kind := ParseLine(line, path)
+		// Decode the line ONCE and reuse the rawLine for all three
+		// extractions below. Each JSONL line can be large (full message
+		// content, tool output), and json.Unmarshal validates then decodes
+		// the whole line — re-unmarshaling per extraction was scanning each
+		// line three times over and dominated the full-corpus load.
+		if len(line) == 0 {
+			continue
+		}
+		var raw rawLine
+		if err := json.Unmarshal(line, &raw); err != nil {
+			res.Malformed++
+			continue
+		}
+		t, u, kind := classifyRaw(&raw, path)
 		switch kind {
 		case LineMalformed:
 			res.Malformed++
@@ -327,13 +350,14 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 		}
 		// Always extract the parent link if present, even for line types
 		// we otherwise ignore. This bridges system / snapshot rows that
-		// would otherwise break the prompt-attribution chain.
-		if uuid, parentUUID := peekParentLink(line); uuid != "" && parentUUID != "" {
-			res.ParentLinks = append(res.ParentLinks, ParentLink{UUID: uuid, ParentUUID: parentUUID})
+		// would otherwise break the prompt-attribution chain. rawLine
+		// already carries uuid/parentUuid, so no extra decode is needed.
+		if raw.UUID != "" && raw.ParentUUID != "" {
+			res.ParentLinks = append(res.ParentLinks, ParentLink{UUID: raw.UUID, ParentUUID: raw.ParentUUID})
 		}
-		// Tool results ride in user turns that ParseLine filters out, so
-		// pull them off the raw line separately (keyed by tool_use_id).
-		res.ToolResults = append(res.ToolResults, peekToolResults(line)...)
+		// Tool results ride in user turns that classifyRaw filters out, so
+		// pull them off the same raw line (keyed by tool_use_id).
+		res.ToolResults = append(res.ToolResults, toolResultsFromRaw(&raw, path)...)
 	}
 	if err := sc.Err(); err != nil {
 		return res, err
@@ -483,23 +507,6 @@ func convertUsage(u *rawUsage) Usage {
 	return out
 }
 
-// peekParentLink decodes only the uuid and parentUuid fields off a line.
-// Cheaper than the full rawLine decode and tolerates any line shape; we
-// only use it to build the parent-link index for chain walking.
-func peekParentLink(line []byte) (uuid, parentUUID string) {
-	if len(line) == 0 {
-		return "", ""
-	}
-	var raw struct {
-		UUID       string `json:"uuid"`
-		ParentUUID string `json:"parentUuid"`
-	}
-	if err := json.Unmarshal(line, &raw); err != nil {
-		return "", ""
-	}
-	return raw.UUID, raw.ParentUUID
-}
-
 // extractUserText pulls the human-readable text out of a user message's
 // content. Returns hasToolResult=true if any block is a tool_result —
 // callers skip those entirely because the spec attributes cost only to
@@ -537,21 +544,22 @@ func extractUserText(content json.RawMessage) (text string, hasToolResult bool) 
 	return b.String(), false
 }
 
-// extractAssistantText pulls the assistant message's reasoning and narration
-// out of its content array as two distinct strings: thinking joins the
-// `thinking` blocks (extended-thinking reasoning), text joins the `text`
-// narration blocks. Multiple blocks of each kind join with newlines.
-// tool_use and other block types are ignored.
+// extractAssistantContent decodes an assistant message's content array
+// ONCE and derives all three things we keep from it: the joined thinking
+// blocks, the joined text-narration blocks, and the tool_use list.
+// Splitting these across two functions meant decoding the (often large)
+// content array twice per assistant line — the single biggest remaining
+// per-line cost after the line-level decode was deduped.
 //
-// Content may be a bare JSON string (older sessions) which carries no typed
-// blocks, so we return "","" for that case the way other extractors do.
-func extractAssistantText(content json.RawMessage) (thinking, text string) {
+// Content may be a bare JSON string (older sessions) which carries no
+// typed blocks, so we return zero values for that case.
+func extractAssistantContent(content json.RawMessage) (thinking, text string, toolUses []ToolUse) {
 	if len(content) == 0 || content[0] == '"' {
-		return "", ""
+		return "", "", nil
 	}
 	var entries []rawContentEntry
 	if err := json.Unmarshal(content, &entries); err != nil {
-		return "", ""
+		return "", "", nil
 	}
 	var tb, xb strings.Builder
 	for _, e := range entries {
@@ -570,9 +578,22 @@ func extractAssistantText(content json.RawMessage) (thinking, text string) {
 				}
 				xb.WriteString(e.Text)
 			}
+		case "tool_use":
+			tu := ToolUse{ID: e.ID, Name: e.Name}
+			if len(e.Input) > 0 && (e.Name == "Skill" || e.Name == "SlashCommand" || e.Name == "Agent") {
+				var in rawSkillInput
+				if err := json.Unmarshal(e.Input, &in); err == nil {
+					tu.SkillName = in.Skill
+					tu.SlashCommand = in.Command
+					tu.SubagentType = in.SubagentType
+				}
+			}
+			tu.Detail = extractDetail(e.Name, e.Input)
+			tu.Input = extractToolInput(e.Name, e.Input)
+			toolUses = append(toolUses, tu)
 		}
 	}
-	return tb.String(), xb.String()
+	return tb.String(), xb.String(), toolUses
 }
 
 // toolResultMaxChars bounds the per-result snippet we retain — enough to
@@ -589,7 +610,19 @@ func peekToolResults(line []byte) []ToolResult {
 		return nil
 	}
 	var raw rawLine
-	if err := json.Unmarshal(line, &raw); err != nil || raw.Type != "user" || len(raw.Message) == 0 {
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return nil
+	}
+	return toolResultsFromRaw(&raw, "")
+}
+
+// toolResultsFromRaw extracts the tool_result blocks from an
+// already-decoded user line. Shared by peekToolResults (which decodes
+// the line first) and ParseFile (which already holds the rawLine), so
+// the line is never re-unmarshaled just to reach the tool results.
+// path is currently unused but kept for symmetry with classifyRaw.
+func toolResultsFromRaw(raw *rawLine, _ string) []ToolResult {
+	if raw.Type != "user" || len(raw.Message) == 0 {
 		return nil
 	}
 	var msg rawMessage
@@ -652,35 +685,6 @@ func toolResultText(raw json.RawMessage) string {
 		}
 	}
 	return b.String()
-}
-
-func extractToolUses(content json.RawMessage) []ToolUse {
-	if len(content) == 0 {
-		return nil
-	}
-	var entries []rawContentEntry
-	if err := json.Unmarshal(content, &entries); err != nil {
-		return nil
-	}
-	var out []ToolUse
-	for _, e := range entries {
-		if e.Type != "tool_use" {
-			continue
-		}
-		tu := ToolUse{ID: e.ID, Name: e.Name}
-		if len(e.Input) > 0 && (e.Name == "Skill" || e.Name == "SlashCommand" || e.Name == "Agent") {
-			var in rawSkillInput
-			if err := json.Unmarshal(e.Input, &in); err == nil {
-				tu.SkillName = in.Skill
-				tu.SlashCommand = in.Command
-				tu.SubagentType = in.SubagentType
-			}
-		}
-		tu.Detail = extractDetail(e.Name, e.Input)
-		tu.Input = extractToolInput(e.Name, e.Input)
-		out = append(out, tu)
-	}
-	return out
 }
 
 // IsSubagentFile reports whether path is one of the

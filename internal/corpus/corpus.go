@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -316,6 +317,17 @@ func (c *Cache) RunPoller(ctx context.Context, interval time.Duration, onErr fun
 // This is the one-shot entry point; it shares the walk and concurrent
 // parse with Cache but keeps no state and never polls.
 func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
+	// The concurrent parse allocates heavily (every line decodes into
+	// short-lived intermediate structs), so the default GC pace fires
+	// often and steals cycles from the parse workers — it measurably
+	// hurts multicore scaling on a full-corpus load. This is a one-shot
+	// batch path (report/diff) that parses everything then exits, so a
+	// looser GC target trades a bounded bump in peak heap for a faster
+	// load. Scoped to this call and restored on return so the long-lived
+	// serve/watch daemons (which use Cache, not LoadConcurrent) keep the
+	// default steady-state memory profile.
+	defer debug.SetGCPercent(debug.SetGCPercent(200))
+
 	var paths []string
 	walkErr := walkJSONL(root, earliest, func(path string, _ time.Time, _ int64) {
 		paths = append(paths, path)
