@@ -8,6 +8,8 @@ Audit your Claude Code session JSONL files for token and cost spend.
 
 claudit reads the `.jsonl` session logs that Claude Code writes under `~/.claude/projects/` and reports where the money went — by project, model, tool, subagent, and individual user prompt. The default output is a single self-contained HTML file you open in a browser; markdown and JSON are also supported for piping into other tools.
 
+Run as a local web app (`claudit serve`), it also opens up the **Agents** view: a full trace of what each session's agents actually did — every turn, tool call, and sub-agent on a real timeline, with automatic anomaly detection. See [The Agents view](#the-agents-view).
+
 ![claudit report screenshot](docs/images/claudit-report.png)
 
 ![claudit diff screenshot](docs/images/claudit-diff.png)
@@ -31,7 +33,8 @@ claudit serve --port=9000 --open=false
 # Filters live in the query string, views in the URL hash:
 #   http://127.0.0.1:8787/?project=myrepo&last=7d
 #   http://127.0.0.1:8787/?since=2026-05-01&until=2026-05-15&by=week#cost
-#   http://127.0.0.1:8787/#sessions/<session-id>     # deep-link a session
+#   http://127.0.0.1:8787/#agents              # the Agents trace viewer
+#   http://127.0.0.1:8787/#agents/timeline     # deep-link a specific lens
 
 # Tail the currently-running session and watch cost accrue
 claudit watch --budget=5.00
@@ -67,9 +70,25 @@ Date filters (`--since` / `--until`, `diff`'s `--a` / `--b` ranges, and serve's 
 - **Per-prompt cost.** Every user prompt's downstream cost, computed by walking the conversation's parent links.
 - **Cache efficiency.** Hit ratio overall plus the worst-offender prompts and tools driving cache misses.
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.
-- **Sessions drill-down (HTML only).** Every session in the time window, newest first (by last activity) and paged 10 at a time, each expandable to show the ordered user prompts and the assistant turns each one produced — per-turn model, tokens, cost, and which tools fired. In a generated report the baked set is bounded via `--sessions=N` (default 50; `--sessions=0` disables the view); `claudit serve` is uncapped by default, so the time range is the only bound. Use `--redact` to replace prompt bodies with `[redacted N chars]` before sharing a report.
+- **Agent traces (`claudit serve` only).** The Agents view reconstructs each session turn-by-turn — the ordered user prompts and the assistant turns each one produced, every tool call (with the exact input/output), and every sub-agent — on a timeline, with automatic anomaly detection. See [The Agents view](#the-agents-view). Pass `--redact` (or `?redact=true` in the URL) to replace prompt and tool-I/O bodies with `[redacted N chars]` before sharing.
 - **Trends.** Day/week/month buckets with sparklines.
 - **Anomalies.** Trend buckets with abnormal cost spikes or cache hit-ratio drops are flagged inline — coral dots in the HTML chart, an `## Anomalies` section in markdown, and an `anomalies` field in JSON.
+
+## The Agents view
+
+`claudit serve` adds an **Agents** tab that turns the raw transcript into a trace you can actually read and audit — not just "where did the money go," but "what did the agent *do*." It's a `serve`-only view (a static one-shot `claudit report` doesn't include it). Open it at `http://127.0.0.1:8787/#agents`.
+
+![claudit agents view screenshot](docs/images/claudit-agents.png)
+
+Everything you click — an agent, a turn, or a single tool call — fills one shared **detail drawer** on the right (input, output, status, reasoning, tokens, cost, model, duration), and the selection persists as you switch between five lenses over the same data:
+
+- **Feed** — a live, newest-first stream of activity. Currently-running agents pin to the top as sticky "live" rows and update in place every couple of seconds; your scroll, selection, and open panels stay put.
+- **Tree** — the drill-down. Pick any agent and read its step-by-step tool log, with sub-agents nested under the call that spawned them, per-turn reasoning, and the exact input each tool sent and the output it got back (✓/✗). Cost and error counts roll up onto parents.
+- **Timeline** — a Gantt on a real time axis: one row per agent, indented by who spawned whom, bar width = lifetime, overlap = concurrency. Bars are tiled into per-turn segments colored by tool kind, with idle-gap and critical-path marks, a draggable **playhead** that replays the trace at any instant, and scroll-wheel zoom.
+- **Conversation** — the prompt-by-prompt thread for a single session, with a session picker.
+- **Insights** — an analytical dashboard, each section its own tab: **Signals** (automatic anomaly detection — cost whales, retry storms, slow tools, error cascades, idle stalls, runaway context — worst-first, click-through to the Timeline), **Tool mix**, **Cost Pareto**, **Latency**, **Errors**, **Token & context**, and **Group by** (kind/model/agent/status). A Graph / Session / Agent scope toggle re-slices every panel except the graph-wide Signals.
+
+A trace filter (kind, cost, duration, errors, free text) dims non-matching steps across every lens at once. Deep-link a specific lens with `#agents/<lens>` (e.g. `#agents/timeline`, `#agents/insights`). Prompt and tool-I/O content is inlined the same way it is elsewhere — `--redact` / `?redact=true` scrubs it (see [Privacy](#privacy)).
 
 ## Privacy
 
@@ -81,7 +100,7 @@ claudit runs entirely on your machine:
 
 The CLI makes no network calls. The HTML report references Inter from Google Fonts for typography, so opening it in a browser fetches the font from `fonts.googleapis.com` — your IP and User-Agent reach Google, but none of the report's content (prompts, paths, costs) does. Offline, the report falls back to system sans-serif. Hotspot prompts are copyable text — pasting them into a model is your decision.
 
-One thing to know if you plan to share a report: the **Sessions drill-down** view inlines your prompt text (truncated to 2000 chars per prompt). The text never leaves the report, but if the file does, the prompts go with it. Pass `--redact` to replace prompt bodies with `[redacted N chars]` — costs, tokens, tool names, and timestamps are still emitted, just not the conversation content. Pass `--sessions=0` to omit the view entirely.
+One thing to know if you plan to share a report: a generated HTML report still inlines your session prompt text (truncated to 2000 chars per prompt) in its data blob, and in `claudit serve` the Agents view inlines prompt and tool-I/O content. The text never leaves your machine on its own, but if the report file does, the prompts go with it. Pass `--redact` (or `?redact=true` in `serve`) to replace prompt and tool-I/O bodies with `[redacted N chars]` — costs, tokens, tool names, and timestamps are still emitted, just not the conversation content. For a static report, `--sessions=0` omits the baked session data entirely.
 
 ## Pricing config
 
@@ -105,7 +124,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 
 | Command | Purpose |
 |---|---|
-| `serve` | Run a local web daemon that re-renders the report as JSONLs change. Filters via URL query. Loopback-only by default. |
+| `serve` | Run a local web daemon that re-renders the report as JSONLs change, and hosts the live [Agents](#the-agents-view) trace viewer. Filters via URL query. Loopback-only by default. |
 | `watch` | Tail the active session (or all recently-modified sessions with `--all`) and print running cost in a full-screen TUI. Rolling hour/today/week/month totals computed over your full history and refreshed live (no scan window — `--scan-days` is deprecated and ignored), plus spike detection and budget alerts. |
 | `report` | Generate a cost/usage report. Default if no subcommand is given. |
 | `diff` | Compare two date ranges and report top movers. |
@@ -114,6 +133,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 
 ## Status and limitations
 
+- The **Agents view** is `claudit serve` only — a one-shot `claudit report` HTML file does not include it.
 - The JSONL schema is Claude Code's. If Anthropic changes it, the parser may need to catch up.
 - Prices are manually maintained in `prices.yaml`. When Anthropic publishes new rates, you update the YAML.
 - Developed and dogfooded on macOS. CI runs the test suite on Linux, macOS, and Windows. On Windows, `claudit watch`'s live status line uses ANSI escape sequences — Windows Terminal and PowerShell 7 render them correctly; legacy `cmd.exe` will show the escapes literally.
