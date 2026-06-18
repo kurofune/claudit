@@ -166,6 +166,56 @@ func mkTurn(uuid, sid, src string, ts time.Time) parse.Turn {
 	}
 }
 
+// TestBuildAgentGraph_ExcludesReplayedTurns: a forked session (s2/b.jsonl)
+// replays the original session's turn (s1/a.jsonl, same message.id). The
+// replay was billed once already, so the Agents view must exclude it — the
+// sum of session costs must equal the deduped headline.
+func TestBuildAgentGraph_ExcludesReplayedTurns(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	orig := mkTurn("a1", "s1", "a.jsonl", t0)
+	orig.MessageID = "m1"
+	replay := mkTurn("a1", "s2", "b.jsonl", t0)
+	replay.MessageID = "m1" // same generation, replayed into the fork
+	fresh := mkTurn("a2", "s2", "b.jsonl", t0.Add(time.Minute))
+	fresh.MessageID = "m2"
+
+	turns := []parse.Turn{orig, replay, fresh}
+	snap := &corpus.Snapshot{Turns: turns}
+
+	// Deduped headline.
+	agg := aggregate.New(prices)
+	for _, tn := range turns {
+		agg.Add(tn)
+	}
+	head := agg.Totals()
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var sum float64
+	var s2 *AgentSession
+	for i := range g.Sessions {
+		sum += g.Sessions[i].CostUSD
+		if g.Sessions[i].SessionID == "s2" {
+			s2 = &g.Sessions[i]
+		}
+	}
+	if d := sum - head.CostUSD; d > 1e-9 || d < -1e-9 {
+		t.Errorf("agent-graph cost sum = %.6f, want %.6f (headline)", sum, head.CostUSD)
+	}
+	if s2 == nil {
+		t.Fatalf("forked session s2 missing")
+	}
+	// s2 should bill only its net-new turn (m2), not the replayed m1.
+	oneTurn, _ := prices.Cost("claude-opus-4-7", 1000, 0, 0, 0, 0)
+	if d := s2.CostUSD - oneTurn; d > 1e-9 || d < -1e-9 {
+		t.Errorf("forked session s2 cost = %.6f, want %.6f (replay excluded)", s2.CostUSD, oneTurn)
+	}
+}
+
 func TestBuildAgentGraph_EmptySnapshot(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	g, err := BuildAgentGraph(&corpus.Snapshot{}, prices, aggregate.Filter{}, Options{})

@@ -51,8 +51,8 @@ func TestAggregate_CountsCoalescedMessageOnce(t *testing.T) {
 
 func TestAggregate_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
 	// A resumed/forked session replays the prior transcript into a NEW file:
-	// same message.id and identical usage, but a fresh uuid and a new
-	// sessionId. Both files land in the corpus, so the aggregator sees the
+	// same message.id, usage, and uuid — only the sessionId and file path
+	// differ. Both files land in the corpus, so the aggregator sees the
 	// same generation twice. coalesceTurns only dedups within one file, so the
 	// aggregator must drop the cross-file duplicate — counting both would
 	// double-bill the tokens and cost. Opus 1M input = $5, so $10 would be the

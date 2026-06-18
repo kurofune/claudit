@@ -67,6 +67,80 @@ func TestBuildSessionTimelines_GroupsPromptsAndOrdersChronologically(t *testing.
 	}
 }
 
+// TestBuildSessionTimelines_ExcludesReplayedTurns: a forked session replays
+// the original session's turn (same message.id, different file/sessionId).
+// The replayed copy was billed once already, so the drill-down must exclude
+// it from the fork's cost/tokens/turn-count — and the sum across all sessions
+// must reconcile exactly with the deduped headline.
+func TestBuildSessionTimelines_ExcludesReplayedTurns(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	mk := func(uuid, msgID, sid, file string, ts time.Time) parse.Turn {
+		return parse.Turn{
+			UUID:       uuid,
+			MessageID:  msgID,
+			SessionID:  sid,
+			SourceFile: file,
+			Timestamp:  ts,
+			Model:      "claude-opus-4-7",
+			Usage:      parse.Usage{InputTokens: 1000, OutputTokens: 500},
+		}
+	}
+
+	// Original session s1 (a.jsonl): one turn, message m1.
+	// Forked session s2 (b.jsonl): replays m1 verbatim, then adds new m2.
+	turns := []parse.Turn{
+		mk("a1", "m1", "s1", "a.jsonl", t0),
+		mk("a1", "m1", "s2", "b.jsonl", t0),                  // replay of m1
+		mk("a2", "m2", "s2", "b.jsonl", t0.Add(time.Minute)), // net-new
+	}
+
+	// Deduped headline: m1 once + m2 once.
+	agg := New(prices)
+	for _, tn := range turns {
+		agg.Add(tn)
+	}
+	head := agg.Totals()
+
+	out, err := BuildSessionTimelines(context.Background(), turns, nil, nil, prices, Filter{}, SessionTimelinesOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sumCost float64
+	var sumTurns int
+	var s2 *SessionTimeline
+	for i := range out {
+		sumCost += out[i].CostUSD
+		sumTurns += out[i].Turns
+		if out[i].SessionID == "s2" {
+			s2 = &out[i]
+		}
+	}
+
+	if sumTurns != head.Turns {
+		t.Errorf("session turn sum = %d, want %d (headline)", sumTurns, head.Turns)
+	}
+	if !floatNear(sumCost, head.CostUSD) {
+		t.Errorf("session cost sum = %.6f, want %.6f (headline)", sumCost, head.CostUSD)
+	}
+	if s2 == nil {
+		t.Fatalf("forked session s2 missing from output")
+	}
+	if s2.Turns != 1 {
+		t.Errorf("forked session s2 Turns = %d, want 1 (replay excluded)", s2.Turns)
+	}
+}
+
+func floatNear(a, b float64) bool {
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return d < 1e-9
+}
+
 func TestBuildSessionTimelines_CarriesEntrypointAndToolInput(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

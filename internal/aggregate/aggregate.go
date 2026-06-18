@@ -153,12 +153,12 @@ type Aggregator struct {
 	unknownModels map[string]struct{}
 
 	// Cross-file dedup set, keyed by message.id. A resumed/forked session
-	// replays the prior transcript into a new file (same message.id and
-	// identical usage, fresh uuid/sessionId); coalesceTurns only dedups
-	// within one file, so without this the same generation is billed once
-	// per file it appears in. We count the first occurrence and skip the
-	// rest. Empty ids (legacy single-line transcripts) can't be keyed and
-	// always count.
+	// replays the prior transcript into a new file verbatim — same message.id,
+	// usage, uuid, and timestamp; only sessionId and the file path differ.
+	// coalesceTurns only dedups within one file, so without this the same
+	// generation is billed once per file it appears in. We count the first
+	// occurrence and skip the rest. Empty ids (legacy single-line transcripts)
+	// can't be keyed and always count.
 	seenMessageID map[string]struct{}
 
 	// Trend mode. Zero-valued (PeriodNone) means trend tracking is off
@@ -281,9 +281,9 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		return false
 	}
 	// Cross-file dedup: a resumed/forked session replays prior turns into a
-	// new file with the same message.id (and identical usage) but a fresh
-	// uuid/sessionId. Count the first occurrence; skip later duplicates so the
-	// same generation isn't billed once per file. Empty ids (legacy
+	// new file verbatim — same message.id, usage, and uuid; only sessionId and
+	// the file path differ. Count the first occurrence; skip later duplicates so
+	// the same generation isn't billed once per file. Empty ids (legacy
 	// single-line transcripts) can't be keyed, so they always count.
 	if t.MessageID != "" {
 		if _, dup := a.seenMessageID[t.MessageID]; dup {

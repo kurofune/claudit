@@ -186,8 +186,17 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		}
 	}
 
+	// A resumed/forked session replays the original's turns verbatim (same
+	// message.id, different file/sessionId). Their cost/tokens were counted on
+	// the canonical occurrence, so skip the replays here or the per-session and
+	// per-agent figures would inflate above the deduped headline.
+	replays := aggregate.BuildReplaySet(snap.Turns)
+
 	for _, t := range snap.Turns {
 		if !aggregate.MatchesFilter(t, f) {
+			continue
+		}
+		if replays.IsReplay(t) {
 			continue
 		}
 		s, ok := sessions[t.SessionID]

@@ -187,6 +187,24 @@ func BuildSessionTimelines(
 	filter Filter,
 	opts SessionTimelinesOptions,
 ) ([]SessionTimeline, error) {
+	// Replay set is built from the same turns this call rolls up. The
+	// single-session entrypoint (BuildSessionTimeline) instead builds it from
+	// the full corpus before narrowing and calls buildSessionTimelines
+	// directly — replays are cross-session, so a narrowed slice can't detect
+	// them on its own.
+	return buildSessionTimelines(ctx, turns, msgs, parentLinks, prices, filter, opts, BuildReplaySet(turns))
+}
+
+func buildSessionTimelines(
+	ctx context.Context,
+	turns []parse.Turn,
+	msgs []parse.UserMessage,
+	parentLinks []parse.ParentLink,
+	prices *pricing.Table,
+	filter Filter,
+	opts SessionTimelinesOptions,
+	replays ReplaySet,
+) ([]SessionTimeline, error) {
 	if len(turns) == 0 {
 		return nil, nil
 	}
@@ -235,6 +253,12 @@ func BuildSessionTimelines(
 			}
 		}
 		if !matchesFilter(t, filter) {
+			continue
+		}
+		// Skip replayed copies from a resumed/forked session: their cost and
+		// tokens were counted on the canonical occurrence, so counting them
+		// here too would inflate this session's spend above the headline.
+		if replays.IsReplay(t) {
 			continue
 		}
 		cost, _ := prices.Cost(t.Model,
@@ -396,6 +420,11 @@ func BuildSessionTimeline(
 	if sessionID == "" {
 		return nil, nil
 	}
+	// Build the replay set from the FULL corpus before narrowing. Replays
+	// are cross-session (a fork lives in a different sessionId/file), so a
+	// slice narrowed to one session can't tell its replayed turns from
+	// originals — the canonical copy is in another session entirely.
+	replays := BuildReplaySet(turns)
 	// Narrow the turn slice to just this session before the heavy
 	// timeline walk runs. The user-messages slice can stay as-is —
 	// resolveUserUUID is cached and irrelevant entries cost nothing
@@ -413,7 +442,7 @@ func BuildSessionTimeline(
 	// caller that forwards the same options struct can't accidentally
 	// cap it to zero rows.
 	opts.TopN = 0
-	tls, err := BuildSessionTimelines(ctx, filtered, msgs, parentLinks, prices, filter, opts)
+	tls, err := buildSessionTimelines(ctx, filtered, msgs, parentLinks, prices, filter, opts, replays)
 	if err != nil {
 		return nil, err
 	}
