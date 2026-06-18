@@ -36,7 +36,20 @@ func RollingTotals(turns []parse.Turn, prices *pricing.Table, now time.Time) (ho
 	weekStart := todayStart.AddDate(0, 0, -(weekday - 1))
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 
+	// Cross-file dedup, same as the Aggregator: a resumed/forked session
+	// replays prior turns into a new file with the same message.id and
+	// identical usage. Count the first occurrence; skip the rest so the panel
+	// isn't double-billed. Empty ids (legacy single-line transcripts) can't be
+	// keyed, so they always count.
+	seen := make(map[string]struct{}, len(turns))
+
 	for _, t := range turns {
+		if t.MessageID != "" {
+			if _, dup := seen[t.MessageID]; dup {
+				continue
+			}
+			seen[t.MessageID] = struct{}{}
+		}
 		cost, _ := prices.Cost(t.Model,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,

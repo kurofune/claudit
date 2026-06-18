@@ -120,6 +120,39 @@ func TestBudget_AlertsOnceOnCross(t *testing.T) {
 	}
 }
 
+func TestMultiHub_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
+	// `watch --all` tails many files. A resumed/forked session replays the
+	// same generation into a second file (same message.id + usage, fresh
+	// uuid). combinedCost must count it once, not once per file.
+	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
+	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+
+	mk := func(path, msgID string) taggedEvent {
+		return taggedEvent{path: path, ev: watch.Event{
+			Kind: parse.LineAssistant, Live: true,
+			Turn: parse.Turn{
+				SessionID: path, MessageID: msgID, Model: "claude-test",
+				Timestamp: time.Now(), CWD: "/proj",
+				Usage: parse.Usage{OutputTokens: 100_000}, // $0.10
+			},
+		}}
+	}
+
+	h.handleEvent(mk("a.jsonl", "msg_dup")) // original
+	h.handleEvent(mk("b.jsonl", "msg_dup")) // fork replay — same generation
+
+	const eps = 1e-9
+	if got := h.state.combinedCost; got < 0.10-eps || got > 0.10+eps {
+		t.Errorf("combinedCost = %.4f, want 0.10 (duplicate counted once, not $0.20)", got)
+	}
+
+	// A genuinely distinct generation still adds.
+	h.handleEvent(mk("b.jsonl", "msg_other"))
+	if got := h.state.combinedCost; got < 0.20-eps || got > 0.20+eps {
+		t.Errorf("combinedCost after distinct id = %.4f, want 0.20", got)
+	}
+}
+
 func TestSpike_SuppressedDuringHistoryReplay(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})

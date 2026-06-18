@@ -49,6 +49,52 @@ func TestAggregate_CountsCoalescedMessageOnce(t *testing.T) {
 	}
 }
 
+func TestAggregate_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
+	// A resumed/forked session replays the prior transcript into a NEW file:
+	// same message.id and identical usage, but a fresh uuid and a new
+	// sessionId. Both files land in the corpus, so the aggregator sees the
+	// same generation twice. coalesceTurns only dedups within one file, so the
+	// aggregator must drop the cross-file duplicate — counting both would
+	// double-bill the tokens and cost. Opus 1M input = $5, so $10 would be the
+	// unambiguous double-count signature.
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	t0 := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+
+	orig := turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", t0)
+	orig.MessageID = "msg_dup"
+	orig.UUID = "uuid-a"
+	orig.SessionID = "session-a"
+	orig.SourceFile = "a.jsonl"
+
+	replay := orig // same message.id + identical usage
+	replay.UUID = "uuid-b"
+	replay.SessionID = "session-b" // fork re-stamps uuid + sessionId
+	replay.SourceFile = "b.jsonl"
+
+	agg.Add(orig)
+	agg.Add(replay)
+
+	tot := agg.Totals()
+	if tot.Turns != 1 {
+		t.Errorf("Turns = %d, want 1 (duplicate generation counted once)", tot.Turns)
+	}
+	if tot.InputTokens != 1_000_000 {
+		t.Errorf("InputTokens = %d, want 1_000_000 once (not 2_000_000)", tot.InputTokens)
+	}
+	if tot.CostUSD < 4.99 || tot.CostUSD > 5.01 {
+		t.Errorf("CostUSD = %v, want ~$5.00 once (not ~$10)", tot.CostUSD)
+	}
+
+	// A genuinely distinct generation (different message.id) must still count.
+	other := turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", t0)
+	other.MessageID = "msg_other"
+	agg.Add(other)
+	if got := agg.Totals().InputTokens; got != 2_000_000 {
+		t.Errorf("InputTokens after distinct id = %d, want 2_000_000", got)
+	}
+}
+
 func turn(model string, in, out int, sidechain bool, cwd string, ts time.Time, tools ...parse.ToolUse) parse.Turn {
 	return parse.Turn{
 		Model:     model,

@@ -234,6 +234,15 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 		return
 	}
 	t := te.ev.Turn
+	// Cross-file dedup: skip a generation already counted from another file
+	// (resume/fork replay). Empty ids (legacy transcripts) can't be keyed and
+	// always count.
+	if t.MessageID != "" {
+		if _, dup := h.state.seenMsg[t.MessageID]; dup {
+			return
+		}
+		h.state.seenMsg[t.MessageID] = struct{}{}
+	}
 	cost, _ := h.prices.Cost(t.Model,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
@@ -409,10 +418,17 @@ type multiState struct {
 	sessions      map[string]*sessionAgg
 	combinedCost  float64
 	budgetAlerted bool
+	// seenMsg dedups generations across files: a resumed/forked session
+	// replays prior turns into a new file with the same message.id, so
+	// without this combinedCost double-bills the replayed history.
+	seenMsg map[string]struct{}
 }
 
 func newMultiState() *multiState {
-	return &multiState{sessions: map[string]*sessionAgg{}}
+	return &multiState{
+		sessions: map[string]*sessionAgg{},
+		seenMsg:  map[string]struct{}{},
+	}
 }
 
 func (m *multiState) session(path, sessID, cwd string) *sessionAgg {

@@ -46,6 +46,32 @@ func TestRollingTotals_Buckets(t *testing.T) {
 	check("month", month, 20)
 }
 
+func TestRollingTotals_DedupsDuplicateMessageID(t *testing.T) {
+	// A forked/resumed session replays the same generation into a second
+	// file: identical message.id + usage. RollingTotals sums raw turns, so it
+	// must drop the cross-file duplicate or the panel double-bills. One opus
+	// 1M-input turn = $5, so the duplicate counted twice would read $10.
+	prices, _ := pricing.LoadDefault()
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 5, 20, 11, 30, 0, 0, time.UTC) // inside all four buckets
+
+	orig := opusTurn(ts)
+	orig.MessageID = "msg_dup"
+	replay := orig // same id + usage; fork re-stamps uuid/sessionId (not summed here)
+	replay.UUID = "uuid-b"
+
+	hour, today, week, month := RollingTotals([]parse.Turn{orig, replay}, prices, now)
+	const eps = 1e-9
+	for _, c := range []struct {
+		name string
+		got  float64
+	}{{"hour", hour}, {"today", today}, {"week", week}, {"month", month}} {
+		if c.got < 5-eps || c.got > 5+eps {
+			t.Errorf("%s = %.4f, want 5 (duplicate generation counted once, not $10)", c.name, c.got)
+		}
+	}
+}
+
 func TestRollingTotals_BoundaryInclusive(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
