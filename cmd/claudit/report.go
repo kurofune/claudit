@@ -99,7 +99,12 @@ func runReport(args []string) error {
 	// chain walk is structural, and a turn's originating prompt is the
 	// same regardless of whether the report's date window includes it.
 	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
-	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period).WithPromptIndex(promptIdx)
+	// Replay set built from the full (unfiltered) corpus — the same input the
+	// session drill-down uses — so the headline per-session/project rollup
+	// dedups resumed/forked turns by the identical canonical choice and the
+	// views reconcile.
+	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period).
+		WithPromptIndex(promptIdx).WithReplaySet(aggregate.BuildReplaySet(turns))
 
 	lookup := newSubagentLookup()
 	for _, t := range turns {

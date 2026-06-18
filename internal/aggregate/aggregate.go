@@ -161,6 +161,16 @@ type Aggregator struct {
 	// can't be keyed and always count.
 	seenMessageID map[string]struct{}
 
+	// replays, when set via WithReplaySet, makes cross-file dedup
+	// deterministic and identical to the drill-downs: instead of crediting
+	// whichever copy Add() saw first (order-dependent — snapshot turn order
+	// is non-deterministic), it skips every non-canonical replay so the
+	// canonical copy (lexicographically smallest source file) is always the
+	// one counted. Built from the full corpus before Add() runs. When unset
+	// (hasReplaySet false), the seenMessageID first-occurrence path applies.
+	replays      ReplaySet
+	hasReplaySet bool
+
 	// Trend mode. Zero-valued (PeriodNone) means trend tracking is off
 	// and the per-bucket maps stay nil. WithPeriod flips it on.
 	period         Period
@@ -223,6 +233,20 @@ func (a *Aggregator) WithPromptIndex(p *PromptIndex) *Aggregator {
 	return a
 }
 
+// WithReplaySet makes cross-file dedup deterministic by deferring to the
+// same canonical choice the drill-downs use (the lexicographically smallest
+// source file for each duplicated message.id). With it set, Add() skips every
+// non-canonical replayed copy so the canonical session/project is credited
+// regardless of the order turns arrive — keeping the headline per-session
+// rollup in lockstep with the Sessions and Agents views. Build the set from
+// the full corpus and call this before Add(); without it, dedup falls back to
+// the order-dependent first-occurrence path.
+func (a *Aggregator) WithReplaySet(rs ReplaySet) *Aggregator {
+	a.replays = rs
+	a.hasReplaySet = true
+	return a
+}
+
 // WithPeriod enables trend tracking at the given bucket size. Pass
 // PeriodNone to disable. Must be called before Add().
 func (a *Aggregator) WithPeriod(p Period) *Aggregator {
@@ -282,10 +306,15 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	}
 	// Cross-file dedup: a resumed/forked session replays prior turns into a
 	// new file verbatim — same message.id, usage, and uuid; only sessionId and
-	// the file path differ. Count the first occurrence; skip later duplicates so
-	// the same generation isn't billed once per file. Empty ids (legacy
-	// single-line transcripts) can't be keyed, so they always count.
-	if t.MessageID != "" {
+	// the file path differ, so the same generation isn't billed once per file.
+	// With a replay set, defer to its canonical choice (deterministic, matches
+	// the drill-downs); otherwise count the first occurrence Add() sees. Empty
+	// ids (legacy single-line transcripts) can't be keyed, so they always count.
+	if a.hasReplaySet {
+		if a.replays.IsReplay(t) {
+			return false
+		}
+	} else if t.MessageID != "" {
 		if _, dup := a.seenMessageID[t.MessageID]; dup {
 			return false
 		}

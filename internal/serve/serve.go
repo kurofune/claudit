@@ -541,7 +541,10 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 		WithFilter(q.Filter).
 		WithPeriod(q.Period).
 		WithTrendFill(q.TrendFillStart, q.TrendFillEnd).
-		WithPromptIndex(promptIdx)
+		WithPromptIndex(promptIdx).
+		// Same canonical replay dedup as the Sessions/Agents drill-downs, so the
+		// headline per-session figures match those views deterministically.
+		WithReplaySet(aggregate.BuildReplaySet(snap.Turns))
 	for _, t := range snap.Turns {
 		agg.AddWithSubagent(t, s.subagentLookup())
 	}

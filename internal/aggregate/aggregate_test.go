@@ -95,6 +95,83 @@ func TestAggregate_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
 	}
 }
 
+func TestAggregate_ReplaySet_CreditsCanonicalSessionRegardlessOfAddOrder(t *testing.T) {
+	// A resumed/forked session replays the original transcript verbatim into a
+	// new file (same message.id + usage; different sessionId + path). The
+	// drill-downs credit the canonical copy — the lexicographically smallest
+	// source file — so a turn is never billed twice. The headline per-session
+	// rollup must agree, deterministically, no matter which copy Add() sees
+	// first. Without WithReplaySet the first-Add-order copy wins (here the
+	// replay, since it's added first), which both contradicts the drill-down
+	// and is non-deterministic across runs. With it, the canonical "a.jsonl"
+	// (session-a) is always credited.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+
+	orig := turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", t0)
+	orig.MessageID = "msg_dup"
+	orig.UUID = "uuid-a"
+	orig.SessionID = "session-a"
+	orig.SourceFile = "a.jsonl" // canonical: lexicographically smallest
+
+	replay := orig
+	replay.UUID = "uuid-b"
+	replay.SessionID = "session-b"
+	replay.SourceFile = "b.jsonl"
+
+	turns := []parse.Turn{replay, orig} // replay added FIRST on purpose
+	agg := New(prices).WithReplaySet(BuildReplaySet(turns))
+	for _, tn := range turns {
+		agg.Add(tn)
+	}
+
+	rows := agg.CacheBySession()
+	if len(rows) != 1 {
+		t.Fatalf("CacheBySession rows = %d, want 1 (replay copy skipped)", len(rows))
+	}
+	if rows[0].Key != "session-a" {
+		t.Errorf("credited session = %q, want %q (canonical min source file)", rows[0].Key, "session-a")
+	}
+	if rows[0].CostUSD < 4.99 || rows[0].CostUSD > 5.01 {
+		t.Errorf("session cost = %v, want ~$5.00 once", rows[0].CostUSD)
+	}
+}
+
+func TestAggregate_ReplaySet_CountsDuplicateOnceInTotals(t *testing.T) {
+	// The replay-set dedup path must not double-bill the headline totals: a
+	// generation present in two files (resume/fork) is one billed call, so
+	// Turns, tokens, and cost all reflect a single occurrence. Opus 1M input =
+	// $5, so $10 / 2M tokens / 2 turns would be the double-count signature.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+
+	orig := turn("claude-opus-4-7", 1_000_000, 0, false, "/p/foo", t0)
+	orig.MessageID = "msg_dup"
+	orig.SessionID = "session-a"
+	orig.SourceFile = "a.jsonl"
+
+	replay := orig
+	replay.SessionID = "session-b"
+	replay.SourceFile = "b.jsonl"
+
+	turns := []parse.Turn{replay, orig}
+	agg := New(prices).WithReplaySet(BuildReplaySet(turns))
+	for _, tn := range turns {
+		agg.Add(tn)
+	}
+
+	tot := agg.Totals()
+	if tot.Turns != 1 {
+		t.Errorf("Turns = %d, want 1 (duplicate counted once)", tot.Turns)
+	}
+	if tot.InputTokens != 1_000_000 {
+		t.Errorf("InputTokens = %d, want 1_000_000 (not 2_000_000)", tot.InputTokens)
+	}
+	if tot.CostUSD < 4.99 || tot.CostUSD > 5.01 {
+		t.Errorf("CostUSD = %v, want ~$5.00 (not ~$10)", tot.CostUSD)
+	}
+}
+
 func turn(model string, in, out int, sidechain bool, cwd string, ts time.Time, tools ...parse.ToolUse) parse.Turn {
 	return parse.Turn{
 		Model:     model,

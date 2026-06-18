@@ -70,6 +70,7 @@ const SHELL = `
     <summary>What "tool cost" means</summary>
     <div class="body">
       <p>Cost attributed to a tool is the cost of the <em>assistant turns that called it</em> — the model has to read the tool's output back into context, so a tool that returns large results inflates the next turn's input cost.</p>
+      <p class="small"><strong>These costs overlap.</strong> A single turn that calls several tools is counted in full under <em>each</em> of them — so this column (and its "% of total") deliberately sums to <em>more</em> than your total spend. Read each row as "spend on turns that involved this tool," not as a slice of a pie.</p>
       <ul>
         <li><strong>High Read or Grep cost</strong> → likely reading huge files or grepping with broad patterns. Open the <strong>Drill-down</strong> tab to see the (tool, args) breakdown and look for arguments hitting big files.</li>
         <li><strong>High Bash cost</strong> → often <code>tail</code>, <code>npm test</code>, log streaming, or other commands whose stdout streams large output back into context. Consider redirecting to a file and reading a slice.</li>

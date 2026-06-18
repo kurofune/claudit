@@ -101,12 +101,16 @@ func runDiffWithRanges(
 	turns, userMsgs, parentLinks := snap.Turns, snap.Users, snap.Links
 
 	promptIdx := aggregate.BuildPromptIndex(turns, userMsgs, parentLinks)
+	// One replay set over the full corpus, shared by both windows: cross-file
+	// replay dedup is a structural property of the corpus, independent of which
+	// date window each side counts.
+	replays := aggregate.BuildReplaySet(turns)
 	aAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
 		Since: sinceA, Until: untilA, ProjectSubstring: project,
-	}).WithPromptIndex(promptIdx)
+	}).WithPromptIndex(promptIdx).WithReplaySet(replays)
 	bAgg := aggregate.New(prices).WithFilter(aggregate.Filter{
 		Since: sinceB, Until: untilB, ProjectSubstring: project,
-	}).WithPromptIndex(promptIdx)
+	}).WithPromptIndex(promptIdx).WithReplaySet(replays)
 
 	lookup := newSubagentLookup()
 	for _, t := range turns {
