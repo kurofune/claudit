@@ -71,6 +71,7 @@ import {
   contextSeries,
   binSeries,
   groupBy,
+  originClass,
 } from '../web/agents-logic.js';
 
 // agents-logic.js holds the pure, DOM-free math behind the Agents tab:
@@ -78,6 +79,20 @@ import {
 // status/elapsed derivations the cards show. view-agents.js is the
 // swappable DOM layer on top — keeping the math here means a redesign
 // never touches tested logic.
+
+// ── originClass ─────────────────────────────────────────────────────
+test('originClass classifies sdk-* entrypoints as sdk', () => {
+  assert.equal(originClass('sdk-cli'), 'sdk');
+  assert.equal(originClass('SDK-CLI'), 'sdk');
+});
+
+test('originClass classifies cli and unknown/empty as interactive', () => {
+  assert.equal(originClass('cli'), 'interactive');
+  assert.equal(originClass(''), 'interactive');
+  assert.equal(originClass(undefined), 'interactive');
+  assert.equal(originClass(null), 'interactive');
+  assert.equal(originClass(42), 'interactive');
+});
 
 // ── parseTime ───────────────────────────────────────────────────────
 test('parseTime passes numbers through', () => {
@@ -290,6 +305,7 @@ test('agentLabel is "main" for the main agent, else the agent_type', () => {
 const FEED_GRAPH = {
   sessions: [{
     session_id: 's1',
+    entrypoint: 'sdk-cli',
     main: {
       kind: 'main', status: 'done',
       started_at: '2026-05-01T12:00:00Z', ended_at: '2026-05-01T12:00:05Z',
@@ -325,6 +341,14 @@ test('buildEventFeed emits tool, spawn and done events sorted newest-first', () 
   assert.equal(top.agentLabel, 'Explore');
   assert.equal(top.agentIndex, 1);
   assert.equal(top.sessionId, 's1');
+});
+
+test('buildEventFeed stamps every event with its session entrypoint', () => {
+  const feed = buildEventFeed(FEED_GRAPH);
+  // Lifted from the session so the Feed row can mark headless (SDK) origin
+  // without a separate lookup — every kind (tool/spawn/done) carries it.
+  assert.ok(feed.length > 0);
+  for (const e of feed) assert.equal(e.entrypoint, 'sdk-cli');
 });
 
 test('buildEventFeed carries a spawn event for each sub-agent', () => {
@@ -2512,6 +2536,7 @@ test('conversationSessionList maps the per-session summary fields', () => {
   const session = {
     session_id: 'sid-1',
     cwd: '/home/me/proj',
+    entrypoint: 'sdk-cli',
     prompts: [{ uuid: 'u1', text: 'hi', first_step_index: 0 }],
     main: {
       steps: [
@@ -2525,6 +2550,7 @@ test('conversationSessionList maps the per-session summary fields', () => {
   assert.deepEqual(out[0], {
     sessionId: 'sid-1',
     cwd: '/home/me/proj',
+    entrypoint: 'sdk-cli',
     index: 0,
     promptCount: 1,
     replyCount: 2,
@@ -2620,6 +2646,7 @@ test('timelineSessionList maps sessionId/cwd/index plus the sessionStats rollups
   assert.deepEqual(out[0], {
     sessionId: 'stats-1',
     cwd: '/home/me/proj',
+    entrypoint: '',
     index: 0,
     durationMs: 60000,
     turnCount: 3,
@@ -2629,6 +2656,13 @@ test('timelineSessionList maps sessionId/cwd/index plus the sessionStats rollups
     tokenCount: 495,
     cost_usd: 0.47,
   });
+});
+
+test('timelineSessionList carries the session entrypoint for the SDK badge', () => {
+  const sdk = { ...STATS_SESSION, session_id: 'sid-sdk', entrypoint: 'sdk-cli' };
+  const out = timelineSessionList([sdk], 9_999_999);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].entrypoint, 'sdk-cli');
 });
 
 test('timelineSessionList excludes null and main-less sessions', () => {

@@ -8,6 +8,17 @@
 // against the same contract without touching tested math. Unit-tested
 // under `node --test` in jstest/agents-logic.test.js.
 
+// originClass partitions a session's entrypoint into 'sdk' vs 'interactive'.
+// Headless/SDK runs report "sdk-cli" (or other "sdk*" origins); everything
+// else — interactive "cli", an unknown, or a missing value — is
+// 'interactive'. Defaulting unknown to interactive keeps the SDK set a
+// conservative "definitely headless" subset, never a catch-all.
+export function originClass(ep) {
+  return typeof ep === 'string' && ep.toLowerCase().startsWith('sdk')
+    ? 'sdk'
+    : 'interactive';
+}
+
 // parseTime coerces a payload timestamp to epoch milliseconds. Numbers
 // pass through (tests use them); ISO-8601 strings parse via Date.parse;
 // anything unparseable is NaN so callers can filter it out.
@@ -128,6 +139,7 @@ export function conversationSessionList(sessions) {
     out.push({
       sessionId: session.session_id || '',
       cwd: session.cwd || '',
+      entrypoint: session.entrypoint || '',
       index,
       promptCount,
       replyCount,
@@ -139,8 +151,9 @@ export function conversationSessionList(sessions) {
 // timelineSessionList summarizes each session for the Timeline lens's session
 // picker — the sibling of conversationSessionList. One entry per session that
 // has a real main agent, in ORIGINAL input order (index = unfiltered position,
-// a stable color slot). Each entry carries { sessionId, cwd, index } plus the
-// whole-session rollups the picker rows triage on, by reusing sessionStats.
+// a stable color slot). Each entry carries { sessionId, cwd, entrypoint, index }
+// plus the whole-session rollups the picker rows triage on, by reusing
+// sessionStats. entrypoint feeds the SDK badge, matching conversationSessionList.
 // Null/main-less sessions are excluded; a null/empty input → [].
 export function timelineSessionList(sessions, nowMs = Date.now()) {
   const list = sessions || [];
@@ -150,6 +163,7 @@ export function timelineSessionList(sessions, nowMs = Date.now()) {
     out.push({
       sessionId: session.session_id || '',
       cwd: session.cwd || '',
+      entrypoint: session.entrypoint || '',
       index,
       ...sessionStats(session, nowMs),
     });
@@ -1084,6 +1098,9 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
   for (const s of sessions) {
     const sid = (s && s.session_id) || '';
     const cwd = (s && s.cwd) || '';
+    // Session origin, stamped on every event so a Feed row can mark headless
+    // (SDK) runs without re-deriving it per row.
+    const entrypoint = (s && s.entrypoint) || '';
     flattenSession(s).forEach((a, idx) => {
       if (!a) return;
       const label = agentLabel(a);
@@ -1092,7 +1109,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const st = parseTime(a.started_at);
         if (!Number.isNaN(st)) {
           events.push({
-            kind: 'spawn', t: st, sessionId: sid, cwd, agentIndex: idx,
+            kind: 'spawn', t: st, sessionId: sid, cwd, entrypoint, agentIndex: idx,
             agentLabel: label, description: a.description || '',
           });
         }
@@ -1103,7 +1120,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         (step.tools || []).forEach((tool, toolIndex) => {
           if (!tool) return;
           events.push({
-            kind: 'tool', t, sessionId: sid, cwd, agentIndex: idx, agentLabel: label,
+            kind: 'tool', t, sessionId: sid, cwd, entrypoint, agentIndex: idx, agentLabel: label,
             tool: tool.name || '', toolKind: tool.kind || '', detail: tool.detail || '',
             input: tool.input || '', status: tool.status || '',
             output: tool.output || '',
@@ -1119,7 +1136,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const et = parseTime(a.ended_at);
         if (!Number.isNaN(et)) {
           events.push({
-            kind: 'done', t: et, sessionId: sid, cwd, agentIndex: idx,
+            kind: 'done', t: et, sessionId: sid, cwd, entrypoint, agentIndex: idx,
             agentLabel: label, steps: (a.steps || []).length, cost_usd: a.cost_usd || 0,
             tokens: agentTokens(a).total,
           });

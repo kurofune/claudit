@@ -2346,6 +2346,9 @@
      stays subordinate to the agent name and body. */
   .fe-ctx { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-1); }
   .fe-ctx-proj { color: var(--ink); }
+  /* Compact headless-origin marker — accent text, no pill chrome, so it reads
+     as a flag without bloating the dense feed row (cf. the kind-badge note). */
+  .fe-origin { color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-right: 0.4em; }
   .fe-ctx-sep { color: var(--muted); margin: 0 0.35em; }
   .fe-ctx-thread { font-variant-numeric: tabular-nums; }
   .fe-glyph { width: 1.2em; text-align: center; }
@@ -2416,6 +2419,28 @@
   .itree-agent-body { margin: 1px 0 4px 8px; padding-left: 10px; border-left: 1px solid var(--border); }
   .insp-sess-proj { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .insp-sess-sid { margin-left: auto; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); }
+  /* Origin badge — a headless (SDK / claude -p) session gets the brand accent
+     so it pops out of a session list. Interactive runs carry no badge, so the
+     pill's mere presence is the "this was headless" signal. Shared by the Tree,
+     Conversation, and Timeline left session menus, pinned top-right (the Tree
+     head floats it via sid's margin-left:auto; the column-layout Conversation /
+     Timeline rows via the .s-entry margin-left:auto in their *-item-head row). */
+  .s-entry {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--t-1);
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .s-entry-sdk {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 28%, var(--border));
+  }
   .insp-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .insp-dot.is-done { background: var(--ink-2); opacity: 0.5; }
   .insp-dot.is-running { background: var(--accent-2); animation: ag-dot-pulse 1.6s ease-in-out infinite; }
@@ -2517,9 +2542,14 @@
   .conv-sess-item.is-selected {
     background: var(--accent-soft); border-left-color: var(--cc, var(--accent));
   }
+  /* Top line: project name (left) and the SDK origin badge pinned top-right,
+     matching the Tree session head. The badge's margin-left:auto floats it to
+     the right edge while a long proj name ellipsizes (min-width:0) behind it. */
+  .conv-sess-item-head, .tl-sess-item-head { display: flex; align-items: center; gap: var(--s-2); }
+  .conv-sess-item-head .s-entry, .tl-sess-item-head .s-entry { margin-left: auto; }
   /* Shrink-wrap to the name text so its tooltip fires only over the project
      name, not the empty space beside it (see .tl-sess-item-proj). */
-  .conv-sess-item-proj { font-weight: 600; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-sess-item-proj { font-weight: 600; align-self: flex-start; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-sess-item-meta { display: flex; align-items: baseline; gap: var(--s-2); }
   .conv-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .conv-sess-item-turns { margin-left: auto; flex: none; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
@@ -2594,7 +2624,7 @@
   /* Shrink-wrap to the name text (not the full card width) so its tooltip
      only fires directly over the project name, never the empty space beside
      it; max-width keeps long names truncating with an ellipsis. */
-  .tl-sess-item-proj { font-weight: 600; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-sess-item-proj { font-weight: 600; align-self: flex-start; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tl-sess-item-meta { display: flex; flex-direction: column; gap: 2px; }
   .tl-sess-item-sid { color: var(--ink-2); font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tl-sess-item-pills { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }

@@ -1,6 +1,7 @@
 package agentflow
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,35 @@ import (
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
+
+// TestBuildAgentGraph_CarriesEntrypoint: a session's origin (cli vs sdk-cli)
+// is a session invariant lifted from its turns, so the Agents view can badge
+// headless runs. First non-empty entrypoint wins; it must reach the JSON.
+func TestBuildAgentGraph_CarriesEntrypoint(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	turn.Entrypoint = "sdk-cli"
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(g.Sessions) != 1 {
+		t.Fatalf("want 1 session, got %d", len(g.Sessions))
+	}
+	if g.Sessions[0].Entrypoint != "sdk-cli" {
+		t.Errorf("session Entrypoint = %q, want sdk-cli", g.Sessions[0].Entrypoint)
+	}
+	b, err := json.Marshal(g.Sessions[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"entrypoint":"sdk-cli"`) {
+		t.Errorf("payload missing entrypoint: %s", b)
+	}
+}
 
 func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
 	// A multi-block message (5 JSONL lines, one message.id) followed by a second

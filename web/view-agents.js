@@ -38,6 +38,7 @@ import {
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
   criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
   filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, detectSignals, signalPipsByAgent, spawnTargetIndex,
+  originClass,
   conversationSegments,
   conversationReplies,
   conversationSessionList,
@@ -54,6 +55,16 @@ import {
 import { fetchAgentToolFull } from './api.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
+
+// originBadgeHTML tags a session whose origin is headless (claude -p / Agent
+// SDK) with an "SDK" pill. Interactive runs get nothing — absence of the badge
+// is itself the signal, keeping a long session list quiet. originClass folds
+// any "sdk*" entrypoint to 'sdk'; everything else is interactive.
+function originBadgeHTML(session) {
+  return originClass(session && session.entrypoint) === 'sdk'
+    ? `<span class="s-entry s-entry-sdk" title="Headless run (claude -p / Agent SDK)">SDK</span>`
+    : '';
+}
 
 // isServeMode is true when a live claudit server is backing the page. The
 // static HTML report inlines its data into window.__claudit_static_data and
@@ -1471,7 +1482,13 @@ function feCtx(e) {
   const proj = baseName(e.cwd) || '—';
   const thread = shortId(e.sessionId || '');
   const title = `${e.cwd || ''}${thread ? ` · ${e.sessionId}` : ''}`;
-  return `<span class="fe-ctx" title="${escHtml(title)}"><span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
+  // A headless (SDK) origin is marked with a compact accent tag, not the full
+  // pill — the feed's ctx column is a single ellipsizing line, so the marker
+  // leads (survives the clip) while the project/thread truncate behind it.
+  const origin = originClass(e.entrypoint) === 'sdk'
+    ? `<span class="fe-origin" title="Headless run (claude -p / Agent SDK)">sdk</span>`
+    : '';
+  return `<span class="fe-ctx" title="${escHtml(title)}">${origin}<span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
 }
 
 // feMetric is the compact per-row cost·duration·tokens chip — the feed doubles
@@ -1523,6 +1540,7 @@ function itreeSessionHTML(session, si, sel) {
       <span class="itree-caret" aria-hidden="true">▸</span>
       <span class="insp-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
       <span class="insp-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+      ${originBadgeHTML(session)}
     </summary>
     <div class="itree-sess-body">${rows}</div>
   </details>`;
@@ -1735,7 +1753,10 @@ function conversationSidebarHTML(list, curSid) {
     const c = colorSlot(e.index);
     const turns = `${fmtNum(e.replyCount)} ${e.replyCount === 1 ? 'reply' : 'replies'}`;
     return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}">
-      <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+      <span class="conv-sess-item-head">
+        <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+        ${originBadgeHTML(e)}
+      </span>
       <span class="conv-sess-item-meta">
         <span class="conv-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
         <span class="conv-sess-item-turns">${turns}</span>
@@ -2261,20 +2282,21 @@ function renderTokenPanel(agents) {
       <figcaption class="ins-tok-cap">Context over ${fmtNum(turns)} turns · peak <b>${escHtml(fmtCompact(peakContext))}</b> · last ${escHtml(fmtCompact(last))}</figcaption>
     </figure>`;
 
-  // Token totals composition — a four-band stacked bar (output→hot, input→warn,
-  // cache-write→accent, cache-read→accent-2) sharing the Tokens-view color
-  // language, so the cache-read band IS the visual cache-hit readout.
+  // Token totals composition — a four-band stacked bar sharing the Tokens-view
+  // color language. Bands follow the canonical per-row token order used by the
+  // Tokens view and the drawer (input→warn, output→hot, cache-write→accent,
+  // cache-read→accent-2), so the cache-read band IS the visual cache-hit readout.
   const tt = totals.total || 1;
   const band = (cls, val, label) => {
     const pct = (val / tt) * 100;
     return pct > 0 ? `<span class="ins-tok-band ${cls}" style="width:${pct.toFixed(2)}%" title="${escHtml(label)}: ${escHtml(fmtCompact(val))} (${escHtml(fmtPct1(val / tt))})"></span>` : '';
   };
   const comp = `<div class="ins-tok-comp" role="img" aria-label="Token composition">
-      ${band('tok-area-cread', totals.cacheRead, 'cache read')}${band('tok-area-input', totals.input, 'input')}${band('tok-area-cwrite', totals.cacheWrite, 'cache write')}${band('tok-area-output', totals.output, 'output')}
+      ${band('tok-area-input', totals.input, 'input')}${band('tok-area-output', totals.output, 'output')}${band('tok-area-cwrite', totals.cacheWrite, 'cache write')}${band('tok-area-cread', totals.cacheRead, 'cache read')}
     </div>`;
   const leg = (cls, label, val) => `<span class="ins-tok-leg-item"><span class="ins-tok-sw ${cls}"></span>${label} <b>${escHtml(fmtCompact(val))}</b></span>`;
   const legend = `<div class="ins-tok-legend">
-      ${leg('tok-area-cread', 'cache read', totals.cacheRead)}${leg('tok-area-input', 'input', totals.input)}${leg('tok-area-cwrite', 'cache write', totals.cacheWrite)}${leg('tok-area-output', 'output', totals.output)}
+      ${leg('tok-area-input', 'input', totals.input)}${leg('tok-area-output', 'output', totals.output)}${leg('tok-area-cwrite', 'cache write', totals.cacheWrite)}${leg('tok-area-cread', 'cache read', totals.cacheRead)}
     </div>`;
 
   const perLabel = binned ? `per ~${fmtNum(perBin)} turns (binned)` : 'per turn';
@@ -2445,7 +2467,10 @@ function timelineSidebarHTML(list, curSid) {
       ? `<span class="tl-sess-item-pill tl-sess-item-err" title="${fmtNum(e.errorCount)} tool error${e.errorCount === 1 ? '' : 's'}">⚠️ ${fmtNum(e.errorCount)}</span>`
       : '';
     return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}">
-      <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+      <span class="tl-sess-item-head">
+        <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+        ${originBadgeHTML(e)}
+      </span>
       <span class="tl-sess-item-meta">
         <span class="tl-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
         <span class="tl-sess-item-pills">

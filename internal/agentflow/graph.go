@@ -26,6 +26,10 @@ type AgentGraph struct {
 type AgentSession struct {
 	SessionID string `json:"session_id"`
 	CWD       string `json:"cwd"`
+	// Entrypoint is the session origin lifted from its turns: "cli" for an
+	// interactive session, "sdk-cli" for a headless/SDK run. Lets the Agents
+	// view badge headless runs. Constant across a session; first non-empty wins.
+	Entrypoint string `json:"entrypoint"`
 	// StartedAt/EndedAt span every agent in the session; CostUSD is the sum
 	// across the main agent and all its sub-agents.
 	StartedAt time.Time `json:"started_at"`
@@ -163,8 +167,9 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	}
 
 	type sessionAccum struct {
-		sessionID string
-		cwd       string
+		sessionID  string
+		cwd        string
+		entrypoint string
 		// nodes keyed by SourceFile — one agent per file.
 		nodes map[string]*nodeAccum
 	}
@@ -192,6 +197,10 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		}
 		if s.cwd == "" && t.CWD != "" {
 			s.cwd = t.CWD
+		}
+		// Entrypoint is a session invariant — capture the first non-empty one.
+		if s.entrypoint == "" && t.Entrypoint != "" {
+			s.entrypoint = t.Entrypoint
 		}
 		n, ok := s.nodes[t.SourceFile]
 		if !ok {
@@ -254,7 +263,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 
 	out := make([]AgentSession, 0, len(sessions))
 	for _, s := range sessions {
-		as := AgentSession{SessionID: s.sessionID, CWD: s.cwd}
+		as := AgentSession{SessionID: s.sessionID, CWD: s.cwd, Entrypoint: s.entrypoint}
 		for _, n := range s.nodes {
 			// Roll node spans/cost up to the session.
 			if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
