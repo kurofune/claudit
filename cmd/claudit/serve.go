@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,6 +16,17 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/serve"
 )
+
+// applyServeMemoryLimit sets a ~1.5 GiB soft limit — serve mode caches
+// multi-hundred-MB rendered payloads; without a limit Go's default GOGC
+// policy holds ~2× live heap in RSS.
+func applyServeMemoryLimit() {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		// The user set an explicit limit; the runtime already applied it.
+		return
+	}
+	debug.SetMemoryLimit(1536 << 20) // ~1.5 GiB
+}
 
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("claudit serve", flag.ExitOnError)
@@ -96,6 +108,7 @@ func runServe(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	applyServeMemoryLimit()
 	srv.Start(ctx)
 
 	// Banner. Print before we block on Serve so users see the URL

@@ -1,6 +1,42 @@
 package main
 
-import "testing"
+import (
+	"runtime/debug"
+	"testing"
+)
+
+func TestApplyServeMemoryLimit_SetsLimitWhenGOMEMLIMITUnset(t *testing.T) {
+	// Tests share a process: capture the current limit and restore it
+	// afterwards so other tests see the runtime state they expect.
+	prev := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+	t.Setenv("GOMEMLIMIT", "")
+
+	applyServeMemoryLimit()
+
+	got := debug.SetMemoryLimit(-1)
+	const want = int64(1536 << 20) // 1.5 GiB
+	if got != want {
+		t.Errorf("memory limit = %d, want %d", got, want)
+	}
+}
+
+func TestApplyServeMemoryLimit_RespectsExplicitGOMEMLIMIT(t *testing.T) {
+	prev := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+	t.Setenv("GOMEMLIMIT", "2GiB")
+
+	// Pin the limit to a sentinel value; the helper must not touch it
+	// when GOMEMLIMIT is explicitly set (the runtime already applied it).
+	const sentinel = int64(2 << 30)
+	debug.SetMemoryLimit(sentinel)
+
+	applyServeMemoryLimit()
+
+	if got := debug.SetMemoryLimit(-1); got != sentinel {
+		t.Errorf("memory limit = %d, want untouched sentinel %d", got, sentinel)
+	}
+}
 
 func TestIsNonLoopbackBind(t *testing.T) {
 	cases := []struct {
