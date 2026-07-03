@@ -47,6 +47,12 @@ type Options struct {
 	// 0 disables caching; 16 is plenty for a single-user tool.
 	MaxCachedRenders int
 
+	// MaxCachedRenderBytes bounds the render cache's resident bytes
+	// (plain + gzip bodies summed across entries). 0 means the default
+	// of 256 MiB. Entry-count and byte bounds are enforced together;
+	// see renderLRU.
+	MaxCachedRenderBytes int64
+
 	// Version is the short build label rendered in the report's
 	// sidebar chrome. Set by cmd/claudit/serve.go from versionShort();
 	// internal/serve stays free of debug.ReadBuildInfo so the package
@@ -78,8 +84,11 @@ type Server struct {
 	// payload, with room for one-per-API-tab section labels in later
 	// phases. Section in the key means HTML and JSON halves of one
 	// pageload coexist without churning each other (replacing the
-	// pre-Phase-1 dual-LRU split). Bounded; LRU-evicted on insert.
-	// nil when MaxCachedRenders == 0.
+	// pre-Phase-1 dual-LRU split). Bounded by entry count AND resident
+	// bytes (MaxCachedRenderBytes); each store also sweeps entries from
+	// older snapshot generations, which are unreachable because lookups
+	// always use the current generation. nil when MaxCachedRenders ==
+	// 0.
 	renderCache *renderLRU
 
 	// aggregateSF collapses concurrent in-flight aggregate+timeline
@@ -129,6 +138,9 @@ func NewServer(cache *Cache, opts Options) *Server {
 	if opts.DefaultPeriod == "" {
 		opts.DefaultPeriod = aggregate.Period("day")
 	}
+	if opts.MaxCachedRenderBytes <= 0 {
+		opts.MaxCachedRenderBytes = defaultMaxCachedRenderBytes
+	}
 	s := &Server{
 		cache:           cache,
 		opts:            opts,
@@ -140,8 +152,11 @@ func NewServer(cache *Cache, opts Options) *Server {
 		// One LRU holds entries for every section (html, data, and
 		// future per-API-tab keys). Cap is doubled vs. the pre-Phase-1
 		// per-LRU cap so that pre-warming the JSON cache from a /
-		// render doesn't halve the effective per-section capacity.
-		s.renderCache = newRenderLRU(opts.MaxCachedRenders * 2)
+		// render doesn't halve the effective per-section capacity. The
+		// byte budget (defaulted above) is what actually bounds memory
+		// — bodies can run to hundreds of MB, so the count cap alone
+		// is no bound at all.
+		s.renderCache = newRenderLRU(opts.MaxCachedRenders*2, opts.MaxCachedRenderBytes)
 	}
 	// Build the SPA asset manifest at startup. A failure here means
 	// the embedded web/ tree is broken — the rest of the daemon can
