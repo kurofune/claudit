@@ -51,6 +51,32 @@ func TestDefault_Fable5AndMythos5(t *testing.T) {
 	}
 }
 
+func TestDefault_Sonnet5(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sonnet 5 launched under introductory pricing ($2 input / $10 output,
+	// through 2026-08-31), with cache rates on the standard ratios off the
+	// $2 input rate. Reverts to $3 / $15 on 2026-09-01.
+	for _, m := range []string{
+		"claude-sonnet-5",
+		"claude-sonnet-5[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 2.00 || p.Output != 10.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p)
+		}
+		if p.CacheRead != 0.20 || p.CacheWrite5m != 2.50 || p.CacheWrite1h != 4.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p)
+		}
+	}
+}
+
 func TestCost(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
