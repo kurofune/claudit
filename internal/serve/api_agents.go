@@ -44,15 +44,19 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAPIAgentsFull serves /_claudit/api/agents/full?session=&tool= — the
-// drawer's "show full" action. Returns the UNTRUNCATED input/output for one
-// tool_use, read back from the session JSONL on disk (the default /agents
-// payload caps both to 2000-rune snippets to stay lean).
+// handleAPIAgentsFull serves /_claudit/api/agents/full — the drawer's "show
+// full" action. Two lookup modes, exactly one of which must be given:
+//
+//	?session=&tool=<tool_use id>  → UNTRUNCATED input/output for one tool_use
+//	?session=&turn=<turn uuid>    → UNTRUNCATED thinking/text for one turn
+//
+// Both read back from the session JSONL on disk (the default /agents payload
+// caps all of these to 2000-rune snippets to stay lean).
 //
 // Serve-mode only: the static HTML report inlines no disk and never calls
 // this — its drawer falls back to the snippet. The source file is resolved
-// from the trusted snapshot (matched by session + tool_use id), never from a
-// user-supplied path, so there is no path-traversal surface.
+// from the trusted snapshot (matched by session + tool_use id / turn uuid),
+// never from a user-supplied path, so there is no path-traversal surface.
 func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -63,8 +67,9 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
 	session := v.Get("session")
 	toolID := v.Get("tool")
-	if session == "" || toolID == "" {
-		http.Error(w, "missing session or tool", http.StatusBadRequest)
+	turnUUID := v.Get("turn")
+	if session == "" || (toolID == "") == (turnUUID == "") {
+		http.Error(w, "need session plus exactly one of tool or turn", http.StatusBadRequest)
 		return
 	}
 	// Parse the query for the redact flag (and to 400 on a malformed filter,
@@ -78,6 +83,11 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	snap := s.cache.Snapshot()
 	if snap == nil {
 		http.NotFound(w, r)
+		return
+	}
+
+	if turnUUID != "" {
+		s.serveAgentsFullTurn(w, r, snap, q, session, turnUUID)
 		return
 	}
 
@@ -134,5 +144,56 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewEncoder(w).Encode(detail); err != nil {
 		s.reqLogger(r.Context()).Error("serve: encode agents/full failed", "err", err)
+	}
+}
+
+// serveAgentsFullTurn answers /agents/full's ?turn= mode: the untruncated
+// thinking/text of the coalesced turn whose first-line uuid == turnUUID,
+// within the named session. Mirrors the ?tool= mode's resolution/redaction.
+func (s *Server) serveAgentsFullTurn(w http.ResponseWriter, r *http.Request, snap *Snapshot, q Query, session, turnUUID string) {
+	// Resolve the on-disk source file from the trusted snapshot.
+	sourceFile := ""
+	for i := range snap.Turns {
+		t := &snap.Turns[i]
+		if t.SessionID == session && t.UUID == turnUUID {
+			sourceFile = t.SourceFile
+			break
+		}
+	}
+	if sourceFile == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	f, err := os.Open(sourceFile)
+	if err != nil {
+		http.Error(w, "open failed", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	detail, ok := parse.FindTurnText(f, turnUUID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	if q.Redact {
+		if detail.Thinking != "" {
+			detail.Thinking = aggregate.RedactMarker(detail.Thinking)
+		}
+		if detail.Text != "" {
+			detail.Text = aggregate.RedactMarker(detail.Text)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(detail); err != nil {
+		s.reqLogger(r.Context()).Error("serve: encode agents/full turn failed", "err", err)
 	}
 }

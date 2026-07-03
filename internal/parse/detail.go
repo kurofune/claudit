@@ -259,6 +259,72 @@ func FindToolUseDetail(r io.Reader, toolUseID string) (ToolUseDetail, bool) {
 	return out, found
 }
 
+// TurnTextDetail is the untruncated thinking/text of one assistant turn, read
+// back from a session JSONL on demand (the drawer's "show full" action).
+// Fields mirror Turn.Thinking/.Text but without the turnTextMaxChars cap.
+type TurnTextDetail struct {
+	Thinking string `json:"thinking"`
+	Text     string `json:"text"`
+}
+
+// FindTurnText streams r (one session's JSONL) and returns the untruncated
+// thinking/text for the coalesced turn whose FIRST line's uuid == turnUUID.
+// It notes that line's message.id and joins (newline between non-empty
+// blocks, matching joinBlocks) the thinking/text of that line plus every
+// subsequent assistant line sharing the id — the same grouping coalesceTurns
+// applies, so the full text matches the bounded snippet minus the cap. A line
+// with an empty message.id stands alone. found is false when no assistant
+// line carries turnUUID. Single forward pass: the uuid is always the first
+// line of its message, so no lookback is needed.
+func FindTurnText(r io.Reader, turnUUID string) (TurnTextDetail, bool) {
+	var out TurnTextDetail
+	found := false
+	msgID := ""
+	sc := bufio.NewScanner(r)
+	// Match ParseFile's buffer: a single line's content can be large.
+	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var raw rawLine
+		if err := json.Unmarshal(line, &raw); err != nil || raw.Type != "assistant" || len(raw.Message) == 0 {
+			continue
+		}
+		if found && msgID == "" {
+			break // empty message.id never coalesces — the uuid line stood alone
+		}
+		var msg rawMessage
+		if err := json.Unmarshal(raw.Message, &msg); err != nil {
+			continue
+		}
+		switch {
+		case !found:
+			if raw.UUID != turnUUID {
+				continue
+			}
+			found = true
+			msgID = msg.ID
+		case msg.ID != msgID:
+			continue
+		}
+		var entries []rawContentEntry
+		if err := json.Unmarshal(msg.Content, &entries); err != nil {
+			continue
+		}
+		for _, e := range entries {
+			switch e.Type {
+			case "thinking":
+				out.Thinking = joinBlocks(out.Thinking, e.Thinking)
+			case "text":
+				out.Text = joinBlocks(out.Text, e.Text)
+			}
+		}
+	}
+	return out, found
+}
+
 // truncateRunes shortens s to at most max runes, appending an ellipsis when
 // it had to cut. Rune-safe so multibyte input isn't split mid-character.
 func truncateRunes(s string, max int) string {

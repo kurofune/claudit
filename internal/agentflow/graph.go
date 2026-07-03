@@ -91,6 +91,10 @@ type AgentNode struct {
 
 // AgentStep is one assistant turn within an agent's timeline.
 type AgentStep struct {
+	// UUID is the turn's uuid (the first JSONL line of the coalesced message) —
+	// the key the drawer uses to fetch the untruncated thinking/text via
+	// /_claudit/api/agents/full?turn=. Omitted for legacy lines without one.
+	UUID      string    `json:"uuid,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Model     string    `json:"model"`
 	CostUSD   float64   `json:"cost_usd"`
@@ -251,6 +255,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			genMs = t.EndTimestamp.Sub(t.Timestamp).Milliseconds()
 		}
 		n.steps = append(n.steps, AgentStep{
+			UUID:          t.UUID,
 			Timestamp:     t.Timestamp,
 			Model:         t.Model,
 			CostUSD:       cost,

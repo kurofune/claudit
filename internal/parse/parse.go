@@ -123,7 +123,9 @@ type UserMessage struct {
 	ParentUUID string
 	Timestamp  time.Time
 	CWD        string
-	Text       string // full text — render layer truncates
+	// Text is a bounded snippet (turnTextMaxChars) of the prompt — consumers
+	// only ever render a prefix, and the full text stays on disk.
+	Text       string
 	SourceFile string
 }
 
@@ -272,6 +274,10 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 		}
 		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
 		thinking, text, toolUses := extractAssistantContent(msg.Content)
+		// Cap at extraction so the full block text is never retained; mergeTurn
+		// re-caps after coalescing so multi-line messages stay bounded too.
+		thinking = truncateRunes(thinking, turnTextMaxChars)
+		text = truncateRunes(text, turnTextMaxChars)
 		return Turn{
 			SessionID:  raw.SessionID,
 			MessageID:  msg.ID,
@@ -310,7 +316,7 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 			ParentUUID: raw.ParentUUID,
 			Timestamp:  ts,
 			CWD:        raw.CWD,
-			Text:       text,
+			Text:       truncateRunes(text, turnTextMaxChars),
 			SourceFile: path,
 		}, LineUserMessage
 	}
@@ -408,8 +414,12 @@ func mergeTurn(a, b Turn) Turn {
 	if b.EndTimestamp.After(a.EndTimestamp) {
 		a.EndTimestamp = b.EndTimestamp
 	}
-	a.Thinking = joinBlocks(a.Thinking, b.Thinking)
-	a.Text = joinBlocks(a.Text, b.Text)
+	// Re-cap after joining: each side is already a bounded snippet, but their
+	// concatenation could double past the cap per continuation line. Both the
+	// batch (coalesceTurns) and streaming (Coalescer) paths merge through here,
+	// so the bound holds for either. Capping an already-capped string is a no-op.
+	a.Thinking = truncateRunes(joinBlocks(a.Thinking, b.Thinking), turnTextMaxChars)
+	a.Text = truncateRunes(joinBlocks(a.Text, b.Text), turnTextMaxChars)
 	a.ToolUses = append(a.ToolUses, b.ToolUses...)
 	a.Usage.InputTokens = maxInt(a.Usage.InputTokens, b.Usage.InputTokens)
 	a.Usage.OutputTokens = maxInt(a.Usage.OutputTokens, b.Usage.OutputTokens)
@@ -599,6 +609,13 @@ func extractAssistantContent(content json.RawMessage) (thinking, text string, to
 // toolResultMaxChars bounds the per-result snippet we retain — enough to
 // see an error message or short stdout without ballooning the payload.
 const toolResultMaxChars = 2000
+
+// turnTextMaxChars bounds the thinking/text snippet retained per assistant
+// turn and per user prompt. Every turn of the whole corpus is held in memory
+// and shipped in the serve payloads, so uncapped extended-thinking/narration
+// (often tens of KB each) balloons both; the full text stays on disk and is
+// fetchable on demand via /_claudit/api/agents/full?turn=<uuid>.
+const turnTextMaxChars = 2000
 
 // peekToolResults decodes a raw line and returns any tool_result blocks in
 // its user-message content. Separate from ParseLine (which drops the

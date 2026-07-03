@@ -655,6 +655,23 @@ func TestBuildAgentGraph_StepCarriesThinkingAndText(t *testing.T) {
 	}
 }
 
+func TestBuildAgentGraph_StepCarriesUUID(t *testing.T) {
+	// The step's uuid is the key the drawer uses to fetch the turn's
+	// untruncated thinking/text via /agents/full?turn=.
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := g.Sessions[0].Main.Steps[0].UUID; got != "a1" {
+		t.Errorf("Step UUID = %q, want a1 (the turn's uuid)", got)
+	}
+}
+
 func TestBuildAgentGraph_RedactsThinkingAndText(t *testing.T) {
 	// Under Redact, reasoning/narration become length-echoing markers — but
 	// an empty field stays empty (no "[redacted 0 chars]" noise), matching

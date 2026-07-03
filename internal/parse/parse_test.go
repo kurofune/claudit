@@ -239,6 +239,25 @@ func TestParseFile_UserMessages(t *testing.T) {
 	}
 }
 
+func TestParseFile_CapsUserMessageText(t *testing.T) {
+	// A pasted wall of text (or a huge slash-command expansion) must not be
+	// retained in full — prompts are held for the whole corpus and shipped in
+	// the payloads; consumers only ever render a prefix.
+	big := strings.Repeat("z", 5000)
+	line := `{"type":"user","uuid":"u1","timestamp":"2026-04-10T10:00:01Z","sessionId":"s1","message":{"role":"user","content":[{"type":"text","text":"` + big + `"}]}}`
+	res, err := ParseFile(strings.NewReader(line+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UserMessages) != 1 {
+		t.Fatalf("UserMessages = %d, want 1", len(res.UserMessages))
+	}
+	if want := strings.Repeat("z", turnTextMaxChars) + "…"; res.UserMessages[0].Text != want {
+		t.Errorf("Text runes = %d, want %d-rune snippet ending in ellipsis",
+			len([]rune(res.UserMessages[0].Text)), turnTextMaxChars+1)
+	}
+}
+
 func TestParseLine_KindClassification(t *testing.T) {
 	cases := []struct {
 		name string
@@ -388,6 +407,57 @@ func TestParseLine_EndTimestampDefaultsToTimestamp(t *testing.T) {
 	}
 }
 
+func TestParseFile_CapsTurnThinkingAndText(t *testing.T) {
+	// Every turn's thinking/narration is held in memory for the whole corpus
+	// and shipped in the Agents payload, so parse caps both to a bounded
+	// snippet (like tool results). Multibyte runes prove the cap is rune-safe.
+	bigThink := strings.Repeat("思", 3000)
+	bigText := strings.Repeat("é", 2500)
+	line := `{"type":"assistant","uuid":"a1","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"` + bigThink + `"},{"type":"text","text":"` + bigText + `"}]}}`
+	res, err := ParseFile(strings.NewReader(line+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("Turns = %d, want 1", len(res.Turns))
+	}
+	turn := res.Turns[0]
+	if want := strings.Repeat("思", turnTextMaxChars) + "…"; turn.Thinking != want {
+		t.Errorf("Thinking runes = %d, want %d-rune snippet ending in ellipsis", len([]rune(turn.Thinking)), turnTextMaxChars+1)
+	}
+	if want := strings.Repeat("é", turnTextMaxChars) + "…"; turn.Text != want {
+		t.Errorf("Text runes = %d, want %d-rune snippet ending in ellipsis", len([]rune(turn.Text)), turnTextMaxChars+1)
+	}
+}
+
+func TestParseFile_CoalescedTurnStaysCapped(t *testing.T) {
+	// A streamed message is many JSONL lines sharing message.id; each line's
+	// snippet may fit the cap, but their join must not exceed it — the cap
+	// holds AFTER coalescing, not just per line.
+	block := strings.Repeat("x", 1500)
+	mk := func(uuid string, prev string) string {
+		return `{"type":"assistant","uuid":"` + uuid + `","parentUuid":"` + prev + `","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"` + block + `"},{"type":"text","text":"` + block + `"}]}}`
+	}
+	lines := []string{mk("a1", "u0"), mk("a2", "a1"), mk("a3", "a2")}
+	res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("Turns = %d, want 1 coalesced", len(res.Turns))
+	}
+	turn := res.Turns[0]
+	if n := len([]rune(turn.Thinking)); n > turnTextMaxChars+1 { // +1 for the ellipsis
+		t.Errorf("Thinking runes = %d, want <= %d after coalescing", n, turnTextMaxChars+1)
+	}
+	if n := len([]rune(turn.Text)); n > turnTextMaxChars+1 {
+		t.Errorf("Text runes = %d, want <= %d after coalescing", n, turnTextMaxChars+1)
+	}
+	if !strings.HasSuffix(turn.Thinking, "…") || !strings.HasSuffix(turn.Text, "…") {
+		t.Errorf("capped snippets must end with the ellipsis marker")
+	}
+}
+
 func TestParseFile_NoMessageIDStaysOneTurnPerLine(t *testing.T) {
 	// Older transcripts (and any line that lost its message.id) carry no
 	// message.id. The fix must be a no-op there: each assistant line stays its
@@ -482,6 +552,35 @@ func TestCoalescer_EmptyMessageIDStaysStandalone(t *testing.T) {
 	last, ok := c.Flush()
 	if !ok || last.Text != "two" {
 		t.Errorf("Flush() = %+v ok=%v, want standalone 'two'", last, ok)
+	}
+}
+
+func TestCoalescer_StreamingMergeStaysCapped(t *testing.T) {
+	// The streaming path (`claudit watch`) merges continuation lines through
+	// the Coalescer, not coalesceTurns — the cap must hold there too.
+	block := strings.Repeat("y", 1500)
+	mk := func(uuid string) string {
+		return `{"type":"assistant","uuid":"` + uuid + `","timestamp":"2026-04-10T10:00:01Z","message":{"id":"msg_s","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"thinking","thinking":"` + block + `"},{"type":"text","text":"` + block + `"}]}}`
+	}
+	var c Coalescer
+	for _, uuid := range []string{"a1", "a2", "a3"} {
+		tn, _, kind := ParseLine([]byte(mk(uuid)), "p")
+		if kind != LineAssistant {
+			t.Fatalf("kind = %v, want LineAssistant", kind)
+		}
+		if _, ok := c.Push(tn); ok {
+			t.Fatal("Push flushed mid-message, want merge")
+		}
+	}
+	done, ok := c.Flush()
+	if !ok {
+		t.Fatal("Flush returned nothing")
+	}
+	if n := len([]rune(done.Thinking)); n > turnTextMaxChars+1 { // +1 for the ellipsis
+		t.Errorf("Thinking runes = %d, want <= %d after streaming merge", n, turnTextMaxChars+1)
+	}
+	if n := len([]rune(done.Text)); n > turnTextMaxChars+1 {
+		t.Errorf("Text runes = %d, want <= %d after streaming merge", n, turnTextMaxChars+1)
 	}
 }
 

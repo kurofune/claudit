@@ -124,3 +124,79 @@ func TestFindToolUseDetail_NotFound(t *testing.T) {
 		t.Error("found=true for unknown id, want false")
 	}
 }
+
+// textLine builds an assistant JSONL line with thinking/text blocks, a uuid
+// and a message.id — the shape FindTurnText navigates.
+func textLine(uuid, msgID, thinking, text string) string {
+	var blocks []string
+	if thinking != "" {
+		blocks = append(blocks, `{"type":"thinking","thinking":`+jsonString(thinking)+`}`)
+	}
+	if text != "" {
+		blocks = append(blocks, `{"type":"text","text":`+jsonString(text)+`}`)
+	}
+	id := ""
+	if msgID != "" {
+		id = `"id":` + jsonString(msgID) + `,`
+	}
+	return `{"type":"assistant","sessionId":"s1","uuid":` + jsonString(uuid) + `,"message":{` + id + `"role":"assistant","usage":{"input_tokens":1},"content":[` + strings.Join(blocks, ",") + `]}}`
+}
+
+// The whole point of load-full for turns: thinking/text come back UNTRUNCATED,
+// past the turnTextMaxChars snippet cap the parse path applies.
+func TestFindTurnText_SingleLineUntruncated(t *testing.T) {
+	bigThink := strings.Repeat("t", 5000)
+	bigText := strings.Repeat("n", 6000)
+	doc := textLine("uu-1", "msg_1", bigThink, bigText) + "\n"
+	got, ok := FindTurnText(strings.NewReader(doc), "uu-1")
+	if !ok {
+		t.Fatal("found=false, want true")
+	}
+	if got.Thinking != bigThink {
+		t.Errorf("Thinking len = %d, want %d (untruncated)", len(got.Thinking), len(bigThink))
+	}
+	if got.Text != bigText {
+		t.Errorf("Text len = %d, want %d (untruncated)", len(got.Text), len(bigText))
+	}
+}
+
+// A streamed message spans several JSONL lines sharing message.id; the full
+// text is their blocks joined with newlines (joinBlocks semantics), and lines
+// of a DIFFERENT message.id are excluded.
+func TestFindTurnText_JoinsCoalescedLines(t *testing.T) {
+	doc := textLine("uu-1", "msg_1", "think one", "text one") + "\n" +
+		textLine("uu-2", "msg_1", "think two", "") + "\n" +
+		textLine("uu-3", "msg_1", "", "text three") + "\n" +
+		textLine("uu-4", "msg_OTHER", "other think", "other text") + "\n"
+	got, ok := FindTurnText(strings.NewReader(doc), "uu-1")
+	if !ok {
+		t.Fatal("found=false, want true")
+	}
+	if want := "think one\nthink two"; got.Thinking != want {
+		t.Errorf("Thinking = %q, want %q", got.Thinking, want)
+	}
+	if want := "text one\ntext three"; got.Text != want {
+		t.Errorf("Text = %q, want %q", got.Text, want)
+	}
+}
+
+// Legacy transcripts have no message.id; such a line never coalesces, so the
+// full text is just that one line — a later id-less line must NOT merge in.
+func TestFindTurnText_EmptyMessageIDStandsAlone(t *testing.T) {
+	doc := textLine("uu-legacy", "", "solo think", "solo text") + "\n" +
+		textLine("uu-next", "", "other think", "other text") + "\n"
+	got, ok := FindTurnText(strings.NewReader(doc), "uu-legacy")
+	if !ok {
+		t.Fatal("found=false, want true")
+	}
+	if got.Thinking != "solo think" || got.Text != "solo text" {
+		t.Errorf("Thinking/Text = %q/%q, want just the matched line's blocks", got.Thinking, got.Text)
+	}
+}
+
+func TestFindTurnText_NotFound(t *testing.T) {
+	doc := textLine("uu-1", "msg_1", "think", "text") + "\n"
+	if _, ok := FindTurnText(strings.NewReader(doc), "nope"); ok {
+		t.Error("found=true for unknown uuid, want false")
+	}
+}
