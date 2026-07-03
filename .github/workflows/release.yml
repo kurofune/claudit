@@ -63,3 +63,51 @@ jobs:
         run: |
           curl -fsS "https://proxy.golang.org/github.com/kurofune/claudit/@v/${GITHUB_REF_NAME}.info" >/dev/null || \
             echo "::warning::Proxy warm failed — @latest installs may briefly serve the previous version until the proxy catches up."
+
+  # Prebuilt binaries for users without a Go toolchain. Each matrix leg
+  # cross-compiles one platform and attaches its archive to the Release
+  # the job above just created (uploads of distinct assets are safe to
+  # run in parallel). CGO is off, so every leg builds on ubuntu.
+  binaries:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, linux, windows]
+        goarch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history + tags so `go build` stamps Main.Version from
+          # the tag (versionString/versionShort read it via
+          # debug.ReadBuildInfo — no -ldflags stamping to maintain).
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build and archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          bin=claudit
+          [ "$GOOS" = windows ] && bin=claudit.exe
+          go build -trimpath -o "dist/$bin" ./cmd/claudit
+          name="claudit_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
+          cd dist
+          if [ "$GOOS" = windows ]; then
+            zip -q "../${name}.zip" "$bin"
+            echo "asset=${name}.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "../${name}.tar.gz" "$bin"
+            echo "asset=${name}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "$asset"
