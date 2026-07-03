@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -242,6 +243,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(apiPathSessions+"/", s.handleAPISessionsTree)
 
 	s.mux.HandleFunc(webAssetURLPrefix, s.handleWebAsset)
+
+	// Profiling endpoints. The server binds loopback-only by default and
+	// the report itself already exposes prompt text, so pprof adds no new
+	// exposure class. Registered on s.mux explicitly — a blank import of
+	// net/http/pprof would register on http.DefaultServeMux instead.
+	s.mux.HandleFunc("/debug/pprof/", pprof.Index)
+	s.mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	s.mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	s.mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	s.mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
 // Handler exposes the http.Handler. Useful for httptest in tests.
