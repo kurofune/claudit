@@ -34,7 +34,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test ./...
+      # -race catches the data races a plain run silently misses; the
+      # serve daemon is the concurrency-heavy path this guards.
+      - run: go test -race ./...
+  staticcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # @latest keeps pace with new Go releases without a pinned-version
+      # bump ritual; the tool never touches go.mod.
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
   # Unit tests for the SPA's pure JS logic (Node's built-in test runner,
   # no npm dependencies). OS-independent, so one runner is enough.
   js:
