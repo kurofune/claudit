@@ -20,6 +20,7 @@ import {
   pctOfAgent,
   pickTimelineSid,
   playheadBounds,
+  promptBands,
   playheadStats,
   refKey,
   segKindColor,
@@ -29,6 +30,7 @@ import {
   timelineAtTime,
   timelineBounds,
   timelineKinds,
+  timelineRowOrder,
   timelineSessionList,
   toolSegments,
   turnTimeBuckets,
@@ -698,7 +700,10 @@ test('toolSegments clamps tool sub-spans to the playhead cap', () => {
   });
 });
 
-test('buildTimeline attaches per-turn segments to each row', () => {
+// ADAPTED (collapse-by-default, Phase-3 item 14): segments were unconditional;
+// now they are behind row expansion, so this test opts the row in via
+// opts.expanded. The expected segment values are unchanged.
+test('buildTimeline attaches per-turn segments to each expanded row', () => {
   const session = {
     session_id: 's1',
     main: {
@@ -713,6 +718,7 @@ test('buildTimeline attaches per-turn segments to each row', () => {
   const layout = buildTimeline(session, {
     hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+    expanded: { rows: new Set(['s1#0']) },
   });
   assert.deepEqual(layout.rows[0].segments, [
     { x: 100, w: 120, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.01, durationMs: 400, kind: 'step' },
@@ -720,7 +726,11 @@ test('buildTimeline attaches per-turn segments to each row', () => {
   ]);
 });
 
-test('buildTimeline rows expose per-tool sub-spans when tools are timed', () => {
+// ADAPTED (two-level disclosure, Phase-3 item 14): tool sub-spans were emitted
+// whenever tools were timed; now they require BOTH the row and the turn to be
+// expanded, and the turn span stays (leading) as the tools' context/collapse
+// target. The two tool sub-span values are unchanged.
+test('buildTimeline rows expose per-tool sub-spans when their turn is expanded', () => {
   const session = {
     session_id: 's1',
     main: {
@@ -740,8 +750,10 @@ test('buildTimeline rows expose per-tool sub-spans when tools are timed', () => 
   const layout = buildTimeline(session, {
     hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+    expanded: { rows: new Set(['s1#0']), turns: new Set(['s1#0.0']) },
   });
   assert.deepEqual(layout.rows[0].segments, [
+    { x: 100, w: 300, stepIndex: 0, refKey: 's1#0.0', status: '', cost_usd: 0.03, durationMs: 1000, kind: 'step' },
     { x: 100, w: 180, stepIndex: 0, toolIndex: 0, refKey: 's1#0.0:0', status: '', cost_usd: 0.03, durationMs: 600, kind: 'other' },
     { x: 280, w: 90, stepIndex: 0, toolIndex: 1, refKey: 's1#0.0:1', status: '', cost_usd: 0.03, durationMs: 300, kind: 'other' },
   ]);
@@ -761,9 +773,12 @@ test('timelineAtTime clamps segments to the playhead (after T dropped, straddlin
       { kind: 'subagent', started_at: 600, status: 'running', steps: [{ timestamp: 600, duration_ms: 0, tools: [] }] },
     ],
   };
+  // ADAPTED (collapse-by-default, Phase-3 item 14): segments require the rows
+  // to be expanded now; expansion added, clamping assertions unchanged.
   const t = timelineAtTime(session, 300, {
     hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
     minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+    expanded: { rows: new Set(['s1#0', 's1#1']) },
   });
   // main active at T=300: step0 (0..400) truncated to 0..300 (w 90); step1 (start 400) dropped.
   assert.equal(t.rows[0].segments.length, 1);
@@ -1227,6 +1242,400 @@ test('criticalSpans can mark a cost whale on a row with no measured duration', (
   const c = criticalSpans(rows);
   assert.deepEqual(c.agents.A, { whaleRef: 'a0' });
   assert.deepEqual(c.session, { whaleRef: 'a0' });
+});
+
+// ── timelineRowOrder (depth-first re-parented row order) ────────────
+test('timelineRowOrder: a main-only session is one entry at depth 0 with no spawn', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [] },
+    children: [],
+  };
+  assert.deepEqual(timelineRowOrder(session), [
+    { agentIndex: 0, depth: 0, spawn: null },
+  ]);
+});
+
+test('timelineRowOrder: children with no parent link keep flatten order at depth 1', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [] },
+    children: [
+      { kind: 'subagent', started_at: 200, ended_at: 400, status: 'done' },
+      { kind: 'subagent', started_at: 500, ended_at: 600, status: 'done' },
+    ],
+  };
+  assert.deepEqual(timelineRowOrder(session), [
+    { agentIndex: 0, depth: 0, spawn: null },
+    { agentIndex: 1, depth: 1, spawn: null },
+    { agentIndex: 2, depth: 1, spawn: null },
+  ]);
+});
+
+test('timelineRowOrder: a resolved child carries spawn {agentIndex, stepIndex, toolIndex}', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 200, tools: [{ name: 'Read', id: 't-read', kind: 'read' }] },
+      { timestamp: 200, duration_ms: 800, tools: [
+        { name: 'Bash', id: 't-bash', kind: 'exec' },
+        { name: 'Agent', id: 't-spawn', kind: 'agent' },
+      ] },
+    ] },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 't-spawn', started_at: 250, ended_at: 400, status: 'done' },
+    ],
+  };
+  assert.deepEqual(timelineRowOrder(session), [
+    { agentIndex: 0, depth: 0, spawn: null },
+    { agentIndex: 1, depth: 1, spawn: { agentIndex: 0, stepIndex: 1, toolIndex: 1 } },
+  ]);
+});
+
+test('timelineRowOrder: a grandchild nests depth-first under its spawning child at depth 2', () => {
+  // flatten order: main(0), gc(1), child(2) — the grandchild appears BEFORE its
+  // parent in children[] to prove ordering is by spawn tree, not input order.
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 1000, tools: [{ name: 'Agent', id: 'spawn-child', kind: 'agent' }] },
+    ] },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 'spawn-gc', started_at: 300, ended_at: 400, status: 'done' },
+      { kind: 'subagent', parent_tool_use_id: 'spawn-child', started_at: 100, ended_at: 500, status: 'done',
+        steps: [{ timestamp: 100, duration_ms: 400, tools: [{ name: 'Agent', id: 'spawn-gc', kind: 'agent' }] }] },
+    ],
+  };
+  assert.deepEqual(timelineRowOrder(session), [
+    { agentIndex: 0, depth: 0, spawn: null },
+    { agentIndex: 2, depth: 1, spawn: { agentIndex: 0, stepIndex: 0, toolIndex: 0 } },
+    { agentIndex: 1, depth: 2, spawn: { agentIndex: 2, stepIndex: 0, toolIndex: 0 } },
+  ]);
+});
+
+test('timelineRowOrder: siblings under one parent order by spawning (stepIndex, toolIndex)', () => {
+  // children[] lists the later-spawned agent first; the tree re-orders by the
+  // spawning tool position: step0:tool1 before step2:tool0.
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 200, tools: [
+        { name: 'Read', id: 'r0', kind: 'read' },
+        { name: 'Agent', id: 'sp-a', kind: 'agent' },
+      ] },
+      { timestamp: 200, duration_ms: 200, tools: [] },
+      { timestamp: 400, duration_ms: 600, tools: [{ name: 'Agent', id: 'sp-b', kind: 'agent' }] },
+    ] },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 'sp-b', started_at: 450, ended_at: 700, status: 'done' },
+      { kind: 'subagent', parent_tool_use_id: 'sp-a', started_at: 50, ended_at: 150, status: 'done' },
+    ],
+  };
+  assert.deepEqual(timelineRowOrder(session).map(e => e.agentIndex), [0, 2, 1]);
+});
+
+test('timelineRowOrder: an unresolvable parent link falls to depth 1 after resolved children', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 1000, tools: [{ name: 'Agent', id: 'sp-known', kind: 'agent' }] },
+    ] },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 'toolu_gone', started_at: 100, ended_at: 200, status: 'done' },
+      { kind: 'subagent', parent_tool_use_id: 'sp-known', started_at: 300, ended_at: 600, status: 'done' },
+    ],
+  };
+  assert.deepEqual(timelineRowOrder(session), [
+    { agentIndex: 0, depth: 0, spawn: null },
+    { agentIndex: 2, depth: 1, spawn: { agentIndex: 0, stepIndex: 0, toolIndex: 0 } },
+    { agentIndex: 1, depth: 1, spawn: null }, // unresolved → flat fallback, appended after
+  ]);
+});
+
+test('timelineRowOrder: a spawn cycle still emits every agent exactly once', () => {
+  // Two children point at tools inside EACH OTHER (never reachable from main)
+  // — a pathological cycle. Both must still appear, once, at the flat depth 1.
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [] },
+    children: [
+      { kind: 'subagent', parent_tool_use_id: 'in-c2', started_at: 100, ended_at: 300, status: 'done',
+        steps: [{ timestamp: 100, duration_ms: 100, tools: [{ name: 'Agent', id: 'in-c1', kind: 'agent' }] }] },
+      { kind: 'subagent', parent_tool_use_id: 'in-c1', started_at: 200, ended_at: 400, status: 'done',
+        steps: [{ timestamp: 200, duration_ms: 100, tools: [{ name: 'Agent', id: 'in-c2', kind: 'agent' }] }] },
+    ],
+  };
+  const order = timelineRowOrder(session);
+  assert.deepEqual(order.map(e => e.agentIndex).sort(), [0, 1, 2]);
+  assert.equal(order.length, 3);
+  // The cycle members landed at the flat fallback depth, under main.
+  for (const e of order.slice(1)) assert.equal(e.depth >= 1, true);
+});
+
+// ── buildTimeline: re-parented rows (b) + progressive disclosure (c) ─
+// A session where flatten order ≠ spawn-tree order: children[] lists the
+// grandchild first, so display order must become [main(0), child(2), gc(1)]
+// while every key stays `${sid}#${flattenIndex}`.
+const NESTED_SESSION = {
+  session_id: 'sn',
+  main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+    { timestamp: 0, duration_ms: 1000, tools: [{ name: 'Agent', id: 'spawn-child', kind: 'agent', ended_at: 500 }] },
+  ] },
+  children: [
+    { kind: 'subagent', parent_tool_use_id: 'spawn-gc', started_at: 300, ended_at: 400, status: 'done' },
+    { kind: 'subagent', parent_tool_use_id: 'spawn-child', started_at: 100, ended_at: 500, status: 'done',
+      steps: [{ timestamp: 100, duration_ms: 400, tools: [{ name: 'Agent', id: 'spawn-gc', kind: 'agent' }] }] },
+  ],
+};
+const NESTED_OPTS = {
+  hostW: 400, labelW: 100, pad: 0, axisH: 20, rowH: 20,
+  minBlock: 2, minPxPerMs: 0, tickCount: 2, nowMs: 1000,
+};
+
+test('buildTimeline re-parents rows depth-first but keeps every key at its flattenSession index', () => {
+  const layout = buildTimeline(NESTED_SESSION, NESTED_OPTS);
+  // Display order per timelineRowOrder; keys/rowIndex pinned to flatten order.
+  assert.deepEqual(layout.rows.map(r => r.key), ['sn#0', 'sn#2', 'sn#1']);
+  assert.deepEqual(layout.rows.map(r => r.rowIndex), [0, 2, 1]);
+  // Key-stability proof: same keys flattenSession implies, independent of order.
+  const flat = flattenSession(NESTED_SESSION).map((_, i) => `sn#${i}`).sort();
+  assert.deepEqual(layout.rows.map(r => r.key).slice().sort(), flat);
+  // Geometry follows DISPLAY position: y stacks in the emitted order.
+  assert.deepEqual(layout.rows.map(r => r.y), [20, 40, 60]);
+});
+
+test('buildTimeline rows carry nesting depth and spawn connector metadata', () => {
+  const layout = buildTimeline(NESTED_SESSION, NESTED_OPTS);
+  const [main, child, gc] = layout.rows;
+  assert.equal(main.depth, 0);
+  assert.equal(main.spawn, null);
+  assert.equal(child.depth, 1);
+  assert.deepEqual(child.spawn, { agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.equal(gc.depth, 2);
+  assert.deepEqual(gc.spawn, { agentIndex: 2, stepIndex: 0, toolIndex: 0 });
+  // Label indent follows depth (pad 0 + depth * default indent 12).
+  assert.deepEqual(layout.rows.map(r => r.labelX), [0, 12, 24]);
+});
+
+// A busy fixture: 2 agents × many timed tools. Collapsed, the layout must stay
+// O(agents) — no per-tool (or per-turn) segments at all.
+function busySession(toolsPerStep = 20, steps = 10) {
+  const mkSteps = (t0) => Array.from({ length: steps }, (_, k) => ({
+    timestamp: t0 + k * 100, duration_ms: 100, cost_usd: 0.01, gen_ms: 10,
+    tools: Array.from({ length: toolsPerStep }, (_, j) => ({
+      name: 'Bash', kind: 'exec', status: 'ok',
+      ended_at: t0 + k * 100 + (j + 1) * Math.floor(100 / (toolsPerStep + 1)),
+    })),
+  }));
+  return {
+    session_id: 'busy',
+    main: { kind: 'main', started_at: 0, ended_at: 2000, status: 'done', steps: mkSteps(0) },
+    children: [
+      { kind: 'subagent', started_at: 1000, ended_at: 2000, status: 'done', steps: mkSteps(1000) },
+    ],
+  };
+}
+
+test('buildTimeline default (no opts.expanded) emits NO segments — O(agents), not O(tools)', () => {
+  const layout = buildTimeline(busySession(), NESTED_OPTS);
+  assert.equal(layout.rows.length, 2);
+  for (const r of layout.rows) {
+    assert.deepEqual(r.segments, []);
+    assert.deepEqual(r.idleSegments, []);
+    assert.equal(r.expanded, false);
+  }
+  // The whole layout is O(agents): rows + their bars, zero sub-spans, for a
+  // fixture holding 2×10×20 = 400 tools.
+  const subSpans = layout.rows.reduce((n, r) => n + r.segments.length + r.idleSegments.length, 0);
+  assert.equal(subSpans, 0);
+});
+
+test('buildTimeline: expanding a row doubles its height, opens segY, and shifts the rows below', () => {
+  const collapsed = buildTimeline(busySession(), NESTED_OPTS);
+  const layout = buildTimeline(busySession(), {
+    ...NESTED_OPTS, expanded: { rows: new Set(['busy#0']) },
+  });
+  const [main, child] = layout.rows;
+  assert.equal(main.expanded, true);
+  assert.equal(main.h, 40);            // 2 × rowH 20
+  assert.equal(main.laneH, 20);        // the bar band stays one lane tall
+  assert.equal(main.segY, 40);         // y 20 + laneH 20 — the turn band below the bar
+  assert.equal(main.segments.length, 10);  // one turn span per step, no tools yet
+  assert.ok(main.idleSegments.length > 0); // gen_ms fixture → idle spans return
+  // The next row is pushed down by the extra lane; total height accounts for it.
+  assert.equal(child.y, 60);           // axisH 20 + main h 40
+  assert.equal(child.expanded, false);
+  assert.deepEqual(child.segments, []);
+  assert.equal(layout.height, collapsed.height + 20); // one extra lane, pad 0
+});
+
+test('buildTimeline: expanding one turn adds ITS tool sub-spans; sibling turns stay single spans', () => {
+  const layout = buildTimeline(busySession(), {
+    ...NESTED_OPTS, expanded: { rows: new Set(['busy#0']), turns: new Set(['busy#0.3']) },
+  });
+  const segs = layout.rows[0].segments;
+  const toolSegs = segs.filter(s => s.toolIndex != null);
+  const turnSegs = segs.filter(s => s.toolIndex == null);
+  assert.equal(turnSegs.length, 10);            // every turn keeps its span
+  assert.equal(toolSegs.length, 20);            // only step 3's 20 tools disclosed
+  assert.ok(toolSegs.every(s => s.stepIndex === 3));
+  // Tools tile immediately after their turn's span in the list (paint order).
+  const turn3At = segs.findIndex(s => s.refKey === 'busy#0.3');
+  assert.ok(segs.slice(turn3At + 1, turn3At + 21).every(s => s.toolIndex != null));
+});
+
+test('timelineAtTime: scrubbing keeps collapsed rows collapsed and clamps disclosed tools to T', () => {
+  // Collapsed rows emit no segments at ANY T.
+  for (const T of [100, 950, 5000]) {
+    const t = timelineAtTime(busySession(), T, NESTED_OPTS);
+    for (const r of t.rows) {
+      assert.deepEqual(r.segments, []);
+      assert.deepEqual(r.idleSegments, []);
+    }
+  }
+  // An expanded row+turn discloses tool sub-spans, clamped to the playhead:
+  // step 3 spans [300,400); at T=350 its tools cap at 350.
+  const t = timelineAtTime(busySession(), 350, {
+    ...NESTED_OPTS, expanded: { rows: new Set(['busy#0']), turns: new Set(['busy#0.3']) },
+  });
+  const tools = t.rows[0].segments.filter(s => s.toolIndex != null);
+  assert.ok(tools.length > 0);
+  const turnStart = 300;
+  let covered = turnStart;
+  for (const s of tools) covered += s.durationMs;
+  assert.ok(covered <= 350, `tool spans must not pass the playhead (covered to ${covered})`);
+  // …and turns after the playhead are dropped entirely.
+  assert.ok(t.rows[0].segments.every(s => s.stepIndex <= 3));
+});
+
+test('timelineAtTime maps phase per AGENT (rowIndex), not per display position, when rows reorder', () => {
+  // NESTED_SESSION display order is [main(0), child(2), gc(1)]. gc spans
+  // [300,400], child [100,500]. At T=200 the child is active but gc is still
+  // pending — a positional agents[i] mapping would swap them.
+  const t = timelineAtTime(NESTED_SESSION, 200, NESTED_OPTS);
+  const byKey = Object.fromEntries(t.rows.map(r => [r.key, r]));
+  assert.equal(byKey['sn#0'].phase, 'active');
+  assert.equal(byKey['sn#2'].phase, 'active'); // child started at 100
+  assert.equal(byKey['sn#1'].phase, 'pending'); // gc starts at 300
+  assert.equal(byKey['sn#1'].w, 0);
+  assert.ok(byKey['sn#2'].w > 0);
+  // Display order itself is preserved from buildTimeline.
+  assert.deepEqual(t.rows.map(r => r.key), ['sn#0', 'sn#2', 'sn#1']);
+});
+
+// ── promptBands (prompt-segmented waterfall bands) ──────────────────
+test('promptBands returns [] for a session with no/empty prompts', () => {
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  assert.deepEqual(promptBands(null, { scale, chartX: 100 }), []);
+  assert.deepEqual(promptBands({ session_id: 's1' }, { scale, chartX: 100 }), []);
+  assert.deepEqual(promptBands({ session_id: 's1', prompts: [] }, { scale, chartX: 100 }), []);
+});
+
+test('promptBands: a single prompt spans its first turn start to the chart end', () => {
+  // scale [0,1000]→[0,300]px, chartX 100. Prompt at t≈90 whose first turn
+  // (step 0) starts at 100 → band [100,1000] → x 130, w 270.
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 100, duration_ms: 900, tools: [] },
+    ] },
+    children: [],
+    prompts: [{ uuid: 'u1', text: 'fix the bug', timestamp: 90, first_step_index: 0 }],
+  };
+  assert.deepEqual(promptBands(session, { scale, chartX: 100 }), [
+    { uuid: 'u1', text: 'fix the bug', x: 130, w: 270, firstStepIndex: 0 },
+  ]);
+});
+
+test('promptBands: the first band ends where the next prompt\'s first turn starts', () => {
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 500, tools: [] },
+      { timestamp: 500, duration_ms: 500, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'u1', text: 'first ask', timestamp: 0, first_step_index: 0 },
+      { uuid: 'u2', text: 'second ask', timestamp: 480, first_step_index: 1 },
+    ],
+  };
+  assert.deepEqual(promptBands(session, { scale, chartX: 100 }), [
+    { uuid: 'u1', text: 'first ask', x: 100, w: 150, firstStepIndex: 0 },
+    { uuid: 'u2', text: 'second ask', x: 250, w: 150, firstStepIndex: 1 },
+  ]);
+});
+
+test('promptBands includes an orphan prompt (uuid "") with its own band', () => {
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 600, tools: [] },
+      { timestamp: 600, duration_ms: 400, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: '', text: '', timestamp: 0, first_step_index: 0 },
+      { uuid: 'u2', text: 'real ask', timestamp: 590, first_step_index: 1 },
+    ],
+  };
+  const bands = promptBands(session, { scale, chartX: 0 });
+  assert.equal(bands.length, 2);
+  assert.deepEqual(bands[0], { uuid: '', text: '', x: 0, w: 180, firstStepIndex: 0 });
+});
+
+test('promptBands sorts out-of-order prompts by band start time', () => {
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 0, duration_ms: 500, tools: [] },
+      { timestamp: 500, duration_ms: 500, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'u2', text: 'later', timestamp: 480, first_step_index: 1 },
+      { uuid: 'u1', text: 'earlier', timestamp: 0, first_step_index: 0 },
+    ],
+  };
+  assert.deepEqual(promptBands(session, { scale, chartX: 0 }).map(b => b.uuid), ['u1', 'u2']);
+});
+
+test('promptBands falls back to the prompt timestamp when the step index resolves to no timed step, and skips unparseable-both', () => {
+  const scale = makeTimeScale({ startMs: 0, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 0, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 'not-a-time', duration_ms: 0, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'u1', text: 'fallback', timestamp: 200, first_step_index: 0 },   // step ts unparseable → prompt ts 200
+      { uuid: 'u2', text: 'gone', timestamp: 'nope', first_step_index: 99 },   // both unparseable → skipped
+    ],
+  };
+  const bands = promptBands(session, { scale, chartX: 0 });
+  assert.equal(bands.length, 1);
+  assert.deepEqual(bands[0], { uuid: 'u1', text: 'fallback', x: 60, w: 240, firstStepIndex: 0 });
+});
+
+test('promptBands clamps a pre-window prompt to the chart left edge', () => {
+  // Scale starts at 500; a prompt whose turn starts at 100 clamps to x(500)=0.
+  const scale = makeTimeScale({ startMs: 500, endMs: 1000, width: 300, minBlock: 2 });
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', started_at: 500, ended_at: 1000, status: 'done', steps: [
+      { timestamp: 100, duration_ms: 900, tools: [] },
+    ] },
+    children: [],
+    prompts: [{ uuid: 'u1', text: 'early', timestamp: 100, first_step_index: 0 }],
+  };
+  assert.deepEqual(promptBands(session, { scale, chartX: 50 }), [
+    { uuid: 'u1', text: 'early', x: 50, w: 300, firstStepIndex: 0 },
+  ]);
 });
 
 test('criticalSpans tolerates a null / non-array argument', () => {

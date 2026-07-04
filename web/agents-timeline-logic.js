@@ -49,6 +49,19 @@ import {
  * @property {number} [minPxPerMs]
  * @property {number} [indent]
  * @property {number} [tickCount]
+ * @property {TimelineExpansion} [expanded]
+ */
+
+/**
+ * Progressive-disclosure state for the Timeline waterfall: which agent rows
+ * are expanded to their per-turn spans (`rows`, keyed by the row key
+ * `${sessionId}#${flattenIndex}`) and which turns are further expanded to
+ * their per-tool sub-spans (`turns`, keyed by the step refKey
+ * `${sessionId}#${agentIndex}.${stepIndex}`). Absent/empty sets mean
+ * everything is collapsed — the default.
+ * @typedef {Object} TimelineExpansion
+ * @property {Set<string>} [rows]
+ * @property {Set<string>} [turns]
  */
 
 // timelineSessionList summarizes each session for the Timeline lens's session
@@ -542,6 +555,41 @@ export function criticalSpans(rows) {
   return { session, agents };
 }
 
+// promptBands segments the Timeline waterfall by user prompt: one labeled
+// vertical band per PromptMarker, spanning from the prompt's first turn to the
+// next prompt's first turn (the last band runs to the chart's end). Pure
+// geometry over an existing time scale — x/w land on the same axis as the
+// bars, already including chartX, and the scale's own clamping keeps every
+// band inside the chart bounds.
+/**
+ * @param {AgentSession|null|undefined} session
+ * @param {{scale?: TimeScale, chartX?: number}} [opts]
+ * @returns {{uuid: string, text: string, x: number, w: number, firstStepIndex: number}[]}
+ */
+export function promptBands(session, opts = {}) {
+  const { scale, chartX = 0 } = opts;
+  const prompts = (session && session.prompts) || [];
+  if (!scale || prompts.length === 0) return [];
+  const steps = (session && session.main && session.main.steps) || [];
+  const items = [];
+  for (const p of prompts) {
+    if (!p) continue;
+    const idx = p.first_step_index;
+    const step = steps[idx];
+    let start = parseTime(step && step.timestamp);
+    if (Number.isNaN(start)) start = parseTime(p.timestamp);
+    if (Number.isNaN(start)) continue;
+    items.push({ uuid: p.uuid || '', text: p.text || '', firstStepIndex: idx, start });
+  }
+  items.sort((a, b) => a.start - b.start);
+  return items.map((it, i) => {
+    const end = i + 1 < items.length ? items[i + 1].start : scale.endMs;
+    const x = chartX + scale.x(it.start);
+    const w = Math.max(0, chartX + scale.x(end) - x);
+    return { uuid: it.uuid, text: it.text, x, w, firstStepIndex: it.firstStepIndex };
+  });
+}
+
 // timelineBounds returns the [startMs, endMs] time window a Gantt timeline
 // should span over a set of agents. Each agent's effective end is "now" if
 // it's still running, else its parseable ended_at, else (NaN end) its own
@@ -646,16 +694,103 @@ export function sessionStats(session, nowMs = Date.now()) {
   return { durationMs, turnCount, toolCount, errorCount, agentCount: agents.length, tokenCount, cost_usd };
 }
 
-// buildTimeline computes a per-session horizontal Gantt layout: one row per
-// agent (main first at depth 0, each sub-agent at depth 1), each bar placed on
-// a real time axis spanning the session's lifetime, plus axis ticks and a
-// "now" line x. Pure geometry — no DOM and no Date.now(); the caller passes
-// nowMs so a running agent's bar (and the now-line) advance on refetch. The
-// chart floors to the host width but widens (→ horizontal scroll) for long
-// sessions via minPxPerMs. Rows stay 1:1 with flattenSession order/index so a
-// row's refKey index aligns with the rest of the tab; an agent with an
-// unparseable start just gets a left-edge sliver bar rather than being dropped.
-// Returns the empty layout when the session has no agents or no parseable times.
+// timelineRowOrder computes the DISPLAY order of a session's timeline rows as
+// a depth-first spawn tree: main first, then each sub-agent nested immediately
+// under the agent whose Agent tool_use spawned it (resolved by matching the
+// child's parent_tool_use_id against every tool's id), recursively — a
+// sub-agent that itself spawned gets its own children beneath it at
+// depth+1. Children of one parent order by their spawning (stepIndex,
+// toolIndex); unresolvable/missing parent links fall back to the old flat
+// model (depth 1 under main, appended after the resolved children in flatten
+// order). agentIndex is ALWAYS the flattenSession index — the stable identity
+// every refKey in the tab hangs off — only order/depth/spawn are computed.
+// spawn is the spawning tool's location {agentIndex, stepIndex, toolIndex}
+// (null for main/unresolved), the connector metadata the view draws elbows from.
+/**
+ * @param {AgentSession|null|undefined} session
+ * @returns {{agentIndex: number, depth: number,
+ *   spawn: {agentIndex: number, stepIndex: number, toolIndex: number}|null}[]}
+ */
+export function timelineRowOrder(session) {
+  const agents = flattenSession(session);
+  // One pass building tool_use id → location; the Agent-kind tools among these
+  // are the spawn calls a child's parent_tool_use_id points back at.
+  const toolLoc = new Map();
+  agents.forEach((a, ai) => {
+    ((a && a.steps) || []).forEach((step, si) => {
+      ((step && step.tools) || []).forEach((tool, ti) => {
+        if (tool && tool.id && !toolLoc.has(tool.id)) {
+          toolLoc.set(tool.id, { agentIndex: ai, stepIndex: si, toolIndex: ti });
+        }
+      });
+    });
+  });
+  // Resolve each non-main agent's spawn location, bucket resolved children
+  // under their parent agent (ordered by spawning stepIndex/toolIndex, then
+  // flatten order for stability), and emit depth-first from the roots.
+  const spawnOf = agents.map((a, i) => {
+    const isMain = a && a.kind === 'main';
+    if (isMain || !a || !a.parent_tool_use_id) return null;
+    const loc = toolLoc.get(a.parent_tool_use_id);
+    return (loc && loc.agentIndex !== i) ? loc : null; // a self-spawn is garbage → unresolved
+  });
+  const childrenOf = new Map(); // parent agentIndex → [child agentIndex…]
+  spawnOf.forEach((loc, i) => {
+    if (!loc) return;
+    if (!childrenOf.has(loc.agentIndex)) childrenOf.set(loc.agentIndex, []);
+    childrenOf.get(loc.agentIndex).push(i);
+  });
+  for (const kids of childrenOf.values()) {
+    kids.sort((x, y) =>
+      spawnOf[x].stepIndex - spawnOf[y].stepIndex ||
+      spawnOf[x].toolIndex - spawnOf[y].toolIndex ||
+      x - y);
+  }
+  const out = [];
+  const visited = new Set();
+  const emit = (i, depth) => {
+    if (visited.has(i)) return; // cycle guard — each agent appears exactly once
+    visited.add(i);
+    out.push({ agentIndex: i, depth, spawn: spawnOf[i] });
+    for (const kid of childrenOf.get(i) || []) emit(kid, depth + 1);
+  };
+  // Roots: main first, then (after its resolved subtree) every unresolved
+  // sub-agent at the old flat depth 1, in flatten order — including agents
+  // orphaned by a spawn cycle, so nothing is ever dropped.
+  agents.forEach((a, i) => { if (a && a.kind === 'main') emit(i, 0); });
+  agents.forEach((a, i) => {
+    if (visited.has(i)) return;
+    if (!spawnOf[i]) { emit(i, 1); return; }
+    // Resolved but unreachable (its parent chain never reached a root — a
+    // cycle): break the link and fall back to the flat model.
+    spawnOf[i] = null;
+    emit(i, 1);
+  });
+  return out;
+}
+
+// buildTimeline computes a per-session horizontal trace-waterfall layout: one
+// row per agent in timelineRowOrder's depth-first spawn-tree order (main at
+// depth 0, each sub-agent nested under its spawning turn at parent depth + 1),
+// each bar placed on a real time axis spanning the session's lifetime, plus
+// axis ticks and a "now" line x. Pure geometry — no DOM and no Date.now(); the
+// caller passes nowMs so a running agent's bar (and the now-line) advance on
+// refetch. The chart floors to the host width but widens (→ horizontal scroll)
+// for long sessions via minPxPerMs.
+//
+// Progressive disclosure (opts.expanded): by default every row is COLLAPSED —
+// one bar, no per-turn/per-tool segments, height rowH — so a busy session
+// renders O(agents) elements, not O(tools). A row whose key is in
+// expanded.rows doubles to h = 2·rowH: the bar keeps the top laneH band and a
+// per-turn segment band opens beneath it (segY = y + laneH). A turn whose step
+// refKey is in expanded.turns additionally emits its tool sub-spans right
+// after its turn span (drawn on top of it).
+//
+// Rows REORDER by spawn tree but each keeps the key/rowIndex flattenSession
+// assigns (`${sid}#${flattenIndex}`) — the identity every refKey/selection in
+// the tab hangs off; an agent with an unparseable start just gets a left-edge
+// sliver bar rather than being dropped. Returns the empty layout when the
+// session has no agents or no parseable times.
 /** @param {AgentSession|null|undefined} session @param {TimelineOpts} [opts] */
 export function buildTimeline(session, opts = {}) {
   const {
@@ -664,7 +799,6 @@ export function buildTimeline(session, opts = {}) {
   } = opts;
   const agents = flattenSession(session);
   const sid = (session && session.session_id) || '';
-  const depth = a => (a && a.kind === 'main' ? 0 : 1);
 
   const bounds = timelineBounds(agents, nowMs);
   if (agents.length === 0 || bounds === null) {
@@ -682,23 +816,36 @@ export function buildTimeline(session, opts = {}) {
   const scale = makeTimeScale({ startMs, endMs, width: chartW, minBlock });
   const chartX = labelW;
 
-  const rows = agents.map((a, i) => {
+  const order = timelineRowOrder(session);
+  const expRows = (opts.expanded && opts.expanded.rows) || null;
+  const expTurns = (opts.expanded && opts.expanded.turns) || null;
+  let nextY = axisH;
+  const rows = order.map(entry => {
+    const i = entry.agentIndex;
+    const a = agents[i];
     const start = parseTime(a.started_at);
     const effEnd = a.status === 'running'
       ? nowMs
       : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
     const bar = agentBar({ start, end: effEnd }, scale);
-    const d = depth(a);
+    const d = entry.depth;
+    const key = `${sid}#${i}`;
+    const expanded = !!(expRows && expRows.has(key));
+    const h = expanded ? rowH * 2 : rowH;
+    const y = nextY;
+    nextY += h;
+    const segOpts = { scale, chartX, sessionId: sid, agentIndex: i, effEnd };
     return {
-      key: `${sid}#${i}`, rowIndex: i, depth: d,
+      key, rowIndex: i, depth: d, spawn: entry.spawn,
       label: agentLabel(a), kind: a.kind || '', status: a.status || '',
       running: a.status === 'running',
       cost_usd: a.cost_usd || 0, steps: (a.steps || []).length,
       x: chartX + bar.x, w: bar.width,
-      y: axisH + i * rowH, h: rowH,
+      y, h, laneH: rowH, expanded,
+      segY: expanded ? y + rowH : null,
       labelX: pad + d * indent,
-      segments: toolSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
-      idleSegments: idleSegments(a, { scale, chartX, sessionId: sid, agentIndex: i, effEnd }),
+      segments: expanded ? disclosedSegments(a, segOpts, expTurns) : [],
+      idleSegments: expanded ? idleSegments(a, segOpts) : [],
     };
   });
 
@@ -717,13 +864,41 @@ export function buildTimeline(session, opts = {}) {
   }
 
   const contentW = chartX + chartW + pad;
-  const height = axisH + agents.length * rowH + pad;
+  const height = nextY + pad; // rows are variable-height (expanded = 2·rowH)
 
   return {
     sessionId: sid, startMs, endMs, span,
     chartX, chartW, chartHostW, contentW, width: contentW, height,
     nowX, rows, ticks,
   };
+}
+
+// disclosedSegments builds an EXPANDED row's segment list: one turn span per
+// timed step (stepSegments), and — for each turn whose step refKey is in the
+// `turns` expansion set — that turn's per-tool sub-spans appended immediately
+// after its turn span, so the tools draw on top of it (SVG paint order) while
+// the turn span keeps the trailing gen/idle region visible (and clickable as
+// the collapse target). Same opts/playhead-cap contract as the segment
+// builders it composes.
+/**
+ * @param {AgentNode|null|undefined} agent
+ * @param {SegmentOpts} opts
+ * @param {Set<string>|null} turns
+ */
+function disclosedSegments(agent, opts, turns) {
+  const turnSegs = stepSegments(agent, opts);
+  if (!turns || turns.size === 0 || !turnSegs.some(s => turns.has(s.refKey))) {
+    return turnSegs;
+  }
+  const toolSegs = toolSegments(agent, opts).filter(s => s.toolIndex != null);
+  const out = [];
+  for (const seg of turnSegs) {
+    out.push(seg);
+    if (turns.has(seg.refKey)) {
+      for (const t of toolSegs) if (t.stepIndex === seg.stepIndex) out.push(t);
+    }
+  }
+  return out;
 }
 
 // TL_MAX_PX_PER_MS caps how far the Timeline can zoom in: enough px-per-ms that
@@ -780,7 +955,10 @@ export function zoomAnchorScrollLeft(opts = {}) {
 // width 0, an in-flight agent's bar grows only up to the playhead, and a
 // finished agent keeps its real bar. Adds `playheadX` (the playhead line's x,
 // null when the session hasn't begun at T) and `atMs` (the T it was built for).
-// Rows stay 1:1 with flattenSession order so selection indices still line up.
+// Rows keep buildTimeline's spawn-tree order and flattenSession-pinned keys, so
+// selection indices still line up; the same opts.expanded disclosure applies —
+// scrubbing a collapsed row keeps it collapsed (no segments), an expanded one
+// gets its turn/tool spans clamped to T.
 /** @param {AgentSession|null|undefined} session @param {number} T @param {TimelineOpts} [opts] */
 export function timelineAtTime(session, T, opts = {}) {
   const base = buildTimeline(session, opts);
@@ -793,11 +971,13 @@ export function timelineAtTime(session, T, opts = {}) {
   });
   const agents = flattenSession(session);
   const nowMs = opts.nowMs || 0;
-  const rows = agents.map((a, i) => {
+  const expTurns = (opts.expanded && opts.expanded.turns) || null;
+  const rows = base.rows.map(row => {
+    const a = agents[row.rowIndex];
     const start = parseTime(a.started_at);
     const phase = agentPhaseAt(a, T);
     if (phase === 'pending') {
-      return { ...base.rows[i], w: 0, phase: 'pending', running: false, segments: [], idleSegments: [] };
+      return { ...row, w: 0, phase: 'pending', running: false, segments: [], idleSegments: [] };
     }
     let clampEnd;
     if (phase === 'active') {
@@ -812,12 +992,12 @@ export function timelineAtTime(session, T, opts = {}) {
       : (Number.isNaN(parseTime(a.ended_at)) ? start : parseTime(a.ended_at));
     const segOpts = {
       scale, chartX: base.chartX, sessionId: base.sessionId,
-      agentIndex: i, effEnd, until: clampEnd,
+      agentIndex: row.rowIndex, effEnd, until: clampEnd,
     };
-    const segments = toolSegments(a, segOpts);
     return {
-      ...base.rows[i], w: bar.width, phase, running: phase === 'active',
-      segments, idleSegments: idleSegments(a, segOpts),
+      ...row, w: bar.width, phase, running: phase === 'active',
+      segments: row.expanded ? disclosedSegments(a, segOpts, expTurns) : [],
+      idleSegments: row.expanded ? idleSegments(a, segOpts) : [],
     };
   });
   const playheadX = T < base.startMs ? null : base.chartX + scale.x(T);

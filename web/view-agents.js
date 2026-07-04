@@ -56,6 +56,7 @@ import {
 import {
   renderTimeline, currentTimelineSession, syncTimelineScroll,
   onTimelineScroll, jumpToNow, onScrub, onTimelineWheel, onTimelineZoomReset,
+  onTimelineDisclose,
 } from './agents-timeline.js';
 import { renderDrawer, loadFull, loadFullTurn } from './agents-drawer.js';
 import {
@@ -404,6 +405,14 @@ function wireSelection(container) {
       // plotted (independent of the drawer selection).
       const tlSess = e.target.closest('[data-tl-sess]');
       if (tlSess) { pickTimeline(container, tlSess.dataset.tlSess); return; }
+      // The Timeline's disclosure caret expands/collapses an agent row to its
+      // turn band — a pure lens repaint, never a selection.
+      const tlDisc = e.target.closest('[data-tltoggle]');
+      if (tlDisc) { onTimelineDisclose(container, tlDisc.dataset.tltoggle); return; }
+      // A turn span both toggles its tool sub-spans AND selects the turn in the
+      // drawer (the existing data-ref semantics), so one click discloses + inspects.
+      const tlTurn = e.target.closest('[data-tlturn]');
+      if (tlTurn) { onTimelineDisclose(container, tlTurn.dataset.tlturn); select(container, tlTurn.dataset.ref); return; }
       // The Insights lens's section tabs switch which panel shows — a pure
       // re-render from lastGraph, no refetch.
       const insTab = e.target.closest('[data-ins-tab]');
@@ -479,6 +488,8 @@ function wireSelection(container) {
     });
     lens.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;
+      const tlDisc = e.target.closest('[data-tltoggle]');
+      if (tlDisc) { e.preventDefault(); onTimelineDisclose(container, tlDisc.dataset.tltoggle); return; }
       const bucket = e.target.closest('[data-ins-bucket]');
       if (bucket) { e.preventDefault(); applyBucketFilter(container, (bucket.dataset.insKinds || '').split(',').filter(Boolean)); return; }
       const cut = e.target.closest('[data-ins-cost-cut]');

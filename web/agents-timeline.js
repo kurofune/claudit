@@ -8,8 +8,9 @@
 import { fmtMoney, fmtNum, fmtCompact, escHtml } from './format.js';
 import {
   flattenSession, agentTokens, agentElapsedMs, formatElapsed, baseName,
-  refKey, resolveRef, sessionStats, timelineSessionList, pickTimelineSid,
+  refKey, parseRefKey, resolveRef, sessionStats, timelineSessionList, pickTimelineSid,
   playheadBounds, playheadStats, timelineAtTime, buildTimeline, timelineKinds,
+  makeTimeScale, promptBands,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip,
   criticalSpans, detectSignals, signalPipsByAgent,
   zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
@@ -28,6 +29,41 @@ let zoomRaf = 0;
 // The pending wheel gesture, coalesced into one rAF repaint: the scroll element,
 // the cursor's x within its viewport, and the summed deltaY since the last frame.
 let zoomPending = null;
+
+// Progressive-disclosure state (Phase-3 item 14). Module-level so it survives
+// repaints, scrub frames, and SSE ticks: `rows` holds expanded agent-row keys
+// (`sid#ai` — collapsed rows draw one bar, no segments), `turns` holds expanded
+// step refKeys (`sid#ai.si` — their tool sub-spans disclose). Fed to
+// buildTimeline/timelineAtTime as opts.expanded; local to the Timeline lens
+// (no other lens collapses), so it lives here rather than agents-shared.js.
+const tlExpanded = { rows: new Set(), turns: new Set() };
+
+// onTimelineDisclose toggles one disclosure key — an agent row key expands/
+// collapses that row's turn band; a step refKey expands/collapses that turn's
+// tool sub-spans — then repaints only the plotted session at the current
+// playhead (same cheap path a scrub frame uses). Collapsing a row keeps its
+// turn expansions so re-expanding restores the same view.
+export function onTimelineDisclose(container, key) {
+  const p = parseRefKey(key);
+  if (!p) return;
+  const set = p.stepIndex != null ? tlExpanded.turns : tlExpanded.rows;
+  if (set.has(key)) set.delete(key); else set.add(key);
+  const nowMs = Date.now();
+  const chosen = currentTimelineSession();
+  const bounds = chosen ? playheadBounds({ sessions: [chosen.session] }, nowMs) : null;
+  repaintTimelineSessions(container, playheadAt(bounds, nowMs));
+}
+
+// ensureDisclosedFor force-expands whatever encloses `ref` (its agent row, and
+// its turn when the ref is tool-deep) so a cross-lens jump — a Signals row, a
+// retry link — always lands on a RENDERED segment even though rows collapse by
+// default. Called with the pending jump's ref at render time.
+function ensureDisclosedFor(ref) {
+  const p = parseRefKey(ref);
+  if (!p || p.stepIndex == null) return;
+  tlExpanded.rows.add(`${p.sessionId}#${p.agentIndex}`);
+  if (p.toolIndex != null) tlExpanded.turns.add(`${p.sessionId}#${p.agentIndex}.${p.stepIndex}`);
+}
 
 // renderTimeline draws the Gantt lens: a scrubber bar on top, then one
 // horizontal Gantt per session (a real time axis, one row per agent, bar =
@@ -208,6 +244,12 @@ const TL_SIG_CAP = 3;
 const TL_ROW_H = 34;
 const TL_LABEL_W = 190;
 const TL_LABEL_CHARS = 24;
+// Taller axis strip when prompt bands are drawn: the top half carries each
+// band's prompt snippet, the bottom half the usual tick labels.
+const TL_AXIS_PROMPT_H = 38;
+// Prompt-band label budget: ~60 chars max, shrunk to what the band width fits
+// (≈6px/char at the 9px mono size, 8px padding).
+const TL_PBAND_CHARS = 60;
 let tlSigCache = null; // { session, byAgent }
 function timelineSignalPips(session, sid) {
   if (tlSigCache && tlSigCache.session === session) return tlSigCache.byAgent;
@@ -219,6 +261,13 @@ function timelineSignalPips(session, sid) {
 
 function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
   const sid = session.session_id || '';
+  // A cross-lens jump must land on a rendered node: expand the jump target's
+  // row/turn BEFORE building the layout (rows collapse by default).
+  if (jumpFlashRef) ensureDisclosedFor(jumpFlashRef);
+  // With prompt bands the axis strip doubles as the prompt-label rail: band
+  // labels ride the top half, tick labels keep their usual baseline slot.
+  const hasPrompts = Array.isArray(session.prompts) && session.prompts.length > 0;
+  const axisH = hasPrompts ? TL_AXIS_PROMPT_H : 20;
   // tlMinPxPerMs (null ⇒ default) is the scroll-wheel zoom density; buildTimeline
   // still floors the chart to the host width, so a stale value below fit-to-width
   // simply renders as the overview.
@@ -227,11 +276,12 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   // names like "Djinn review-leak-detector" from clipping to "Djinn review-le…".
   const tl = timelineAtTime(session, T, {
     hostW, nowMs, minPxPerMs: tlMinPxPerMs ?? undefined,
-    rowH: TL_ROW_H, labelW: TL_LABEL_W,
+    rowH: TL_ROW_H, labelW: TL_LABEL_W, axisH,
+    expanded: tlExpanded,
   });
   // The rows start at y = axisH (buildTimeline), so the first row's top is the
   // axis baseline — tick labels sit above it, gridlines run from it down.
-  const axisY = tl.rows.length ? tl.rows[0].y : 20;
+  const axisY = tl.rows.length ? tl.rows[0].y : axisH;
 
   // The agent-label column (x: 0 → chartX) is frozen as its own SVG; the chart
   // (ticks/bars/playhead) lives in a separate horizontally-scrolling SVG whose
@@ -266,6 +316,28 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
+  // Prompt bands (Phase-3 item 14a): one labeled full-height band per user
+  // prompt, spanning that prompt's turns — always visible, whatever the
+  // rows' disclosure state. Drawn behind the grid/rows.
+  const bandsHTML = hasPrompts && !Number.isNaN(tl.startMs)
+    ? promptBandsHTML(session, tl) : '';
+
+  // Spawn connectors (14b): an elbow from the parent row's bar lane down to
+  // each re-parented sub-agent row at the child's start x — the visual edge of
+  // the spawn tree. Behind the rows so bars/segments stay clickable.
+  const rowByAgent = new Map(tl.rows.map(r => [r.rowIndex, r]));
+  const elbows = tl.rows.map(r => {
+    if (!r.spawn || r.phase === 'pending') return '';
+    const p = rowByAgent.get(r.spawn.agentIndex);
+    if (!p) return '';
+    const laneH = r.laneH || r.h;
+    const pLaneH = p.laneH || p.h;
+    const x = r.x.toFixed(1);
+    const fromY = (p.y + pLaneH - 4).toFixed(1);
+    const toY = (r.y + laneH / 2).toFixed(1);
+    return `<path class="tl-elbow" d="M ${x} ${fromY} L ${x} ${toY} L ${(r.x + 5).toFixed(1)} ${toY}"/>`;
+  }).join('');
+
   return `<div class="timeline-sess">
     <div class="timeline-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
       <span class="timeline-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
@@ -279,13 +351,42 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
       </svg>
       <div class="timeline-scroll" data-tlscroll="${escHtml(sid)}">
         <svg class="timeline-svg" viewBox="${tl.chartX} 0 ${chartW} ${tl.height}" width="${chartW}" height="${tl.height}" role="img" aria-label="Agent timeline">
+          ${bandsHTML}
           <g class="tl-grid">${ticks}</g>
+          <g class="tl-elbows">${elbows}</g>
           <g class="tl-rows">${chartRows}</g>
           ${playhead}
         </svg>
       </div>
     </div>
   </div>`;
+}
+
+// promptBandsHTML renders the prompt-segmentation layer: for each PromptMarker
+// a subtle full-height band (alternating tint), a dashed boundary line at its
+// first turn, and the prompt snippet as a label in the top axis strip —
+// truncated to what the band width fits (never bleeding into the next band),
+// with the fuller text in a hover <title>. An orphan marker (uuid '') labels
+// as (no prompt). Everything escHtml'd.
+function promptBandsHTML(session, tl) {
+  const scale = makeTimeScale({ startMs: tl.startMs, endMs: tl.endMs, width: tl.chartW, minBlock: 3 });
+  const bands = promptBands(session, { scale, chartX: tl.chartX });
+  if (bands.length === 0) return '';
+  const inner = bands.map((b, i) => {
+    const text = b.text || '(no prompt)';
+    const fitChars = Math.floor((b.w - 8) / 6);
+    const label = fitChars >= 4 ? clip(text, Math.min(TL_PBAND_CHARS, fitChars)) : '';
+    const tip = `Prompt ${i + 1}: ${clip(text, 400)}`;
+    const labelEl = label
+      ? `<text class="tl-pband-label" x="${(b.x + 4).toFixed(1)}" y="12" pointer-events="none">${escHtml(label)}</text>`
+      : '';
+    return `<g class="tl-pband${i % 2 ? ' is-alt' : ''}">
+      <rect x="${b.x.toFixed(1)}" y="0" width="${b.w.toFixed(1)}" height="${tl.height}"><title>${escHtml(tip)}</title></rect>
+      <line x1="${b.x.toFixed(1)}" y1="0" x2="${b.x.toFixed(1)}" y2="${tl.height}"/>
+      ${labelEl}
+    </g>`;
+  }).join('');
+  return `<g class="tl-pbands" aria-label="Prompt segments">${inner}</g>`;
 }
 
 // timelineRowHTML splits one agent row into two synchronized <g>s: a `gutter`
@@ -323,8 +424,15 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
   const pending = r.phase === 'pending' ? ' tl-pending' : '';
-  const barH = Math.max(6, r.h - 10);
-  const barY = r.y + Math.round((r.h - barH) / 2);
+  // laneH is the per-band height: a collapsed row is one lane (h === laneH), an
+  // expanded row stacks a second lane (the turn/tool band at segY) beneath the
+  // bar lane, so bar geometry always centers within the TOP lane.
+  const laneH = r.laneH || r.h;
+  const barH = Math.max(6, laneH - 10);
+  const barY = r.y + Math.round((laneH - barH) / 2);
+  // Segments live in the disclosure band (expanded rows only); same inset as
+  // the bar so turn spans read as a sibling lane.
+  const segRectY = r.expanded && r.segY != null ? r.segY + Math.round((laneH - barH) / 2) : barY;
   const cx = (r.x + r.w).toFixed(1);
   const cy = (barY + barH / 2).toFixed(1);
   // A red pip flags an agent that hit ≥1 tool error — but not while pending (it
@@ -333,7 +441,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   // auto-scrolls to "now", which would carry a bar-start pip off-screen.
   const errs = (agent && agent.error_count) || 0;
   const errPip = errs > 0 && r.phase !== 'pending'
-    ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
+    ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + laneH / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
     : '';
   // Signal pips (Phase 3d): one small ▲ per detected anomaly on this agent, tier-
   // colored, in the frozen gutter just left of the err-pip (same off-screen-proof
@@ -345,7 +453,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   // lives in Insights → Signals.
   const sigPips = (sig && r.phase !== 'pending') ? sig.pips : [];
   const sigOverflow = (sig && r.phase !== 'pending') ? sig.overflow : 0;
-  const pipCy = r.y + r.h / 2;
+  const pipCy = r.y + laneH / 2;
   // Reserve the err-pip's slot (chartX-7) so pips never collide with it; step left.
   const pipBaseX = tl.chartX - 7 - (errs > 0 && r.phase !== 'pending' ? 9 : 0);
   const sigHTML = sigPips.map((p, i) => {
@@ -370,9 +478,10 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   // hit a tool error stays red and skips the heat var so error always wins the
   // fill; the label still rides on top. Narrow segments carry no label and read
   // by width + tint + tooltip alone, so the row never crowds.
+  // Segments now live in their own disclosure band beneath the bar lane, so the
+  // bar no longer fades behind them (the old .has-segs rail treatment).
   const segs = r.segments || [];
-  const hasSegs = segs.length ? ' has-segs' : '';
-  const segLabelY = (barY + barH / 2 + 3).toFixed(1);
+  const segLabelY = (segRectY + barH / 2 + 3).toFixed(1);
   const steps = (agent && agent.steps) || [];
   // The segment's share of its agent's whole runtime, for the "(xx% of agent)"
   // clause — a fixed denominator so every segment in a row reads against the same
@@ -387,7 +496,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
     const ipct = pctOfAgent(s.durationMs, agentDurMs);
     const itip = segTooltip({ head: 'idle / wait', durText: idur, pct: ipct });
     const isel = s.refKey === selectedRef ? ' is-selected' : '';
-    return `<rect class="tl-idle${isel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(itip)}</title></rect>`;
+    return `<rect class="tl-idle${isel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${segRectY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(itip)}</title></rect>`;
   }).join('');
   // Critical-path overlays (Phase 1c): a non-filled outline over the longest span
   // / cost-whale turn so it never fights the segment's own fill or state stroke.
@@ -397,10 +506,10 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
     const m = crit.get(s.refKey);
     if (!m) return '';
     const cls = `tl-crit${m.longest ? ' is-long' : ''}${m.whale ? ' is-whale' : ''}${m.session ? ' is-session' : ''}`;
-    const outline = `<rect class="${cls}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2" pointer-events="none"/>`;
+    const outline = `<rect class="${cls}" x="${s.x.toFixed(1)}" y="${segRectY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2" pointer-events="none"/>`;
     if (!m.session) return outline;
     const what = [m.longest ? 'longest span' : '', m.whale ? 'cost whale' : ''].filter(Boolean).join(' · ');
-    const mark = `<text class="tl-crit-mark${m.whale ? ' is-whale' : ''}" x="${(s.x + s.w / 2).toFixed(1)}" y="${(barY - 2).toFixed(1)}" text-anchor="middle" pointer-events="none">▲<title>session ${escHtml(what)}</title></text>`;
+    const mark = `<text class="tl-crit-mark${m.whale ? ' is-whale' : ''}" x="${(s.x + s.w / 2).toFixed(1)}" y="${(segRectY - 2).toFixed(1)}" text-anchor="middle" pointer-events="none">▲<title>session ${escHtml(what)}</title></text>`;
     return outline + mark;
   }).join('');
   const segHTML = segs.map(s => {
@@ -435,23 +544,41 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
     }
     const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
     const sjump = s.refKey === jumpFlashRef ? ' is-jumped' : '';
-    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}${sjump}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
+    // Two-level disclosure: a TURN span is the toggle target for its own tool
+    // sub-spans (data-tlturn → onTimelineDisclose, which also selects it via
+    // data-ref as before); tool sub-spans render inset on top of their turn
+    // span so both stay hoverable/clickable.
+    const segY2 = isTool ? segRectY + 3 : segRectY;
+    const segH2 = isTool ? Math.max(4, barH - 6) : barH;
+    const isOpen = !isTool && tlExpanded.turns.has(s.refKey);
+    const turnAttr = isTool ? '' : ` data-tlturn="${escHtml(s.refKey)}"`;
+    const turnCls = isTool ? ' is-tool' : (isOpen ? ' tl-turn is-open' : ' tl-turn');
+    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}${sjump}${turnCls}" data-ref="${escHtml(s.refKey)}"${turnAttr}${heat} x="${s.x.toFixed(1)}" y="${segY2}" width="${s.w.toFixed(1)}" height="${segH2}" rx="2"><title>${escHtml(isTool ? tip : `${tip} — click to ${isOpen ? 'collapse' : 'expand'} tools`)}</title></rect>`;
     // Inline label: the richest of "dur · cost" / "dur" that fits the segment
     // width; '' when too narrow. pointer-events:none keeps the click on the rect.
-    const text = fitSegmentLabel(s.w, durText, costText);
+    const text = (isTool || isOpen) ? '' : fitSegmentLabel(s.w, durText, costText);
     const label = text
       ? `<text class="tl-seg-label" x="${(s.x + s.w / 2).toFixed(1)}" y="${segLabelY}">${escHtml(text)}</text>`
       : '';
     return rect + label;
   }).join('');
   const rjump = r.key === jumpFlashRef ? ' is-jumped' : '';
-  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}${rjump}`;
+  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${rjump}${r.expanded ? ' is-expanded' : ''}`;
   const meta = r.phase === 'pending' ? 'not started yet'
     : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
-  const labelY = (r.y + r.h / 2 + 4).toFixed(1);
+  const labelY = (r.y + laneH / 2 + 4).toFixed(1);
+  // Disclosure caret (14c): rows with turns expand to their per-turn band. It
+  // sits before the label in the gutter; data-tltoggle routes the click to
+  // onTimelineDisclose instead of the data-ref selection delegate.
+  const canDisclose = r.steps > 0;
+  const disclose = canDisclose
+    ? `<text class="tl-disclose" data-tltoggle="${escHtml(r.key)}" role="button" tabindex="0" x="${r.labelX}" y="${labelY}" aria-expanded="${r.expanded ? 'true' : 'false'}">${r.expanded ? '▾' : '▸'}<title>${r.expanded ? 'Collapse' : 'Expand'} ${escHtml(r.label)} to its turns</title></text>`
+    : '';
+  const labelX = r.labelX + (canDisclose ? 12 : 0);
   const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
-    <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, TL_LABEL_CHARS))}</text>
+    ${disclose}
+    <text class="tl-label" x="${labelX}" y="${labelY}">${escHtml(clip(r.label, TL_LABEL_CHARS))}</text>
     ${errPip}
     ${sigHTML}
     ${moreHTML}
