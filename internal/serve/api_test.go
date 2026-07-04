@@ -558,6 +558,47 @@ func TestAPISessionsTree_UnknownSubpath(t *testing.T) {
 	}
 }
 
+// TestAPISessions_TrailingSlash404NoRedirect pins the bare
+// "/_claudit/api/sessions/" (empty session id) shape: a plain 404,
+// never a 301 back to the list endpoint. A redirect would make a
+// typo'd fetch silently return the wrong payload.
+func TestAPISessions_TrailingSlash404NoRedirect(t *testing.T) {
+	srv := fixtureServer(t)
+	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/", nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Errorf("Location = %q, want no redirect", loc)
+	}
+}
+
+// TestAPISessionTimeline_MethodNotAllowed: the timeline endpoint is
+// GET/HEAD only, like the section endpoints.
+func TestAPISessionTimeline_MethodNotAllowed(t *testing.T) {
+	srv := fixtureServer(t)
+	w := doAPI(t, srv, http.MethodPost, "/_claudit/api/sessions/s-alpha/timeline", nil)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405; body=%s", w.Code, w.Body.String())
+	}
+	if allow := w.Header().Get("Allow"); !strings.Contains(allow, "GET") {
+		t.Errorf("Allow = %q, want GET listed", allow)
+	}
+}
+
+// TestAPITheme_MethodNotAllowed: /theme is the daemon's only write
+// path and accepts POST exclusively; a GET is 405 with Allow: POST.
+func TestAPITheme_MethodNotAllowed(t *testing.T) {
+	srv := fixtureServer(t)
+	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/theme", nil)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405; body=%s", w.Code, w.Body.String())
+	}
+	if allow := w.Header().Get("Allow"); !strings.Contains(allow, "POST") {
+		t.Errorf("Allow = %q, want POST listed", allow)
+	}
+}
+
 func keysOf(m map[string]json.RawMessage) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

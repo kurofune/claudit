@@ -29,13 +29,14 @@ const (
 	apiPathAnomalies = "/_claudit/api/anomalies"
 	apiPathTheme     = "/_claudit/api/theme"
 	apiPathAgents    = "/_claudit/api/agents"
-	// apiPathAgentsFull is an exact subpath of apiPathAgents; http.ServeMux
-	// matches the longer exact pattern first, so /agents stays unaffected.
+	// apiPathAgentsFull sits under apiPathAgents but both are exact
+	// (non-subtree) patterns, so they're simply two distinct routes —
+	// no precedence interplay.
 	apiPathAgentsFull = "/_claudit/api/agents/full"
 
-	// sessionTimelineSuffix lives on a /api/sessions/{id}/timeline path.
-	// The dispatcher in handleAPISessionsTree splits the path and matches
-	// on this suffix.
+	// sessionTimelineSuffix is the trailing segment of the
+	// "/api/sessions/{id}/timeline" route pattern; routes() composes
+	// the pattern from apiPathSessions + "/{id}" + this suffix.
 	sessionTimelineSuffix = "/timeline"
 )
 
@@ -102,12 +103,6 @@ type apiSectionSpec struct {
 // the browser revalidates with If-None-Match on every navigation but
 // can short-circuit the heavy work whenever the snapshot hasn't moved.
 func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec apiSectionSpec) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	now := time.Now()
 	q, err := parseQuery(r.URL.Query(), now)
 	if err != nil {
@@ -269,11 +264,6 @@ func isUserInputError(err error) bool {
 // somewhere else to keep the closure types straight.
 
 func (s *Server) handleAPISnapshot(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	snap := s.cache.Snapshot()
 	host := s.cache.HostInfo()
 	body := struct {

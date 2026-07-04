@@ -227,36 +227,45 @@ func htmlEscape(s string) string {
 }
 
 func (s *Server) routes() {
-	// "/" serves the SPA shell. /app is retained as an alias so URLs
-	// learned during the Phase-5 A/B window keep working — both routes
-	// go through handleApp, which accepts either path.
-	s.mux.HandleFunc(rootPath, s.handleApp)
+	// Method-qualified Go 1.22+ patterns: "GET /path" also matches
+	// HEAD (net/http documents this), and a mismatched verb gets
+	// ServeMux's 405 + Allow header — no per-handler method checks.
+	// Note there is deliberately NO methodless catch-all: a "/"
+	// subtree route would match every verb and swallow the 405s the
+	// method-qualified patterns otherwise produce.
+	//
+	// "GET /{$}" serves the SPA shell at exactly "/". /app is retained
+	// as an alias so URLs learned during the Phase-5 A/B window keep
+	// working — both routes go through handleApp.
+	s.mux.HandleFunc("GET /{$}", s.handleApp)
+	s.mux.HandleFunc("GET "+appPath, s.handleApp)
 	s.mux.HandleFunc("/_claudit/healthz", s.handleHealthz)
+	// /events stays methodless: the SSE handler enforces GET-only
+	// itself because it must also reject HEAD, which a "GET /events"
+	// pattern would silently admit.
 	s.mux.HandleFunc("/events", s.handleEvents)
 
 	// Phase 3: thin API. /_claudit/api/snapshot is no-store; the
 	// rest are ETag-cached so the SPA can short-circuit revisits.
-	// Per-session timeline lives under the /sessions/ tree which a
-	// path-routed dispatcher handles, since net/http.ServeMux
-	// doesn't pattern-match path segments.
-	s.mux.HandleFunc(apiPathSnapshot, s.handleAPISnapshot)
-	s.mux.HandleFunc(apiPathOverview, s.handleAPIOverview)
-	s.mux.HandleFunc(apiPathCost, s.handleAPICost)
-	s.mux.HandleFunc(apiPathCache, s.handleAPICache)
-	s.mux.HandleFunc(apiPathTokens, s.handleAPITokens)
-	s.mux.HandleFunc(apiPathTools, s.handleAPITools)
-	s.mux.HandleFunc(apiPathSubagents, s.handleAPISubagents)
-	s.mux.HandleFunc(apiPathTrends, s.handleAPITrends)
-	s.mux.HandleFunc(apiPathAnomalies, s.handleAPIAnomalies)
-	s.mux.HandleFunc(apiPathTheme, s.handleAPITheme)
-	s.mux.HandleFunc(apiPathAgents, s.handleAPIAgents)
-	s.mux.HandleFunc(apiPathAgentsFull, s.handleAPIAgentsFull)
-	// /_claudit/api/sessions and /_claudit/api/sessions/{id}/timeline
-	// share a dispatcher because ServeMux can't pattern-match {id}.
-	s.mux.HandleFunc(apiPathSessions, s.handleAPISessions)
-	s.mux.HandleFunc(apiPathSessions+"/", s.handleAPISessionsTree)
+	s.mux.HandleFunc("GET "+apiPathSnapshot, s.handleAPISnapshot)
+	s.mux.HandleFunc("GET "+apiPathOverview, s.handleAPIOverview)
+	s.mux.HandleFunc("GET "+apiPathCost, s.handleAPICost)
+	s.mux.HandleFunc("GET "+apiPathCache, s.handleAPICache)
+	s.mux.HandleFunc("GET "+apiPathTokens, s.handleAPITokens)
+	s.mux.HandleFunc("GET "+apiPathTools, s.handleAPITools)
+	s.mux.HandleFunc("GET "+apiPathSubagents, s.handleAPISubagents)
+	s.mux.HandleFunc("GET "+apiPathTrends, s.handleAPITrends)
+	s.mux.HandleFunc("GET "+apiPathAnomalies, s.handleAPIAnomalies)
+	s.mux.HandleFunc("POST "+apiPathTheme, s.handleAPITheme)
+	s.mux.HandleFunc("GET "+apiPathAgents, s.handleAPIAgents)
+	s.mux.HandleFunc("GET "+apiPathAgentsFull, s.handleAPIAgentsFull)
+	// Per-session timelines use a {id} wildcard; anything else under
+	// /api/sessions/ (bare {id}, unknown subpaths, trailing slash)
+	// falls through to ServeMux's 404.
+	s.mux.HandleFunc("GET "+apiPathSessions, s.handleAPISessions)
+	s.mux.HandleFunc("GET "+apiPathSessions+"/{id}"+sessionTimelineSuffix, s.handleAPISessionTimeline)
 
-	s.mux.HandleFunc(webAssetURLPrefix, s.handleWebAsset)
+	s.mux.HandleFunc("GET "+webAssetURLPrefix, s.handleWebAsset)
 
 	// Profiling endpoints. The server binds loopback-only by default and
 	// the report itself already exposes prompt text, so pprof adds no new

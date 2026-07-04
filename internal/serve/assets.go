@@ -29,13 +29,11 @@ const webRoot = "web"
 // served. Browser requests look like /_claudit/web/app.<hash>.js.
 const webAssetURLPrefix = "/_claudit/web/"
 
-// rootPath is the SPA's canonical entry URL. appPath is kept as an
-// alias so /app bookmarks from the Phase 5/6/7 A/B window still
-// resolve — both routes go through handleApp.
-const (
-	rootPath = "/"
-	appPath  = "/app"
-)
+// appPath is kept as an alias for the SPA's canonical "/" entry URL
+// (routed via the exact-match "GET /{$}" pattern) so /app bookmarks
+// from the Phase 5/6/7 A/B window still resolve — both routes go
+// through handleApp.
+const appPath = "/app"
 
 // assetEntry is one rewritten file ready to be served. body has already
 // had its import URLs (.js) or {{asset "..."}} placeholders (.html)
@@ -208,20 +206,11 @@ func buildAssetManifest(fsys fs.FS, root string) (*assetManifest, error) {
 // load rather than serve a stale shell that points at evicted hashed
 // URLs.
 //
-// Routes "/" through this handler as a catch-all post-Phase-8: the
-// only paths that should answer with the shell are "/" and the
-// historical "/app" alias. Everything else 404s here rather than
-// silently rendering the shell under a typo'd URL.
+// Registered under the "GET /{$}" and "GET /app" patterns — only an
+// exact "/" or "/app" reaches this handler; every other path (and
+// verb) is answered by ServeMux's 404/405 rather than silently
+// rendering the shell under a typo'd URL.
 func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != rootPath && r.URL.Path != appPath {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if s.assets == nil {
 		http.Error(w, "assets unavailable", http.StatusInternalServerError)
 		return
@@ -258,11 +247,6 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 // changes whenever the bytes change, so the browser can hold the
 // response forever.
 func (s *Server) handleWebAsset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if s.assets == nil {
 		http.NotFound(w, r)
 		return

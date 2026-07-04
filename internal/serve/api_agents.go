@@ -58,12 +58,6 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 // from the trusted snapshot (matched by session + tool_use id / turn uuid),
 // never from a user-supplied path, so there is no path-traversal surface.
 func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	v := r.URL.Query()
 	session := v.Get("session")
 	toolID := v.Get("tool")

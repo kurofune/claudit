@@ -34,39 +34,14 @@ func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAPISessionsTree dispatches /_claudit/api/sessions/{id}/...
-// requests. The only supported subpath today is .../timeline; every
-// other shape 404s. Lifted into its own handler because
-// http.ServeMux doesn't pattern-match path segments — the route
-// table forwards anything under /api/sessions/ here.
-func (s *Server) handleAPISessionsTree(w http.ResponseWriter, r *http.Request) {
-	// Strip the /api/sessions/ prefix to get "<id>/<rest>".
-	rest := strings.TrimPrefix(r.URL.Path, apiPathSessions+"/")
-	if rest == "" || rest == r.URL.Path {
-		http.NotFound(w, r)
-		return
-	}
-	idx := strings.Index(rest, "/")
-	if idx < 0 {
-		// /api/sessions/{id} (no subpath): not a defined endpoint yet.
-		// Could surface a single-session summary, but the SPA only
-		// needs the list endpoint plus the timeline endpoint, so 404
-		// rather than invent a third shape.
-		http.NotFound(w, r)
-		return
-	}
-	id := rest[:idx]
-	sub := rest[idx:]
-	switch sub {
-	case sessionTimelineSuffix:
-		s.handleAPISessionTimeline(w, r, id)
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-// handleAPISessionTimeline serves /_claudit/api/sessions/{id}/timeline.
-// Returns one session's full PromptTimeline + TurnSummary tree.
+// handleAPISessionTimeline serves /_claudit/api/sessions/{id}/timeline
+// (the {id} segment arrives via r.PathValue). Returns one session's
+// full PromptTimeline + TurnSummary tree.
+//
+// /api/sessions/{id} with no subpath is deliberately unrouted: it
+// could surface a single-session summary, but the SPA only needs the
+// list endpoint plus the timeline endpoint, so it 404s rather than
+// invent a third shape.
 //
 // ETag derives from the max mtime of the source files that
 // contributed turns to this session — per the plan, finer-grain
@@ -78,12 +53,8 @@ func (s *Server) handleAPISessionsTree(w http.ResponseWriter, r *http.Request) {
 // SPA passes the page's current filter when fetching, and a session
 // with no turns matching the filter returns 404 — matching what the
 // static report would have rendered.
-func (s *Server) handleAPISessionTimeline(w http.ResponseWriter, r *http.Request, sessionID string) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func (s *Server) handleAPISessionTimeline(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
 	if sessionID == "" {
 		http.NotFound(w, r)
 		return
@@ -235,8 +206,8 @@ func sessionTimelineEtag(snap *Snapshot, sessionID string) string {
 // ETag header.
 func sanitizeSessionIDForETag(id string) string {
 	// Trim to the basename of the path to defend against bogus input
-	// (the dispatcher already extracted the segment, but defense in
-	// depth is cheap).
+	// (the {id} route pattern already extracted a single segment, but
+	// defense in depth is cheap).
 	id = path.Base(id)
 	var b strings.Builder
 	b.Grow(len(id))

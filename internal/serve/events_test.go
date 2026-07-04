@@ -198,6 +198,21 @@ func TestEvents_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestEvents_HeadMethodNotAllowed pins that /events is GET-only —
+// HEAD included in the rejection. An SSE stream has no meaningful
+// HEAD response, and a "GET /events" mux pattern would silently admit
+// HEAD (net/http treats HEAD as matching GET patterns); the in-handler
+// check is deliberate.
+func TestEvents_HeadMethodNotAllowed(t *testing.T) {
+	srv := newTestServer(t, t.TempDir())
+	r := httptest.NewRequest(http.MethodHead, "/events", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("HEAD /events = %d, want 405", w.Code)
+	}
+}
+
 // TestEvents_DrainsOnServerShutdown is the Phase-2 risk-mitigation
 // assertion called out in the plan: cancel the server's context with an
 // active SSE client and the server must return within shutdownTimeout.

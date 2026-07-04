@@ -135,6 +135,20 @@ func TestWebAsset_404OnBadHash(t *testing.T) {
 	}
 }
 
+// TestWebAsset_MethodNotAllowed: hashed asset URLs are GET/HEAD only.
+func TestWebAsset_MethodNotAllowed(t *testing.T) {
+	s := fixtureServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/_claudit/web/app.js", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /_claudit/web/app.js = %d, want 405", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); !strings.Contains(allow, "GET") {
+		t.Errorf("Allow = %q, want GET listed", allow)
+	}
+}
+
 // extractHashedAssetURL pulls the first occurrence of
 // /_claudit/web/<prefix><8 hex chars><suffix> from an HTML body.
 // Used only in tests to follow the shell-to-asset chain without
