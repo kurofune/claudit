@@ -31,48 +31,38 @@ import { fmtMoney, fmtNum, fmtCompact, fmtPct1, escHtml } from './format.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
-  flattenSession, agentElapsedMs, formatElapsed, graphStats,
-  agentLabel, buildEventFeed, buildLiveFeed, parseTime,
-  refKey, defaultRef, resolveRef, buildDrawerPayload, agentTokens, currentToolKind, baseName,
-  looksTruncated, timelineAtTime, playheadBounds, playheadStats, sessionStats,
-  fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip, timelineKinds,
-  criticalSpans, toolMix, percentiles, durationHistogram, costPareto, errorRates, contextSeries, binSeries, groupBy,
-  filterTrace, specActive, parseRefKey, deepestRefs, detectRetries, detectSignals, signalPipsByAgent, spawnTargetIndex,
-  originClass,
-  conversationSegments,
-  conversationReplies,
-  conversationSessionList,
-  timelineSessionList,
-  pickTimelineSid,
-  clampConvSidebarWidth,
-  clampTreeWidth,
-  clampDrawerWidth,
-  orderTreeSessions,
-  treeFollowMode,
-  buildTimeline,
-  zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
+  flattenSession, agentLabel, graphStats, parseTime, refKey, parseRefKey,
+  resolveRef, defaultRef, baseName, formatElapsed,
+  conversationSegments, conversationReplies, conversationSessionList,
+  clampTreeWidth, clampDrawerWidth, orderTreeSessions, treeFollowMode,
+  toolMix, percentiles, durationHistogram, costPareto, errorRates,
+  contextSeries, binSeries, groupBy, detectSignals,
 } from './agents-logic.js';
-import { fetchAgentToolFull, fetchAgentTurnFull } from './api.js';
-
-const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
-
-// originBadgeHTML tags a session whose origin is headless (claude -p / Agent
-// SDK) with an "SDK" pill. Interactive runs get nothing — absence of the badge
-// is itself the signal, keeping a long session list quiet. originClass folds
-// any "sdk*" entrypoint to 'sdk'; everything else is interactive.
-function originBadgeHTML(session) {
-  return originClass(session && session.entrypoint) === 'sdk'
-    ? `<span class="s-entry s-entry-sdk" title="Headless run (claude -p / Agent SDK)">SDK</span>`
-    : '';
-}
-
-// isServeMode is true when a live claudit server is backing the page. The
-// static HTML report inlines its data into window.__claudit_static_data and
-// has no disk to read at view time, so the drawer's "show full" affordance
-// (which fetches untruncated tool I/O from disk) is serve-only.
-function isServeMode() {
-  return !(typeof window !== 'undefined' && window.__claudit_static_data);
-}
+import {
+  lastGraph, setLastGraph, activeSub, setActiveSub,
+  selectedRef, setSelectedRef, setJumpFlashRef,
+  setFullCache, setFullTurnCache, setPrevTimelineKeys, timelinePinned,
+  setPlayheadT, setTlMinPxPerMs, setTimelineSid,
+  setFilterSpec, setFilterBarBuilt, setHitIndex,
+  openAgentBodies, TREE_PAGE, treeLimit, setTreeLimit, coreHooks,
+  labelIcon, originBadgeHTML, isServeMode, colorSlot, convSidebarWidth,
+  startConvResize, startTimelineResize, kindFamily, kindBadge,
+  captureState, restoreState, clockTime, shortId,
+} from './agents-shared.js';
+import { renderControl } from './agents-feed.js';
+import {
+  renderInspector, onTreeToggle, ensureAgentExpanded,
+} from './agents-tree.js';
+import {
+  renderTimeline, currentTimelineSession, syncTimelineScroll,
+  onTimelineScroll, jumpToNow, onScrub, onTimelineWheel, onTimelineZoomReset,
+} from './agents-timeline.js';
+import { renderDrawer, loadFull, loadFullTurn } from './agents-drawer.js';
+import {
+  lensHasFilter, ensureFilterBar, applyFilter,
+  applyBucketFilter, applyCostFilter, applyErrorFilter,
+  onFilterInput, onFilterClick,
+} from './agents-filter.js';
 
 const SHELL = `
   <header class="view-head"><h1>${labelIcon('agents')}Agents</h1></header>
@@ -118,88 +108,18 @@ const SHELL = `
 
 const SUBS = ['feed', 'tree', 'timeline', 'conversation', 'insights'];
 
-// View-local state. lastGraph is the most recent payload; the live handler
-// and lens switches both re-render against it without a refetch. selectedRef
-// is the ONE selection shared across every lens — a refKey string
-// (agent "sid#ai" · step "sid#ai.si" · tool "sid#ai.si:ti"), persisted across
-// refetch so a live update doesn't reset what the user was inspecting.
+// Core-private view state (the cross-lens shared state lives in
+// agents-shared.js).
 let painted = false;
 let navPainted = false;
-let lastGraph = null;
-let activeSub = 'feed';
 let tickerId = null;
-let selectedRef = null;
 // pendingJumpRef carries a ref across a lens-switch navigation (e.g. a Signals
 // row click on the drawer-less Insights lens jumping to the Timeline). paint()
 // reads it to FORCE a drawer repaint (a plain lens switch skips it) and scroll
 // the target into view once the destination lens is in the DOM, then clears it.
 let pendingJumpRef = null;
-// jumpFlashRef is the ref a cross-lens jump just landed on; the Timeline render
-// stamps an `is-jumped` class on its segment/row so a one-shot CSS pulse draws
-// the eye to the spot. State-driven (not an imperative class-add) so it survives
-// the re-renders a smooth scroll-into-view triggers; cleared after the pulse.
-let jumpFlashRef = null;
 let jumpFlashTimer = null;
-
-// fullCache keys loaded-full tool I/O by tool_use id → { input?, output? }.
-// When the user clicks "show full", the untruncated content is cached here and
-// fed into buildDrawerPayload on EVERY drawer paint, so a live SSE re-render
-// keeps the expanded content sticky instead of reverting to the snippet.
-let fullCache = {};
-
-// fullTurnCache is the turn-level twin: keyed by turn uuid → { thinking?,
-// text? }. Same sticky mechanism, feeding buildDrawerPayload's fullByTurn
-// param so expanded Reasoning/Message survive live repaints.
-let fullTurnCache = {};
-
-// Timeline lens state. prevTimelineKeys tracks which agent rows existed on the
-// last render so a genuinely NEW agent fades in (and the rest don't re-animate
-// on every live re-render). timelinePinned[sid]=true means the user scrolled a
-// session's Gantt back into history, so live updates must NOT yank it to the
-// "now" edge — the #1 live-trace UX trap; the "● now" button clears it.
-let prevTimelineKeys = new Set();
-const timelinePinned = new Map();
 let liveScheduled = false;
-
-// Timeline scrubber state. playheadT is the instant the Gantt is rendered "as
-// of": null means LIVE (the playhead follows now and auto-advances on each
-// refetch); a number pauses it at that absolute epoch-ms, so the bars/counts
-// recompute from events ≤ T (a pure seek, never an incremental replay).
-let playheadT = null;
-let scrubRaf = 0;
-// Timeline zoom state. tlMinPxPerMs is the time-axis density (px per ms) the
-// Gantt renders at; null ⇒ buildTimeline's default (the un-zoomed overview).
-// Scroll-wheel over the chart multiplies it (cursor-anchored), double-click
-// resets to fit-to-width. Like playheadT it's a single module var scoped to the
-// one plotted session and reset whenever the plotted session changes. The
-// time WINDOW [startMs,endMs] is untouched by zoom — only pixel density — so
-// zoom and scrub compose cleanly (the axis never reflows).
-let tlMinPxPerMs = null;
-let zoomRaf = 0;
-// The pending wheel gesture, coalesced into one rAF repaint: the scroll element,
-// the cursor's x within its viewport, and the summed deltaY since the last frame.
-let zoomPending = null;
-// Which single session the Timeline lens plots. null ⇒ resolve via
-// pickTimelineSid (selected turn's session, else the first); a sid pins that
-// session until the user picks another or it ages out of the window. Kept
-// separate from selectedRef so inspecting a tool sub-span (which sets
-// selectedRef) never changes which session is plotted.
-let timelineSid = null;
-
-// Trace filter (Phase 2). filterSpec is the live filter over the loaded graph;
-// when specActive, filterTrace gives the Set of matching refKeys and every lens
-// dims the rest. filterBarBuilt guards the one-time bar build (kind chips depend
-// on the graph) so a live re-render never wipes the user's typing or focus.
-// hitIndex steps the selection through ordered matches via the ‹ › buttons.
-let filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
-let filterBarBuilt = false;
-let hitIndex = -1;
-let currentHits = [];
-// Cached match Set from the last applyFilter (null when not filtering). The
-// Timeline's scrub repaint rebuilds ~19k segment nodes per animation frame and
-// re-dims them from THIS cache — a class-only pass — instead of re-running the
-// full-graph filterTrace walk every frame.
-let filterMatchSet = null;
 
 // Insights lens (Phase 2). insightsScope picks which slice of the graph the
 // aggregations cover — 'graph' (every agent in the window), 'session' (the one
@@ -217,25 +137,6 @@ let insightsGroupDim = 'kind';
 // Insights lens (see INS_TABS / renderInsights); clamps to the first tab when
 // an unknown key sneaks in. Signals leads since it's the audit headline.
 let insightsTab = 'signals';
-
-// Conversation lens: the session list on the left is drag-resizable. Width is
-// clamped (clampConvSidebarWidth) and persisted to localStorage so it survives
-// reloads, live re-renders, and lens switches. Read once, lazily, on first use.
-const CONV_SIDEBAR_KEY = 'claudit.agents.convSidebarW';
-let convSidebarW = null;
-function convSidebarWidth() {
-  if (convSidebarW == null) {
-    let stored = null;
-    try { stored = localStorage.getItem(CONV_SIDEBAR_KEY); } catch { /* private mode */ }
-    convSidebarW = clampConvSidebarWidth(stored);
-  }
-  return convSidebarW;
-}
-function setConvSidebarWidth(px) {
-  convSidebarW = clampConvSidebarWidth(px);
-  try { localStorage.setItem(CONV_SIDEBAR_KEY, String(convSidebarW)); } catch { /* private mode */ }
-  return convSidebarW;
-}
 
 // The Tree lens is a fixed-width left RAIL (the detail drawer takes the rest of
 // the width); the handle between them resizes the rail — the "left panel" the
@@ -277,24 +178,6 @@ function setDrawerWidth(px) {
   return drawerW;
 }
 
-const colorSlot = i => ((i % 5) + 1);
-
-// Tree lens: which agent nodes have their step/tool log rendered. The graph can
-// hold thousands of agents (and hundreds of thousands of tools), and a collapsed
-// <details> still keeps its children in the DOM — so agent bodies are LAZY: only
-// expanded agents (this set) render their log; others are bare summaries. Filled
-// on expand (onTreeToggle / ensureAgentExpanded), cleared on collapse, and read
-// by renderInspector so a live re-render reproduces exactly the open bodies.
-const openAgentBodies = new Set();
-
-// Tree lens paging: the window can hold thousands of sessions, and a <details>
-// keeps its children in the DOM even when collapsed — rendering every session
-// eagerly (and re-rendering them on every live tick) is what made the tree
-// janky. So the tree renders only the newest TREE_PAGE sessions, with a "show
-// more" control revealing the next page. Reset on a fresh load / window change.
-const TREE_PAGE = 40;
-let treeLimit = TREE_PAGE;
-
 // Tree "anchor + pause reorder" live-stability state. lastTreeScrollAt is the
 // wall-clock of the user's last scroll in the .itree container; frozenTreeOrder
 // is the session-id order to hold while they're active (null = follow the live
@@ -306,20 +189,20 @@ let frozenTreeOrder = null;
 export function reset() {
   painted = false;
   navPainted = false;
-  lastGraph = null;
-  selectedRef = null;
-  fullCache = {};
-  fullTurnCache = {};
-  prevTimelineKeys = new Set();
+  setLastGraph(null);
+  setSelectedRef(null);
+  setFullCache({});
+  setFullTurnCache({});
+  setPrevTimelineKeys(new Set());
   timelinePinned.clear();
-  playheadT = null;
-  tlMinPxPerMs = null;
-  timelineSid = null;
-  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
-  filterBarBuilt = false;
-  hitIndex = -1;
+  setPlayheadT(null);
+  setTlMinPxPerMs(null);
+  setTimelineSid(null);
+  setFilterSpec({ text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 });
+  setFilterBarBuilt(false);
+  setHitIndex(-1);
   openAgentBodies.clear();
-  treeLimit = TREE_PAGE;
+  setTreeLimit(TREE_PAGE);
   lastTreeScrollAt = null;
   frozenTreeOrder = null;
 }
@@ -329,7 +212,7 @@ export async function paintNav() {
   if (navPainted || painted) return;
   let graph;
   try { graph = await fetchAgents(); } catch { return; }
-  lastGraph = graph;
+  setLastGraph(graph);
   updateNavMetric(graphStats(graph));
   navPainted = true;
 }
@@ -337,7 +220,7 @@ export async function paintNav() {
 export async function paint(route) {
   const container = document.getElementById('view-agents');
   if (!container) return;
-  activeSub = wantedSub(route && route.sub);
+  setActiveSub(wantedSub(route && route.sub));
 
   // First paint builds the shell + a skeleton; later paints (lens swap)
   // reuse it. Register the live updater + start the timer ticker once.
@@ -355,7 +238,7 @@ export async function paint(route) {
 
   if (lastGraph == null) {
     try {
-      lastGraph = await fetchAgents();
+      setLastGraph(await fetchAgents());
     } catch (err) {
       container.innerHTML = `<header class="view-head"><h1>${labelIcon('agents')}Agents</h1></header>
         <div class="warning-card" role="alert"><strong class="danger">Failed to load agents:</strong> ${escHtml(err.message)}</div>`;
@@ -495,7 +378,7 @@ function treeSessionOrder(host, sessions) {
 function ensureSelection(graph) {
   if (selectedRef && resolveRef(graph, selectedRef)) return;
   const d = defaultRef(graph);
-  selectedRef = d ? refKey(d) : null;
+  setSelectedRef(d ? refKey(d) : null);
 }
 
 // wireSelection installs the delegated click/keyboard handlers once per shell
@@ -560,7 +443,7 @@ function wireSelection(container) {
         return;
       }
       // The Tree lens pages its sessions; "show more" reveals the next page.
-      if (e.target.closest('[data-tree-more]')) { treeLimit += TREE_PAGE; renderActive(container, true); return; }
+      if (e.target.closest('[data-tree-more]')) { setTreeLimit(treeLimit + TREE_PAGE); renderActive(container, true); return; }
       // A Signals row lives on the drawer-less Insights lens, so it can't select
       // in place — it jumps to the Timeline at its ref (see gotoSignalRef). The
       // Timeline pip's "+N" overflow glyph routes to the Signals panel itself.
@@ -661,7 +544,7 @@ function wireSelection(container) {
 // would only clobber the native <details> toggle the click is also performing.)
 function select(container, ref) {
   if (!ref) return;
-  selectedRef = ref;
+  setSelectedRef(ref);
   // On the Tree lens, make sure the selected row's agent is expanded (its body
   // is lazy) before highlighting — otherwise a jump into a collapsed agent would
   // light up a row that isn't in the DOM.
@@ -670,6 +553,11 @@ function select(container, ref) {
   renderDrawer(container);
 }
 
+// Lens modules can't import select() from the core (the core imports them;
+// a cycle would break the static-report bundler), so the shared coreHooks
+// registry carries it — see agents-filter.js's stepHit.
+coreHooks.select = select;
+
 // pickConversation switches the Conversation lens to another session by pointing
 // the shared selection at that session's main agent (agentIndex 0), then doing a
 // full re-render so the lens shows the new dialogue and the drawer follows. The
@@ -677,7 +565,7 @@ function select(container, ref) {
 // row you just clicked stays put instead of jumping to the top of the list.
 function pickConversation(container, sessionId) {
   if (!sessionId) return;
-  selectedRef = refKey({ sessionId, agentIndex: 0 });
+  setSelectedRef(refKey({ sessionId, agentIndex: 0 }));
   const sidebar = container.querySelector('.conv-sidebar');
   const top = sidebar ? sidebar.scrollTop : 0;
   renderActive(container, false);
@@ -692,9 +580,9 @@ function pickConversation(container, sessionId) {
 // scrollTop is preserved across the re-render the way pickConversation does.
 function pickTimeline(container, sessionId) {
   if (!sessionId) return;
-  timelineSid = sessionId;
-  playheadT = null;
-  tlMinPxPerMs = null;
+  setTimelineSid(sessionId);
+  setPlayheadT(null);
+  setTlMinPxPerMs(null);
   const sidebar = container.querySelector('.tl-sidebar');
   const top = sidebar ? sidebar.scrollTop : 0;
   renderActive(container, false);
@@ -712,8 +600,8 @@ function pickTimeline(container, sessionId) {
 function gotoSignalRef(container, ref) {
   if (!ref) return;
   const p = parseRefKey(ref);
-  if (p && p.sessionId) { timelineSid = p.sessionId; playheadT = null; tlMinPxPerMs = null; }
-  selectedRef = ref;
+  if (p && p.sessionId) { setTimelineSid(p.sessionId); setPlayheadT(null); setTlMinPxPerMs(null); }
+  setSelectedRef(ref);
   pendingJumpRef = ref;
   location.hash = '#agents/timeline';
 }
@@ -733,64 +621,12 @@ function scrollRefIntoView(container, ref) {
 // often a hair-thin tool segment, and an imperative class gets blown away by
 // that follow-up render before it can be seen.
 function armJumpFlash(container, ref) {
-  jumpFlashRef = ref;
+  setJumpFlashRef(ref);
   clearTimeout(jumpFlashTimer);
   jumpFlashTimer = setTimeout(() => {
-    jumpFlashRef = null;
+    setJumpFlashRef(null);
     container.querySelectorAll('.is-jumped').forEach(el => el.classList.remove('is-jumped'));
   }, 1900);
-}
-
-// startTimelineResize drives the Timeline sidebar's drag-to-resize. It reuses
-// the Conversation sidebar's width state (convSidebarW + clamp + persistence) —
-// the two lenses are never visible at once, so one shared width is DRY and
-// keeps both rails the same size.
-function startTimelineResize(container, startX) {
-  const sidebar = container.querySelector('.tl-sidebar');
-  if (!sidebar) return;
-  const startW = sidebar.getBoundingClientRect().width;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-  const onMove = e => {
-    const w = clampConvSidebarWidth(startW + (e.clientX - startX));
-    convSidebarW = w;
-    sidebar.style.width = `${w}px`;
-  };
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    setConvSidebarWidth(convSidebarW);
-  };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-}
-
-// startConvResize drives the Conversation sidebar's drag-to-resize. It sizes the
-// live .conv-sidebar element directly during the drag (no re-render — keeps it
-// smooth) and persists the clamped width on release, so it survives reloads,
-// lens switches, and live re-renders (which read it back via convSidebarWidth).
-function startConvResize(container, startX) {
-  const sidebar = container.querySelector('.conv-sidebar');
-  if (!sidebar) return;
-  const startW = sidebar.getBoundingClientRect().width;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-  const onMove = e => {
-    const w = clampConvSidebarWidth(startW + (e.clientX - startX));
-    convSidebarW = w;
-    sidebar.style.width = `${w}px`;
-  };
-  const onUp = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    setConvSidebarWidth(convSidebarW);
-  };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
 }
 
 // startSplitResize drives the lens|drawer split handle. Its meaning flips by
@@ -856,241 +692,6 @@ function copyText(text, btn) {
   }).catch(() => {});
 }
 
-// ── trace filter (Phase 2) ──────────────────────────────────────────────────
-// One bar above the lenses turns the trace from something you read into
-// something you interrogate: free text + kind chips + an errors toggle + slow/
-// expensive thresholds. Matching (filterTrace) is pure and runs against the
-// already-loaded graph, so it works in the offline static report with no
-// round-trip. Non-matching rows dim across ALL lenses via a post-render DOM
-// pass (no lens renderer needs to know about the filter); ‹ › step the shared
-// selection through the matches.
-
-const FILTER_KIND_ORDER = ['agent', 'edit', 'exec', 'read', 'web', 'skill', 'mcp', 'command', 'todo', 'other'];
-
-// The trace filter dims + steps through per-ref rows. Feed and Tree lay them out
-// directly; the Timeline's agent bars and turn segments also carry data-ref, so
-// the same dim-walk collapses the Gantt to matches (e.g. failures only). Only
-// Conversation (a thread) has no such rows, so the bar is hidden — and filtering
-// not applied — there.
-const FILTER_LENSES = new Set(['feed', 'tree', 'timeline']);
-function lensHasFilter(sub) { return FILTER_LENSES.has(sub); }
-
-// presentKinds lists the kinds that actually occur in the graph, in canonical
-// order — the chip row only offers kinds the user can act on.
-function presentKinds(graph) {
-  const seen = new Set();
-  for (const s of (graph && graph.sessions) || []) {
-    for (const a of flattenSession(s)) {
-      for (const st of a.steps || []) {
-        for (const t of st.tools || []) if (t && t.kind) seen.add(t.kind);
-      }
-    }
-  }
-  return FILTER_KIND_ORDER.filter(k => seen.has(k));
-}
-
-// ensureFilterBar fills the (persistent) bar exactly once. Kind chips reflect
-// the loaded graph; rebuilding on every live update would wipe the user's
-// focus/typing, so this is strictly idempotent.
-function ensureFilterBar(container) {
-  if (filterBarBuilt) return;
-  const bar = container.querySelector('[data-trace-filter]');
-  if (!bar) return;
-  const chips = presentKinds(lastGraph).map(k =>
-    `<button type="button" class="tf-chip kind-${kindFamily(k)}" data-tf-kind="${k}" aria-pressed="false" title="Show only ${escHtml(k)} calls">${kindBadge(k)}<span class="tf-chip-label">${escHtml(k)}</span></button>`).join('');
-  bar.innerHTML = `
-    <input type="search" class="tf-text" data-tf-text placeholder="filter trace — name, path, input, reasoning…" aria-label="Filter trace by text">
-    <div class="tf-chips" role="group" aria-label="Tool kinds">${chips}</div>
-    <button type="button" class="tf-toggle" data-tf-errors aria-pressed="false" title="Only tool calls that errored">✗ errors</button>
-    <label class="tf-num" title="Turns at least this slow"><span aria-hidden="true">⏱</span> ≥<input type="number" data-tf-dur min="0" step="500" placeholder="0"><span class="tf-unit">ms</span></label>
-    <label class="tf-num" title="Turns or agents at least this costly"><span aria-hidden="true">$</span> ≥<input type="number" data-tf-cost min="0" step="0.01" placeholder="0"></label>
-    <div class="tf-result" data-tf-result hidden>
-      <span class="tf-count" data-tf-count></span>
-      <button type="button" class="tf-nav" data-tf-prev title="Previous match" aria-label="Previous match">‹</button>
-      <button type="button" class="tf-nav" data-tf-next title="Next match" aria-label="Next match">›</button>
-      <button type="button" class="tf-clear" data-tf-clear title="Clear the filter">clear</button>
-    </div>`;
-  filterBarBuilt = true;
-}
-
-// readSpec pulls the current spec out of the bar's controls.
-function readSpec(container) {
-  const bar = container.querySelector('[data-trace-filter]');
-  if (!bar) return filterSpec;
-  const val = sel => { const el = bar.querySelector(sel); return el ? el.value : ''; };
-  const pressed = sel => { const el = bar.querySelector(sel); return !!el && el.getAttribute('aria-pressed') === 'true'; };
-  return {
-    text: val('[data-tf-text]'),
-    kinds: [...bar.querySelectorAll('[data-tf-kind][aria-pressed="true"]')].map(b => b.dataset.tfKind),
-    errorsOnly: pressed('[data-tf-errors]'),
-    minDurationMs: Number(val('[data-tf-dur]')) || 0,
-    minCostUSD: Number(val('[data-tf-cost]')) || 0,
-  };
-}
-
-// applyFilter recomputes the match set and dims every non-matching lens row.
-// Called after each (re)render so live updates and lens switches keep dimming.
-function applyFilter(container) {
-  const active = specActive(filterSpec) && lensHasFilter(activeSub);
-  filterMatchSet = active ? filterTrace(lastGraph, filterSpec) : null;
-  const lens = container.querySelector('.agents-lens');
-  if (lens) {
-    lens.classList.toggle('is-filtering', active);
-    dimNodes(lens, filterMatchSet);
-  }
-  currentHits = filterMatchSet ? matchHits(filterMatchSet) : [];
-  if (hitIndex >= currentHits.length) hitIndex = -1;
-  updateFilterResult(container);
-}
-
-// dimNodes toggles is-dimmed on every [data-ref] under root against a match Set
-// (null = not filtering → clears dimming). Class-only, no filterTrace recompute,
-// so the Timeline's per-frame scrub repaint can re-dim its fresh nodes cheaply.
-function dimNodes(root, matchSet) {
-  root.querySelectorAll('[data-ref]').forEach(el => {
-    el.classList.toggle('is-dimmed', !!matchSet && !matchSet.has(el.dataset.ref));
-  });
-}
-
-// matchHits is the ordered list of "deepest" matched refs — a matched ref with
-// no matched descendant — which is what ‹ › steps through. Sorted in reading
-// order (session order, then agent/step/tool index).
-function matchHits(matchSet) {
-  const order = new Map(((lastGraph && lastGraph.sessions) || []).map((s, i) => [(s && s.session_id) || '', i]));
-  const leaves = deepestRefs(matchSet);
-  const rank = r => {
-    const p = parseRefKey(r) || {};
-    return [order.has(p.sessionId) ? order.get(p.sessionId) : 1e9, p.agentIndex ?? 1e9, p.stepIndex ?? -1, p.toolIndex ?? -1];
-  };
-  return leaves.sort((a, b) => {
-    const ra = rank(a), rb = rank(b);
-    for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] - rb[i];
-    return 0;
-  });
-}
-
-// updateFilterResult refreshes the "N matches" readout and prev/next state.
-function updateFilterResult(container) {
-  const bar = container.querySelector('[data-trace-filter]');
-  if (!bar) return;
-  const result = bar.querySelector('[data-tf-result]');
-  const countEl = bar.querySelector('[data-tf-count]');
-  if (!specActive(filterSpec)) { if (result) result.hidden = true; return; }
-  if (result) result.hidden = false;
-  const n = currentHits.length;
-  if (countEl) {
-    countEl.textContent = hitIndex >= 0 && n ? `${hitIndex + 1} / ${n} matches` : `${n} match${n === 1 ? '' : 'es'}`;
-    countEl.classList.toggle('is-empty', n === 0);
-  }
-  bar.querySelectorAll('[data-tf-prev],[data-tf-next]').forEach(b => { b.disabled = n === 0; });
-}
-
-// stepHit advances the shared selection to the next/prev match and scrolls it
-// into view in the current lens (the drawer still updates even if the active
-// lens has no row for that ref — e.g. a tool hit while on the Timeline).
-function stepHit(container, dir) {
-  if (!currentHits.length) return;
-  hitIndex = (hitIndex + dir + currentHits.length) % currentHits.length;
-  const ref = currentHits[hitIndex];
-  select(container, ref);
-  const el = container.querySelector(`.agents-lens [data-ref="${ref}"]`);
-  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  updateFilterResult(container);
-}
-
-// applyBucketFilter is the bridge from an Insights latency bucket to the trace
-// filter: it sets the spec to the bucket's tool kinds, mirrors that into the
-// (shared) filter bar, and routes to the Timeline — a filter-bearing lens — so
-// the dimming the Insights lens can't show actually appears. Empty kinds clears
-// nothing useful, so it's a no-op (the bucket wasn't clickable anyway).
-function applyBucketFilter(container, kinds) {
-  if (!kinds || kinds.length === 0) return;
-  filterSpec = { text: '', kinds: kinds.slice(), errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
-  hitIndex = -1;
-  syncFilterBar(container);
-  location.hash = '#agents/timeline';
-}
-
-// applyCostFilter is the Cost-Pareto sibling of applyBucketFilter: a row (or the
-// headline) names a dollar threshold, and we set the trace's minCostUSD to it and
-// route to the Timeline so the dimming Insights can't show lands on a
-// filter-bearing lens — "show me every turn at least this expensive." A
-// non-positive threshold is a no-op (those rows aren't clickable anyway).
-function applyCostFilter(container, minCostUSD) {
-  // Floor (never round up) to sub-cent precision so the field shows a clean
-  // threshold AND the `>=` filter still admits the clicked turn — rounding up
-  // would push the boundary past it and exclude the very turn that was clicked.
-  const v = Math.floor(Number(minCostUSD) * 1e4) / 1e4;
-  if (!(v > 0)) return;
-  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: v };
-  hitIndex = -1;
-  syncFilterBar(container);
-  location.hash = '#agents/timeline';
-}
-
-// applyErrorFilter is the Error-breakdown sibling of applyBucketFilter: it turns
-// on errorsOnly (optionally pinned to one tool kind from a per-kind bar / failing
-// tool) and routes to the Timeline so the dimming Insights can't show lands on a
-// filter-bearing lens — "show me every errored tool (of this kind)." Empty kinds
-// means "all errors", which is still a valid filter (unlike applyBucketFilter,
-// whose empty-kinds case constrains nothing).
-function applyErrorFilter(container, kinds) {
-  filterSpec = { text: '', kinds: (kinds || []).slice(), errorsOnly: true, minDurationMs: 0, minCostUSD: 0 };
-  hitIndex = -1;
-  syncFilterBar(container);
-  location.hash = '#agents/timeline';
-}
-
-// syncFilterBar pushes the current filterSpec into the bar's controls — the
-// inverse of readSpec — so a programmatic filter (e.g. an Insights bucket click)
-// shows up in the bar the user can then read and clear.
-function syncFilterBar(container) {
-  const bar = container.querySelector('[data-trace-filter]');
-  if (!bar) return;
-  const set = (sel, v) => { const el = bar.querySelector(sel); if (el) el.value = v; };
-  set('[data-tf-text]', filterSpec.text || '');
-  set('[data-tf-dur]', filterSpec.minDurationMs || '');
-  set('[data-tf-cost]', filterSpec.minCostUSD || '');
-  bar.querySelectorAll('[data-tf-kind]').forEach(b =>
-    b.setAttribute('aria-pressed', filterSpec.kinds.includes(b.dataset.tfKind) ? 'true' : 'false'));
-  const err = bar.querySelector('[data-tf-errors]');
-  if (err) err.setAttribute('aria-pressed', filterSpec.errorsOnly ? 'true' : 'false');
-}
-
-// clearFilter resets the controls and removes all dimming.
-function clearFilter(container) {
-  const bar = container.querySelector('[data-trace-filter]');
-  if (bar) {
-    bar.querySelectorAll('[data-tf-text],[data-tf-dur],[data-tf-cost]').forEach(i => { i.value = ''; });
-    bar.querySelectorAll('[data-tf-kind],[data-tf-errors]').forEach(b => b.setAttribute('aria-pressed', 'false'));
-  }
-  filterSpec = { text: '', kinds: [], errorsOnly: false, minDurationMs: 0, minCostUSD: 0 };
-  hitIndex = -1;
-  applyFilter(container);
-}
-
-// onFilterInput/onFilterClick are the bar's delegated handlers (wired once).
-function onFilterInput(container, e) {
-  if (!e.target.closest('[data-tf-text],[data-tf-dur],[data-tf-cost]')) return;
-  filterSpec = readSpec(container);
-  hitIndex = -1;
-  applyFilter(container);
-}
-
-function onFilterClick(container, e) {
-  const toggle = e.target.closest('[data-tf-kind],[data-tf-errors]');
-  if (toggle) {
-    toggle.setAttribute('aria-pressed', toggle.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
-    filterSpec = readSpec(container);
-    hitIndex = -1;
-    applyFilter(container);
-    return;
-  }
-  if (e.target.closest('[data-tf-prev]')) { stepHit(container, -1); return; }
-  if (e.target.closest('[data-tf-next]')) { stepHit(container, +1); return; }
-  if (e.target.closest('[data-tf-clear]')) { clearFilter(container); }
-}
-
 // ── live update + timer ticker ──────────────────────────────────────────
 
 // liveUpdate is the SSE in-place handler. It RENDER-BATCHES: a burst of
@@ -1110,7 +711,7 @@ async function flushLiveUpdate() {
   if (!container || !painted) return;
   let graph;
   try { graph = await fetchAgents(); } catch { return; }
-  lastGraph = graph;
+  setLastGraph(graph);
   renderActive(container, true);
   updateNavMetric(graphStats(graph));
 }
@@ -1137,627 +738,6 @@ function tickTimers(root) {
     const ms = running ? Math.max(0, now - start) : Math.max(0, (Number.isFinite(end) ? end : start) - start);
     el.textContent = formatElapsed(ms);
   });
-}
-
-// elapsedSpan renders a live-updating elapsed timer for one agent.
-function elapsedSpan(agent, extraCls = '') {
-  const start = parseTime(agent && agent.started_at);
-  const end = parseTime(agent && agent.ended_at);
-  const running = agent && agent.status === 'running';
-  const ms = agentElapsedMs(agent, Date.now());
-  return `<span class="${extraCls}" data-elapsed data-start="${Number.isFinite(start) ? start : ''}" data-end="${Number.isFinite(end) ? end : ''}" data-running="${running ? '1' : '0'}">${escHtml(formatElapsed(ms))}</span>`;
-}
-
-// ── kind → color/icon lens (presentational; pure styling) ──────────────────
-
-// KIND_GLYPH is the monogram for each normalized ToolKind (Phase 1), plus the
-// 'agent'/'step' pseudo-kinds. Picked to be visually distinct — the old
-// "first letter" rule collided edit/exec → "E". The loud kinds (agent/edit/
-// exec) get iconic glyphs; the rest get a clear monogram.
-const KIND_GLYPH = {
-  agent: '◆', edit: '✎', exec: '❯', read: 'R', web: 'W',
-  skill: 'S', mcp: 'M', command: '/', todo: '☑', other: '•', step: '✦',
-};
-
-// kindFamily maps a normalized ToolKind (or an 'agent'/'step' pseudo-kind) to
-// its CSS color-family class so the same kind reads identically in every lens
-// and the drawer. The enum values are the class names 1:1; anything unknown
-// (e.g. legacy data with no kind) falls to 'other'.
-function kindFamily(kind) {
-  return Object.prototype.hasOwnProperty.call(KIND_GLYPH, kind) ? kind : 'other';
-}
-
-// kindBadge is the small colored monogram that marks a kind. Takes a normalized
-// ToolKind ("exec"/"read"/…) or a pseudo-kind ("agent"/"step") — NOT a raw tool
-// name (that mapping now lives in the backend's aggregate.ToolKind).
-function kindBadge(kind) {
-  const fam = kindFamily(kind);
-  return `<span class="kind-badge kind-${fam}" aria-hidden="true">${escHtml(KIND_GLYPH[fam])}</span>`;
-}
-
-// ── shared detail drawer ────────────────────────────────────────────────────
-
-function renderDrawer(container) {
-  const drawer = container.querySelector('.agents-drawer');
-  if (!drawer) return;
-  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache, fullTurnCache), retryInfoFor(selectedRef));
-}
-
-// retryInfoFor reports whether the selected tool is a retry of an earlier
-// errored call of the same (kind,name,detail) — { attempt, total, ofRefKey } —
-// or null. `total` is the chain length (max attempt sharing the same first
-// call); ofRefKey is the full refKey of attempt 1 so the drawer can link back.
-// Pure lookup over detectRetries for the selected tool's agent.
-function retryInfoFor(ref) {
-  const parsed = parseRefKey(ref);
-  if (!parsed || parsed.type !== 'tool') return null;
-  const r = resolveRef(lastGraph, ref);
-  if (!r || r.type !== 'tool') return null;
-  const retries = detectRetries(r.agent);
-  const entry = retries.get(`${parsed.stepIndex}:${parsed.toolIndex}`);
-  if (!entry) return null;
-  let total = entry.attempt;
-  for (const v of retries.values()) {
-    if (v.ofRef === entry.ofRef && v.attempt > total) total = v.attempt;
-  }
-  return { attempt: entry.attempt, total, ofRefKey: `${r.session.session_id || ''}#${r.agentIndex}.${entry.ofRef}` };
-}
-
-function drawerHTML(p, retry = null) {
-  if (!p) return `<div class="dr-empty-state">Select an agent, turn, or tool to inspect it here.</div>`;
-
-  // A retry chain: this tool repeats an earlier call that errored. Link back to
-  // the first attempt so the whole chain is one click apart.
-  const retryRow = retry
-    ? `<button type="button" class="dr-retry" data-ref="${escHtml(retry.ofRefKey)}" title="Jump to the first attempt">
-         <span class="dr-retry-icon" aria-hidden="true">↻</span> attempt ${retry.attempt} of ${retry.total}
-       </button>`
-    : '';
-
-  const typeLabel = p.type === 'tool' ? 'tool' : p.type === 'step' ? 'turn' : (p.agentKind === 'main' ? 'main agent' : 'sub-agent');
-  const desc = p.description ? `<p class="dr-desc">${escHtml(p.description)}</p>` : '';
-
-  // An Agent call links straight to the sub-agent it launched, with that
-  // sub-agent's rolled-up cost/errors — one decision's blast radius, one click
-  // away. Only a navigable child (in this window) gets a link.
-  const spawnRow = (p.spawned && p.spawned.childRef)
-    ? `<button type="button" class="dr-spawn" data-ref="${escHtml(p.spawned.childRef)}" title="Jump to the sub-agent this call launched">
-         <span class="dr-spawn-icon" aria-hidden="true">↳</span>
-         <span class="dr-spawn-label">sub-agent</span>
-         <span class="dr-spawn-stats">+${escHtml(fmtMoney(p.spawned.cost_usd || 0))}${p.spawned.error_count ? ` · ${fmtNum(p.spawned.error_count)} ${p.spawned.error_count === 1 ? 'error' : 'errors'}` : ''}</span>
-       </button>`
-    : '';
-
-  // Compact metric chips — only the ones that apply to this kind.
-  const metrics = [
-    drMetric('cost', p.cost_usd ? fmtMoney(p.cost_usd) : ''),
-    drMetric('dur', p.durationMs ? formatElapsed(p.durationMs) : ''),
-    drMetric('model', p.model ? shortModel(p.model) : ''),
-    drMetric('tokens', p.tokens && p.tokens.total ? `${fmtCompact(p.tokens.total)}` : ''),
-    drMetric('steps', p.type === 'agent' && p.stepCount ? fmtNum(p.stepCount) : ''),
-  ].filter(Boolean).join('');
-
-  // Sections vary by level so no row is dead weight. "Reasoning" is the turn's
-  // extended-thinking; "Message" is the assistant's prose for that turn (what it
-  // says between tool calls) — both inherited from the parent step.
-  //  - tool: Reasoning, Message, then its own Input/Output (the only level that
-  //    has real tool I/O).
-  //  - step (turn): Reasoning, Message, a Tools list (each row clicks through to
-  //    that tool's I/O), and the per-turn token breakdown — never the
-  //    always-empty I/O rows a turn would otherwise show.
-  //  - agent: only the rolled-up tokens. An agent has no turn text of its own,
-  //    so Reasoning/Message would always be empty placeholders — omit them.
-  // The skeleton order is stable so the layout never jumps between selections.
-  let sections;
-  if (p.type === 'tool') {
-    sections = [
-      drTurnSection('Reasoning', p.thinking, 'thinking', p),
-      drTurnSection('Message', p.text, 'text', p),
-      drIOSection('Input', p.input, 'input', p),
-      drIOSection('Output', p.output, 'output', p),
-      // A tool inherits its turn's tokens; drTokens self-collapses at 0.
-      drTokens(p.tokens),
-    ].join('');
-  } else if (p.type === 'step') {
-    sections = [
-      drTurnSection('Reasoning', p.thinking, 'thinking', p),
-      drTurnSection('Message', p.text, 'text', p),
-      drToolList(p.tools),
-      drTokens(p.tokens),
-    ].join('');
-  } else {
-    sections = drTokens(p.tokens);
-  }
-
-  return `<div class="dr">
-    <div class="dr-head">
-      ${kindBadge(p.kind)}
-      <span class="dr-title" title="${escHtml(p.title)}">${escHtml(p.title)}</span>
-      <span class="dr-type">${escHtml(typeLabel)}</span>
-      ${statusPill(p.status)}
-    </div>
-    ${retryRow}
-    ${spawnRow}
-    <div class="dr-project" title="${escHtml(p.cwd)}">${labelIcon('overview')}<span class="dr-proj-name">${escHtml(p.project || '—')}</span></div>
-    <div class="dr-sid" title="${escHtml(p.sessionId)}"><span class="dr-sid-id">${escHtml(p.sessionId || '—')}</span></div>
-    <div class="dr-agentline"><span class="dr-agent">${escHtml(p.agentLabel)}</span>${p.detail ? ` <span class="dr-detail">${escHtml(p.detail)}</span>` : ''}</div>
-    ${desc}
-    ${metrics ? `<div class="dr-metrics">${metrics}</div>` : ''}
-    ${sections}
-  </div>`;
-}
-
-function drMetric(label, value) {
-  return value ? `<span class="dr-metric"><span class="dr-m-k">${escHtml(label)}</span><span class="dr-m-v">${escHtml(value)}</span></span>` : '';
-}
-
-function statusPill(status) {
-  if (status === 'running') return `<span class="ag-pill ag-running">running</span>`;
-  if (status === 'done') return `<span class="ag-pill ag-done">done</span>`;
-  if (status === 'ok') return `<span class="ag-pill ag-ok">✓ ok</span>`;
-  if (status === 'error') return `<span class="ag-pill ag-err">✗ error</span>`;
-  return '';
-}
-
-function drSection(label, content, pre) {
-  const empty = content == null || content === '';
-  if (empty) return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">${escHtml(label)} <span class="dr-none">—</span></h4></section>`;
-  const body = pre
-    ? `<pre class="dr-pre">${escHtml(content)}</pre>`
-    : `<div class="dr-text">${escHtml(content)}</div>`;
-  return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}</h4>${body}</section>`;
-}
-
-// drIOSection renders a tool's Input/Output as a <pre>, with a "show full"
-// affordance when the snippet was truncated (looksTruncated). In serve mode
-// that's a button that loads the untruncated content from disk; in static
-// mode there's no disk, so it degrades to a clear "snippet only" label rather
-// than a dead button.
-function drIOSection(label, content, field, p) {
-  const empty = content == null || content === '';
-  if (empty) {
-    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">${escHtml(label)} <span class="dr-none">—</span></h4></section>`;
-  }
-  let affordance = '';
-  if (p.type === 'tool' && p.toolId && looksTruncated(content)) {
-    affordance = isServeMode()
-      ? `<button type="button" class="dr-full-btn" data-loadfull="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-tool="${escHtml(p.toolId)}">show full</button>`
-      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
-  }
-  return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
-}
-
-// drTurnSection renders a turn's Reasoning/Message as a <pre>, with the same
-// "show full" affordance drIOSection gives tool I/O: when the snippet was
-// truncated (looksTruncated) and the turn has a uuid to fetch by, serve mode
-// gets a button that loads the untruncated content from disk; static mode
-// degrades to a "snippet only" label rather than a dead button.
-function drTurnSection(label, content, field, p) {
-  const empty = content == null || content === '';
-  if (empty) {
-    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">${escHtml(label)} <span class="dr-none">—</span></h4></section>`;
-  }
-  let affordance = '';
-  if (p.turnUuid && looksTruncated(content)) {
-    affordance = isServeMode()
-      ? `<button type="button" class="dr-full-btn" data-loadfullturn="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-turn="${escHtml(p.turnUuid)}">show full</button>`
-      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
-  }
-  return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
-}
-
-// loadFull handles a "show full" click: fetch the untruncated tool I/O from
-// the server and swap it into the section's <pre>. The button is removed once
-// the full content is in (there's nothing more to load); a failure re-enables
-// it so the user can retry.
-async function loadFull(btn) {
-  const sec = btn.closest('.dr-sec');
-  const pre = sec && sec.querySelector('.dr-pre');
-  const { session, tool, loadfull: field } = btn.dataset;
-  if (!pre || !session || !tool) return;
-  btn.disabled = true;
-  btn.textContent = 'loading…';
-  try {
-    const d = await fetchAgentToolFull(session, tool);
-    const fullText = (field === 'output' ? d.output : d.input) || '';
-    // Cache by tool_use id so the next drawer paint (e.g. a live SSE tick)
-    // re-applies the full content instead of reverting to the snippet.
-    fullCache[tool] = { ...(fullCache[tool] || {}), [field]: fullText };
-    pre.textContent = fullText;
-    btn.remove();
-  } catch {
-    btn.textContent = 'failed — retry';
-    btn.disabled = false;
-  }
-}
-
-// loadFullTurn is loadFull's turn-level twin: fetch the untruncated
-// thinking/text for the turn and swap it into the section's <pre>. Cached by
-// turn uuid so the next drawer paint re-applies the full content instead of
-// reverting to the snippet; a failure re-enables the button for retry.
-async function loadFullTurn(btn) {
-  const sec = btn.closest('.dr-sec');
-  const pre = sec && sec.querySelector('.dr-pre');
-  const { session, turn, loadfullturn: field } = btn.dataset;
-  if (!pre || !session || !turn) return;
-  btn.disabled = true;
-  btn.textContent = 'loading…';
-  try {
-    const d = await fetchAgentTurnFull(session, turn);
-    const fullText = (field === 'text' ? d.text : d.thinking) || '';
-    fullTurnCache[turn] = { ...(fullTurnCache[turn] || {}), [field]: fullText };
-    pre.textContent = fullText;
-    btn.remove();
-  } catch {
-    btn.textContent = 'failed — retry';
-    btn.disabled = false;
-  }
-}
-
-// drToolList renders a turn's tool calls as a list of click-through rows
-// (kind badge · name · detail · status pill). Each row carries the tool's
-// data-ref so the shared drawer delegate jumps the selection straight to that
-// tool's Input/Output. Empty turns collapse to a dim "—" header like any other
-// section, so a tool-only turn never renders as an empty slab.
-function drToolList(tools) {
-  if (!tools || !tools.length) {
-    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">Tools <span class="dr-none">—</span></h4></section>`;
-  }
-  const rows = tools.map(t => {
-    const detail = t.detail ? `<span class="dr-tool-detail" title="${escHtml(t.detail)}">${escHtml(t.detail)}</span>` : '';
-    const pill = t.status ? statusPill(t.status) : '';
-    return `<button type="button" class="dr-tool-row" data-ref="${escHtml(t.refKey)}" title="${escHtml(t.name)}">
-      ${kindBadge(t.kind)}<span class="dr-tool-name">${escHtml(t.name)}</span>${detail}${pill}
-    </button>`;
-  }).join('');
-  return `<section class="dr-sec"><h4 class="dr-sec-h">Tools <span class="dr-sec-sum">${tools.length}</span></h4>
-    <div class="dr-tools">${rows}</div></section>`;
-}
-
-function drTokens(t) {
-  if (!t || !t.total) return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">Tokens <span class="dr-none">—</span></h4></section>`;
-  const cell = (k, v) => `<div class="dr-tok"><span class="dr-tok-k">${k}</span><span class="dr-tok-v">${escHtml(fmtNum(v))}</span></div>`;
-  return `<section class="dr-sec"><h4 class="dr-sec-h">Tokens <span class="dr-sec-sum">${escHtml(fmtCompact(t.total))} total</span></h4>
-    <div class="dr-toks">${cell('input', t.input)}${cell('output', t.output)}${cell('cache write', t.cacheWrite)}${cell('cache read', t.cacheRead)}</div>
-  </section>`;
-}
-
-// ── Feed lens (formerly Mission Control) ────────────────────────────────────
-
-// renderControl draws the Feed lens: one scrolling .agent-feed box whose top
-// stratum is a STICKY band of "live rows" — one per currently-running agent —
-// pinned above the reverse-chronological event history that scrolls beneath it.
-// (This replaces the old full-width Active-now card band; the live roster now
-// lives inside the feed so the lens and detail drawer align at the top edge.)
-// The live rows share the feed's iconography/hues; a left-rail green pulse +
-// live-ticking timer marks them as alive against the static history rows.
-function renderControl(sessions) {
-  const feed = buildEventFeed(lastGraph, { limit: 250 });
-  const feedHTML = feed.length === 0
-    ? `<div class="ac-idle">No activity yet.</div>`
-    : feed.map(feedRowHTML).join('');
-
-  return `
-    <section class="mc-feed">
-      <div class="mc-section-head">Live feed <span class="mc-count">${feed.length}</span></div>
-      <div class="agent-feed" tabindex="0">${liveStratumHTML()}${feedHTML}</div>
-    </section>`;
-}
-
-// liveStratumHTML is the sticky top band of the feed: a "RUNNING · n" header
-// plus one live row per running agent. Renders nothing when nothing is running,
-// so the feed collapses to pure history. It's a single grid item spanning all
-// the feed's columns, with position:sticky pinning it as the history scrolls.
-function liveStratumHTML() {
-  const live = buildLiveFeed(lastGraph);
-  if (!live.length) return '';
-  return `<div class="feed-live">
-    <div class="feed-live-head"><span class="mc-dot-live"></span>Running <span class="mc-count">${live.length}</span></div>
-    ${live.map(liveRowHTML).join('')}
-  </div>`;
-}
-
-// A live row mirrors a history feedRowHTML cell-for-cell — same six subgrid
-// columns (time · ctx · agent · glyph · body · metric) — so the running roster
-// lines up with the history beneath it. The differences that mark it "live": a
-// green pulse in the time column instead of a timestamp, and a metric whose
-// duration is a live-ticking elapsed timer (cost · elapsed · tokens, same hues
-// and token figure as a history row).
-function liveRowHTML(d) {
-  const ref = refKey({ sessionId: d.sessionId, agentIndex: d.agentIndex });
-  const c = colorSlot(d.agentIndex);
-  const sel = ref === selectedRef ? ' is-selected' : '';
-  const tool = d.currentTool
-    ? `${kindBadge(d.currentToolKind)}<span class="fe-tool kind-${kindFamily(d.currentToolKind)}">${escHtml(d.currentTool)}</span>`
-    : `<span class="live-idle">working…</span>`;
-  const desc = d.kind !== 'main' && d.description
-    ? ` <span class="fe-arg" title="${escHtml(d.description)}">${escHtml(clip(d.description, 72))}</span>` : '';
-  // Metric mirrors feMetric (cost · dur · tok), but "dur" is a live-ticking
-  // elapsed timer fed by the same data-elapsed contract tickTimers rewrites
-  // against the wall clock (running → counts up from start).
-  const parts = [];
-  if (d.cost_usd) parts.push(`<span class="fe-m-cost">${escHtml(fmtMoney(d.cost_usd))}</span>`);
-  parts.push(`<span class="fe-m-dur" data-elapsed data-start="${Number.isFinite(d.startedAt) ? d.startedAt : ''}" data-end="" data-running="1">${escHtml(formatElapsed(d.elapsedMs))}</span>`);
-  if (d.tokens) parts.push(`<span class="fe-m-tok">${escHtml(fmtCompact(d.tokens))} tok</span>`);
-  const metric = `<span class="fe-metric">${parts.join('<span class="fe-m-sep">·</span>')}</span>`;
-  return `<div class="live-row${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-    <span class="fe-time live-pulse-cell"><span class="live-pulse" aria-label="running"></span></span>
-    ${feCtx(d)}
-    <span class="fe-agent" title="${escHtml(d.agentLabel)}">${escHtml(clip(d.agentLabel, 24))}</span>
-    <span class="fe-glyph"></span>
-    <span class="fe-body">${tool}${desc}</span>
-    ${metric}
-  </div>`;
-}
-
-function feedRowHTML(e) {
-  const c = colorSlot(e.agentIndex);
-  const time = clockTime(e.t);
-  const ref = e.kind === 'tool'
-    ? refKey({ sessionId: e.sessionId, agentIndex: e.agentIndex, stepIndex: e.stepIndex, toolIndex: e.toolIndex })
-    : refKey({ sessionId: e.sessionId, agentIndex: e.agentIndex });
-  const sel = ref === selectedRef ? ' is-selected' : '';
-  let glyph = '<span class="fe-glyph fe-arrow">→</span>';
-  let body;
-  let metric = '';
-  if (e.kind === 'spawn') {
-    glyph = '<span class="fe-glyph fe-spawn">↳</span>';
-    body = `<span class="fe-verb">spawn</span> <span class="fe-strong">${escHtml(e.agentLabel)}</span>${e.description ? ` <span class="fe-dim">${escHtml(e.description)}</span>` : ''}`;
-  } else if (e.kind === 'done') {
-    glyph = '<span class="fe-glyph fe-done">✓</span>';
-    body = `<span class="fe-verb">done</span> <span class="fe-dim">${fmtNum(e.steps)} step${e.steps === 1 ? '' : 's'}</span>`;
-    metric = feMetric(e.cost_usd, 0, e.tokens);
-  } else {
-    if (e.status === 'error') glyph = '<span class="fe-glyph fe-err">✗</span>';
-    else if (e.status === 'ok') glyph = '<span class="fe-glyph fe-ok">✓</span>';
-    const arg = e.input || e.detail;
-    body = `${kindBadge(e.toolKind)}<span class="fe-tool kind-${kindFamily(e.toolKind)}">${escHtml(e.tool)}</span>${arg ? ` <span class="fe-arg" title="${escHtml(e.input || e.detail)}">${escHtml(clip(arg, 72))}</span>` : ''}`;
-    metric = feMetric(e.cost_usd, e.durationMs, e.tokens);
-  }
-  return `<div class="fe-row fe-${e.kind}${sel}" data-c="${c}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-    <span class="fe-time">${escHtml(time)}</span>
-    ${feCtx(e)}
-    <span class="fe-agent" title="${escHtml(e.agentLabel)}">${escHtml(clip(e.agentLabel, 24))}</span>
-    ${glyph}
-    <span class="fe-body">${body}</span>
-    ${metric}
-  </div>`;
-}
-
-// feCtx names the project→thread a feed row belongs to — the cross-session feed
-// interleaves rows from every open session, so each one shows where it came
-// from: the cwd's project folder and the short session id. The full path and
-// id ride on the title for disambiguation when basenames collide.
-function feCtx(e) {
-  const proj = baseName(e.cwd) || '—';
-  const thread = shortId(e.sessionId || '');
-  const title = `${e.cwd || ''}${thread ? ` · ${e.sessionId}` : ''}`;
-  // A headless (SDK) origin is marked with a compact accent tag, not the full
-  // pill — the feed's ctx column is a single ellipsizing line, so the marker
-  // leads (survives the clip) while the project/thread truncate behind it.
-  const origin = originClass(e.entrypoint) === 'sdk'
-    ? `<span class="fe-origin" title="Headless run (claude -p / Agent SDK)">sdk</span>`
-    : '';
-  return `<span class="fe-ctx" title="${escHtml(title)}">${origin}<span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
-}
-
-// feMetric is the compact per-row cost·duration·tokens chip — the feed doubles
-// as a spend/latency/token heat-map. Each figure gets its own hue (money /
-// time / tokens) so the eye can pick one dimension out of the stream. Renders
-// nothing when all are empty.
-function feMetric(cost, ms, tokens) {
-  const parts = [];
-  if (cost) parts.push(`<span class="fe-m-cost">${escHtml(fmtMoney(cost))}</span>`);
-  if (ms) parts.push(`<span class="fe-m-dur">${escHtml(formatElapsed(ms))}</span>`);
-  if (tokens) parts.push(`<span class="fe-m-tok">${escHtml(fmtCompact(tokens))} tok</span>`);
-  return parts.length ? `<span class="fe-metric">${parts.join('<span class="fe-m-sep">·</span>')}</span>` : '';
-}
-
-// ── Tree lens (formerly Inspector) ──────────────────────────────────────────
-
-// The Tree lens is ONE compact, collapsible navigator rail (no more split
-// list|log): each session is an expandable group, each agent an expandable node
-// whose summary is its headline row and whose body is a tight step→tool log.
-// Clicking any summary, turn, or tool sets the shared selection and fills the
-// wide detail drawer on the right (where input/output/reasoning live); the drag
-// handle between the rail and the drawer resizes the split. Native <details>
-// carries the expand/collapse state, snapshotted across live re-renders by
-// captureState/restoreState (session groups keyed by data-skey; agent bodies by
-// openAgentBodies).
-function renderInspector(sessions) {
-  const sel = resolveRef(lastGraph, selectedRef);
-  if (!sessions.length) {
-    return `<div class="itree" data-no-tooltip><div class="ac-idle">No agents in this window.</div></div>`;
-  }
-  // Render only the newest `treeLimit` sessions, but always far enough to include
-  // the selected one (a ‹ › filter step can target a session past the cap).
-  const selIdx = sel ? sessions.findIndex(s => (s.session_id || '') === sel.session.session_id) : -1;
-  const shown = Math.min(sessions.length, Math.max(treeLimit, selIdx + 1));
-  const tree = sessions.slice(0, shown).map((s, si) => itreeSessionHTML(s, si, sel)).join('');
-  const more = sessions.length > shown
-    ? `<button type="button" class="itree-more" data-tree-more>Show ${Math.min(TREE_PAGE, sessions.length - shown)} more · ${fmtNum(sessions.length - shown)} older ${sessions.length - shown === 1 ? 'session' : 'sessions'} hidden</button>`
-    : '';
-  return `<div class="itree" role="tree" aria-label="Agents" data-no-tooltip>${tree}${more}</div>`;
-}
-
-function itreeSessionHTML(session, si, sel) {
-  const sid = session.session_id || '';
-  const c = colorSlot(si);
-  const agents = flattenSession(session);
-  const rows = agents.map((a, i) => itreeAgentHTML(session, a, i, sel)).join('');
-  return `<details class="itree-sess" data-skey="${escHtml(sid)}" open>
-    <summary class="itree-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
-      <span class="itree-caret" aria-hidden="true">▸</span>
-      <span class="insp-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
-      <span class="insp-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
-      ${originBadgeHTML(session)}
-    </summary>
-    <div class="itree-sess-body">${rows}</div>
-  </details>`;
-}
-
-function itreeAgentHTML(session, agent, agentIndex, sel) {
-  const sid = session.session_id || '';
-  const running = agent.status === 'running';
-  const tokens = agentTokens(agent).total;
-  const agentRef = refKey({ sessionId: sid, agentIndex });
-  // The agent (or any step/tool inside it) being selected lights the row and
-  // opens the node — so a spawn jump or the default selection lands expanded.
-  const holdsSel = !!(sel && sel.session.session_id === sid && sel.agentIndex === agentIndex);
-  if (holdsSel) openAgentBodies.add(agentRef);
-  // Lazy body: only render the log for an expanded agent (selected or toggled
-  // open earlier). Collapsed agents ship a bare placeholder, filled on expand.
-  const open = holdsSel || openAgentBodies.has(agentRef);
-  // Tight summary for the rail: name, an error flag if any, then duration + cost
-  // pinned right. Step/token totals (and everything else) ride in the drawer.
-  return `<details class="itree-agent" data-akey="${escHtml(agentRef)}"${open ? ' open' : ''} title="${escHtml(agentLabel(agent))}${tokens ? ` · ${fmtCompact(tokens)} tok` : ''}">
-    <summary class="itree-agent-row${holdsSel ? ' is-selected' : ''}" data-ref="${escHtml(agentRef)}">
-      <span class="itree-caret" aria-hidden="true">▸</span>
-      <span class="insp-dot ${running ? 'is-running' : 'is-done'}"></span>
-      <span class="insp-d-name">${escHtml(agentLabel(agent))}</span>
-      ${agent.error_count ? `<span class="insp-d-stat insp-d-err" title="tool calls that errored">✗${fmtNum(agent.error_count)}</span>` : ''}
-      <span class="insp-d-spacer"></span>
-      <span class="insp-d-stat">${elapsedSpan(agent)}</span>
-      <span class="insp-d-stat insp-d-cost">${escHtml(fmtMoney(agent.cost_usd || 0))}</span>
-    </summary>
-    <div class="itree-agent-body"${open ? ' data-rendered="1"' : ''}>${open ? itreeAgentBodyHTML(session, agent, agentIndex) : ''}</div>
-  </details>`;
-}
-
-// itreeAgentBodyHTML is the inner of an agent node's lazy body: its description
-// (sub-agents only) plus the step→tool log. Rendered inline for agents open at
-// render time, and injected by fillAgentBody when one is expanded interactively.
-function itreeAgentBodyHTML(session, agent, agentIndex) {
-  const sid = session.session_id || '';
-  const desc = agent.kind !== 'main' && agent.description
-    ? `<p class="insp-d-desc">${escHtml(agent.description)}</p>` : '';
-  const steps = (agent.steps || []);
-  const stepHTML = steps.length === 0
-    ? `<div class="ac-idle">No assistant turns recorded.</div>`
-    : steps.map((st, i) => inspectorStepHTML(st, i, steps.length, sid, agentIndex, session)).join('');
-  return `${desc}<div class="insp-steps">${stepHTML}</div>`;
-}
-
-// fillAgentBody syncs one agent node's lazy body to its open state: an expanded
-// node gets its log rendered (once), a collapsed one is emptied to free the DOM.
-// Shared by the toggle handler and ensureAgentExpanded.
-function fillAgentBody(node) {
-  const akey = node.dataset.akey;
-  const body = node.querySelector('.itree-agent-body');
-  if (!body) return;
-  if (node.open) {
-    openAgentBodies.add(akey);
-    if (!body.dataset.rendered) {
-      const r = resolveRef(lastGraph, akey);
-      if (r) { body.innerHTML = itreeAgentBodyHTML(r.session, r.agent, r.agentIndex); body.dataset.rendered = '1'; }
-    }
-  } else {
-    openAgentBodies.delete(akey);
-    body.innerHTML = '';
-    delete body.dataset.rendered;
-  }
-}
-
-// onTreeToggle catches a user expanding/collapsing an agent node. The native
-// `toggle` event doesn't bubble, so this is wired in the capture phase.
-function onTreeToggle(e) {
-  const node = e.target;
-  if (node instanceof Element && node.classList && node.classList.contains('itree-agent')) {
-    fillAgentBody(node);
-  }
-}
-
-// ensureAgentExpanded opens the node holding `ref` and renders its body, so a
-// selection that lands inside a collapsed agent (a spawn jump, a ‹ › filter
-// step) reveals the row instead of highlighting a node that isn't there.
-function ensureAgentExpanded(container, ref) {
-  const p = parseRefKey(ref);
-  if (!p) return;
-  const akey = refKey({ sessionId: p.sessionId, agentIndex: p.agentIndex });
-  const node = container.querySelector(`details.itree-agent[data-akey="${cssEsc(akey)}"]`);
-  if (!node) return;
-  node.open = true;
-  fillAgentBody(node);
-}
-
-// cssEsc escapes a value for use inside a querySelector attribute match.
-const cssEsc = s => (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
-
-function inspectorStepHTML(step, i, total, sid, agentIndex, session) {
-  const time = clockTime(parseTime(step.timestamp));
-  const ref = refKey({ sessionId: sid, agentIndex, stepIndex: i });
-  const sel = ref === selectedRef ? ' is-selected' : '';
-  const tools = (step.tools || []);
-  const toolHTML = tools.map((t, j) => toolRowHTML(t, sid, agentIndex, i, j, session)).join('');
-  const model = step.model ? `<span class="insp-step-model">${escHtml(shortModel(step.model))}</span>` : '';
-  const reasoned = (step.thinking || step.text)
-    ? `<span class="insp-step-reason" title="this turn has reasoning — click to read it">✦ reasoned</span>` : '';
-  return `<div class="insp-step">
-    <div class="insp-step-head${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-      <span class="insp-step-n">${i + 1}/${total}</span>
-      <span class="insp-step-time">${escHtml(time)}</span>
-      ${model}
-      ${reasoned}
-      ${step.cost_usd ? `<span class="insp-step-cost">${escHtml(fmtMoney(step.cost_usd))}</span>` : ''}
-      ${(() => { const tk = agentTokens(step).total; return tk ? `<span class="insp-step-toks" title="tokens this turn">${escHtml(fmtCompact(tk))}</span>` : ''; })()}
-    </div>
-    ${tools.length ? `<div class="insp-tools">${toolHTML}</div>` : ''}
-  </div>`;
-}
-
-// In the compact tree a tool is ALWAYS one tight, clickable row (kind · name ·
-// detail · status · cost); its full input/output lives in the shared drawer,
-// which the click opens — so the rail stays a navigator, not a content dump.
-function toolRowHTML(tool, sid, agentIndex, stepIndex, toolIndex, session) {
-  const name = tool.name || '';
-  const ref = refKey({ sessionId: sid, agentIndex, stepIndex, toolIndex });
-  const sel = ref === selectedRef ? ' is-selected' : '';
-  const detail = tool.detail ? `<span class="tr-detail">${escHtml(tool.detail)}</span>` : '';
-  const status = tool.status === 'error'
-    ? '<span class="tr-status tr-err" title="errored">✗</span>'
-    : tool.status === 'ok' ? '<span class="tr-status tr-ok" title="ok">✓</span>' : '';
-  // A spawning Agent call shows its sub-agent's cost inline (the blast radius
-  // of one decision), with the full clickable rollup nested directly beneath.
-  const costBadge = tool.spawned
-    ? `<span class="tr-spawn-cost" title="cost of the sub-agent this call launched">+${escHtml(fmtMoney(tool.spawned.cost_usd || 0))}</span>` : '';
-  const spawnRow = tool.spawned ? spawnRowHTML(tool, session) : '';
-  return `<div class="tr${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button"><span class="tr-row">${kindBadge(tool.kind)}<span class="tr-name">${escHtml(name)}</span>${detail}${status}${costBadge}</span></div>${spawnRow}`;
-}
-
-// spawnRowHTML renders the nested sub-agent affordance under a spawning Agent
-// call: the child's label plus the rolled-up "+$X · N tools · M errors across
-// sub-agent". When the sub-agent is in this window it's a button that jumps the
-// shared selection to it (data-ref = the child's agent refKey); otherwise it's
-// a static badge. This is the Tree lens's nesting — each sub-agent shown under
-// the exact step/tool that launched it.
-function spawnRowHTML(tool, session) {
-  const sp = tool.spawned;
-  if (!sp || !session) return '';
-  const idx = spawnTargetIndex(session, sp.agent_ref);
-  const child = idx == null ? null : flattenSession(session)[idx];
-  const parts = [`+${fmtMoney(sp.cost_usd || 0)}`];
-  if (child) {
-    const n = (child.steps || []).reduce((sum, st) => sum + (st.tools || []).length, 0);
-    parts.push(`${fmtNum(n)} ${n === 1 ? 'tool' : 'tools'}`);
-  }
-  const errs = sp.error_count || 0;
-  if (errs) parts.push(`${fmtNum(errs)} ${errs === 1 ? 'error' : 'errors'}`);
-  const stats = `${parts.join(' · ')} across sub-agent`;
-  const label = child ? agentLabel(child) : 'sub-agent';
-  if (idx == null) {
-    return `<div class="tr-spawn" title="This sub-agent isn't in the current window">
-      <span class="tr-spawn-arrow" aria-hidden="true">↳</span>
-      <span class="tr-spawn-label">${escHtml(label)}</span>
-      <span class="tr-spawn-stats">${escHtml(stats)}</span>
-    </div>`;
-  }
-  const childRef = refKey({ sessionId: session.session_id || '', agentIndex: idx });
-  const selCls = childRef === selectedRef ? ' is-selected' : '';
-  return `<button type="button" class="tr-spawn is-link${selCls}" data-ref="${escHtml(childRef)}" title="Jump to this sub-agent">
-    <span class="tr-spawn-arrow" aria-hidden="true">↳</span>
-    <span class="tr-spawn-label">${escHtml(label)}</span>
-    <span class="tr-spawn-stats">${escHtml(stats)}</span>
-  </button>`;
 }
 
 // ── Conversation lens ────────────────────────────────────────────────────────
@@ -1862,8 +842,6 @@ function conversationReplyHTML(reply, sid) {
     </div>
   </div>`;
 }
-
-// ── Timeline (Gantt) lens ───────────────────────────────────────────────────
 
 // ── Insights lens (Phase 2) ─────────────────────────────────────────────────
 
@@ -2457,491 +1435,6 @@ function renderGroupPanel(agents) {
     </section>`;
 }
 
-// renderTimeline draws the Gantt lens: a scrubber bar on top, then one
-// horizontal Gantt per session (a real time axis, one row per agent, bar =
-// lifetime, overlap = concurrency). Everything is rendered "as of" the playhead
-// instant T (live → now); geometry comes from the pure, unit-tested
-// timelineAtTime. The scrubber is a separate sibling from the .timeline-sessions
-// container so a scrub re-renders ONLY the sessions, leaving the range input
-// (mid-drag) untouched.
-function renderTimeline(sessions) {
-  const list = timelineSessionList(sessions);
-  if (list.length === 0) return `<div class="ac-idle">No agents to plot.</div>`;
-  const chosen = currentTimelineSession();
-  // chosen is always non-null here (list is non-empty ⇒ pickTimelineSid resolves
-  // a sid); guard anyway so a future caller can't NPE.
-  const view = chosen ? { sessions: [chosen.session] } : { sessions: [] };
-  const curSid = chosen ? chosen.session.session_id || '' : '';
-  const nowMs = Date.now();
-  // Scrubber window + counts are scoped to the ONE plotted session, not the
-  // whole graph — the playhead spans just this trace, and ▶/✓/○ count only its
-  // agents. This is also what removes the all-sessions repaint per scrub frame.
-  const bounds = playheadBounds(view, nowMs);
-  const live = playheadT == null;
-  const T = playheadAt(bounds, nowMs);
-  // The kind legend names the colors the Gantt actually draws for THIS session.
-  const kinds = chosen ? timelineKinds(chosen.session) : [];
-  const scrubber = bounds ? scrubberHTML(bounds, T, live, playheadStats(view, T), kinds) : '';
-  const w = convSidebarWidth();
-  return `<div class="timeline-layout">
-    <div class="tl-sidebar" style="width:${w}px" role="tablist" aria-label="Sessions">${timelineSidebarHTML(list, curSid)}</div>
-    <div class="tl-resize" data-tl-resize role="separator" aria-orientation="vertical" aria-label="Resize the session list"></div>
-    <div class="timeline-lens">${scrubber}<div class="timeline-sessions">${renderTimelineSessions(view.sessions, nowMs, T, chosen ? chosen.index : 0)}</div></div>
-  </div>`;
-}
-
-// currentTimelineSession resolves the single session the Timeline plots: its
-// sid via pickTimelineSid (explicit pick → selected turn's session → first),
-// then the matching session object plus its ORIGINAL index (the stable color
-// slot). Returns null when nothing is plottable. Shared by renderTimeline and
-// renderScrub so both render and scope to the SAME session.
-function currentTimelineSession() {
-  const sessions = (lastGraph && lastGraph.sessions) || [];
-  const sid = pickTimelineSid(sessions, timelineSid, selectedRef);
-  if (!sid) return null;
-  const index = sessions.findIndex(s => s && (s.session_id || '') === sid);
-  if (index < 0) return null;
-  return { session: sessions[index], index };
-}
-
-// timelineSidebarHTML renders the left session list: one selectable row per
-// plottable session, the in-lens way to switch which Gantt is plotted. The
-// active session is highlighted; each row carries data-tl-sess so a click
-// re-points timelineSid at it. Rows lead with project/shortId and a few
-// sessionStats pills (⏱ duration · ⚠ errors · 💰 cost) so the list triages.
-function timelineSidebarHTML(list, curSid) {
-  return list.map(e => {
-    const sel = e.sessionId === curSid ? ' is-selected' : '';
-    const c = colorSlot(e.index);
-    const err = e.errorCount > 0
-      ? `<span class="tl-sess-item-pill tl-sess-item-err" title="${fmtNum(e.errorCount)} tool error${e.errorCount === 1 ? '' : 's'}">⚠️ ${fmtNum(e.errorCount)}</span>`
-      : '';
-    return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}">
-      <span class="tl-sess-item-head">
-        <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
-        ${originBadgeHTML(e)}
-      </span>
-      <span class="tl-sess-item-meta">
-        <span class="tl-sess-item-sid">${escHtml(shortId(e.sessionId))}</span>
-        <span class="tl-sess-item-pills">
-          <span class="tl-sess-item-pill" title="session duration">⏱️ ${escHtml(formatElapsed(e.durationMs))}</span>
-          ${err}
-          <span class="tl-sess-item-pill" title="session cost">💰 ${escHtml(fmtMoney(e.cost_usd))}</span>
-        </span>
-      </span>
-    </button>`;
-  }).join('');
-}
-
-// playheadAt resolves the instant the Gantt renders at: the paused T, or — when
-// live — the right edge of the global window (now), falling back to nowMs when
-// there are no parseable agent times yet.
-function playheadAt(bounds, nowMs) {
-  if (playheadT != null) return playheadT;
-  return bounds ? bounds.endMs : nowMs;
-}
-
-// renderTimelineSessions emits just the per-session Gantts (the scrubber is
-// rendered/updated separately). prevTimelineKeys → a genuinely NEW agent fades
-// in; phase changes don't, because every agent always has a row (a pending one
-// is simply zero-width), so scrubbing never adds/removes keys.
-// Only the chosen session is plotted, so `colorIdx` is its ORIGINAL list index
-// (the stable color slot) — passed through to the session-head data-c so the
-// card keeps the same hue it had when every session was stacked.
-function renderTimelineSessions(sessions, nowMs, T, colorIdx = 0) {
-  const hostW = timelineHostW();
-  const sel = resolveRef(lastGraph, selectedRef);
-  const selAgentKey = sel ? refKey({ sessionId: sel.session.session_id, agentIndex: sel.agentIndex }) : null;
-  const seen = prevTimelineKeys;
-  const next = new Set();
-  const html = sessions.map(s => timelineSessionHTML(s, colorIdx, hostW, nowMs, T, selAgentKey, seen, next)).join('');
-  prevTimelineKeys = next;
-  return html;
-}
-
-// scrubberHTML is the sticky control strip: a "● live" toggle, a range input
-// spanning the whole trace window, and a clock + active/done/pending readout —
-// all "as of" the playhead T.
-function scrubberHTML(bounds, T, live, stats, kinds = []) {
-  const span = bounds.endMs - bounds.startMs;
-  const val = Math.max(0, Math.min(span, T - bounds.startMs));
-  return `<div class="tl-scrubber">
-    <button type="button" class="tl-live${live ? ' is-live' : ''}" data-tllive title="Resume live — the playhead follows now">● live</button>
-    <input class="tl-range" type="range" min="0" max="${span}" step="any" value="${val}"
-      data-tlrange data-tlstart="${bounds.startMs}" aria-label="Scrub the timeline to a point in time"/>
-    <span class="tl-clock" data-tlclock>${escHtml(clockTime(T))}</span>
-    <span class="tl-counts" data-tlcounts>${countsHTML(stats)}</span>
-    ${kindLegendHTML(kinds)}
-  </div>`;
-}
-
-// kindLegendHTML renders the segment-color key for the Timeline: one swatch +
-// label per kind the plotted session draws, in canonical order (from
-// timelineKinds), reusing the .kind-* palette (the swatch reads var(--kc)). Empty
-// string when the session has no segments — no legend, no clutter.
-function kindLegendHTML(kinds) {
-  if (!kinds || kinds.length === 0) return '';
-  const items = kinds.map(k =>
-    `<span class="tl-leg-item kind-${kindFamily(k)}" title="${escHtml(k)} segments"><span class="tl-leg-sw" aria-hidden="true"></span>${escHtml(k)}</span>`).join('');
-  return `<span class="tl-legend" aria-label="Segment colors by tool kind">${items}</span>`;
-}
-
-function countsHTML(s) {
-  return `<span class="tlc tlc-active" title="agents active at the playhead">▶ ${fmtNum(s.active)}</span>` +
-    `<span class="tlc tlc-done" title="agents finished by the playhead">✓ ${fmtNum(s.done)}</span>` +
-    `<span class="tlc tlc-pending" title="agents not yet started at the playhead">○ ${fmtNum(s.pending)}</span>`;
-}
-
-// timelineSummaryHTML is the at-a-glance triage strip for a session card: its
-// duration, turns, tools, agents, errors, and cost as .tlc pills (mirroring
-// countsHTML's idiom). These are whole-session totals, NOT playhead-relative, so
-// every scrub frame recomputes the same values — but it must live in the shared
-// timelineSessionHTML anyway, because renderScrub rewrites .timeline-sessions
-// wholesale and a strip kept out of that path would vanish mid-scrub. Stable
-// values → no flicker; the sessionStats walk is the same O(steps) order as the
-// timelineAtTime geometry the scrub already runs per session. The errors pill is
-// omitted when the session is clean.
-function timelineSummaryHTML(s) {
-  // Each pill leads with an emoji (the strip is HTML, so emoji render fine) and
-  // keeps the full meaning in its title tooltip. The errors pill is omitted when
-  // the session is clean.
-  const err = s.errorCount > 0
-    ? `<span class="tlc tlc-err" title="${fmtNum(s.errorCount)} tool error${s.errorCount === 1 ? '' : 's'} in this session">⚠️ ${fmtNum(s.errorCount)}</span>`
-    : '';
-  return `<span class="tlc" title="session duration">⏱️ ${escHtml(formatElapsed(s.durationMs))}</span>` +
-    `<span class="tlc" title="turns (model steps) across all agents">💬 ${fmtNum(s.turnCount)}</span>` +
-    `<span class="tlc" title="tool calls across all agents">🛠️ ${fmtNum(s.toolCount)}</span>` +
-    `<span class="tlc" title="agents (main + sub-agents)">🤖 ${fmtNum(s.agentCount)}</span>` +
-    err +
-    `<span class="tlc" title="total tokens (input + output + cache) across all agents">🎟️ ${escHtml(fmtCompact(s.tokenCount))}</span>` +
-    `<span class="tlc tlc-cost" title="session cost">💰 ${escHtml(fmtMoney(s.cost_usd))}</span>`;
-}
-
-// Timeline signal pips (Phase 3d): the per-agent anomaly markers drawn in the
-// Gantt gutter come from the SAME detectSignals output the Insights → Signals
-// panel uses, scoped to the ONE plotted session. detectSignals is pure but not
-// free, and renderScrub repaints the sessions every rAF frame of a scrub drag, so
-// the result is memoized by session-object identity — a data reload swaps the
-// session reference and invalidates it; scrubbing the same session reuses it. nowMs
-// keeps the static-safe contract (serve → live clock, static → undefined), the same
-// as the Signals panel; pip presence doesn't depend on the playhead T (it's gated
-// per row by phase, not by signal data), so a stale nowMs across scrub frames is
-// harmless.
-const TL_SIG_CAP = 3;
-// Row geometry overrides for the single-session Gantt (buildTimeline defaults are
-// 24 / 130, tuned for the old multi-session stack). TL_ROW_H drives bar height
-// (barH = rowH - 10); TL_LABEL_W is the frozen label column / gutter width, and
-// TL_LABEL_CHARS is the matching char budget for the in-SVG label (no native
-// ellipsis in <text>, so we clip in JS — keep it in step with TL_LABEL_W).
-const TL_ROW_H = 34;
-const TL_LABEL_W = 190;
-const TL_LABEL_CHARS = 24;
-let tlSigCache = null; // { session, byAgent }
-function timelineSignalPips(session, sid) {
-  if (tlSigCache && tlSigCache.session === session) return tlSigCache.byAgent;
-  const nowMs = isServeMode() ? Date.now() : undefined;
-  const byAgent = signalPipsByAgent(detectSignals({ sessions: [session] }, { nowMs }), sid, TL_SIG_CAP);
-  tlSigCache = { session, byAgent };
-  return byAgent;
-}
-
-function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, next) {
-  const sid = session.session_id || '';
-  // tlMinPxPerMs (null ⇒ default) is the scroll-wheel zoom density; buildTimeline
-  // still floors the chart to the host width, so a stale value below fit-to-width
-  // simply renders as the overview.
-  // We show one session at a time, so there's vertical room: taller rows (TL_ROW_H)
-  // give the bars real presence, and a wider label column (TL_LABEL_W) stops agent
-  // names like "Djinn review-leak-detector" from clipping to "Djinn review-le…".
-  const tl = timelineAtTime(session, T, {
-    hostW, nowMs, minPxPerMs: tlMinPxPerMs ?? undefined,
-    rowH: TL_ROW_H, labelW: TL_LABEL_W,
-  });
-  // The rows start at y = axisH (buildTimeline), so the first row's top is the
-  // axis baseline — tick labels sit above it, gridlines run from it down.
-  const axisY = tl.rows.length ? tl.rows[0].y : 20;
-
-  // The agent-label column (x: 0 → chartX) is frozen as its own SVG; the chart
-  // (ticks/bars/playhead) lives in a separate horizontally-scrolling SVG whose
-  // viewBox starts at chartX, so panning the chart never carries the labels off.
-  const gutterW = tl.chartX;
-  const chartW = tl.contentW - tl.chartX;
-
-  const ticks = tl.ticks.map(tk =>
-    `<g class="tl-tick"><line x1="${tk.x.toFixed(1)}" y1="${axisY}" x2="${tk.x.toFixed(1)}" y2="${tl.height}"/><text x="${(tk.x + 3).toFixed(1)}" y="${(axisY - 7).toFixed(1)}">${escHtml(clockTime(tk.t))}</text></g>`).join('');
-  // The playhead replaces the old now-line: one vertical line at T. Hidden when
-  // T precedes the session (playheadX null) or the session finished before T
-  // (T past its end → the line would just pin to the right edge, redundant).
-  const showHead = tl.playheadX != null && T <= tl.endMs;
-  const playhead = showHead
-    ? `<line class="tl-playhead" x1="${tl.playheadX.toFixed(1)}" y1="0" x2="${tl.playheadX.toFixed(1)}" y2="${tl.height}"/>` : '';
-  const agents = flattenSession(session);
-  // The cost-heat ramp normalizes per session: the priciest turn anywhere in
-  // this card is the hottest, so a click-target turn "stands out" relative to
-  // its own trace rather than to some other session's spend.
-  let maxSegCost = 0;
-  for (const r of tl.rows) for (const s of (r.segments || [])) {
-    if (s.cost_usd > maxSegCost) maxSegCost = s.cost_usd;
-  }
-  // Critical-path marks: the longest span and cost-whale turn, per session and
-  // per agent. The session pair gets the loud ▲; the per-agent pair a subtle
-  // outline. crit.refs maps a segment refKey → which mark(s) to draw on it.
-  const crit = criticalMarks(tl.rows);
-  // Per-agent anomaly pips for this session's gutter (Phase 3d), memoized so a
-  // scrub drag's per-frame repaint doesn't re-run detectSignals.
-  const sigPips = timelineSignalPips(session, sid);
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit, sigPips.get(r.rowIndex)));
-  const gutterRows = parts.map(p => p.gutter).join('');
-  const chartRows = parts.map(p => p.chart).join('');
-
-  return `<div class="timeline-sess">
-    <div class="timeline-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
-      <span class="timeline-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
-      <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
-      <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
-    </div>
-    <div class="timeline-sess-sum">${timelineSummaryHTML(sessionStats(session, nowMs))}</div>
-    <div class="timeline-body">
-      <svg class="timeline-gutter" viewBox="0 0 ${gutterW} ${tl.height}" width="${gutterW}" height="${tl.height}" role="img" aria-label="Agent labels">
-        <g class="tl-rows">${gutterRows}</g>
-      </svg>
-      <div class="timeline-scroll" data-tlscroll="${escHtml(sid)}">
-        <svg class="timeline-svg" viewBox="${tl.chartX} 0 ${chartW} ${tl.height}" width="${chartW}" height="${tl.height}" role="img" aria-label="Agent timeline">
-          <g class="tl-grid">${ticks}</g>
-          <g class="tl-rows">${chartRows}</g>
-          ${playhead}
-        </svg>
-      </div>
-    </div>
-  </div>`;
-}
-
-// timelineRowHTML splits one agent row into two synchronized <g>s: a `gutter`
-// piece (frozen label column) and a `chart` piece (the scrolling bar). Both
-// carry the same data-ref so a click in either selects the row, and both get the
-// is-selected / is-new / tl-pending classes so state shows on both sides of the
-// freeze line. A row's phase comes from the playhead: 'active' draws the pulse
-// at the (clamped) bar end, 'pending' ghosts the label (the bar is zero-width).
-// criticalMarks folds criticalSpans' refKey lists into a refKey→{longest, whale,
-// session} map the row renderer queries per segment. Session-level marks (the
-// loud ▲) and agent-level marks (a subtle outline) share the map; `session` is
-// set only for the across-session standouts. A segment that is both the longest
-// span and the cost whale carries both flags.
-function criticalMarks(rows) {
-  const c = criticalSpans(rows);
-  const refs = new Map();
-  const flag = (ref, key, isSession) => {
-    if (!ref) return;
-    const m = refs.get(ref) || { longest: false, whale: false, session: false };
-    m[key] = true;
-    if (isSession) m.session = true;
-    refs.set(ref, m);
-  };
-  for (const e of Object.values(c.agents)) {
-    flag(e.longestRef, 'longest', false);
-    flag(e.whaleRef, 'whale', false);
-  }
-  flag(c.session.longestRef, 'longest', true);
-  flag(c.session.whaleRef, 'whale', true);
-  return refs;
-}
-
-function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map(), sig = null) {
-  next.add(r.key);
-  const isNew = !seen.has(r.key);
-  const sel = r.key === selAgentKey ? ' is-selected' : '';
-  const pending = r.phase === 'pending' ? ' tl-pending' : '';
-  const barH = Math.max(6, r.h - 10);
-  const barY = r.y + Math.round((r.h - barH) / 2);
-  const cx = (r.x + r.w).toFixed(1);
-  const cy = (barY + barH / 2).toFixed(1);
-  // A red pip flags an agent that hit ≥1 tool error — but not while pending (it
-  // hasn't run at the playhead T yet, so it can't have errored). It lives in the
-  // frozen gutter (right edge of the label column), not on the bar: a live Gantt
-  // auto-scrolls to "now", which would carry a bar-start pip off-screen.
-  const errs = (agent && agent.error_count) || 0;
-  const errPip = errs > 0 && r.phase !== 'pending'
-    ? `<circle class="tl-err-pip" cx="${(tl.chartX - 7).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="3.5"><title>${errs} ${errs === 1 ? 'error' : 'errors'}</title></circle>`
-    : '';
-  // Signal pips (Phase 3d): one small ▲ per detected anomaly on this agent, tier-
-  // colored, in the frozen gutter just left of the err-pip (same off-screen-proof
-  // rationale). They share the err-pip's pending gate — a not-yet-started row can't
-  // have anomalies at T. Each pip carries data-ref = the signal's exact refKey
-  // (agent/step/tool), so a click routes through the shared data-ref delegate and
-  // lands selection on the anomaly — no bespoke handler. Worst-first (the list is
-  // severity-ordered), capped at TL_SIG_CAP with a +N overflow glyph; the full list
-  // lives in Insights → Signals.
-  const sigPips = (sig && r.phase !== 'pending') ? sig.pips : [];
-  const sigOverflow = (sig && r.phase !== 'pending') ? sig.overflow : 0;
-  const pipCy = r.y + r.h / 2;
-  // Reserve the err-pip's slot (chartX-7) so pips never collide with it; step left.
-  const pipBaseX = tl.chartX - 7 - (errs > 0 && r.phase !== 'pending' ? 9 : 0);
-  const sigHTML = sigPips.map((p, i) => {
-    const px = pipBaseX - i * 9;
-    const d = `M ${px.toFixed(1)} ${(pipCy - 4).toFixed(1)} L ${(px - 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} L ${(px + 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} Z`;
-    return `<path class="tl-sig-pip sig-${p.tier}" data-ref="${escHtml(p.ref)}" d="${d}"><title>${escHtml(p.summary)}</title></path>`;
-  }).join('');
-  const moreHTML = sigOverflow > 0
-    ? `<text class="tl-sig-more" data-goto-insights role="button" tabindex="0" x="${(pipBaseX - sigPips.length * 9).toFixed(1)}" y="${(pipCy + 3).toFixed(1)}" text-anchor="end">+${sigOverflow}<title>${sigOverflow} more signal${sigOverflow === 1 ? '' : 's'} — open Insights → Signals</title></text>`
-    : '';
-  // Segments tile the bar on the time axis at the finest grain the data allows:
-  // one sub-span per TOOL where the backend captured tool wall-clock (toolIndex
-  // set, data-ref = that tool → a click opens the tool in the drawer), else one
-  // per TURN (data-ref = the step). The bar/rowbg under them have no data-ref and
-  // fall through to selecting the whole agent. When a row has segments the
-  // lifetime bar drops to a faint rail behind them (.has-segs); a row with no
-  // timed steps (older data, or a run before its first turn) keeps the solid bar
-  // so it never looks empty.
-  // Each turn segment encodes time as width (Phase 1), now also cost as fill
-  // intensity (a per-session heat ramp) and — on wide-enough segments — its
-  // duration (and cost, when there's room) as an inline label. A segment that
-  // hit a tool error stays red and skips the heat var so error always wins the
-  // fill; the label still rides on top. Narrow segments carry no label and read
-  // by width + tint + tooltip alone, so the row never crowds.
-  const segs = r.segments || [];
-  const hasSegs = segs.length ? ' has-segs' : '';
-  const segLabelY = (barY + barH / 2 + 3).toFixed(1);
-  const steps = (agent && agent.steps) || [];
-  // The segment's share of its agent's whole runtime, for the "(xx% of agent)"
-  // clause — a fixed denominator so every segment in a row reads against the same
-  // total. Done agents report end−start; a running one counts to now.
-  const agentDurMs = agentElapsedMs(agent, Date.now());
-  // Idle/wait gaps (Phase 1b): a hatched span at each turn's trailing edge for
-  // the dead air between its last tool and the next turn, drawn BEHIND the tool
-  // segments so "where did the time go" reads at a glance. Click selects the
-  // turn. Honest-only — pre-0a turns (no gen_ms) emit none.
-  const idleHTML = (r.idleSegments || []).map(s => {
-    const idur = formatElapsed(s.durationMs);
-    const ipct = pctOfAgent(s.durationMs, agentDurMs);
-    const itip = segTooltip({ head: 'idle / wait', durText: idur, pct: ipct });
-    const isel = s.refKey === selectedRef ? ' is-selected' : '';
-    return `<rect class="tl-idle${isel}" data-ref="${escHtml(s.refKey)}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(itip)}</title></rect>`;
-  }).join('');
-  // Critical-path overlays (Phase 1c): a non-filled outline over the longest span
-  // / cost-whale turn so it never fights the segment's own fill or state stroke.
-  // Session standouts also get a ▲ above the bar (rare → loud); per-agent marks
-  // are the outline alone. pointer-events:none so the click still hits the rect.
-  const critHTML = segs.map(s => {
-    const m = crit.get(s.refKey);
-    if (!m) return '';
-    const cls = `tl-crit${m.longest ? ' is-long' : ''}${m.whale ? ' is-whale' : ''}${m.session ? ' is-session' : ''}`;
-    const outline = `<rect class="${cls}" x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2" pointer-events="none"/>`;
-    if (!m.session) return outline;
-    const what = [m.longest ? 'longest span' : '', m.whale ? 'cost whale' : ''].filter(Boolean).join(' · ');
-    const mark = `<text class="tl-crit-mark${m.whale ? ' is-whale' : ''}" x="${(s.x + s.w / 2).toFixed(1)}" y="${(barY - 2).toFixed(1)}" text-anchor="middle" pointer-events="none">▲<title>session ${escHtml(what)}</title></text>`;
-    return outline + mark;
-  }).join('');
-  const segHTML = segs.map(s => {
-    const ssel = s.refKey === selectedRef ? ' is-selected' : '';
-    const isErr = s.status === 'error';
-    const serr = isErr ? ' is-error' : '';
-    const durText = formatElapsed(s.durationMs);
-    const pct = pctOfAgent(s.durationMs, agentDurMs);
-    const step = steps[s.stepIndex] || {};
-    const tokens = agentTokens(step).total;
-    const tokensText = tokens ? `${fmtCompact(tokens)} tok` : '';
-    // Hue comes from the tool kind (or 'step' for a turn segment), reusing the
-    // same .kind-* palette as the Feed/Tree badges; cost-heat (--seg-heat) stays
-    // a secondary saturation channel and an error overrides the fill to red.
-    const kindCls = ` kind-${segKindColor(s.kind)}`;
-    // A tool sub-span (toolIndex set) leads with the tool name·detail and shows
-    // duration·tokens only — tools aren't individually priced (the heat still
-    // reflects the parent turn's cost), so a per-tool cost would mislead. A turn
-    // segment leads with "Turn N" and carries cost too. Both gain the %-of-agent
-    // and token context — richer hover, while the in-bar label stays minimal.
-    const isTool = s.toolIndex != null;
-    let tip, costText;
-    if (isTool) {
-      const tool = (step.tools || [])[s.toolIndex] || {};
-      const name = tool.name || 'tool';
-      const detail = tool.detail ? ` · ${tool.detail}` : '';
-      tip = segTooltip({ head: `${name}${detail}`, durText, pct, tokensText, isError: isErr });
-      costText = '';
-    } else {
-      costText = s.cost_usd ? fmtMoney(s.cost_usd) : '';
-      tip = segTooltip({ head: `Turn ${s.stepIndex + 1}`, durText, pct, costText, tokensText, isError: isErr });
-    }
-    const heat = isErr ? '' : ` style="--seg-heat:${costHeat(s.cost_usd, maxSegCost).toFixed(3)}"`;
-    const sjump = s.refKey === jumpFlashRef ? ' is-jumped' : '';
-    const rect = `<rect class="tl-seg${kindCls}${serr}${ssel}${sjump}" data-ref="${escHtml(s.refKey)}"${heat} x="${s.x.toFixed(1)}" y="${barY}" width="${s.w.toFixed(1)}" height="${barH}" rx="2"><title>${escHtml(tip)}</title></rect>`;
-    // Inline label: the richest of "dur · cost" / "dur" that fits the segment
-    // width; '' when too narrow. pointer-events:none keeps the click on the rect.
-    const text = fitSegmentLabel(s.w, durText, costText);
-    const label = text
-      ? `<text class="tl-seg-label" x="${(s.x + s.w / 2).toFixed(1)}" y="${segLabelY}">${escHtml(text)}</text>`
-      : '';
-    return rect + label;
-  }).join('');
-  const rjump = r.key === jumpFlashRef ? ' is-jumped' : '';
-  const cls = `tl-row ${r.kind === 'main' ? 'tl-main' : 'tl-sub'}${r.running ? ' is-running' : ''}${sel}${isNew ? ' is-new' : ''}${pending}${hasSegs}${rjump}`;
-  const meta = r.phase === 'pending' ? 'not started yet'
-    : r.running ? 'running' : `${fmtNum(r.steps)} · ${fmtMoney(r.cost_usd || 0)}`;
-  const labelY = (r.y + r.h / 2 + 4).toFixed(1);
-  const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
-    <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
-    <text class="tl-label" x="${r.labelX}" y="${labelY}">${escHtml(clip(r.label, TL_LABEL_CHARS))}</text>
-    ${errPip}
-    ${sigHTML}
-    ${moreHTML}
-    <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
-  </g>`;
-  const chart = `<g class="${cls}" data-ref="${escHtml(r.key)}" tabindex="0" role="button">
-    <rect class="tl-rowbg" x="${tl.chartX}" y="${r.y}" width="${tl.contentW - tl.chartX}" height="${r.h}"/>
-    <rect class="tl-bar" x="${r.x.toFixed(1)}" y="${barY}" width="${r.w.toFixed(1)}" height="${barH}" rx="3">
-      <title>${escHtml(r.label)} — ${escHtml(meta)}</title>
-    </rect>
-    ${idleHTML}
-    ${segHTML}
-    ${critHTML}
-    ${r.running ? `<circle class="tl-pulse" cx="${cx}" cy="${cy}" r="3.5"/>` : ''}
-  </g>`;
-  return { gutter, chart };
-}
-
-function timelineHostW() {
-  const host = document.querySelector('#view-agents .subview[data-subview="timeline"]');
-  const w = host ? host.clientWidth : 0;
-  // The Gantt now occupies only the pane to the right of the session sidebar, so
-  // discount the sidebar + drag handle (6px) from the available width — else the
-  // chart floors too wide and overflows the pane. Leave room for the session
-  // card's padding/border; clamp so the fit-width floor stays readable.
-  const rail = convSidebarWidth() + 6;
-  return Math.max(420, (w > 0 ? w : 760) - rail - 28);
-}
-
-// syncTimelineScroll applies the live-edge follow after a (re)render: a session
-// with a running agent and horizontal overflow auto-scrolls to "now" UNLESS the
-// user pinned it by scrolling into history, in which case the "● now" button is
-// revealed instead. Runs on real DOM (scroll offsets need layout).
-function syncTimelineScroll(container) {
-  container.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
-    const sid = sc.dataset.tlscroll;
-    const sess = sc.closest('.timeline-sess');
-    const overflow = sc.scrollWidth - sc.clientWidth > 2;
-    const running = !!(sess && sess.querySelector('.tl-row.is-running'));
-    const pinned = timelinePinned.get(sid) === true;
-    if (overflow && running && !pinned) sc.scrollLeft = sc.scrollWidth;
-    const jump = sess && sess.querySelector('[data-tljump]');
-    if (jump) jump.hidden = !(overflow && running && pinned);
-  });
-}
-
-// onTimelineScroll pins/un-pins a session as the user drags its Gantt: scrolled
-// off the right edge → pinned (live updates won't yank it); back at the edge →
-// un-pinned (resumes following). Toggles the "● now" button to match.
-function onTimelineScroll(e) {
-  const sc = e.target.closest && e.target.closest('.timeline-scroll[data-tlscroll]');
-  if (!sc) return;
-  const sid = sc.dataset.tlscroll;
-  const overflow = sc.scrollWidth - sc.clientWidth > 2;
-  const atEdge = sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 2;
-  timelinePinned.set(sid, overflow && !atEdge);
-  const sess = sc.closest('.timeline-sess');
-  const running = !!(sess && sess.querySelector('.tl-row.is-running'));
-  const jump = sess && sess.querySelector('[data-tljump]');
-  if (jump) jump.hidden = !(overflow && running && !atEdge);
-}
-
 // onTreeScroll stamps the user's last scroll in the tree's .itree container,
 // the signal treeFollowMode uses to pause/resume live reordering. A scroll back
 // to the very top resets the stamp so we follow again immediately rather than
@@ -2952,253 +1445,13 @@ function onTreeScroll(e) {
   lastTreeScrollAt = itree.scrollTop <= 0 ? null : Date.now();
 }
 
-// jumpToNow re-pins a session to the live edge and snaps its Gantt there.
-function jumpToNow(container, sid) {
-  const sc = container.querySelector(`.timeline-scroll[data-tlscroll="${sid}"]`);
-  if (!sc) return;
-  timelinePinned.set(sid, false);
-  sc.scrollLeft = sc.scrollWidth;
-  const sess = sc.closest('.timeline-sess');
-  const jump = sess && sess.querySelector('[data-tljump]');
-  if (jump) jump.hidden = true;
-}
-
-// ── playhead scrubber ─────────────────────────────────────────────────────
-
 // setLive resumes live mode: the playhead follows "now" and auto-advances on
 // each refetch. A full re-render rebuilds the scrubber with the thumb at the
 // right edge and every bar grown to the present.
 function setLive(container) {
-  playheadT = null;
+  setPlayheadT(null);
   renderActive(container, true);
 }
-
-// onScrub handles a drag of the range input: it parks the playhead at the picked
-// absolute instant (T = window start + slider value), drops live mode, and
-// schedules a single rAF repaint so a fast drag coalesces to one frame.
-function onScrub(container, range) {
-  const start = Number(range.dataset.tlstart);
-  playheadT = start + Number(range.value);
-  const liveBtn = container.querySelector('.tl-live');
-  if (liveBtn) liveBtn.classList.remove('is-live');
-  if (scrubRaf) return;
-  scrubRaf = requestAnimationFrame(() => { scrubRaf = 0; renderScrub(container); });
-}
-
-// repaintTimelineSessions rebuilds ONLY the .timeline-sessions inner HTML for a
-// given playhead T and returns the single-session view it plotted. It's the
-// shared single-session repaint behind both scrubbing and zooming (was inlined
-// in renderScrub): resolve the SAME session renderTimeline plotted and repaint
-// ONLY it (not every session, every frame — the scrub-perf win), preserving each
-// Gantt's horizontal scroll and re-applying the cached filter dimming. It leaves
-// the scrubber's range input alone so an in-progress drag isn't interrupted.
-function repaintTimelineSessions(container, T) {
-  const chosen = currentTimelineSession();
-  const view = chosen ? { sessions: [chosen.session] } : { sessions: [] };
-  const lensHost = container.querySelector('.subview[data-subview="timeline"]');
-  const host = container.querySelector('.timeline-sessions');
-  if (host && lensHost) {
-    const memo = captureState(lensHost);
-    host.innerHTML = renderTimelineSessions(view.sessions, Date.now(), T, chosen ? chosen.index : 0);
-    restoreState(lensHost, memo);
-    // The repaint replaced the row/segment nodes with fresh, undimmed ones; re-
-    // apply the cached filter dimming (class-only, no recompute) so it survives.
-    // is-filtering lives on the parent .agents-lens, untouched here.
-    if (filterMatchSet) dimNodes(host, filterMatchSet);
-  }
-  return view;
-}
-
-// renderScrub repaints ONLY the session Gantts + the clock/counts readout for
-// the current playhead T — preserving each Gantt's horizontal scroll so seeking
-// through time never yanks the viewport sideways.
-function renderScrub(container) {
-  const T = playheadT;
-  const view = repaintTimelineSessions(container, T);
-  const clock = container.querySelector('[data-tlclock]');
-  if (clock) clock.textContent = clockTime(T);
-  const counts = container.querySelector('[data-tlcounts]');
-  if (counts) counts.innerHTML = countsHTML(playheadStats(view, T));
-}
-
-// ── timeline zoom (scroll-wheel over the Gantt) ────────────────────────────
-
-// onTimelineWheel turns a scroll-wheel over the Gantt into a TIME-AXIS zoom.
-// Shift+wheel and horizontal-dominant (trackpad) gestures fall through to the
-// browser's native horizontal scroll — that's PAN, which the chart already does.
-// A plain vertical wheel is captured (preventDefault stops the page scrolling
-// under it); deltas accumulate and a single rAF applies the zoom so a fast
-// scroll coalesces to one repaint. No-ops gracefully off a Gantt (e.g. the
-// static report, which has no .timeline-scroll).
-function onTimelineWheel(container, e) {
-  const sc = e.target.closest && e.target.closest('.timeline-scroll[data-tlscroll]');
-  if (!sc) return;
-  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // → native pan
-  e.preventDefault();
-  const cursorX = e.clientX - sc.getBoundingClientRect().left;
-  if (zoomPending && zoomPending.sc === sc) {
-    zoomPending.deltaY += e.deltaY;
-    zoomPending.cursorX = cursorX;
-  } else {
-    zoomPending = { sc, sid: sc.dataset.tlscroll, cursorX, deltaY: e.deltaY };
-  }
-  if (zoomRaf) return;
-  zoomRaf = requestAnimationFrame(() => { zoomRaf = 0; applyTimelineZoom(container); });
-}
-
-// applyTimelineZoom consumes the pending wheel gesture: it multiplies the axis
-// density by 1.15^(-deltaY/100) (a perceptually-even step), clamps to the usable
-// range (floor = fit-to-width, ceiling = TL_MAX_PX_PER_MS), repaints the single
-// plotted Gantt at the new density, then sets the scroll offset so the timestamp
-// under the cursor stays pinned. The current density is read off the live chart
-// width (scrollWidth/span) so the first tick is responsive even from a stale
-// below-floor state (the chart renders AT the floor in that case).
-function applyTimelineZoom(container) {
-  const pending = zoomPending;
-  zoomPending = null;
-  if (!pending) return;
-  const chosen = currentTimelineSession();
-  if (!chosen) return;
-  const nowMs = Date.now();
-  const { span, chartHostW } = buildTimeline(chosen.session, { hostW: timelineHostW(), nowMs });
-  if (!(span > 0)) return; // zero-length session → no axis to zoom
-
-  const oldChartW = pending.sc.scrollWidth;
-  const viewportW = pending.sc.clientWidth;
-  const scrollLeft = pending.sc.scrollLeft;
-  const cur = oldChartW > 0 ? oldChartW / span : chartHostW / span;
-  const factor = Math.pow(1.15, -pending.deltaY / 100);
-  tlMinPxPerMs = zoomClampPxPerMs(cur * factor, { span, chartHostW, maxPxPerMs: TL_MAX_PX_PER_MS });
-
-  const bounds = playheadBounds({ sessions: [chosen.session] }, nowMs);
-  const T = playheadAt(bounds, nowMs);
-  repaintTimelineSessions(container, T);
-
-  // The repaint replaced the scroll node; re-query it and pin the cursor's
-  // timestamp by setting scrollLeft from the old/new content widths.
-  const newSc = container.querySelector(`.timeline-scroll[data-tlscroll="${cssEsc(pending.sid)}"]`);
-  if (newSc) {
-    newSc.scrollLeft = zoomAnchorScrollLeft({
-      cursorX: pending.cursorX, scrollLeft, viewportW,
-      oldChartW, newChartW: newSc.scrollWidth,
-    });
-  }
-}
-
-// onTimelineZoomReset returns the Gantt to the fit-to-width overview: it sets the
-// density to the floor (chartHostW/span) so the whole session fits with no
-// horizontal scroll — the double-click escape hatch from a deep zoom.
-function onTimelineZoomReset(container) {
-  const chosen = currentTimelineSession();
-  if (!chosen) return;
-  const nowMs = Date.now();
-  const { span, chartHostW } = buildTimeline(chosen.session, { hostW: timelineHostW(), nowMs });
-  if (!(span > 0)) return;
-  tlMinPxPerMs = chartHostW / span;
-  const bounds = playheadBounds({ sessions: [chosen.session] }, nowMs);
-  repaintTimelineSessions(container, playheadAt(bounds, nowMs));
-}
-
-// ── preserve scroll / open-rows across a live re-render ────────────────────
-
-function captureState(host) {
-  const m = { scrolls: {}, tlScroll: {}, nodes: {} };
-  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar, .tl-sidebar').forEach(el => {
-    m.scrolls[scrollKey(el)] = el.scrollTop;
-  });
-  // Per-session horizontal Gantt offset, so a live update that rebuilds the SVG
-  // doesn't reset a user who scrolled into history (syncTimelineScroll then
-  // overrides only the sessions still following the live edge).
-  host.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
-    m.tlScroll[sc.dataset.tlscroll] = sc.scrollLeft;
-  });
-  // Tree lens session groups default open and the user can collapse them, so
-  // snapshot EXACT open-state (must also be re-closed). Agent nodes need no
-  // snapshot — openAgentBodies drives their open state and lazy body, so
-  // renderInspector already reproduces them on a re-render.
-  host.querySelectorAll('details.itree-sess[data-skey]').forEach(d => { m.nodes[`s:${d.dataset.skey}`] = d.open; });
-  // Tree anchor: when scrolled into the list, pin a specific row across the
-  // re-render so it stays put even if the session order shifts around it. The
-  // plain scrollTop restore alone would keep the SAME pixel offset over now-
-  // different content → a visible jump.
-  if (activeSub === 'tree') {
-    const itree = host.querySelector('.itree');
-    if (itree && itree.scrollTop > 0) m.treeAnchor = captureTreeAnchor(itree);
-  }
-  return m;
-}
-
-// captureTreeAnchor picks the row to hold steady across a tree re-render and
-// records its id plus its current offset from the .itree scroll container's
-// top. Prefers the selected row when it's on screen (that's what the user is
-// reading); otherwise the topmost row that starts within the viewport. Returns
-// null when no stable-id row is visible. Anchor ids are namespaced 'ref:'
-// (a step/tool/agent row) or 'skey:' (a session group).
-function captureTreeAnchor(itree) {
-  const cTop = itree.getBoundingClientRect().top;
-  const cBottom = cTop + itree.clientHeight;
-  const offsetOf = el => el.getBoundingClientRect().top - cTop;
-  const idOf = el => el.dataset.ref ? `ref:${el.dataset.ref}` : (el.dataset.skey ? `skey:${el.dataset.skey}` : null);
-  const visible = el => { const t = el.getBoundingClientRect().top; return t < cBottom && el.getBoundingClientRect().bottom > cTop; };
-
-  const sel = itree.querySelector('[data-ref].is-selected, .is-selected[data-ref]');
-  if (sel && visible(sel)) {
-    const id = idOf(sel);
-    if (id) return { id, offset: offsetOf(sel) };
-  }
-  // Topmost row that begins at/below the container top — the first thing whose
-  // top edge the user can see. Session <details> are tall, so we lean on the
-  // row elements (data-ref) and fall back to the session summary's data-skey.
-  const rows = itree.querySelectorAll('.itree-agent-row[data-ref], .insp-step-head[data-ref], .tr[data-ref], details.itree-sess[data-skey]');
-  for (const el of rows) {
-    const top = el.getBoundingClientRect().top;
-    if (top >= cTop - 1 && top < cBottom) {
-      const id = idOf(el);
-      if (id) return { id, offset: top - cTop };
-    }
-  }
-  return null;
-}
-
-function restoreState(host, m) {
-  host.querySelectorAll('.agent-feed, .itree, .timeline-lens, .conv, .conv-sidebar, .tl-sidebar').forEach(el => {
-    const v = m.scrolls[scrollKey(el)];
-    if (v != null) el.scrollTop = v;
-  });
-  host.querySelectorAll('.timeline-scroll[data-tlscroll]').forEach(sc => {
-    const v = m.tlScroll[sc.dataset.tlscroll];
-    if (v != null) sc.scrollLeft = v;
-  });
-  if (m.nodes) {
-    host.querySelectorAll('details.itree-sess[data-skey]').forEach(d => {
-      const v = m.nodes[`s:${d.dataset.skey}`]; if (v != null) d.open = v;
-    });
-  }
-  // Re-pin the anchored row last: the scrollTop restore above lands us roughly
-  // right, then we nudge so the anchor sits at exactly its old offset — even if
-  // the order (and thus what's above it) changed. Falls through to the plain
-  // restore when the row vanished or none was captured.
-  if (m.treeAnchor && activeSub === 'tree') {
-    const itree = host.querySelector('.itree');
-    if (itree) applyTreeAnchor(itree, m.treeAnchor);
-  }
-}
-
-// applyTreeAnchor adjusts the .itree scrollTop so the anchored row sits at its
-// captured offset again. The delta is (current offset − saved offset): a no-op
-// when nothing above it moved, a correction when the order shifted.
-function applyTreeAnchor(itree, anchor) {
-  const sel = anchor.id.startsWith('ref:')
-    ? `[data-ref="${cssEsc(anchor.id.slice(4))}"]`
-    : `details.itree-sess[data-skey="${cssEsc(anchor.id.slice(5))}"]`;
-  const el = itree.querySelector(sel);
-  if (!el) return;
-  const cTop = itree.getBoundingClientRect().top;
-  const newOffset = el.getBoundingClientRect().top - cTop;
-  itree.scrollTop += newOffset - anchor.offset;
-}
-
-const scrollKey = el => el.className.split(' ').find(c => /feed|itree|timeline-lens|conv/.test(c)) || el.className;
 
 // ── nav metric + small formatters ────────────────────────────────────────
 
@@ -3214,23 +1467,4 @@ function updateNavMetric(stats) {
     ? `${fmtNum(stats.agents)} · ${fmtNum(stats.running)} live`
     : `${fmtNum(stats.agents)} agents`;
   el.title = `${stats.agents} agents across ${stats.sessions} session${stats.sessions === 1 ? '' : 's'}${stats.running > 0 ? `; ${stats.running} running now` : ''}`;
-}
-
-function clockTime(ms) {
-  const d = new Date(ms);
-  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour12: false });
-}
-
-function shortId(id) {
-  const s = String(id || '');
-  return s.length > 8 ? s.slice(0, 8) : s;
-}
-
-function shortModel(m) {
-  return String(m || '').replace(/^claude-/, '').replace(/-\d{8}$/, '');
-}
-
-function clip(s, n) {
-  const str = String(s == null ? '' : s);
-  return str.length > n ? str.slice(0, n - 1) + '…' : str;
 }
