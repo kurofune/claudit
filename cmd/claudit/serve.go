@@ -67,6 +67,10 @@ func runServe(args []string) error {
 	if *port < 1 || *port > 65535 {
 		return fmt.Errorf("--port: must be 1..65535, got %d", *port)
 	}
+	listenAddr, err := bindListenAddr(*bind, *port)
+	if err != nil {
+		return err
+	}
 	period := aggregate.Period(*by)
 	switch *by {
 	case "off":
@@ -93,7 +97,7 @@ func runServe(args []string) error {
 
 	cache := serve.NewCache(*root)
 	srv := serve.NewServer(cache, serve.Options{
-		Bind:               fmt.Sprintf("%s:%d", *bind, *port),
+		Bind:               listenAddr,
 		Prices:             prices,
 		PollInterval:       time.Duration(*pollMS) * time.Millisecond,
 		DefaultLast:        defaultLast,
@@ -135,6 +139,25 @@ func runServe(args []string) error {
 	return srv.ListenAndServe(ctx)
 }
 
+// bindListenAddr validates that bind is a host without a port and
+// returns the listen address composed with port. IPv6 literals like
+// "::1" or "[::1]" are hosts, not host:port pairs — net.SplitHostPort
+// fails on both, which is exactly the "no port present" signal we want.
+func bindListenAddr(bind string, port int) (string, error) {
+	if _, _, err := net.SplitHostPort(bind); err == nil {
+		return "", fmt.Errorf("--bind takes a host only (got %q); use --port to set the port", bind)
+	}
+	// Un-bracket "[::1]" so JoinHostPort (which adds brackets to any
+	// host containing a colon) doesn't double-wrap it.
+	return net.JoinHostPort(trimIPv6Brackets(bind), strconv.Itoa(port)), nil
+}
+
+// trimIPv6Brackets strips one layer of "[...]" from a bracketed IPv6
+// literal, leaving other hosts untouched.
+func trimIPv6Brackets(host string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+}
+
 // isNonLoopbackBind reports whether bind addresses something other
 // than the loopback interface — the trigger for the LAN-exposure
 // warning printed at startup.
@@ -142,7 +165,7 @@ func isNonLoopbackBind(bind string) bool {
 	if bind == "" {
 		return true
 	}
-	host := strings.TrimSuffix(strings.TrimPrefix(bind, "["), "]")
+	host := trimIPv6Brackets(bind)
 	if strings.EqualFold(host, "localhost") {
 		return false
 	}
