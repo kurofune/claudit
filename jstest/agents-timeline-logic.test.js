@@ -16,6 +16,7 @@ import {
   idleSegments,
   laneCount,
   makeTimeScale,
+  narrativeStrip,
   packLanes,
   pctOfAgent,
   pickTimelineSid,
@@ -1641,4 +1642,243 @@ test('promptBands clamps a pre-window prompt to the chart left edge', () => {
 test('criticalSpans tolerates a null / non-array argument', () => {
   assert.deepEqual(criticalSpans(null), { session: {}, agents: {} });
   assert.deepEqual(criticalSpans([]), { session: {}, agents: {} });
+});
+
+// ── narrativeStrip ──────────────────────────────────────────────────
+test('narrativeStrip: null / main-less / step-less session yields []', () => {
+  assert.deepEqual(narrativeStrip(null), []);
+  assert.deepEqual(narrativeStrip({ session_id: 's', main: null, children: [], prompts: [] }), []);
+  assert.deepEqual(narrativeStrip({
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 10, steps: [] },
+    children: [], prompts: [],
+  }), []);
+});
+
+test('narrativeStrip: steps but no prompt markers → one orphan segment over all of them', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 4000, cost_usd: 0, tools: [{ kind: 'read' }, { kind: 'exec' }] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [{ kind: 'edit' }] },
+    ] },
+    children: [], prompts: [],
+  };
+  const rows = narrativeStrip(session);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].uuid, '');
+  assert.equal(rows[0].text, '');
+  assert.equal(rows[0].turnCount, 2);
+  assert.equal(rows[0].toolCount, 3);
+  assert.deepEqual(rows[0].agents, []);
+});
+
+test('narrativeStrip: two prompts split turn/tool counts at the first_step_index boundary', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 2000, cost_usd: 0, tools: [{ kind: 'read' }] },
+      { timestamp: 2000, duration_ms: 2000, cost_usd: 0, tools: [] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [{ kind: 'edit' }, { kind: 'exec' }] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'p1', text: 'first ask', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'second ask', timestamp: 3900, first_step_index: 2 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].uuid, 'p1');
+  assert.equal(rows[0].text, 'first ask');
+  assert.equal(rows[0].turnCount, 2);
+  assert.equal(rows[0].toolCount, 1);
+  assert.equal(rows[1].uuid, 'p2');
+  assert.equal(rows[1].turnCount, 1);
+  assert.equal(rows[1].toolCount, 2);
+});
+
+test('narrativeStrip: segment windows tile [first step … main end] and durationMs = end - start', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 2000, cost_usd: 0, tools: [] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 1 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  assert.equal(rows[0].startMs, 0);      // its first step's timestamp
+  assert.equal(rows[0].endMs, 4000);     // next segment's start
+  assert.equal(rows[0].durationMs, 4000);
+  assert.equal(rows[1].startMs, 4000);
+  assert.equal(rows[1].endMs, 9000);     // main's ended_at
+  assert.equal(rows[1].durationMs, 5000);
+});
+
+test('narrativeStrip: a running main leaves the last segment open-ended to the injected nowMs', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'running', started_at: 0, ended_at: '', steps: [
+      { timestamp: 1000, duration_ms: 0, cost_usd: 0, tools: [] },
+    ] },
+    children: [],
+    prompts: [{ uuid: 'p1', text: 'go', timestamp: 1000, first_step_index: 0 }],
+  };
+  const rows = narrativeStrip(session, { nowMs: 60_000 });
+  assert.equal(rows[0].startMs, 1000);
+  assert.equal(rows[0].endMs, 60_000);
+  assert.equal(rows[0].durationMs, 59_000);
+});
+
+test('narrativeStrip: costUsd sums the main agent step costs inside each segment', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 2000, cost_usd: 0.01, tools: [] },
+      { timestamp: 2000, duration_ms: 2000, cost_usd: 0.02, tools: [] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0.04, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 2 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  assert.ok(Math.abs(rows[0].costUsd - 0.03) < 1e-9);
+  assert.ok(Math.abs(rows[1].costUsd - 0.04) < 1e-9);
+});
+
+test('narrativeStrip: a sub-agent spawned from a segment turn is that segment\'s chip and rolls in whole-agent', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      // p1's only turn spawns the sub-agent via tool id 'spawn-1'.
+      { timestamp: 0, duration_ms: 4000, cost_usd: 0.01, tools: [{ id: 'spawn-1', kind: 'agent' }] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0.02, tools: [] },
+    ] },
+    children: [{
+      kind: 'subagent', agent_type: 'Explore', parent_tool_use_id: 'spawn-1',
+      status: 'done', started_at: 100, ended_at: 3500, error_count: 0,
+      steps: [
+        { timestamp: 200, duration_ms: 1000, cost_usd: 0.10, tools: [{ kind: 'read' }, { kind: 'read' }] },
+        { timestamp: 1200, duration_ms: 2000, cost_usd: 0.20, tools: [{ kind: 'exec' }] },
+      ],
+    }],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 1 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  // Segment 1: 1 main turn + 2 sub-agent turns, 1 main tool + 3 sub-agent tools,
+  // cost = 0.01 main + 0.30 whole sub-agent.
+  assert.equal(rows[0].turnCount, 3);
+  assert.equal(rows[0].toolCount, 4);
+  assert.ok(Math.abs(rows[0].costUsd - 0.31) < 1e-9);
+  assert.deepEqual(rows[0].agents, [{ agentIndex: 1, label: 'Explore', ok: true }]);
+  // Segment 2 is untouched by the sub-agent.
+  assert.equal(rows[1].turnCount, 1);
+  assert.equal(rows[1].toolCount, 0);
+  assert.ok(Math.abs(rows[1].costUsd - 0.02) < 1e-9);
+  assert.deepEqual(rows[1].agents, []);
+});
+
+test('narrativeStrip: a nested sub-agent attributes to the segment that spawned its root parent', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 4000, cost_usd: 0, tools: [{ id: 'spawn-1', kind: 'agent' }] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [] },
+    ] },
+    children: [
+      { kind: 'subagent', agent_type: 'parent', parent_tool_use_id: 'spawn-1',
+        status: 'done', started_at: 100, ended_at: 3500, error_count: 0,
+        steps: [{ timestamp: 200, duration_ms: 500, cost_usd: 0.10, tools: [{ id: 'spawn-2', kind: 'agent' }] }] },
+      { kind: 'subagent', agent_type: 'child', parent_tool_use_id: 'spawn-2',
+        status: 'done', started_at: 300, ended_at: 3000, error_count: 0,
+        steps: [{ timestamp: 400, duration_ms: 500, cost_usd: 0.05, tools: [{ kind: 'read' }] }] },
+    ],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 1 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  assert.deepEqual(rows[0].agents.map(c => c.agentIndex), [1, 2]);
+  assert.equal(rows[0].turnCount, 3);   // 1 main + 1 parent + 1 child
+  assert.equal(rows[0].toolCount, 3);   // spawn-1 + spawn-2 + read
+  assert.ok(Math.abs(rows[0].costUsd - 0.15) < 1e-9);
+  assert.deepEqual(rows[1].agents, []);
+});
+
+test('narrativeStrip: chip ok=false when the agent error_count > 0, true when clean', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 9000, cost_usd: 0, tools: [
+        { id: 'spawn-1', kind: 'agent' }, { id: 'spawn-2', kind: 'agent' },
+      ] },
+    ] },
+    children: [
+      { kind: 'subagent', agent_type: 'clean', parent_tool_use_id: 'spawn-1',
+        status: 'done', started_at: 100, ended_at: 3000, error_count: 0, steps: [] },
+      { kind: 'subagent', agent_type: 'broken', parent_tool_use_id: 'spawn-2',
+        status: 'done', started_at: 200, ended_at: 4000, error_count: 2, steps: [] },
+    ],
+    prompts: [{ uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 }],
+  };
+  const rows = narrativeStrip(session);
+  assert.deepEqual(rows[0].agents, [
+    { agentIndex: 1, label: 'clean', ok: true },
+    { agentIndex: 2, label: 'broken', ok: false },
+  ]);
+});
+
+test('narrativeStrip: an unresolvable spawn falls back to the segment containing its start time', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 4000, cost_usd: 0, tools: [] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [] },
+    ] },
+    children: [
+      // No parent_tool_use_id → timelineRowOrder can't resolve the spawn;
+      // started_at 5000 lands inside the second segment [4000, 9000).
+      { kind: 'subagent', agent_type: 'orphan', status: 'done',
+        started_at: 5000, ended_at: 6000, error_count: 0,
+        steps: [{ timestamp: 5100, duration_ms: 500, cost_usd: 0.07, tools: [{ kind: 'read' }] }] },
+    ],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 1 },
+    ],
+  };
+  const rows = narrativeStrip(session);
+  assert.deepEqual(rows[0].agents, []);
+  assert.deepEqual(rows[1].agents, [{ agentIndex: 1, label: 'orphan', ok: true }]);
+  assert.equal(rows[1].turnCount, 2);
+  assert.equal(rows[1].toolCount, 1);
+  assert.ok(Math.abs(rows[1].costUsd - 0.07) < 1e-9);
+});
+
+test('narrativeStrip: rows carry firstStepIndex (the promptBands join key)', () => {
+  const session = {
+    session_id: 's',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 9000, steps: [
+      { timestamp: 0, duration_ms: 4000, cost_usd: 0, tools: [] },
+      { timestamp: 4000, duration_ms: 5000, cost_usd: 0, tools: [] },
+    ] },
+    children: [],
+    prompts: [
+      { uuid: 'p1', text: 'a', timestamp: 0, first_step_index: 0 },
+      { uuid: 'p2', text: 'b', timestamp: 3900, first_step_index: 1 },
+    ],
+  };
+  assert.deepEqual(narrativeStrip(session).map(r => r.firstStepIndex), [0, 1]);
 });

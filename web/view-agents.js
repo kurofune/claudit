@@ -56,7 +56,7 @@ import {
 import {
   renderTimeline, currentTimelineSession, syncTimelineScroll,
   onTimelineScroll, jumpToNow, onScrub, onTimelineWheel, onTimelineZoomReset,
-  onTimelineDisclose,
+  onTimelineDisclose, onNarrativeNav,
 } from './agents-timeline.js';
 import { renderDrawer, loadFull, loadFullTurn } from './agents-drawer.js';
 import {
@@ -405,6 +405,11 @@ function wireSelection(container) {
       // plotted (independent of the drawer selection).
       const tlSess = e.target.closest('[data-tl-sess]');
       if (tlSess) { pickTimeline(container, tlSess.dataset.tlSess); return; }
+      // A narrative-strip row scrolls the Gantt to its prompt's band and
+      // flashes it — pure navigation, never a selection. (Rows are <button>s,
+      // so Enter routes here through the native click.)
+      const tlNav = e.target.closest('[data-tlnav]');
+      if (tlNav) { onNarrativeNav(container, tlNav); return; }
       // The Timeline's disclosure caret expands/collapses an agent row to its
       // turn band — a pure lens repaint, never a selection.
       const tlDisc = e.target.closest('[data-tltoggle]');

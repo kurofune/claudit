@@ -2860,6 +2860,41 @@
   /* Spawn connectors (item 14b): the elbow from a parent row's bar lane down to
      the sub-agent row it spawned. Behind the rows; never intercepts clicks. */
   .tl-elbow { fill: none; stroke: color-mix(in oklch, var(--accent) 45%, var(--border)); stroke-width: 1.25; pointer-events: none; }
+  /* Session narrative strip (item 15): the per-prompt outline above the Gantt.
+     One button row per prompt segment; a click jumps/flashes its band below. */
+  .tl-nstrip { display: flex; flex-direction: column; gap: 1px; margin: var(--s-2) 0; }
+  .tl-nstrip-row { display: flex; align-items: center; gap: var(--s-3); width: 100%;
+    appearance: none; text-align: left; background: transparent; cursor: pointer;
+    border: 1px solid transparent; border-radius: var(--r-sm); padding: 2px var(--s-2);
+    font: inherit; font-size: var(--t-1); color: var(--ink-2); line-height: 1.5; }
+  .tl-nstrip-row:hover { background: color-mix(in oklch, var(--accent) 7%, transparent); border-color: var(--border); }
+  .tl-nstrip-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .tl-nstrip-idx { color: var(--ink-2); font-family: var(--font-mono);
+    min-width: 1.4em; text-align: right; opacity: 0.7; flex: none; }
+  /* The prompt snippet is the row's primary content: when the pane narrows the
+     chip rail shrinks away first (flex-shrink 4 vs 1) and the snippet keeps a
+     readable floor before it starts to ellipsize. */
+  .tl-nstrip-text { color: var(--ink); font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 12ch; }
+  .tl-nstrip-agents { display: inline-flex; flex-wrap: nowrap; gap: var(--s-2);
+    flex: 0 4 auto; min-width: 0; overflow: hidden; }
+  .tl-nstrip-agents:not(:empty) { min-width: 8ch; }
+  .tl-nstrip-agent { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap;
+    border: 1px solid var(--border); border-radius: 999px; padding: 0 6px;
+    color: var(--ok, var(--accent-2)); }
+  .tl-nstrip-agent.is-err { color: var(--danger, #e5484d); border-color: color-mix(in oklch, var(--danger, #e5484d) 45%, var(--border)); }
+  .tl-nstrip-agent.is-more { color: var(--ink-2); }
+  .tl-nstrip-counts, .tl-nstrip-dur, .tl-nstrip-cost { flex: none; white-space: nowrap;
+    font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  .tl-nstrip-counts { margin-left: auto; }
+  .tl-nstrip-cost { font-weight: 600; }
+  /* Click-to-navigate flash: the target band pulses once, then settles back to
+     its usual wash (only the from-frame is keyed, so it animates home). */
+  .tl-pband.is-flash rect { animation: tl-pband-flash 1.5s ease-out; }
+  @keyframes tl-pband-flash {
+    from { fill: color-mix(in oklch, var(--accent) 30%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) { .tl-pband.is-flash rect { animation: none; } }
 
   /* ─── Insights lens (Phase 2) ─────────────────────────────────────────
      A pure-aggregation dashboard on the Agents tab. No drawer (full-width

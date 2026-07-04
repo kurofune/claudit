@@ -10,7 +10,7 @@ import {
   flattenSession, agentTokens, agentElapsedMs, formatElapsed, baseName,
   refKey, parseRefKey, resolveRef, sessionStats, timelineSessionList, pickTimelineSid,
   playheadBounds, playheadStats, timelineAtTime, buildTimeline, timelineKinds,
-  makeTimeScale, promptBands,
+  makeTimeScale, promptBands, narrativeStrip,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip,
   criticalSpans, detectSignals, signalPipsByAgent,
   zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
@@ -345,6 +345,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
       <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>
     <div class="timeline-sess-sum">${timelineSummaryHTML(sessionStats(session, nowMs))}</div>
+    ${narrativeStripHTML(session, nowMs)}
     <div class="timeline-body">
       <svg class="timeline-gutter" viewBox="0 0 ${gutterW} ${tl.height}" width="${gutterW}" height="${tl.height}" role="img" aria-label="Agent labels">
         <g class="tl-rows">${gutterRows}</g>
@@ -380,13 +381,82 @@ function promptBandsHTML(session, tl) {
     const labelEl = label
       ? `<text class="tl-pband-label" x="${(b.x + 4).toFixed(1)}" y="12" pointer-events="none">${escHtml(label)}</text>`
       : '';
-    return `<g class="tl-pband${i % 2 ? ' is-alt' : ''}">
+    return `<g class="tl-pband${i % 2 ? ' is-alt' : ''}" data-pband="${b.firstStepIndex}">
       <rect x="${b.x.toFixed(1)}" y="0" width="${b.w.toFixed(1)}" height="${tl.height}"><title>${escHtml(tip)}</title></rect>
       <line x1="${b.x.toFixed(1)}" y1="0" x2="${b.x.toFixed(1)}" y2="${tl.height}"/>
       ${labelEl}
     </g>`;
   }).join('');
   return `<g class="tl-pbands" aria-label="Prompt segments">${inner}</g>`;
+}
+
+// narrativeStripHTML renders the session narrative strip (Phase-3 item 15): a
+// compact per-prompt outline ABOVE the Gantt — one button row per prompt
+// segment showing the prompt snippet, the segment's turn/tool counts, the
+// sub-agents it spawned (✓/✗ by error_count), its duration, and its cost.
+// All numbers come from the pure, tested narrativeStrip; this only formats.
+// Each row carries data-tlnav (the segment's firstStepIndex — promptBands'
+// band key) + data-tlnav-start (its startMs) so a click scrolls the waterfall
+// to that prompt's band and flashes it (onNarrativeNav). Rows are <button>s,
+// so they're focusable and Enter activates natively.
+const TL_NSTRIP_CHARS = 60;
+const TL_NSTRIP_CHIPS = 4;
+function narrativeStripHTML(session, nowMs) {
+  const rows = narrativeStrip(session, { nowMs });
+  if (rows.length === 0) return '';
+  const items = rows.map((r, i) => {
+    const text = r.text || '(no prompt)';
+    // Chips cap at TL_NSTRIP_CHIPS, worst-first (✗ before ✓ — same triage-first
+    // idiom as the gutter's signal pips), with a "+N" overflow tail; the full
+    // roster lives in the Gantt rows below.
+    const byOutcome = [...r.agents].sort((a, b) => (a.ok ? 1 : 0) - (b.ok ? 1 : 0));
+    const extra = Math.max(0, byOutcome.length - TL_NSTRIP_CHIPS);
+    const chips = byOutcome.slice(0, TL_NSTRIP_CHIPS).map(c =>
+      `<span class="tl-nstrip-agent${c.ok ? '' : ' is-err'}" title="${escHtml(c.label)} — ${c.ok ? 'no tool errors' : 'had tool errors'}">${c.ok ? '✓' : '✗'} ${escHtml(clip(c.label, 18))}</span>`).join('')
+      + (extra ? `<span class="tl-nstrip-agent is-more" title="${extra} more agent${extra === 1 ? '' : 's'} in this segment">+${extra}</span>` : '');
+    return `<button type="button" class="tl-nstrip-row" data-tlnav="${r.firstStepIndex}" data-tlnav-start="${r.startMs}" title="${escHtml(clip(text, 300))} — click to jump the waterfall to this prompt">
+      <span class="tl-nstrip-idx">${i + 1}</span>
+      <span class="tl-nstrip-text">${escHtml(clip(text, TL_NSTRIP_CHARS))}</span>
+      <span class="tl-nstrip-agents">${chips}</span>
+      <span class="tl-nstrip-counts" title="turns · tool calls in this segment (spawned sub-agents included)">💬 ${fmtNum(r.turnCount)} · 🛠️ ${fmtNum(r.toolCount)}</span>
+      <span class="tl-nstrip-dur" title="segment duration">${escHtml(formatElapsed(r.durationMs))}</span>
+      <span class="tl-nstrip-cost" title="segment cost (spawned sub-agents included)">${escHtml(fmtMoney(r.costUsd))}</span>
+    </button>`;
+  }).join('');
+  return `<div class="tl-nstrip" aria-label="Session narrative — one row per prompt">${items}</div>`;
+}
+
+// onNarrativeNav handles a narrative-strip row click: it scrolls the plotted
+// session's waterfall so the segment's prompt band starts near the left edge
+// (at the CURRENT zoom density — the geometry is rebuilt with the same opts
+// the render used) and flashes the band. The programmatic scroll fires the
+// normal scroll event, so the live-follow pin logic (onTimelineScroll) engages
+// exactly as if the user had panned there by hand.
+export function onNarrativeNav(container, btn) {
+  const startMs = Number(btn.dataset.tlnavStart);
+  const chosen = currentTimelineSession();
+  if (!chosen || !Number.isFinite(startMs)) return;
+  const sid = chosen.session.session_id || '';
+  const sc = container.querySelector(`.timeline-scroll[data-tlscroll="${cssEsc(sid)}"]`);
+  if (!sc) return;
+  const hasPrompts = Array.isArray(chosen.session.prompts) && chosen.session.prompts.length > 0;
+  const tl = buildTimeline(chosen.session, {
+    hostW: timelineHostW(), nowMs: Date.now(), minPxPerMs: tlMinPxPerMs ?? undefined,
+    rowH: TL_ROW_H, labelW: TL_LABEL_W, axisH: hasPrompts ? TL_AXIS_PROMPT_H : 20,
+    expanded: tlExpanded,
+  });
+  if (Number.isNaN(tl.startMs)) return;
+  const scale = makeTimeScale({ startMs: tl.startMs, endMs: tl.endMs, width: tl.chartW, minBlock: 3 });
+  // Band x within the scrolling content is scale.x(startMs) (the svg viewBox
+  // already starts at chartX); back off a few px so the boundary line shows.
+  sc.scrollTo({ left: Math.max(0, scale.x(startMs) - 12), behavior: 'smooth' });
+  const band = sc.querySelector(`.tl-pband[data-pband="${cssEsc(btn.dataset.tlnav || '')}"]`);
+  if (band) {
+    band.classList.remove('is-flash');
+    void band.getBoundingClientRect(); // restart the CSS animation on re-click
+    band.classList.add('is-flash');
+    setTimeout(() => band.classList.remove('is-flash'), 1600);
+  }
 }
 
 // timelineRowHTML splits one agent row into two synchronized <g>s: a `gutter`

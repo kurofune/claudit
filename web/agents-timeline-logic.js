@@ -8,6 +8,7 @@ import {
   agentLabel, agentSpan, agentTokens, flattenSession,
   parseRefKey, parseTime, refKey,
 } from './agents-model.js';
+import { conversationSegments } from './agents-conversation-logic.js';
 
 /** @import { AgentGraph, AgentSession, AgentNode, AgentStep } from './api-types.js' */
 
@@ -587,6 +588,123 @@ export function promptBands(session, opts = {}) {
     const x = chartX + scale.x(it.start);
     const w = Math.max(0, chartX + scale.x(end) - x);
     return { uuid: it.uuid, text: it.text, x, w, firstStepIndex: it.firstStepIndex };
+  });
+}
+
+// narrativeStrip rolls a session up to the per-prompt outline the Timeline
+// renders above the Gantt: one row per prompt segment (conversationSegments'
+// slicing, so segment boundaries are exactly the Conversation lens's —
+// prompt i's turns are main.steps[first_step_index_i, first_step_index_i+1);
+// a session with steps but no markers degrades to one orphan (uuid '') row).
+//
+// Time window: a segment starts at its first turn's timestamp (falling back
+// to the prompt marker's own) and ends where the next segment starts; the
+// last segment ends at the main agent's ended_at, or at the injected nowMs
+// while the main agent is still running (no Date.now() here — callers pass it).
+//
+// INCLUSION RULE — a sub-agent belongs WHOLLY to the segment that spawned it:
+// each agent's spawn chain (timelineRowOrder's spawn metadata, i.e. the
+// parent_tool_use_id links item 14 re-parents rows by) is walked up to the
+// main agent, and the main-agent stepIndex where the chain anchors picks the
+// segment — nested sub-agents therefore attribute to their ROOT spawning
+// prompt. turnCount/toolCount/costUsd sum the segment's main-agent steps plus
+// EVERY step of its attributed sub-agents (whole-agent, even where a
+// sub-agent outlives the segment window — its work answers that prompt).
+// An agent whose spawn can't be resolved falls back to time containment: the
+// segment whose [startMs, next startMs) window holds its started_at (clamped
+// to the first segment when earlier, the last when later/unparseable).
+//
+// OUTCOME RULE — a chip is ✗ (ok:false) iff the agent's error_count > 0:
+// error_count is the backend's whole-agent rollup of failed tools, the same
+// source the Gantt gutter's err-pip reads, so the strip and the waterfall
+// can never disagree; a last-step-status heuristic would also miss mid-run
+// failures the agent recovered from, which the audit still wants surfaced.
+/**
+ * @param {AgentSession|null|undefined} session
+ * @param {{nowMs?: number}} [opts]
+ * @returns {{uuid: string, text: string, firstStepIndex: number, startMs: number,
+ *   endMs: number, durationMs: number, turnCount: number, toolCount: number,
+ *   costUsd: number, agents: {agentIndex: number, label: string, ok: boolean}[]}[]}
+ */
+export function narrativeStrip(session, opts = {}) {
+  const segments = conversationSegments(session);
+  if (segments.length === 0) return [];
+  const main = session && session.main;
+  // Each segment starts at its first step's timestamp (falling back to the
+  // prompt marker's own timestamp) and ends where the next one starts; the
+  // last ends at the main agent's end.
+  const starts = segments.map(seg => {
+    const t = parseTime(seg.steps[0] && seg.steps[0].timestamp);
+    return Number.isNaN(t) ? parseTime(seg.timestamp) : t;
+  });
+  const { nowMs = 0 } = opts;
+  const mainEnd = main && main.status === 'running'
+    ? nowMs
+    : parseTime(main && main.ended_at);
+
+  // Sub-agent attribution: walk each agent's spawn chain (timelineRowOrder's
+  // spawn metadata) up to the main agent; the main-agent stepIndex where the
+  // chain anchors picks the segment. The whole agent belongs to that segment.
+  const agents = flattenSession(session);
+  const spawnByAgent = new Map(timelineRowOrder(session).map(e => [e.agentIndex, e.spawn]));
+  const segOfStep = stepIndex => {
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (stepIndex >= segments[i].firstStepIndex) return i;
+    }
+    return 0; // a pre-first-marker turn clamps into the first segment
+  };
+  const subsOf = segments.map(() => /** @type {number[]} */ ([]));
+  agents.forEach((a, ai) => {
+    if (!a || a.kind === 'main') return;
+    // Walk to the root: main (agentIndex 0) anchors the segment.
+    let loc = spawnByAgent.get(ai) || null;
+    const seen = new Set([ai]);
+    while (loc && loc.agentIndex !== 0 && !seen.has(loc.agentIndex)) {
+      seen.add(loc.agentIndex);
+      loc = spawnByAgent.get(loc.agentIndex) || null;
+    }
+    if (loc && loc.agentIndex === 0) { subsOf[segOfStep(loc.stepIndex)].push(ai); return; }
+    // Unresolved spawn (no/dangling parent_tool_use_id, or a cycle): fall back
+    // to time containment — the segment whose window holds the agent's start.
+    // A start before the first window clamps to segment 0; a NaN/late start
+    // lands in the last (findIndex misses → segments.length - 1).
+    const start = parseTime(a.started_at);
+    let idx = segments.length - 1;
+    for (let i = 0; i < segments.length; i++) {
+      const hi = i + 1 < segments.length ? starts[i + 1] : Infinity;
+      if (start < hi) { idx = i; break; }
+    }
+    subsOf[idx].push(ai);
+  });
+
+  return segments.map((seg, i) => {
+    const startMs = starts[i];
+    const endMs = i + 1 < segments.length ? starts[i + 1] : mainEnd;
+    let turnCount = seg.steps.length, toolCount = 0, costUsd = 0;
+    for (const step of seg.steps) {
+      toolCount += ((step && step.tools) || []).length;
+      costUsd += (step && step.cost_usd) || 0;
+    }
+    const chips = subsOf[i].map(ai => {
+      const a = agents[ai];
+      for (const step of ((a && a.steps) || [])) {
+        turnCount++;
+        toolCount += ((step && step.tools) || []).length;
+        costUsd += (step && step.cost_usd) || 0;
+      }
+      return { agentIndex: ai, label: agentLabel(a), ok: !((a && a.error_count) > 0) };
+    });
+    return {
+      uuid: seg.uuid,
+      text: seg.text,
+      firstStepIndex: seg.firstStepIndex,
+      startMs, endMs,
+      durationMs: Math.max(0, endMs - startMs),
+      turnCount,
+      toolCount,
+      costUsd,
+      agents: chips,
+    };
   });
 }
 
