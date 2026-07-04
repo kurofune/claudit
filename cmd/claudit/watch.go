@@ -194,6 +194,22 @@ type watchState struct {
 	budgetAlerted bool
 	sessionID     string
 	cwd           string
+
+	// Rolling-panel memo (guarded by mu, like the fields above).
+	// RollingTotals walks every turn in the corpus and allocates a
+	// corpus-sized dedup map, so recomputing it on every 1s repaint is
+	// wasteful when nothing changed. Keyed on (snapshot generation,
+	// minute stamp): see rollingTotals for the trade-off.
+	rolling rollingMemo
+}
+
+// rollingMemo caches one RollingTotals result under its (generation,
+// minute) key. Zero value is "empty" — valid flags a stored result.
+type rollingMemo struct {
+	valid                    bool
+	gen                      int64
+	minute                   int64
+	hour, today, week, month float64
 }
 
 type tokensSum struct {
@@ -373,11 +389,36 @@ func (s *watchState) render() {
 		},
 	}
 	if s.cache != nil {
-		hour, today, week, month := aggregate.RollingTotals(s.cache.Snapshot().Turns, s.prices, time.Now())
+		hour, today, week, month := s.rollingTotals(s.cache.Snapshot(), time.Now())
 		frame.HasRolling = true
 		frame.Rolling = RollingPanelData{Hour: hour, Today: today, Week: week, Month: month}
 	}
 	s.painter.Render(frame)
+}
+
+// rollingTotals returns the hour/today/week/month panel figures for the
+// given corpus snapshot, memoized on (snapshot generation, minute
+// stamp). Caller must hold s.mu.
+//
+// Generation alone isn't a sufficient key: the "hour" bucket is a
+// trailing 60-minute window against now, so its value drifts as old
+// turns age out even when no new data arrives. Folding the current
+// minute into the key means an idle corpus recomputes at most once per
+// minute instead of on every 1s repaint. Trade-off: the aging-out
+// effect on the rolling-hour figure can lag by up to 59s, which is
+// imperceptible on a cost panel; new data still recomputes immediately
+// via the generation bump.
+func (s *watchState) rollingTotals(snap *corpus.Snapshot, now time.Time) (hour, today, week, month float64) {
+	minute := now.Unix() / 60
+	if m := s.rolling; m.valid && m.gen == snap.Generation && m.minute == minute {
+		return m.hour, m.today, m.week, m.month
+	}
+	hour, today, week, month = aggregate.RollingTotals(snap.Turns, s.prices, now)
+	s.rolling = rollingMemo{
+		valid: true, gen: snap.Generation, minute: minute,
+		hour: hour, today: today, week: week, month: month,
+	}
+	return hour, today, week, month
 }
 
 func (s *watchState) shutdown(w io.Writer) {

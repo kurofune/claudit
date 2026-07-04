@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/watch"
@@ -205,6 +208,127 @@ func TestBudget_SuppressedDuringReplay(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "BUDGET") {
 		t.Errorf("history-replay budget cross should be suppressed; got %q", buf.String())
+	}
+}
+
+// rollingSnap builds a corpus snapshot with one turn per given cost,
+// timestamped `age` before now, tagged with the given generation.
+// Distinct MessageIDs so the panel's dedup doesn't collapse them.
+func rollingSnap(t *testing.T, gen int64, now time.Time, costs ...float64) *corpus.Snapshot {
+	t.Helper()
+	snap := &corpus.Snapshot{Generation: gen}
+	for i, c := range costs {
+		snap.Turns = append(snap.Turns, parse.Turn{
+			SessionID: "s1",
+			MessageID: fmt.Sprintf("msg_g%d_%d", gen, i),
+			Model:     "claude-test",
+			Timestamp: now.Add(-time.Minute),
+			Usage:     parse.Usage{OutputTokens: int(c * 1_000_000)},
+		})
+	}
+	return snap
+}
+
+func TestRollingTotals_FirstCallMatchesAggregate(t *testing.T) {
+	prices := testPrices(t)
+	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
+	s := newWatchState(prices, 0, 0, nil, r, nil)
+
+	now := time.Now()
+	snap := rollingSnap(t, 1, now, 0.10, 0.05)
+
+	wantHour, wantToday, wantWeek, wantMonth := aggregate.RollingTotals(snap.Turns, prices, now)
+	hour, today, week, month := s.rollingTotals(snap, now)
+	if hour != wantHour || today != wantToday || week != wantWeek || month != wantMonth {
+		t.Errorf("rollingTotals = (%.4f, %.4f, %.4f, %.4f), want (%.4f, %.4f, %.4f, %.4f)",
+			hour, today, week, month, wantHour, wantToday, wantWeek, wantMonth)
+	}
+}
+
+func TestRollingTotals_CachedWithinSameGenerationAndMinute(t *testing.T) {
+	prices := testPrices(t)
+	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
+	s := newWatchState(prices, 0, 0, nil, r, nil)
+
+	// Fix now to mid-minute so both calls share the same minute stamp.
+	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
+	snap := rollingSnap(t, 1, now, 0.10)
+
+	hour1, _, _, _ := s.rollingTotals(snap, now)
+	if hour1 != 0.10 {
+		t.Fatalf("first call hour = %.4f, want 0.10", hour1)
+	}
+
+	// Mutate the turns behind the memo's back. Same generation + same
+	// minute must serve the cached figure, not recompute from this.
+	snap.Turns = append(snap.Turns, rollingSnap(t, 9, now, 5.0).Turns...)
+
+	hour2, _, _, _ := s.rollingTotals(snap, now.Add(time.Second))
+	if hour2 != hour1 {
+		t.Errorf("second call hour = %.4f, want cached %.4f (must not recompute)", hour2, hour1)
+	}
+}
+
+func TestRollingTotals_RecomputesOnGenerationBump(t *testing.T) {
+	prices := testPrices(t)
+	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
+	s := newWatchState(prices, 0, 0, nil, r, nil)
+
+	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
+	hour1, _, _, _ := s.rollingTotals(rollingSnap(t, 1, now, 0.10), now)
+	if hour1 != 0.10 {
+		t.Fatalf("first call hour = %.4f, want 0.10", hour1)
+	}
+
+	// New snapshot with a higher generation at the same minute: the
+	// fresh turn must show up immediately.
+	const eps = 1e-9
+	hour2, _, _, _ := s.rollingTotals(rollingSnap(t, 2, now, 0.10, 0.05), now)
+	if hour2 < 0.15-eps || hour2 > 0.15+eps {
+		t.Errorf("post-bump hour = %.4f, want 0.15 (must recompute on new generation)", hour2)
+	}
+}
+
+func TestRollingTotals_RecomputesOnMinuteRollover(t *testing.T) {
+	prices := testPrices(t)
+	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
+	s := newWatchState(prices, 0, 0, nil, r, nil)
+
+	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
+	// One turn 59m45s old: inside the trailing hour at `now`, aged out
+	// one minute later.
+	snap := &corpus.Snapshot{Generation: 1, Turns: []parse.Turn{{
+		SessionID: "s1",
+		MessageID: "msg_old",
+		Model:     "claude-test",
+		Timestamp: now.Add(-59*time.Minute - 45*time.Second),
+		Usage:     parse.Usage{OutputTokens: 100_000}, // $0.10
+	}}}
+
+	hour1, _, _, _ := s.rollingTotals(snap, now)
+	if hour1 != 0.10 {
+		t.Fatalf("hour at t0 = %.4f, want 0.10", hour1)
+	}
+
+	// Same generation, next minute: the turn has aged out of the
+	// rolling hour, so serving the cached 0.10 would be stale.
+	hour2, _, _, _ := s.rollingTotals(snap, now.Add(time.Minute))
+	if hour2 != 0 {
+		t.Errorf("hour after minute rollover = %.4f, want 0 (must recompute on new minute)", hour2)
+	}
+}
+
+func TestRender_NilCacheHasNoRollingPanel(t *testing.T) {
+	var buf bytes.Buffer
+	r := newStreamPainter(&buf, term.Style{})
+	s := newWatchState(testPrices(t), 0, 0, nil, r, nil) // no corpus cache
+	s.onEvent(fakeAssistantTurn(t, 0.01))
+	got := buf.String()
+	if strings.Contains(got, "hour") || strings.Contains(got, "month") {
+		t.Errorf("nil cache must render no rolling panel; got %q", got)
+	}
+	if !strings.Contains(got, "turns") {
+		t.Errorf("live session line missing from frame; got %q", got)
 	}
 }
 
