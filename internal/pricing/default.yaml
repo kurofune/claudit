@@ -136,3 +136,75 @@ models:
     cache_read_per_mtok: 0.10
     cache_write_5m_per_mtok: 1.25
     cache_write_1h_per_mtok: 2.00
+
+  # ── Legacy models (pre-Opus-4.5) ──
+  # Keyed on the dated ids Claude Code wrote into old transcripts (the
+  # lookup is an exact map match). Without these, sessions from before
+  # ~late 2025 price at $0. Opus 4.1/4, Sonnet 4, and Haiku 3.5 rates
+  # verified on the live pricing page 2026-07-03; the fully retired 3.x
+  # models are delisted there, so those carry their last published
+  # official rates (historical).
+
+  claude-opus-4-1-20250805:         # verified 2026-07-03 — deprecated, $15 / $75
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    cache_read_per_mtok: 1.50
+    cache_write_5m_per_mtok: 18.75
+    cache_write_1h_per_mtok: 30.00
+
+  claude-opus-4-20250514:           # verified 2026-07-03 — retired, $15 / $75
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    cache_read_per_mtok: 1.50
+    cache_write_5m_per_mtok: 18.75
+    cache_write_1h_per_mtok: 30.00
+
+  claude-sonnet-4-20250514:         # verified 2026-07-03 — retired, $3 / $15
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  claude-3-7-sonnet-20250219:       # historical (delisted) — $3 / $15
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  claude-3-5-sonnet-20241022:       # historical (delisted) — $3 / $15
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  claude-3-5-sonnet-20240620:       # historical (delisted) — $3 / $15
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+
+  claude-3-5-haiku-20241022:        # verified 2026-07-03 — retired, $0.80 / $4
+    input_per_mtok: 0.80
+    output_per_mtok: 4.00
+    cache_read_per_mtok: 0.08
+    cache_write_5m_per_mtok: 1.00
+    cache_write_1h_per_mtok: 1.60
+
+  claude-3-opus-20240229:           # historical (delisted) — $15 / $75
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    cache_read_per_mtok: 1.50
+    cache_write_5m_per_mtok: 18.75
+    cache_write_1h_per_mtok: 30.00
+
+  claude-3-haiku-20240307:          # historical (delisted) — $0.25 / $1.25;
+    # cache rates as last published ($0.30 5m / $0.03 read), not exact ratios
+    input_per_mtok: 0.25
+    output_per_mtok: 1.25
+    cache_read_per_mtok: 0.03
+    cache_write_5m_per_mtok: 0.30
+    cache_write_1h_per_mtok: 0.50
