@@ -10,7 +10,7 @@ import {
   flattenSession, agentTokens, agentElapsedMs, formatElapsed, baseName,
   refKey, parseRefKey, resolveRef, sessionStats, timelineSessionList, pickTimelineSid,
   playheadBounds, playheadStats, timelineAtTime, buildTimeline, timelineKinds,
-  makeTimeScale, promptBands, narrativeStrip,
+  makeTimeScale, promptBands, narrativeStrip, sessionTimeRollup, agentOutcome,
   fitSegmentLabel, costHeat, segKindColor, pctOfAgent, segTooltip,
   criticalSpans, detectSignals, signalPipsByAgent,
   zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
@@ -225,6 +225,31 @@ function timelineSummaryHTML(s) {
     `<span class="tlc tlc-cost" title="session cost">💰 ${escHtml(fmtMoney(s.cost_usd))}</span>`;
 }
 
+// timeRollupBarHTML is the session card's "where did the time go" readout
+// (Phase-3 item 16): a compact stacked bar splitting the session's attributed
+// wall-clock into model generation · tool execution · idle/wait, summed over
+// every agent's turns by the pure, tested sessionTimeRollup. The three
+// segments reuse the waterfall's color language (gen = the .kind-step turn
+// hue, idle = the .tl-idle wash) so the bar and the Gantt agree; each segment
+// and legend chip carries the ms + % in its title. Honest-only, like the idle
+// spans: pre-gen_ms turns contribute no idle, so the bar's total can undershoot
+// the session span rather than mislabel time. Empty when nothing is attributable.
+function timeRollupBarHTML(session, nowMs) {
+  const r = sessionTimeRollup(session, { nowMs });
+  if (!(r.totalMs > 0)) return '';
+  const pctOf = v => (v / r.totalMs) * 100;
+  const seg = (cls, v, name) => v > 0
+    ? `<span class="tl-trb-seg ${cls}" style="width:${pctOf(v).toFixed(2)}%" title="${escHtml(name)}: ${escHtml(formatElapsed(v))} (${Math.round(pctOf(v))}%)"></span>`
+    : '';
+  const leg = (cls, v, name) => v > 0
+    ? `<span class="tl-trb-leg" title="${escHtml(name)}: ${escHtml(formatElapsed(v))} (${Math.round(pctOf(v))}%)"><span class="tl-trb-sw ${cls}" aria-hidden="true"></span>${escHtml(name)} ${escHtml(formatElapsed(v))}</span>`
+    : '';
+  return `<span class="tl-trb" title="Where the time went: model generation vs tool execution vs idle/wait, summed across every agent's turns">
+      <span class="tl-trb-bar" role="img" aria-label="Time split: generating ${escHtml(formatElapsed(r.genMs))}, tools ${escHtml(formatElapsed(r.toolMs))}, idle ${escHtml(formatElapsed(r.idleMs))}">${seg('tl-trb-gen', r.genMs, 'gen')}${seg('tl-trb-tool', r.toolMs, 'tools')}${seg('tl-trb-idle', r.idleMs, 'idle')}</span>
+      ${leg('tl-trb-gen', r.genMs, 'gen')}${leg('tl-trb-tool', r.toolMs, 'tools')}${leg('tl-trb-idle', r.idleMs, 'idle')}
+    </span>`;
+}
+
 // Timeline signal pips (Phase 3d): the per-agent anomaly markers drawn in the
 // Gantt gutter come from the SAME detectSignals output the Insights → Signals
 // panel uses, scoped to the ONE plotted session. detectSignals is pure but not
@@ -312,7 +337,17 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
   // Per-agent anomaly pips for this session's gutter (Phase 3d), memoized so a
   // scrub drag's per-frame repaint doesn't re-run detectSignals.
   const sigPips = timelineSignalPips(session, sid);
-  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit, sigPips.get(r.rowIndex)));
+  // Outcome chips (item 16): each sub-agent row's ✓/✗ verdict. The spawning
+  // Agent tool_use (resolved off the row's spawn metadata) folds in, so an
+  // Agent call that itself errored marks the child failed even when the
+  // child's own tools all passed.
+  const spawnToolOf = r => {
+    if (!r.spawn) return null;
+    const p = agents[r.spawn.agentIndex];
+    const st = p && (p.steps || [])[r.spawn.stepIndex];
+    return (st && (st.tools || [])[r.spawn.toolIndex]) || null;
+  };
+  const parts = tl.rows.map(r => timelineRowHTML(r, tl, selAgentKey, seen, next, agents[r.rowIndex], maxSegCost, crit, sigPips.get(r.rowIndex), agentOutcome(agents[r.rowIndex], spawnToolOf(r))));
   const gutterRows = parts.map(p => p.gutter).join('');
   const chartRows = parts.map(p => p.chart).join('');
 
@@ -344,7 +379,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
       <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
       <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>
-    <div class="timeline-sess-sum">${timelineSummaryHTML(sessionStats(session, nowMs))}</div>
+    <div class="timeline-sess-sum">${timelineSummaryHTML(sessionStats(session, nowMs))}${timeRollupBarHTML(session, nowMs)}</div>
     ${narrativeStripHTML(session, nowMs)}
     <div class="timeline-body">
       <svg class="timeline-gutter" viewBox="0 0 ${gutterW} ${tl.height}" width="${gutterW}" height="${tl.height}" role="img" aria-label="Agent labels">
@@ -489,7 +524,7 @@ function criticalMarks(rows) {
   return refs;
 }
 
-function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map(), sig = null) {
+function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, crit = new Map(), sig = null, outcome = 'ok') {
   next.add(r.key);
   const isNew = !seen.has(r.key);
   const sel = r.key === selAgentKey ? ' is-selected' : '';
@@ -644,10 +679,25 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   const disclose = canDisclose
     ? `<text class="tl-disclose" data-tltoggle="${escHtml(r.key)}" role="button" tabindex="0" x="${r.labelX}" y="${labelY}" aria-expanded="${r.expanded ? 'true' : 'false'}">${r.expanded ? '▾' : '▸'}<title>${r.expanded ? 'Collapse' : 'Expand'} ${escHtml(r.label)} to its turns</title></text>`
     : '';
-  const labelX = r.labelX + (canDisclose ? 12 : 0);
+  // Outcome chip (item 16): stamp a small ✓/✗ verdict on SUB-agent rows — did
+  // this delegated run finish clean or failing? — sharing the narrative-strip
+  // chips' color language (.tl-nstrip-agent) so the two reads can't disagree.
+  // Running rows show no chip (the pulse/`running` meta already carries state)
+  // but still reserve the slot so sibling labels stay aligned; the main row
+  // gets none (the session-level error pill above owns that verdict).
+  const hasChip = r.kind !== 'main' && !(r.phase === 'pending');
+  const chipGlyph = outcome === 'error' ? '✗' : outcome === 'ok' ? '✓' : '';
+  const chipTitle = outcome === 'error'
+    ? `${escHtml(r.label)} finished failing — ${errs > 0 ? `${fmtNum(errs)} tool error${errs === 1 ? '' : 's'}` : 'its final tool or its spawning Agent call errored'}`
+    : `${escHtml(r.label)} finished clean — no tool errors`;
+  const chip = hasChip && chipGlyph
+    ? `<text class="tl-outcome ${outcome === 'error' ? 'is-err' : 'is-ok'}" x="${r.labelX + (canDisclose ? 12 : 0)}" y="${labelY}"><title>${chipTitle}</title>${chipGlyph}</text>`
+    : '';
+  const labelX = r.labelX + (canDisclose ? 12 : 0) + (r.kind !== 'main' ? 11 : 0);
   const gutter = `<g class="${cls}" data-ref="${escHtml(r.key)}">
     <rect class="tl-rowbg" x="0" y="${r.y}" width="${tl.chartX}" height="${r.h}"/>
     ${disclose}
+    ${chip}
     <text class="tl-label" x="${labelX}" y="${labelY}">${escHtml(clip(r.label, TL_LABEL_CHARS))}</text>
     ${errPip}
     ${sigHTML}

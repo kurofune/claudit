@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   agentBar,
   agentPhaseAt,
+  agentTimeRollup,
   buildFlowLayout,
   buildTimeline,
   costHeat,
@@ -27,6 +28,7 @@ import {
   segKindColor,
   segTooltip,
   sessionStats,
+  sessionTimeRollup,
   stepSegments,
   timelineAtTime,
   timelineBounds,
@@ -1881,4 +1883,93 @@ test('narrativeStrip: rows carry firstStepIndex (the promptBands join key)', () 
     ],
   };
   assert.deepEqual(narrativeStrip(session).map(r => r.firstStepIndex), [0, 1]);
+});
+
+// ── agentTimeRollup (whole-agent gen · tool · idle rollup, item 16) ─────
+test('agentTimeRollup is all-zero for a null / step-less agent', () => {
+  assert.deepEqual(agentTimeRollup(null), { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
+  assert.deepEqual(agentTimeRollup({ kind: 'main', status: 'done', steps: [] }),
+    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
+});
+
+test('agentTimeRollup on a single closed turn matches turnTimeBuckets, totalMs = sum', () => {
+  const step = { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [
+    { ended_at: 300 }, { ended_at: 500 },
+  ] };
+  const agent = { kind: 'main', status: 'done', started_at: 0, ended_at: 1000, steps: [step] };
+  // turnTimeBuckets(step) = { genMs: 200, toolMs: 500, idleMs: 300 } (tested above).
+  assert.deepEqual(agentTimeRollup(agent), { genMs: 200, toolMs: 500, idleMs: 300, totalMs: 1000 });
+});
+
+test('agentTimeRollup over multiple turns sums per-turn turnTimeBuckets', () => {
+  const s1 = { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300 }] };
+  const s2 = { timestamp: 1000, duration_ms: 2000, gen_ms: 500, tools: [{ ended_at: 2200 }] };
+  const agent = { kind: 'main', status: 'done', started_at: 0, ended_at: 3000, steps: [s1, s2] };
+  const b1 = turnTimeBuckets(s1), b2 = turnTimeBuckets(s2);
+  const got = agentTimeRollup(agent);
+  assert.equal(got.genMs, b1.genMs + b2.genMs);
+  assert.equal(got.toolMs, b1.toolMs + b2.toolMs);
+  assert.equal(got.idleMs, b1.idleMs + b2.idleMs);
+  assert.equal(got.totalMs, got.genMs + got.toolMs + got.idleMs);
+});
+
+test('agentTimeRollup clamps a done agent\'s open-ended last turn to ended_at', () => {
+  // Last turn has duration_ms 0 (the wire convention); the agent ended at 2000,
+  // so the turn's wall-clock is [1000..2000]: gen 300, tool 400, idle 300.
+  const agent = { kind: 'main', status: 'done', started_at: 0, ended_at: 2000, steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300 }] },
+    { timestamp: 1000, duration_ms: 0, gen_ms: 300, tools: [{ ended_at: 1400 }] },
+  ] };
+  // First turn: gen 200, tool 300, idle 500. Last turn: gen 300, tool 400, idle 300.
+  assert.deepEqual(agentTimeRollup(agent), { genMs: 500, toolMs: 700, idleMs: 800, totalMs: 2000 });
+});
+
+test('agentTimeRollup clamps a RUNNING agent\'s open last turn to nowMs', () => {
+  const agent = { kind: 'main', status: 'running', started_at: 0, steps: [
+    { timestamp: 0, duration_ms: 0, gen_ms: 100, tools: [{ ended_at: 500 }] },
+  ] };
+  // At nowMs 800 the turn spans [0..800]: gen 100, tool 500, idle 200.
+  assert.deepEqual(agentTimeRollup(agent, { nowMs: 800 }),
+    { genMs: 100, toolMs: 500, idleMs: 200, totalMs: 800 });
+  // No injected clock (nowMs defaults 0) → no wall-clock to attribute beyond gen.
+  assert.deepEqual(agentTimeRollup(agent),
+    { genMs: 100, toolMs: 0, idleMs: 0, totalMs: 100 });
+});
+
+test('agentTimeRollup never goes negative on degenerate timestamps', () => {
+  // nowMs BEFORE the running turn started, and a done agent whose ended_at
+  // precedes its last turn — both collapse to zero-width, never negative.
+  const running = { kind: 'main', status: 'running', started_at: 1000, steps: [
+    { timestamp: 1000, duration_ms: 0, gen_ms: 100, tools: [] },
+  ] };
+  const gotR = agentTimeRollup(running, { nowMs: 500 });
+  assert.ok(gotR.genMs >= 0 && gotR.toolMs >= 0 && gotR.idleMs >= 0 && gotR.totalMs >= 0);
+  const done = { kind: 'main', status: 'done', started_at: 1000, ended_at: 900, steps: [
+    { timestamp: 1000, duration_ms: 0, gen_ms: 0, tools: [{ ended_at: 1200 }] },
+  ] };
+  const gotD = agentTimeRollup(done);
+  assert.ok(gotD.genMs >= 0 && gotD.toolMs >= 0 && gotD.idleMs >= 0 && gotD.totalMs >= 0);
+});
+
+test('sessionTimeRollup sums the main agent and every child', () => {
+  const session = {
+    session_id: 's1',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 2000, steps: [
+      { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [{ ended_at: 300 }] },
+    ] },
+    children: [
+      { kind: 'subagent', agent_type: 'Explore', status: 'done', started_at: 100, ended_at: 900, steps: [
+        { timestamp: 100, duration_ms: 500, gen_ms: 100, tools: [{ ended_at: 400 }] },
+      ] },
+    ],
+  };
+  // main: gen 200, tool 300, idle 500. child: gen 100, tool 300, idle 100.
+  assert.deepEqual(sessionTimeRollup(session),
+    { genMs: 300, toolMs: 600, idleMs: 600, totalMs: 1500 });
+});
+
+test('sessionTimeRollup is all-zero for a null / main-less session', () => {
+  assert.deepEqual(sessionTimeRollup(null), { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
+  assert.deepEqual(sessionTimeRollup({ session_id: 's', main: null, children: [] }),
+    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
 });

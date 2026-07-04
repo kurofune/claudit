@@ -37,6 +37,7 @@ import {
   clampTreeWidth, clampDrawerWidth, orderTreeSessions, treeFollowMode,
   toolMix, percentiles, durationHistogram, costPareto, errorRates,
   contextSeries, binSeries, groupBy, detectSignals,
+  agentTimeRows, sessionTimeRows,
 } from './agents-logic.js';
 import {
   lastGraph, setLastGraph, activeSub, setActiveSub,
@@ -920,6 +921,7 @@ function insightsScopeAgents() {
 const INS_TABS = [
   { key: 'signals', label: 'Signals',         scoped: false },
   { key: 'toolmix', label: 'Tool mix',        scoped: true,  render: renderToolMixPanel },
+  { key: 'time',    label: 'Time',            scoped: true }, // dispatched specially — needs the scope, not just the agents
   { key: 'pareto',  label: 'Cost Pareto',     scoped: true,  render: renderParetoPanel },
   { key: 'latency', label: 'Latency',         scoped: true,  render: renderLatencyPanel },
   { key: 'errors',  label: 'Errors',          scoped: true,  render: renderErrorPanel },
@@ -964,6 +966,10 @@ function renderInsights(sessions) {
     // contract — idle-stall's trailing-gap check degrades cleanly when omitted.
     const nowMs = isServeMode() ? Date.now() : undefined;
     panel = renderSignalsPanel(detectSignals(lastGraph, { nowMs }));
+  } else if (tab.key === 'time') {
+    // Time needs the SCOPE, not just the flat agent list: at graph scope it
+    // rolls up per SESSION (top-N by total) so a wide window stays legible.
+    panel = renderTimePanel(scope, agents);
   } else {
     panel = tab.render(agents);
   }
@@ -1013,6 +1019,80 @@ function renderToolMixPanel(agents) {
       ${head}
       ${colLabels}
       <div class="ins-rows">${rows}</div>
+    </section>`;
+}
+
+// renderTimePanel draws the "where did the time go" Insights panel (Phase-3
+// item 16): one stacked gen · tool · idle bar per unit — per SESSION at graph
+// scope (top-10 by attributed time, sessionTimeRows), per AGENT at session /
+// agent scope (agentTimeRows) — over the same rollup the Timeline session
+// card's bar reads, so the two can't disagree. Bar length ∝ the row's total
+// against the worst row; the segments split it by bucket, reusing the card
+// bar's .tl-trb-* color classes. Read-only like the Token panel: the trace
+// filter has no time-bucket dimension to land on. Honest-only — turns without
+// a measured gen_ms contribute no idle, so totals can undershoot wall-clock.
+// Pure render from the scoped slice (no scrub / SSE); nowMs is the live clock
+// in serve mode and absent in the static report (a running agent's open turn
+// then simply contributes only its gen time).
+function renderTimePanel(scope, agents) {
+  const nowMs = isServeMode() ? Date.now() : undefined;
+  const graphScoped = scope === 'graph';
+  const data = graphScoped
+    ? sessionTimeRows((lastGraph && lastGraph.sessions) || [], { nowMs })
+    : agentTimeRows(agents, { nowMs });
+  const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Time</h3></header>`;
+  if (data.rows.length === 0) {
+    return `<section class="ins-panel">${head}<div class="ins-empty">No attributable time in this scope.</div></section>`;
+  }
+  const t = data.total;
+  const stat = (k, v) => `<span class="ins-stat"><span class="ins-stat-k">${k}</span><span class="ins-stat-v">${escHtml(formatElapsed(v))}</span></span>`;
+  const stats = `<div class="ins-stats">${stat('gen', t.genMs)}${stat('tools', t.toolMs)}${stat('idle', t.idleMs)}<span class="ins-stat ins-stat-n">${escHtml(formatElapsed(t.totalMs))} total</span></div>`;
+
+  const maxTotal = data.rows.reduce((m, r) => Math.max(m, r.totalMs), 0) || 1;
+  const rows = data.rows.map(r => {
+    const label = graphScoped
+      ? `<span class="ins-grp-key" title="${escHtml(r.cwd || '')}">${escHtml(baseName(r.cwd) || '—')} · ${escHtml(shortId(r.sessionId))}</span>`
+      : `<span class="ins-grp-key" title="${escHtml(r.label)}">${escHtml(r.label)}</span>`;
+    const barPct = Math.max(2, (r.totalMs / maxTotal) * 100);
+    const seg = (cls, v, name) => v > 0
+      ? `<span class="ins-time-seg ${cls}" style="width:${((v / r.totalMs) * 100).toFixed(2)}%" title="${escHtml(name)}: ${escHtml(formatElapsed(v))} (${Math.round((v / r.totalMs) * 100)}%)"></span>`
+      : '';
+    return `<div class="ins-row ins-time-row">
+        <span class="ins-row-head">${label}</span>
+        <span class="ins-bar-wrap"><span class="ins-time-bar" style="width:${barPct.toFixed(2)}%">${seg('tl-trb-gen', r.genMs, 'gen')}${seg('tl-trb-tool', r.toolMs, 'tools')}${seg('tl-trb-idle', r.idleMs, 'idle')}</span></span>
+        <span class="ins-figs">
+          <span class="ins-fig" title="model generation">${escHtml(formatElapsed(r.genMs))}</span>
+          <span class="ins-fig" title="tool execution">${escHtml(formatElapsed(r.toolMs))}</span>
+          <span class="ins-fig" title="idle / wait">${escHtml(formatElapsed(r.idleMs))}</span>
+          <span class="ins-fig is-primary" title="total attributed">${escHtml(formatElapsed(r.totalMs))}</span>
+        </span>
+      </div>`;
+  }).join('');
+
+  const colLabels = `<div class="ins-row ins-time-row ins-row-labels" aria-hidden="true">
+      <span class="ins-row-head"></span><span class="ins-bar-wrap"></span>
+      <span class="ins-figs"><span class="ins-fig">gen</span><span class="ins-fig">tools</span><span class="ins-fig">idle</span><span class="ins-fig is-primary">total</span></span>
+    </div>`;
+  const legend = `<div class="ins-time-legend">
+      <span class="ins-time-leg"><span class="ins-time-sw tl-trb-gen" aria-hidden="true"></span>generating</span>
+      <span class="ins-time-leg"><span class="ins-time-sw tl-trb-tool" aria-hidden="true"></span>tool exec</span>
+      <span class="ins-time-leg"><span class="ins-time-sw tl-trb-idle" aria-hidden="true"></span>idle / wait</span>
+    </div>`;
+  const unit = graphScoped ? 'session' : 'agent';
+  const overflowNote = data.overflow > 0
+    ? ` Showing the top ${data.rows.length} ${unit}s by attributed time — ${fmtNum(data.overflow)} more not shown (their time still counts in the header totals).`
+    : '';
+  const note = `<p class="ins-panel-note">Where the wall-clock went, per ${unit}: model generation vs tool execution vs idle/wait between turns. Turns recorded before generation timing landed contribute no idle, so totals can undershoot a ${unit}’s real span.${overflowNote}</p>`;
+
+  return `<section class="ins-panel">
+      <div class="ins-panel-head ins-panel-head--split">
+        <h3 class="ins-panel-title">Time</h3>
+        ${stats}
+      </div>
+      ${note}
+      ${legend}
+      ${colLabels}
+      <div class="ins-rows ins-time-rows">${rows}</div>
     </section>`;
 }
 

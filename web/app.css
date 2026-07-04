@@ -2888,6 +2888,31 @@
     font-variant-numeric: tabular-nums; color: var(--ink-2); }
   .tl-nstrip-counts { margin-left: auto; }
   .tl-nstrip-cost { font-weight: 600; }
+  /* Where-did-the-time-go rollup (item 16). The .tl-trb-* bucket colors are
+     SHARED by the session card's stacked bar and the Insights Time panel:
+     gen reuses the .kind-step turn hue (--accent-2) and idle the .tl-idle ink
+     wash, so the bar agrees with the waterfall's segment language; tool exec
+     takes the brand accent (tools have no single hue in the Gantt — each kind
+     keeps its own — so the rollup uses the "active work" accent instead). */
+  .tl-trb-gen  { background: var(--accent-2); }
+  .tl-trb-tool { background: var(--accent); }
+  .tl-trb-idle { background: color-mix(in oklch, var(--ink) 22%, transparent); }
+  .tl-trb { display: inline-flex; align-items: center; gap: var(--s-2); margin-left: auto; min-width: 0; }
+  .tl-trb-bar { display: inline-flex; width: 140px; max-width: 30vw; height: 8px; flex: none;
+    border-radius: 999px; overflow: hidden;
+    background: color-mix(in oklch, var(--ink) 5%, transparent);
+    outline: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+  .tl-trb-seg { display: block; height: 100%; }
+  .tl-trb-leg { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;
+    font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .tl-trb-sw { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+  /* Outcome chip (item 16): the ✓/✗ verdict on a finished sub-agent's gutter
+     row. SVG text, so fill carries the color — the same ok/danger pair the
+     narrative strip's .tl-nstrip-agent chips use, so the two reads agree. */
+  .tl-outcome { font-size: 10px; }
+  .tl-outcome.is-ok  { fill: var(--ok, var(--accent-2)); }
+  .tl-outcome.is-err { fill: var(--danger, #e5484d); font-weight: 700; }
+
   /* Click-to-navigate flash: the target band pulses once, then settles back to
      its usual wash (only the from-frame is keyed, so it animates home). */
   .tl-pband.is-flash rect { animation: tl-pband-flash 1.5s ease-out; }
@@ -3073,6 +3098,16 @@
      bar); the figs column carries FOUR figures, so widen it from the default 3. */
   .ins-grp-head-controls { display: inline-flex; align-items: baseline; gap: var(--s-3); flex-wrap: wrap; }
   .ins-grp-row .ins-figs { grid-template-columns: repeat(4, 1fr); }
+  /* Time panel — per-session/agent stacked gen·tool·idle bars sharing the
+     .tl-trb-* bucket colors with the Timeline session card's rollup bar. The
+     outer .ins-time-bar is the row's share of the worst row; the inner segs
+     split it by bucket. Four figs, like the Group-by rows. */
+  .ins-time-row .ins-figs { grid-template-columns: repeat(4, 1fr); }
+  .ins-time-bar { display: flex; height: 100%; border-radius: var(--r-sm); overflow: hidden; }
+  .ins-time-seg { display: block; height: 100%; }
+  .ins-time-legend { display: flex; gap: var(--s-3); margin-bottom: var(--s-2); }
+  .ins-time-leg { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-2); }
+  .ins-time-sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
   .ins-grp-key { font-size: 12px; color: var(--ink); font-family: var(--font-mono);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Only kind groups and the 'error' status group map to a trace filter, so only

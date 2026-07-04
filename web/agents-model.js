@@ -216,6 +216,32 @@ export function currentToolKind(agent) {
   return '';
 }
 
+// agentOutcome classifies how an agent's run ENDED — the ✓/✗ outcome chip
+// rule. 'error' when the backend's whole-agent error_count rollup flagged any
+// failed tool (the same source the Gantt err-pip and narrative-strip chips
+// read), OR when the last step's LAST tool errored (the terminal status),
+// OR when the spawning Agent tool_use itself errored (`spawnTool`, optional —
+// the parent-side ToolInvocation that launched this agent; the child's own
+// tools can all pass while the Agent call fails, e.g. an abort). Error wins
+// over running — a mid-run failure is already a failure worth flagging.
+// 'running' (no chip; the running pill exists) for a still-clean in-flight
+// agent; 'ok' for a clean finished one. Null/step-less agents read as 'ok'.
+/**
+ * @param {AgentNode|null|undefined} agent
+ * @param {ToolInvocation|null} [spawnTool] the Agent tool_use that spawned this agent, when known
+ * @returns {'ok'|'error'|'running'}
+ */
+export function agentOutcome(agent, spawnTool = null) {
+  if ((agent && agent.error_count) > 0) return 'error';
+  const steps = (agent && agent.steps) || [];
+  const lastTools = (steps.length && steps[steps.length - 1].tools) || [];
+  const lastTool = lastTools.length ? lastTools[lastTools.length - 1] : null;
+  if (lastTool && lastTool.status === 'error') return 'error';
+  if (spawnTool && spawnTool.status === 'error') return 'error';
+  if (agent && agent.status === 'running') return 'running';
+  return 'ok';
+}
+
 // refKey serializes a selection ref to a stable string. Forms:
 //   agent  "<sessionId>#<agentIndex>"
 //   step   "<sessionId>#<agentIndex>.<stepIndex>"

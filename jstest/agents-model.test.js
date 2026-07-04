@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   agentElapsedMs,
   agentLabel,
+  agentOutcome,
   agentSpan,
   agentTokens,
   baseName,
@@ -455,4 +456,60 @@ test('clampDrawerWidth returns DEFAULT 360 for non-finite input', () => {
 test('clampDrawerWidth rounds a fractional in-range value', () => {
   assert.equal(clampDrawerWidth(400.6), 401);
   assert.equal(clampDrawerWidth(400.4), 400);
+});
+
+// ── agentOutcome (the ✓/✗ chip rule for finished agents) ───────────────
+test('agentOutcome: a done agent with no errors is ok', () => {
+  const a = { kind: 'subagent', status: 'done', error_count: 0, steps: [
+    { timestamp: 0, tools: [{ name: 'Read', status: 'ok' }] },
+  ] };
+  assert.equal(agentOutcome(a), 'ok');
+});
+
+test('agentOutcome: error_count > 0 means error', () => {
+  const a = { kind: 'subagent', status: 'done', error_count: 2, steps: [] };
+  assert.equal(agentOutcome(a), 'error');
+});
+
+test('agentOutcome: a clean error_count but an errored final tool is still error', () => {
+  // Belt-and-braces: the last step's LAST tool carries the run's terminal
+  // status; if it errored the run ended failing even if the rollup missed it.
+  const a = { kind: 'subagent', status: 'done', error_count: 0, steps: [
+    { timestamp: 0, tools: [{ name: 'Read', status: 'ok' }] },
+    { timestamp: 1, tools: [{ name: 'Bash', status: 'ok' }, { name: 'Bash', status: 'error' }] },
+  ] };
+  assert.equal(agentOutcome(a), 'error');
+});
+
+test('agentOutcome: a clean running agent is running (no chip yet)', () => {
+  const a = { kind: 'subagent', status: 'running', error_count: 0, steps: [
+    { timestamp: 0, tools: [{ name: 'Read', status: 'ok' }] },
+  ] };
+  assert.equal(agentOutcome(a), 'running');
+});
+
+test('agentOutcome: error beats running — a mid-run failure already shows', () => {
+  const a = { kind: 'subagent', status: 'running', error_count: 1, steps: [] };
+  assert.equal(agentOutcome(a), 'error');
+});
+
+test('agentOutcome: an errored spawning Agent call marks the run failed', () => {
+  // The Agent tool_use on the PARENT side can fail even when the child's own
+  // tools all passed (e.g. the sub-agent was aborted). The caller passes the
+  // spawning ToolInvocation when it has one.
+  const a = { kind: 'subagent', status: 'done', error_count: 0, steps: [
+    { timestamp: 0, tools: [{ name: 'Read', status: 'ok' }] },
+  ] };
+  assert.equal(agentOutcome(a, { name: 'Agent', kind: 'agent', status: 'error' }), 'error');
+  assert.equal(agentOutcome(a, { name: 'Agent', kind: 'agent', status: 'ok' }), 'ok');
+  assert.equal(agentOutcome(a, null), 'ok');
+});
+
+test('agentOutcome: null / step-less done agents are ok', () => {
+  assert.equal(agentOutcome(null), 'ok');
+  assert.equal(agentOutcome({ kind: 'subagent', status: 'done', error_count: 0, steps: [] }), 'ok');
+  // A step whose tools are null (the wire's nil slice) doesn't trip the walk.
+  assert.equal(agentOutcome({ kind: 'subagent', status: 'done', error_count: 0, steps: [
+    { timestamp: 0, tools: null },
+  ] }), 'ok');
 });

@@ -7,8 +7,9 @@
 import {
   agentLabel, agentTokens, flattenSession, parseRefKey, parseTime,
 } from './agents-model.js';
+import { agentTimeRollup, sessionTimeRollup } from './agents-timeline-logic.js';
 
-/** @import { AgentGraph, AgentNode, AgentStep, ToolInvocation } from './api-types.js' */
+/** @import { AgentGraph, AgentNode, AgentSession, AgentStep, ToolInvocation } from './api-types.js' */
 
 /**
  * One Phase 3 anomaly finding from detectSignals.
@@ -403,6 +404,48 @@ export function groupBy(agents, opts = {}) {
     }))
     .sort((a, b) => b.costUSD - a.costUSD || b.count - a.count || a.key.localeCompare(b.key));
   return { dimension, total, rows };
+}
+
+// agentTimeRows aggregates the Insights "Time" panel's per-agent rows for the
+// session/agent scopes: one row per agent — its label plus the agentTimeRollup
+// buckets — sorted by totalMs desc.
+/**
+ * @param {AgentNode[]|null|undefined} agents
+ * @param {{nowMs?: number, topN?: number}} [opts]
+ */
+export function agentTimeRows(agents, opts = {}) {
+  const topN = opts.topN != null ? opts.topN : 10;
+  const rows = (Array.isArray(agents) ? agents : [])
+    .map(a => ({ label: agentLabel(a), ...agentTimeRollup(a, opts) }))
+    .filter(r => r.totalMs > 0)
+    .sort((a, b) => b.totalMs - a.totalMs);
+  const total = rows.reduce(
+    (acc, r) => ({ genMs: acc.genMs + r.genMs, toolMs: acc.toolMs + r.toolMs, idleMs: acc.idleMs + r.idleMs, totalMs: acc.totalMs + r.totalMs }),
+    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
+  return { rows: rows.slice(0, topN), overflow: Math.max(0, rows.length - topN), total };
+}
+
+// sessionTimeRows is agentTimeRows' graph-scope sibling: one row per SESSION
+// (its whole main+children sessionTimeRollup), so the panel stays legible when
+// the scope spans hundreds of agents. Same shape/contract as agentTimeRows —
+// zero-total sessions drop, rows sort by totalMs desc, the list caps at topN
+// (default 10) with the remainder reported as overflow, and total sums every
+// kept row (including the truncated ones — never just the shown slice).
+/**
+ * @param {AgentSession[]|null|undefined} sessions
+ * @param {{nowMs?: number, topN?: number}} [opts]
+ */
+export function sessionTimeRows(sessions, opts = {}) {
+  const topN = opts.topN != null ? opts.topN : 10;
+  const rows = (Array.isArray(sessions) ? sessions : [])
+    .filter(s => s)
+    .map(s => ({ sessionId: s.session_id || '', cwd: s.cwd || '', ...sessionTimeRollup(s, opts) }))
+    .filter(r => r.totalMs > 0)
+    .sort((a, b) => b.totalMs - a.totalMs);
+  const total = rows.reduce(
+    (acc, r) => ({ genMs: acc.genMs + r.genMs, toolMs: acc.toolMs + r.toolMs, idleMs: acc.idleMs + r.idleMs, totalMs: acc.totalMs + r.totalMs }),
+    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
+  return { rows: rows.slice(0, topN), overflow: Math.max(0, rows.length - topN), total };
 }
 
 // detectRetries finds repeated tool calls where an earlier attempt errored,

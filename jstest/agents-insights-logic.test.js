@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   DURATION_EDGES,
   agentLabel,
+  agentTimeRows,
   binSeries,
   contextSeries,
   costPareto,
@@ -17,6 +18,7 @@ import {
   errorRates,
   groupBy,
   percentiles,
+  sessionTimeRows,
   signalPipsByAgent,
   toolMix,
 } from '../web/agents-logic.js';
@@ -1242,4 +1244,75 @@ test('groupBy tolerates null agents/steps/tool entries and sums t.count for repe
   const res = groupBy(agents);
   assert.equal(res.total.count, 3);
   assert.deepEqual(res.rows.map(r => ({ key: r.key, count: r.count })), [{ key: 'exec', count: 3 }]);
+});
+
+// ── agentTimeRows / sessionTimeRows (Insights "Time" panel, item 16) ──
+test('agentTimeRows: one row per agent with label + buckets, sorted by totalMs desc', () => {
+  const small = { kind: 'subagent', agent_type: 'Explore', status: 'done', started_at: 0, ended_at: 500, steps: [
+    { timestamp: 0, duration_ms: 500, gen_ms: 100, tools: [{ ended_at: 300 }] },
+  ] };
+  const big = { kind: 'main', status: 'done', started_at: 0, ended_at: 2000, steps: [
+    { timestamp: 0, duration_ms: 2000, gen_ms: 600, tools: [{ ended_at: 1000 }] },
+  ] };
+  const { rows, overflow, total } = agentTimeRows([small, big]);
+  assert.equal(overflow, 0);
+  assert.deepEqual(rows.map(r => r.label), ['main', 'Explore']);
+  // big: gen 600, tool 1000, idle 400. small: gen 100, tool 300, idle 100.
+  assert.deepEqual(rows[0], { label: 'main', genMs: 600, toolMs: 1000, idleMs: 400, totalMs: 2000 });
+  assert.deepEqual(rows[1], { label: 'Explore', genMs: 100, toolMs: 300, idleMs: 100, totalMs: 500 });
+  assert.deepEqual(total, { genMs: 700, toolMs: 1300, idleMs: 500, totalMs: 2500 });
+});
+
+test('agentTimeRows: drops zero-total rows; empty/null input yields empty rows + zero total', () => {
+  const idle = { kind: 'subagent', agent_type: 'noop', status: 'done', started_at: 0, ended_at: 0, steps: [] };
+  const busy = { kind: 'main', status: 'done', started_at: 0, ended_at: 1000, steps: [
+    { timestamp: 0, duration_ms: 1000, gen_ms: 200, tools: [] },
+  ] };
+  const { rows } = agentTimeRows([idle, busy]);
+  assert.deepEqual(rows.map(r => r.label), ['main']);
+  assert.deepEqual(agentTimeRows(null), {
+    rows: [], overflow: 0, total: { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 },
+  });
+});
+
+test('agentTimeRows: caps at topN with an overflow count; total still sums ALL rows', () => {
+  const mk = (i, dur) => ({ kind: 'subagent', agent_type: `a${i}`, status: 'done',
+    started_at: 0, ended_at: dur, steps: [{ timestamp: 0, duration_ms: dur, gen_ms: dur, tools: [] }] });
+  const agents = [mk(1, 100), mk(2, 300), mk(3, 200)];
+  const { rows, overflow, total } = agentTimeRows(agents, { topN: 2 });
+  assert.deepEqual(rows.map(r => r.label), ['a2', 'a3']);
+  assert.equal(overflow, 1);
+  assert.equal(total.totalMs, 600); // the truncated a1 still counts in the totals
+});
+
+test('sessionTimeRows: one row per session with id/cwd + buckets, sorted, capped with overflow', () => {
+  const mkSession = (id, cwd, dur) => ({
+    session_id: id, cwd,
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: dur, steps: [
+      { timestamp: 0, duration_ms: dur, gen_ms: dur / 2, tools: [{ ended_at: dur / 2 }] },
+    ] },
+    children: [],
+  });
+  const sessions = [mkSession('s1', '/a', 400), mkSession('s2', '/b', 1000), mkSession('s3', '/c', 600)];
+  const { rows, overflow, total } = sessionTimeRows(sessions, { topN: 2 });
+  assert.deepEqual(rows.map(r => r.sessionId), ['s2', 's3']);
+  assert.deepEqual(rows.map(r => r.cwd), ['/b', '/c']);
+  // s2: gen 500, tool 500, idle 0 → the buckets ride on each row.
+  assert.deepEqual(rows[0], { sessionId: 's2', cwd: '/b', genMs: 500, toolMs: 500, idleMs: 0, totalMs: 1000 });
+  assert.equal(overflow, 1);
+  assert.equal(total.totalMs, 2000); // truncated s1 still counts
+});
+
+test('sessionTimeRows: skips null / zero-time sessions; null input is empty', () => {
+  const empty = { session_id: 'e', cwd: '/e', main: null, children: [] };
+  const busy = { session_id: 'b', cwd: '/b',
+    main: { kind: 'main', status: 'done', started_at: 0, ended_at: 100, steps: [
+      { timestamp: 0, duration_ms: 100, gen_ms: 100, tools: [] },
+    ] },
+    children: [] };
+  const { rows } = sessionTimeRows([null, empty, busy]);
+  assert.deepEqual(rows.map(r => r.sessionId), ['b']);
+  assert.deepEqual(sessionTimeRows(null), {
+    rows: [], overflow: 0, total: { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 },
+  });
 });

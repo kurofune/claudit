@@ -350,6 +350,55 @@ export function turnTimeBuckets(step) {
   return { genMs, toolMs, idleMs };
 }
 
+// agentTimeRollup rolls turnTimeBuckets up over one agent's whole run — the
+// "where did the time go" totals: generated · tool exec · idle, plus their sum.
+/**
+ * @param {AgentNode|null|undefined} agent
+ * @param {{nowMs?: number}} [opts]
+ * @returns {{genMs: number, toolMs: number, idleMs: number, totalMs: number}}
+ */
+export function agentTimeRollup(agent, opts = {}) {
+  const { nowMs = 0 } = opts;
+  const steps = (agent && agent.steps) || [];
+  let genMs = 0, toolMs = 0, idleMs = 0;
+  for (let k = 0; k < steps.length; k++) {
+    let step = steps[k];
+    // The LAST turn ships duration_ms 0 (the wire's "gap to the next turn"
+    // convention has no next turn); synthesize its wall-clock up to the agent's
+    // effective end — ended_at when done, nowMs while running (the same clamp
+    // stepSegments' effEnd applies) — so turnTimeBuckets can attribute it.
+    if (k === steps.length - 1 && !((step && step.duration_ms) > 0)) {
+      const start = parseTime(step && step.timestamp);
+      const end = agent.status === 'running' ? nowMs : parseTime(agent.ended_at);
+      if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+        step = { ...step, duration_ms: end - start };
+      }
+    }
+    const b = turnTimeBuckets(step);
+    genMs += b.genMs; toolMs += b.toolMs; idleMs += b.idleMs;
+  }
+  return { genMs, toolMs, idleMs, totalMs: genMs + toolMs + idleMs };
+}
+
+// sessionTimeRollup is agentTimeRollup summed over a whole session — the main
+// agent plus every sub-agent — for the session card's "where did the time go"
+// stacked bar. Note totalMs is attributed time (gen + tool + idle), NOT the
+// session's wall-clock span: pre-gen_ms turns contribute no idle, and
+// concurrent sub-agents each contribute their own full runtime.
+/**
+ * @param {AgentSession|null|undefined} session
+ * @param {{nowMs?: number}} [opts]
+ * @returns {{genMs: number, toolMs: number, idleMs: number, totalMs: number}}
+ */
+export function sessionTimeRollup(session, opts = {}) {
+  let genMs = 0, toolMs = 0, idleMs = 0;
+  for (const a of flattenSession(session)) {
+    const b = agentTimeRollup(a, opts);
+    genMs += b.genMs; toolMs += b.toolMs; idleMs += b.idleMs;
+  }
+  return { genMs, toolMs, idleMs, totalMs: genMs + toolMs + idleMs };
+}
+
 // idleSegments draws the wait/idle gap as a distinct span at the trailing edge of
 // each turn — the "tool-end → next turn" dead air where the agent was neither
 // generating nor running a tool, so "where did the time go" is visible in the
