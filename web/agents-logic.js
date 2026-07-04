@@ -1,3 +1,4 @@
+// @ts-check
 // Pure, DOM-free logic for the Agents observability tab: lane packing
 // for the swimlane, time→x scaling, agent-bar geometry, and the
 // status/elapsed derivations the cards display, all computed over the

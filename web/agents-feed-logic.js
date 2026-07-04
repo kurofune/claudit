@@ -1,3 +1,4 @@
+// @ts-check
 // Feed-lens derivations: the reverse-chronological event feed and the
 // running-agent live rows. Split out of agents-logic.js (re-exported by
 // the facade).
@@ -6,6 +7,8 @@ import {
   agentElapsedMs, agentLabel, agentTokens, currentToolKind,
   flattenSession, parseTime,
 } from './agents-model.js';
+
+/** @import { AgentGraph } from './api-types.js' */
 
 // buildEventFeed flattens the whole graph into a single reverse-chronological
 // stream of discrete events — the "tail -f" the Feed lens renders.
@@ -20,6 +23,11 @@ import {
 // of the tab. Events are emitted in a deterministic order, then stably sorted
 // newest-first; `limit` caps the result (0 = unlimited). DOM-free + pure so
 // it's unit-testable and a refetch can diff against the previous feed.
+/**
+ * @param {AgentGraph|null|undefined} graph
+ * @param {{limit?: number}} [opts]
+ * @returns {any[]} newest-first events (tool | spawn | done)
+ */
 export function buildEventFeed(graph, { limit = 200 } = {}) {
   const sessions = (graph && graph.sessions) || [];
   const events = [];
@@ -86,6 +94,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
 // one worth watching) sits at the top. Each descriptor carries the agent's
 // flatten index (0=main, 1.. children) so the row colors/links consistently
 // with the rest of the tab, plus the started_at/status the live timer ticks on.
+/** @param {AgentGraph|null|undefined} graph @param {number} [nowMs] */
 export function buildLiveFeed(graph, nowMs = Date.now()) {
   const sessions = (graph && graph.sessions) || [];
   const live = [];

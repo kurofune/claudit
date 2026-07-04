@@ -1,3 +1,4 @@
+// @ts-check
 // Insights-lens aggregations and anomaly detection: tool mix, percentiles,
 // latency histogram, cost Pareto, error rates, token/context series,
 // group-by, retry detection, and the Phase 3 signal detectors + timeline
@@ -7,10 +8,26 @@ import {
   agentLabel, agentTokens, flattenSession, parseRefKey, parseTime,
 } from './agents-model.js';
 
+/** @import { AgentGraph, AgentNode, AgentStep, ToolInvocation } from './api-types.js' */
+
+/**
+ * One Phase 3 anomaly finding from detectSignals.
+ * @typedef {Object} Signal
+ * @property {string} kind      'retry-storm'|'cost-whale'|'slow-tool'|'error-cascade'|'idle-stall'
+ * @property {number} severity  [0,1] badness magnitude (cross-kind sort key)
+ * @property {string} tier      'high'|'med'|'low'
+ * @property {string} ref       refKey (sid#ai / sid#ai.si / sid#ai.si:ti)
+ * @property {string} summary
+ */
+
 // toolMix aggregates an array of agent nodes (already scoped by the caller —
 // whole graph, one session, or one agent) into per-kind tool totals for the
 // Insights "Tool mix" panel: count · wall-clock · cost, grouped by ToolKind.
 // Pure and scope-agnostic. Returns [] for a null/empty input.
+/**
+ * @param {AgentNode[]|null|undefined} agents
+ * @returns {{kind: string, count: number, durationMs: number, costUSD: number}[]}
+ */
 export function toolMix(agents) {
   if (!Array.isArray(agents)) return [];
   const byKind = new Map();
@@ -41,6 +58,7 @@ export function toolMix(agents) {
 }
 
 // percentiles returns one value per requested point.
+/** @param {number[]|null|undefined} values @param {number[]|null|undefined} ps @returns {number[]} */
 export function percentiles(values, ps) {
   const points = Array.isArray(ps) ? ps : [];
   const nums = (Array.isArray(values) ? values : [])
@@ -62,6 +80,7 @@ export function percentiles(values, ps) {
 export const DURATION_EDGES = [100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000];
 
 // durationHistogram buckets per-tool wall-clock.
+/** @param {AgentNode[]|null|undefined} agents @param {{edges?: number[]}} [opts] */
 export function durationHistogram(agents, opts = {}) {
   const edges = (Array.isArray(opts.edges) && opts.edges.length)
     ? opts.edges.slice().sort((a, b) => a - b)
@@ -107,6 +126,7 @@ export function durationHistogram(agents, opts = {}) {
 //                `turnsPct`% of turns (rounded up, ≥1) account for spendShare of
 //                spend; thresholdCost is the cheapest turn still inside that slice
 //                (the minCostUSD cut that isolates the whales).
+/** @param {AgentNode[]|null|undefined} agents @param {{topN?: number, headlinePct?: number}} [opts] */
 export function costPareto(agents, opts = {}) {
   const topN = opts.topN != null ? opts.topN : 10;
   const headlinePct = opts.headlinePct != null ? opts.headlinePct : 10;
@@ -160,6 +180,7 @@ export function costPareto(agents, opts = {}) {
 //             each { name, kind, total, errors, rate }, same sort by name, capped
 //             at opts.topN (default 8). A name with no kind folds to 'other',
 //             a nameless tool to '(unnamed)'.
+/** @param {AgentNode[]|null|undefined} agents @param {{topN?: number}} [opts] */
 export function errorRates(agents, opts = {}) {
   const topN = opts.topN != null ? opts.topN : 8;
   let total = 0, errors = 0;
@@ -231,6 +252,7 @@ export function errorRates(agents, opts = {}) {
 //                 the denominator is 0
 //   totals      — summed { input, output, cacheWrite, cacheRead, total }
 
+/** @param {AgentNode[]|null|undefined} agents @param {Object} [opts] */
 export function contextSeries(agents, opts = {}) {
   const series = [];
   let peakContext = 0;
@@ -272,6 +294,11 @@ export function contextSeries(agents, opts = {}) {
 // (so the bars represent that slice's real volume), and count records how many
 // turns folded in. When the series already fits, every turn is its own bin
 // (count 1). No turn is dropped — render code must not silently truncate.
+/**
+ * @param {{context: number, input: number, output: number, cacheWrite: number,
+ *   cacheRead: number, total: number}[]|null|undefined} series
+ * @param {number} maxBins
+ */
 export function binSeries(series, maxBins) {
   const src = Array.isArray(series) ? series : [];
   const cap = maxBins > 0 ? maxBins : 1;
@@ -322,6 +349,10 @@ export function binSeries(series, maxBins) {
 //           medianMs is the median tool-row wall-clock (NaN when the group has
 //           no measured rows); costShare/countShare are the group's fraction of
 //           the totals (0 when the total is 0).
+/**
+ * @param {AgentNode[]|null|undefined} agents
+ * @param {{dimension?: 'kind'|'status'|'model'|'agent'}} [opts]
+ */
 export function groupBy(agents, opts = {}) {
   const dimension = opts.dimension || 'kind';
   const dimKey = (t, step, aLabel) => {
@@ -382,6 +413,10 @@ export function groupBy(agents, opts = {}) {
 // chronological). A call is a retry only when some earlier call in its group
 // had status "error", so a clean repeat (ok → ok) is never flagged. Coords are
 // the suffix of the full tool refKey, composable via `${sid}#${ai}.${coord}`.
+/**
+ * @param {AgentNode|null|undefined} agent
+ * @returns {Map<string, {attempt: number, ofRef: string}>}
+ */
 export function detectRetries(agent) {
   const out = new Map();
   const groups = new Map(); // groupKey -> { firstRef, count, sawError }
@@ -411,6 +446,13 @@ export function detectRetries(agent) {
 // is the detector's own banding for pip styling, ref is a refKey (sid#ai /
 // sid#ai.si / sid#ai.si:ti) so the existing select()/filter machinery can land on
 // it, and summary is a self-contained sentence for the panel/tooltip.
+/**
+ * @param {AgentGraph|null|undefined} graph
+ * @param {{whaleShare?: number, retryStormMin?: number, slowToolMin?: number,
+ *   slowMultiple?: number, errorCascadeMin?: number, idleStallMs?: number,
+ *   nowMs?: number}} [opts]
+ * @returns {Signal[]}
+ */
 export function detectSignals(graph, opts = {}) {
   const whaleShare = opts.whaleShare > 0 ? opts.whaleShare : 0.2;
   const retryStormMin = opts.retryStormMin > 0 ? opts.retryStormMin : 3;
@@ -441,6 +483,7 @@ export function detectSignals(graph, opts = {}) {
 // signal per group (keyed by the first call's coord), refed at the worst
 // (highest-attempt) call so click-through lands on the storm's peak. Emits only
 // groups reaching retryStormMin attempts.
+/** @param {AgentNode[]} agents @param {string} sid @param {number} retryStormMin @returns {Signal[]} */
 function retryStormSignals(agents, sid, retryStormMin) {
   const out = [];
   agents.forEach((a, ai) => {
@@ -454,7 +497,8 @@ function retryStormSignals(agents, sid, retryStormMin) {
       const severity = Math.max(0, Math.min(1, (maxAttempt - 1) / 5));
       const tier = maxAttempt >= 5 ? 'high' : maxAttempt >= 4 ? 'med' : 'low';
       const [si, ti] = worstCoord.split(':').map(Number);
-      const tool = ((a.steps[si] || {}).tools || [])[ti] || {};
+      const tool = ((a.steps[si] || /** @type {Partial<AgentStep>} */ ({})).tools || [])[ti]
+        || /** @type {Partial<ToolInvocation>} */ ({});
       const name = tool.name || tool.kind || 'tool';
       const summary = tool.detail
         ? `${name} retried ${maxAttempt}× (${tool.detail})`
@@ -471,6 +515,11 @@ function retryStormSignals(agents, sid, retryStormMin) {
 // Reads is caught even when it's not in the global top tail). Needs at least
 // slowToolMin valid-duration tools for a meaningful percentile; below that the
 // session is too small to call anything an outlier. ref is the tool (sid#ai.si:ti).
+/**
+ * @param {AgentNode[]} agents @param {string} sid
+ * @param {number} slowToolMin @param {number} slowMultiple
+ * @returns {Signal[]}
+ */
 function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
   // Collect every tool with a real wall-clock (NaN-guarded like durationHistogram).
   const tools = []; // { ai, si, ti, kind, name, dur }
@@ -519,6 +568,7 @@ function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
 // order and flag any run of errorCascadeMin-or-more consecutive errored tools as
 // one signal, refed at the run's first error so click-through lands where it
 // began. A non-error tool breaks the run; runs don't cross agent boundaries.
+/** @param {AgentNode[]} agents @param {string} sid @param {number} errorCascadeMin @returns {Signal[]} */
 function errorCascadeSignals(agents, sid, errorCascadeMin) {
   const out = [];
   agents.forEach((a, ai) => {
@@ -555,7 +605,13 @@ function errorCascadeSignals(agents, sid, errorCascadeMin) {
 // finished). When nowMs is provided, the tail from the final step's end to "now"
 // is also checked, catching a run that stalled and never resumed. ref is the step
 // that ends the idle (the resuming step, or the last step for a trailing stall).
+/**
+ * @param {AgentNode[]} agents @param {string} sid
+ * @param {number} idleStallMs @param {number|null} nowMs
+ * @returns {Signal[]}
+ */
 function idleStallSignals(agents, sid, idleStallMs, nowMs) {
+  /** @param {AgentStep|null|undefined} step */
   const stepEnd = (step) => {
     let end = parseTime(step && step.timestamp);
     for (const t of (step && step.tools) || []) {
@@ -597,6 +653,7 @@ function idleStallSignals(agents, sid, idleStallMs, nowMs) {
 // costWhaleSignals: per session, flag each turn whose cost is at least whaleShare
 // of the session's total step cost. severity is the share itself; ref is the
 // turn (sid#ai.si). Shares are normalized within the session, never the graph.
+/** @param {AgentNode[]} agents @param {string} sid @param {number} whaleShare @returns {Signal[]} */
 function costWhaleSignals(agents, sid, whaleShare) {
   let total = 0;
   for (const a of agents) for (const step of (a.steps || [])) total += (step && step.cost_usd) || 0;
@@ -625,6 +682,12 @@ function costWhaleSignals(agents, sid, whaleShare) {
 // or cross-session refs are skipped, and each pip's tier is normalized to
 // high|med|low so the renderer always has a color class. Returns
 // Map<agentIndex, { pips: [{ ref, tier, summary, kind }], overflow }>.
+/**
+ * @param {Signal[]|null|undefined} signals
+ * @param {string|null|undefined} sessionId
+ * @param {number} [cap]
+ * @returns {Map<number, {pips: {ref: string, tier: string, summary: string, kind: string}[], overflow: number}>}
+ */
 export function signalPipsByAgent(signals, sessionId, cap = 3) {
   const byAgent = new Map();
   if (!Array.isArray(signals) || !sessionId) return byAgent;

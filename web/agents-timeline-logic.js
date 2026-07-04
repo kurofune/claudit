@@ -1,3 +1,4 @@
+// @ts-check
 // Timeline (Gantt) math for the Agents tab: lane packing, time→x scaling,
 // bar/segment geometry, playhead phase/stats, zoom clamps, and the
 // session-picker rollups. Pure geometry — no DOM, no Date.now() (callers
@@ -8,6 +9,48 @@ import {
   parseRefKey, parseTime, refKey,
 } from './agents-model.js';
 
+/** @import { AgentGraph, AgentSession, AgentNode, AgentStep } from './api-types.js' */
+
+/**
+ * The linear time→x map makeTimeScale builds.
+ * @typedef {Object} TimeScale
+ * @property {(ts: *) => number} x
+ * @property {number} startMs
+ * @property {number} endMs
+ * @property {number} width
+ * @property {number} span
+ * @property {number} minBlock
+ */
+
+/**
+ * Shared options for the segment builders (stepSegments / toolSegments /
+ * idleSegments). `scale` is required in practice — optional here only so the
+ * `opts = {}` default-parameter idiom typechecks.
+ * @typedef {Object} SegmentOpts
+ * @property {TimeScale} [scale]
+ * @property {number} [chartX]
+ * @property {string} [sessionId]
+ * @property {number} [agentIndex]
+ * @property {number} [effEnd]
+ * @property {number|null} [until]
+ */
+
+/**
+ * The knobs buildTimeline / timelineAtTime / buildFlowLayout accept. All
+ * optional — zero config yields the documented defaults.
+ * @typedef {Object} TimelineOpts
+ * @property {number} [hostW]
+ * @property {number} [rowH]
+ * @property {number} [axisH]
+ * @property {number} [labelW]
+ * @property {number} [pad]
+ * @property {number} [nowMs]
+ * @property {number} [minBlock]
+ * @property {number} [minPxPerMs]
+ * @property {number} [indent]
+ * @property {number} [tickCount]
+ */
+
 // timelineSessionList summarizes each session for the Timeline lens's session
 // picker — the sibling of conversationSessionList. One entry per session that
 // has a real main agent, in ORIGINAL input order (index = unfiltered position,
@@ -15,6 +58,7 @@ import {
 // plus the whole-session rollups the picker rows triage on, by reusing
 // sessionStats. entrypoint feeds the SDK badge, matching conversationSessionList.
 // Null/main-less sessions are excluded; a null/empty input → [].
+/** @param {AgentSession[]|null|undefined} sessions @param {number} [nowMs] */
 export function timelineSessionList(sessions, nowMs = Date.now()) {
   const list = sessions || [];
   const out = [];
@@ -39,6 +83,12 @@ export function timelineSessionList(sessions, nowMs = Date.now()) {
 // else the first plottable session; else null when nothing is plottable. The
 // timelineSid/selectedRef fallbacks guard against a chosen session aging out of
 // the live window — it quietly drops back to the first.
+/**
+ * @param {AgentSession[]|null|undefined} sessions
+ * @param {string|null|undefined} timelineSid
+ * @param {string|null|undefined} selectedRef
+ * @returns {string|null}
+ */
 export function pickTimelineSid(sessions, timelineSid, selectedRef) {
   const list = timelineSessionList(sessions);
   if (list.length === 0) return null;
@@ -57,6 +107,10 @@ export function pickTimelineSid(sessions, timelineSid, selectedRef) {
 // unparseable start are dropped. End is treated as inclusive of the
 // boundary, so two agents that merely touch (one ends exactly when the
 // next starts) can share a lane.
+/**
+ * @param {AgentNode[]|null|undefined} agents
+ * @returns {{agent: AgentNode, lane: number, start: number, end: number}[]}
+ */
 export function packLanes(agents) {
   const items = (agents || [])
     .map(a => ({ agent: a, ...agentSpan(a) }))
@@ -88,6 +142,7 @@ export function packLanes(agents) {
 
 // laneCount returns how many lanes a packed layout occupies (max lane
 // index + 1), or 0 when empty — the swimlane's row count.
+/** @param {{lane: number}[]|null|undefined} packed @returns {number} */
 export function laneCount(packed) {
   let max = -1;
   for (const p of packed || []) if (p.lane > max) max = p.lane;
@@ -100,6 +155,10 @@ export function laneCount(packed) {
 // divide-by-zero). minBlock is the floor agentBar applies to bar widths
 // so a sub-second agent stays visible/clickable; it's carried on the
 // returned scale for agentBar to read.
+/**
+ * @param {{startMs: number, endMs: number, width: number, minBlock?: number}} opts
+ * @returns {TimeScale}
+ */
 export function makeTimeScale({ startMs, endMs, width, minBlock = 2 }) {
   const span = endMs - startMs;
   const x = ts => {
@@ -115,6 +174,11 @@ export function makeTimeScale({ startMs, endMs, width, minBlock = 2 }) {
 // agentBar computes the { x, width, lane } pixel rect for one packed
 // agent against a scale. Width is floored to the scale's minBlock so a
 // near-instant agent is still a visible block rather than a hairline.
+/**
+ * @param {{start: number, end: number, lane?: number}} item
+ * @param {TimeScale} scale
+ * @returns {{x: number, width: number, lane?: number}}
+ */
 export function agentBar(item, scale) {
   const x = scale.x(item.start);
   const raw = scale.x(item.end) - x;
@@ -134,6 +198,7 @@ export function agentBar(item, scale) {
 // not step.duration_ms — so the last step (raw duration 0, stretched to effEnd)
 // and a truncated straddler both report the wall-clock the rendered width depicts,
 // which is what an inline label reads off (see fitSegmentLabel).
+/** @param {AgentNode|null|undefined} agent @param {SegmentOpts} [opts] */
 export function stepSegments(agent, opts = {}) {
   const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
   const steps = (agent && agent.steps) || [];
@@ -179,6 +244,7 @@ export function stepSegments(agent, opts = {}) {
 // sliver). Tools share their parent step's cost (the finest cost the wire gives
 // — tools aren't individually priced), which keeps the cost-heat ramp alive;
 // the render suppresses per-tool cost in labels so it never implies otherwise.
+/** @param {AgentNode|null|undefined} agent @param {SegmentOpts} [opts] */
 export function toolSegments(agent, opts = {}) {
   const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
   const steps = (agent && agent.steps) || [];
@@ -245,6 +311,7 @@ export function toolSegments(agent, opts = {}) {
 // is whatever wall-clock is left (duration_ms − gen − tool), floored at 0.
 // Pre-0a fallback: when gen_ms is missing/0 we can't separate generation from
 // wait, so idleMs stays 0 — no attribution beats mislabelling generation as idle.
+/** @param {AgentStep|null|undefined} step @returns {{genMs: number, toolMs: number, idleMs: number}} */
 export function turnTimeBuckets(step) {
   const genMs = Math.max(0, (step && step.gen_ms) || 0);
   const durMs = Math.max(0, (step && step.duration_ms) || 0);
@@ -278,6 +345,7 @@ export function turnTimeBuckets(step) {
 // Same opts/playhead-cap contract as toolSegments; refKey points at the step (no
 // toolIndex) so a click selects that turn. Kept separate from toolSegments so the
 // idle rail renders behind/around the tool bars without disturbing their tiling.
+/** @param {AgentNode|null|undefined} agent @param {SegmentOpts} [opts] */
 export function idleSegments(agent, opts = {}) {
   const { scale, chartX = 0, sessionId = '', agentIndex = 0, effEnd, until } = opts;
   const steps = (agent && agent.steps) || [];
@@ -323,6 +391,13 @@ export function idleSegments(agent, opts = {}) {
 // charW is the approximate px per glyph at the segment font size and padX the
 // breathing room reserved on each side — both tunable so the view can match its
 // actual CSS without this module touching the DOM.
+/**
+ * @param {number} width
+ * @param {string} durText
+ * @param {string} costText
+ * @param {{charW?: number, padX?: number}} [opts]
+ * @returns {string}
+ */
 export function fitSegmentLabel(width, durText, costText, opts = {}) {
   const { charW = 6, padX = 4 } = opts;
   const avail = width - padX * 2;
@@ -342,6 +417,7 @@ export function fitSegmentLabel(width, durText, costText, opts = {}) {
 // shapes the ramp: gamma > 1 holds cheap turns cool so only the genuinely
 // expensive ones light up (cost is long-tailed, so a linear ramp would wash
 // everything mid-bright). The caller feeds the result to an inline CSS var.
+/** @param {number} cost @param {number} maxCost @param {{gamma?: number}} [opts] @returns {number} */
 export function costHeat(cost, maxCost, opts = {}) {
   const { gamma = 2 } = opts;
   const c = cost > 0 ? cost : 0;
@@ -370,6 +446,7 @@ const KIND_ORDER = ['read', 'edit', 'exec', 'web', 'skill', 'mcp', 'command', 't
 // Timeline renders `kind-${segKindColor(seg.kind)}` so hue carries the kind while
 // cost-heat demotes to a secondary (saturation) channel and error-red still wins.
 // DOM-free twin of view-agents' kindFamily (which also drives the glyph monograms).
+/** @param {string|undefined} kind @returns {string} */
 export function segKindColor(kind) {
   return KIND_FAMILIES.has(kind) ? kind : 'other';
 }
@@ -378,6 +455,7 @@ export function segKindColor(kind) {
 // integer percent (0..100) — the "(xx% of agent)" clause the richer tooltip adds.
 // A zero/negative part is 0; a zero/invalid whole returns null so the caller drops
 // the clause rather than dividing by zero.
+/** @param {number} partMs @param {number} wholeMs @returns {number|null} */
 export function pctOfAgent(partMs, wholeMs) {
   if (!(wholeMs > 0)) return null;
   if (!(partMs > 0)) return 0;
@@ -389,6 +467,11 @@ export function pctOfAgent(partMs, wholeMs) {
 // DOM- and format-free): `head · dur (pct% of agent) · cost · tokens`. Empty pieces
 // are dropped; a null pct drops the parenthetical; an error appends a trailing
 // marker. Richer hover, NOT richer in-bar labels — bars are a poor text channel.
+/**
+ * @param {{head?: string, durText?: string, pct?: number|null, costText?: string,
+ *   tokensText?: string, isError?: boolean}} [parts]
+ * @returns {string}
+ */
 export function segTooltip({ head = '', durText = '', pct = null, costText = '', tokensText = '', isError = false } = {}) {
   const parts = [];
   if (head) parts.push(head);
@@ -405,6 +488,7 @@ export function segTooltip({ head = '', durText = '', pct = null, costText = '',
 // timed-vs-untimed decision exactly: a step with ≥1 tool carrying ended_at
 // contributes each timed tool's kind; a step with none falls back to the 'step'
 // (turn) color — so the legend names exactly the colors the Gantt actually draws.
+/** @param {AgentSession|null|undefined} session @returns {string[]} */
 export function timelineKinds(session) {
   const seen = new Set();
   for (const a of flattenSession(session)) {
@@ -427,9 +511,14 @@ export function timelineKinds(session) {
 // duration contributes no longest mark; one with no positive cost no whale mark,
 // so a row can carry a whale without a longest (and vice versa). Input is
 // buildTimeline's rows (each { key, segments:[{ refKey, durationMs, cost_usd }] }).
+/**
+ * @param {{key: string, segments: {refKey: string, durationMs: number, cost_usd: number}[]}[]|null|undefined} rows
+ * @returns {{session: {longestRef?: string, whaleRef?: string},
+ *   agents: Object<string, {longestRef?: string, whaleRef?: string}>}}
+ */
 export function criticalSpans(rows) {
   const list = Array.isArray(rows) ? rows : [];
-  const agents = {};
+  const agents = /** @type {Object<string, {longestRef?: string, whaleRef?: string}>} */ ({});
   let allLongest = null, allWhale = null;
   for (const row of list) {
     if (!row) continue;
@@ -440,14 +529,14 @@ export function criticalSpans(rows) {
       if (s.durationMs > 0 && (!longest || s.durationMs > longest.durationMs)) longest = s;
       if (s.cost_usd > 0 && (!whale || s.cost_usd > whale.cost_usd)) whale = s;
     }
-    const entry = {};
+    const entry = /** @type {{longestRef?: string, whaleRef?: string}} */ ({});
     if (longest) entry.longestRef = longest.refKey;
     if (whale) entry.whaleRef = whale.refKey;
     if (longest || whale) agents[row.key] = entry;
     if (longest && (!allLongest || longest.durationMs > allLongest.durationMs)) allLongest = longest;
     if (whale && (!allWhale || whale.cost_usd > allWhale.cost_usd)) allWhale = whale;
   }
-  const session = {};
+  const session = /** @type {{longestRef?: string, whaleRef?: string}} */ ({});
   if (allLongest) session.longestRef = allLongest.refKey;
   if (allWhale) session.whaleRef = allWhale.refKey;
   return { session, agents };
@@ -460,6 +549,11 @@ export function criticalSpans(rows) {
 // rather than poisoning the window. startMs is the earliest parseable
 // start; endMs is the latest of all starts and effective ends, clamped so
 // endMs >= startMs. Null when no agent has a parseable start.
+/**
+ * @param {AgentNode[]|null|undefined} agents
+ * @param {number} nowMs
+ * @returns {{startMs: number, endMs: number}|null}
+ */
 export function timelineBounds(agents, nowMs) {
   let startMs = Infinity;
   let endMs = -Infinity;
@@ -487,6 +581,7 @@ export function timelineBounds(agents, nowMs) {
 // start), 'active' while it runs, 'done' once it has ended. A running agent
 // (no end yet) is active for any T at or after its start. Boundaries are
 // inclusive: T === start is active, T === end is done.
+/** @param {AgentNode|null|undefined} agent @param {number} T @returns {'pending'|'active'|'done'} */
 export function agentPhaseAt(agent, T) {
   const start = parseTime(agent && agent.started_at);
   if (Number.isNaN(start) || start > T) return 'pending';
@@ -500,6 +595,7 @@ export function agentPhaseAt(agent, T) {
 // agent of every session — the window the playhead slider spans. Flattens all
 // sessions into one agent array and delegates to timelineBounds (so a running
 // agent extends endMs to nowMs). Null for a null/empty/agent-less graph.
+/** @param {AgentGraph|null|undefined} graph @param {number} nowMs */
 export function playheadBounds(graph, nowMs) {
   const sessions = (graph && graph.sessions) || [];
   const allAgents = sessions.flatMap(flattenSession);
@@ -510,6 +606,7 @@ export function playheadBounds(graph, nowMs) {
 // active / done as of instant T, classifying each via agentPhaseAt. Zeros for
 // a null/empty graph. Before the earliest start everything is pending; after
 // the latest end everything is done.
+/** @param {AgentGraph|null|undefined} graph @param {number} T @returns {{pending: number, active: number, done: number}} */
 export function playheadStats(graph, T) {
   const out = { pending: 0, active: 0, done: 0 };
   const sessions = (graph && graph.sessions) || [];
@@ -523,6 +620,7 @@ export function playheadStats(graph, T) {
 
 // sessionStats rolls one session up to the numbers the Timeline's per-session
 // summary strip shows, all from already-present data.
+/** @param {AgentSession|null|undefined} session @param {number} [nowMs] */
 export function sessionStats(session, nowMs = Date.now()) {
   const agents = flattenSession(session);
   let turnCount = 0, toolCount = 0, toolErrors = 0, stepCost = 0, tokenCount = 0;
@@ -558,6 +656,7 @@ export function sessionStats(session, nowMs = Date.now()) {
 // row's refKey index aligns with the rest of the tab; an agent with an
 // unparseable start just gets a left-edge sliver bar rather than being dropped.
 // Returns the empty layout when the session has no agents or no parseable times.
+/** @param {AgentSession|null|undefined} session @param {TimelineOpts} [opts] */
 export function buildTimeline(session, opts = {}) {
   const {
     hostW = 800, rowH = 24, axisH = 20, labelW = 130, pad = 8,
@@ -641,6 +740,11 @@ export const TL_MAX_PX_PER_MS = 0.12;
 // floor wins and every request collapses to it. A zero/negative span (a
 // zero-length session) has no meaningful axis → returns the ceiling; a
 // non-positive/NaN request returns the floor (the safe overview density).
+/**
+ * @param {number} pxPerMs
+ * @param {{span?: number, chartHostW?: number, maxPxPerMs?: number}} [opts]
+ * @returns {number}
+ */
 export function zoomClampPxPerMs(pxPerMs, opts = {}) {
   const { span, chartHostW, maxPxPerMs = TL_MAX_PX_PER_MS } = opts;
   const floor = span > 0 ? chartHostW / span : maxPxPerMs;
@@ -656,6 +760,11 @@ export function zoomClampPxPerMs(pxPerMs, opts = {}) {
 // the old/new chart content widths, it returns the scrollLeft that puts the same
 // FRACTIONAL content position back under the cursor — clamped to [0, maxScroll]
 // so the result never over- or under-scrolls. A degenerate old width yields 0.
+/**
+ * @param {{cursorX?: number, scrollLeft?: number, viewportW?: number,
+ *   oldChartW?: number, newChartW?: number}} [opts]
+ * @returns {number}
+ */
 export function zoomAnchorScrollLeft(opts = {}) {
   const { cursorX = 0, scrollLeft = 0, viewportW = 0, oldChartW = 0, newChartW = 0 } = opts;
   if (!(oldChartW > 0)) return 0;
@@ -672,6 +781,7 @@ export function zoomAnchorScrollLeft(opts = {}) {
 // finished agent keeps its real bar. Adds `playheadX` (the playhead line's x,
 // null when the session hasn't begun at T) and `atMs` (the T it was built for).
 // Rows stay 1:1 with flattenSession order so selection indices still line up.
+/** @param {AgentSession|null|undefined} session @param {number} T @param {TimelineOpts} [opts] */
 export function timelineAtTime(session, T, opts = {}) {
   const base = buildTimeline(session, opts);
   if (base.rows.length === 0) {
@@ -720,6 +830,11 @@ export function timelineAtTime(session, T, opts = {}) {
 // given pixel width — the view renders the returned rects/lines as SVG.
 // Nodes are keyed `${sessionId}#${flattenIndex}` (0=main) so selection and
 // coloring stay stable across refetches. Tolerates a missing main / children.
+/**
+ * @param {AgentSession|null|undefined} session
+ * @param {{width?: number, nodeW?: number, nodeH?: number, padding?: number,
+ *   gapX?: number, gapY?: number}} [opts]
+ */
 export function buildFlowLayout(session, opts = {}) {
   const {
     width = 800, nodeW = 120, nodeH = 48,
@@ -770,6 +885,12 @@ export function buildFlowLayout(session, opts = {}) {
 }
 
 // nodeOf builds one flow-graph node rect from an agent payload.
+/**
+ * @param {AgentNode|null|undefined} a
+ * @param {string} key
+ * @param {string} kind
+ * @param {number} x @param {number} y @param {number} w @param {number} h
+ */
 function nodeOf(a, key, kind, x, y, w, h) {
   return {
     key, kind, label: agentLabel(a),

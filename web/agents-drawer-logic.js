@@ -1,3 +1,4 @@
+// @ts-check
 // Drawer payload logic: the flat audit record the shared detail drawer
 // renders for a selection, plus its row/spawn sub-builders and the
 // truncation probe. Split out of agents-logic.js (re-exported by the
@@ -7,6 +8,9 @@ import {
   agentLabel, agentSpan, agentTokens, baseName,
   refKey, resolveRef, spawnTargetIndex,
 } from './agents-model.js';
+
+/** @import { AgentGraph, AgentSession, AgentStep, ToolInvocation } from './api-types.js' */
+/** @import { Ref } from './agents-model.js' */
 
 // buildDrawerPayload assembles the full audit object the detail drawer
 // renders for a selection. Resolves the (possibly stale) ref, then emits
@@ -29,6 +33,12 @@ import {
 // snippet for a STEP ref and for any TOOL ref sharing that uuid (a tool
 // inherits its parent turn's thinking/text). A field absent from the entry
 // keeps its snippet; ignored when null/undefined.
+/**
+ * @param {AgentGraph|null|undefined} graph
+ * @param {Ref|string|null|undefined} ref
+ * @param {Object<string, {input?: string, output?: string}>|null} [fullByTool]
+ * @param {Object<string, {thinking?: string, text?: string}>|null} [fullByTurn]
+ */
 export function buildDrawerPayload(graph, ref, fullByTool = null, fullByTurn = null) {
   const r = resolveRef(graph, ref);
   if (!r) return null;
@@ -116,6 +126,13 @@ export function buildDrawerPayload(graph, ref, fullByTool = null, fullByTurn = n
 // stepToolRows builds the navigable tool-call rows for a step (turn) ref: one
 // per tool_use, each carrying the refKey of the exact tool so the drawer can
 // click through to its Input/Output. Empty for any non-step ref.
+/**
+ * @param {'agent'|'step'|'tool'} type
+ * @param {AgentStep|null} step
+ * @param {AgentSession} session
+ * @param {number} agentIndex
+ * @param {number|null} stepIndex
+ */
 function stepToolRows(type, step, session, agentIndex, stepIndex) {
   if (type !== 'step' || !step || !Array.isArray(step.tools)) return [];
   return step.tools.map((tu, i) => ({
@@ -131,6 +148,11 @@ function stepToolRows(type, step, session, agentIndex, stepIndex) {
 // backend SpawnRollup plus childRef, the navigable refKey of the sub-agent it
 // launched (resolved via spawnTargetIndex). Returns null unless this is a tool
 // ref that actually spawned a sub-agent.
+/**
+ * @param {'agent'|'step'|'tool'} type
+ * @param {ToolInvocation|null} tool
+ * @param {AgentSession} session
+ */
 function spawnDrawerInfo(type, tool, session) {
   if (type !== 'tool' || !tool || !tool.spawned) return null;
   const idx = spawnTargetIndex(session, tool.spawned.agent_ref);
@@ -142,6 +164,7 @@ function spawnDrawerInfo(type, tool, session) {
 // layer appends a "…" (U+2026) marker when it truncates a tool input/output
 // to its rune cap. The drawer uses this to decide whether to offer a "show
 // full" toggle, so it doesn't promise more content than exists.
+/** @param {*} s @returns {boolean} */
 export function looksTruncated(s) {
   return typeof s === 'string' && s.endsWith('…');
 }

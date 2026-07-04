@@ -1,16 +1,32 @@
+// @ts-check
 // Trace-filter logic (Phase 2): the spec-activity probe and the bottom-up
 // refKey matcher every lens dims against. Split out of agents-logic.js
 // (re-exported by the facade).
 
 import { flattenSession } from './agents-model.js';
 
+/** @import { AgentGraph } from './api-types.js' */
+
+/**
+ * The trace-filter spec: every dimension optional; an all-empty spec is
+ * "inactive" (show everything).
+ * @typedef {Object} FilterSpec
+ * @property {string} [text]
+ * @property {string[]} [kinds]
+ * @property {boolean} [errorsOnly]
+ * @property {number} [minDurationMs]
+ * @property {number} [minCostUSD]
+ * @property {string} [agentType]
+ */
+
 // ── trace filter (Phase 2) ──────────────────────────────────────────────────
 
 // specActive reports whether a filter spec constrains anything — true iff at
 // least one dimension is set. The UI uses it to decide whether to dim rows at
 // all (an inactive spec means "show everything", not "match nothing").
+/** @param {FilterSpec|null|undefined} spec @returns {boolean} */
 export function specActive(spec) {
-  const s = spec || {};
+  const s = spec || /** @type {FilterSpec} */ ({});
   return !!(
     (typeof s.text === 'string' && s.text.trim()) ||
     (Array.isArray(s.kinds) && s.kinds.length) ||
@@ -31,11 +47,12 @@ export function specActive(spec) {
 // ancestors) can be included — a step or agent can't match on its own. The
 // other dimensions (text/duration/cost/agentType) can also match a step (e.g. a
 // slow step with no tools) or an agent (e.g. an expensive sub-agent) directly.
+/** @param {AgentGraph|null|undefined} graph @param {FilterSpec|null|undefined} spec @returns {Set<string>} */
 export function filterTrace(graph, spec) {
   const out = new Set();
   if (!specActive(spec)) return out;
 
-  const s = spec || {};
+  const s = spec || /** @type {FilterSpec} */ ({});
   const text = (typeof s.text === 'string' ? s.text.trim() : '').toLowerCase();
   const kinds = Array.isArray(s.kinds) ? s.kinds : [];
   const errorsOnly = !!s.errorsOnly;

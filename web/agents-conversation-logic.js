@@ -1,6 +1,19 @@
+// @ts-check
 // Conversation-lens derivations: the main agent's step timeline sliced by
 // user prompt into segments/replies, plus the session-picker summary list.
 // Split out of agents-logic.js (re-exported by the facade).
+
+/** @import { AgentSession, AgentStep } from './api-types.js' */
+
+/**
+ * One prompt-bounded slice of the main agent's step timeline.
+ * @typedef {Object} ConversationSegment
+ * @property {string} uuid
+ * @property {string} text
+ * @property {string} timestamp
+ * @property {number} firstStepIndex
+ * @property {AgentStep[]} steps
+ */
 
 // conversationSegments groups the main agent's step timeline by originating
 // user prompt for the Conversation lens. Each segment is one prompt marker
@@ -10,6 +23,7 @@
 // each step with the SAME refKey the other lenses use (main = agentIndex 0).
 // Returns [] when the main agent has no steps; a session with steps but no
 // markers degrades to one prompt-less segment over all of them.
+/** @param {AgentSession|null|undefined} session @returns {ConversationSegment[]} */
 export function conversationSegments(session) {
   const main = session && session.main;
   const steps = (main && main.steps) || [];
@@ -40,12 +54,16 @@ export function conversationSegments(session) {
 // a trace. Each reply keeps its absolute stepIndex (firstStepIndex + local k) so
 // the rendered bubble carries the SAME refKey the other lenses use and a click
 // still opens the full turn (tools, reasoning) in the shared drawer.
+/**
+ * @param {ConversationSegment|null|undefined} seg
+ * @returns {{stepIndex: number, text: string, timestamp: string, model: string, cost_usd: number}[]}
+ */
 export function conversationReplies(seg) {
   const steps = (seg && seg.steps) || [];
   const base = (seg && seg.firstStepIndex) || 0;
   const out = [];
   for (let k = 0; k < steps.length; k++) {
-    const st = steps[k] || {};
+    const st = steps[k] || /** @type {Partial<AgentStep>} */ ({});
     if (!(st.text || '').trim()) continue;
     out.push({
       stepIndex: base + k,
@@ -65,6 +83,11 @@ export function conversationReplies(seg) {
 // dropped). promptCount counts only segments tied to a real user prompt (a
 // non-empty uuid); replyCount sums the assistant's spoken replies across every
 // segment. Null/main-less sessions are excluded; a null/empty input → [].
+/**
+ * @param {AgentSession[]|null|undefined} sessions
+ * @returns {{sessionId: string, cwd: string, entrypoint: string, index: number,
+ *   promptCount: number, replyCount: number}[]}
+ */
 export function conversationSessionList(sessions) {
   const list = sessions || [];
   const out = [];

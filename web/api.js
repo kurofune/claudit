@@ -1,3 +1,4 @@
+// @ts-check
 // Thin fetch wrappers for /_claudit/api/*. Each helper carries the
 // browser's location.search forward so the URL contract from the
 // fat-HTML era — "the URL is the filter" — still holds: bookmark a
@@ -21,8 +22,11 @@
 // the report-author chose; client-side re-filtering across the wire
 // has no meaning when there is no wire.
 
+/** @import { AgentGraph, ToolUseDetail, TurnTextDetail } from './api-types.js' */
+
 const apiBase = '/_claudit/api';
 
+/** @param {string} path */
 function withSearch(path) {
   const search = window.location.search || '';
   return apiBase + path + search;
@@ -33,8 +37,11 @@ function withSearch(path) {
 // throws if the path is unknown — same failure shape getJSON
 // produces for an HTTP error, so callers don't need to branch on
 // online/offline.
+/** @param {string} path @returns {any} */
 function offlineLookup(path) {
-  const data = window.__claudit_static_data;
+  // window.__claudit_static_data is an ad-hoc global the static report
+  // stamps on window; cast keeps the checker off the untyped property.
+  const data = /** @type {any} */ (window).__claudit_static_data;
   // Strip a trailing querystring before pattern-matching — offline
   // mode ignores filter params (the inline blob is pre-filtered).
   const q = path.indexOf('?');
@@ -62,8 +69,9 @@ function offlineLookup(path) {
   throw new Error('offline: no inline payload for ' + path);
 }
 
+/** @param {string} path @returns {Promise<any>} */
 async function getJSON(path) {
-  if (typeof window !== 'undefined' && window.__claudit_static_data) {
+  if (typeof window !== 'undefined' && /** @type {any} */ (window).__claudit_static_data) {
     return offlineLookup(path);
   }
   const url = withSearch(path);
@@ -86,18 +94,30 @@ export const fetchCache = () => getJSON('/cache');
 export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');
 export const fetchAnomalies = () => getJSON('/anomalies');
+/** @returns {Promise<AgentGraph>} */
 export const fetchAgents = () => getJSON('/agents');
 // fetchAgentToolFull pulls the untruncated input/output for one tool_use back
 // from disk (the drawer's "show full" action). Serve-mode only — in static
 // mode offlineLookup has no inline payload for this and throws; the drawer
 // guards on serve mode so it never calls this offline.
+/**
+ * @param {string} sessionId
+ * @param {string} toolId
+ * @returns {Promise<ToolUseDetail>}
+ */
 export const fetchAgentToolFull = (sessionId, toolId) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&tool=' + encodeURIComponent(toolId));
 // fetchAgentTurnFull pulls the untruncated thinking/text for one turn back
 // from disk (the drawer's "show full" action on Reasoning/Message). Serve-mode
 // only, same as fetchAgentToolFull — the drawer guards on serve mode.
+/**
+ * @param {string} sessionId
+ * @param {string} turnUuid
+ * @returns {Promise<TurnTextDetail>}
+ */
 export const fetchAgentTurnFull = (sessionId, turnUuid) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&turn=' + encodeURIComponent(turnUuid));
+/** @param {string} dim */
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));

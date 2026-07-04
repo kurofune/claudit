@@ -1,14 +1,37 @@
+// @ts-check
 // Shared graph/model pure helpers for the Agents tab: session flattening,
 // ref (de)serialization and resolution, token folding, elapsed/format math,
 // and the pane-width clamps. Every other agents-*-logic module builds on
 // these. Split out of agents-logic.js (which now re-exports everything as a
 // facade); unit-tested under `node --test` in jstest/.
 
+/** @import { AgentGraph, AgentSession, AgentNode, AgentStep, ToolInvocation, Tokens } from './api-types.js' */
+
+/**
+ * A selection ref: an agent, a step within it, or a tool within that step.
+ * @typedef {Object} Ref
+ * @property {string} sessionId
+ * @property {number} agentIndex
+ * @property {number|null} [stepIndex]
+ * @property {number|null} [toolIndex]
+ */
+
+/**
+ * parseRefKey's output: a Ref plus the resolved depth.
+ * @typedef {Object} ParsedRef
+ * @property {string} sessionId
+ * @property {number} agentIndex
+ * @property {number|null} stepIndex
+ * @property {number|null} toolIndex
+ * @property {'agent'|'step'|'tool'} type
+ */
+
 // originClass partitions a session's entrypoint into 'sdk' vs 'interactive'.
 // Headless/SDK runs report "sdk-cli" (or other "sdk*" origins); everything
 // else — interactive "cli", an unknown, or a missing value — is
 // 'interactive'. Defaulting unknown to interactive keeps the SDK set a
 // conservative "definitely headless" subset, never a catch-all.
+/** @param {*} ep @returns {'sdk'|'interactive'} */
 export function originClass(ep) {
   return typeof ep === 'string' && ep.toLowerCase().startsWith('sdk')
     ? 'sdk'
@@ -18,6 +41,7 @@ export function originClass(ep) {
 // parseTime coerces a payload timestamp to epoch milliseconds. Numbers
 // pass through (tests use them); ISO-8601 strings parse via Date.parse;
 // anything unparseable is NaN so callers can filter it out.
+/** @param {*} ts @returns {number} */
 export function parseTime(ts) {
   if (typeof ts === 'number') return ts;
   if (typeof ts !== 'string') return NaN;
@@ -26,6 +50,7 @@ export function parseTime(ts) {
 }
 
 // agentSpan returns an agent node's { start, end } in epoch ms.
+/** @param {AgentNode|null|undefined} a @returns {{start: number, end: number}} */
 export function agentSpan(a) {
   return { start: parseTime(a && a.started_at), end: parseTime(a && a.ended_at) };
 }
@@ -34,6 +59,7 @@ export function agentSpan(a) {
 // agent first, then its sub-agents (already start-ordered by the
 // backend). Tolerates a missing main or children so a half-built /
 // null payload doesn't throw.
+/** @param {AgentSession|null|undefined} session @returns {AgentNode[]} */
 export function flattenSession(session) {
   if (!session) return [];
   const out = [];
@@ -48,6 +74,7 @@ export function flattenSession(session) {
 // empty, so the caller can fall back to a non-navigable rollup badge. The
 // index lines up with flattenSession order (main=0, children 1..), which every
 // other lens keys selection off, so the result drops straight into a refKey.
+/** @param {AgentSession|null|undefined} session @param {string} agentRef @returns {number|null} */
 export function spawnTargetIndex(session, agentRef) {
   if (!session || !agentRef) return null;
   const flat = flattenSession(session);
@@ -61,6 +88,7 @@ export function spawnTargetIndex(session, agentRef) {
 // sidebar within sane bounds: a finite px is clamped to [MIN, MAX] and rounded
 // to a whole pixel; anything non-finite (NaN, undefined, null, Infinity, a
 // non-numeric string) falls back to DEFAULT.
+/** @param {*} px @returns {number} */
 export function clampConvSidebarWidth(px) {
   const MIN = 160, MAX = 560, DEFAULT = 240;
   const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
@@ -72,6 +100,7 @@ export function clampConvSidebarWidth(px) {
 // (the detail pane takes the remaining width) that the user drags to resize.
 // Same contract as clampConvSidebarWidth — finite px clamped to [MIN, MAX] and
 // rounded; non-finite falls back to DEFAULT.
+/** @param {*} px @returns {number} */
 export function clampTreeWidth(px) {
   const MIN = 220, MAX = 680, DEFAULT = 320;
   const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
@@ -83,6 +112,7 @@ export function clampTreeWidth(px) {
 // the drawer is the fixed-width RIGHT column (the lens flexes to fill the rest)
 // and the handle between them resizes it. Same contract as the rail clamps —
 // finite px clamped to [MIN, MAX] and rounded; non-finite falls back to DEFAULT.
+/** @param {*} px @returns {number} */
 export function clampDrawerWidth(px) {
   const MIN = 280, MAX = 640, DEFAULT = 360;
   const n = typeof px === 'number' ? px : (typeof px === 'string' ? Number(px) : NaN);
@@ -93,6 +123,7 @@ export function clampDrawerWidth(px) {
 // agentElapsedMs returns how long an agent has been active. A running
 // agent counts up to nowMs (so a card's timer advances on each ~2s
 // refetch); a done agent reports its fixed (end - start). Never negative.
+/** @param {AgentNode|null|undefined} agent @param {number} [nowMs] @returns {number} */
 export function agentElapsedMs(agent, nowMs = Date.now()) {
   const { start, end } = agentSpan(agent);
   if (Number.isNaN(start)) return 0;
@@ -105,6 +136,7 @@ export function agentElapsedMs(agent, nowMs = Date.now()) {
 // string: "5s", "1m 5s", "2m", "1h", "1h 5m". Tuned for agent runtimes
 // (seconds to hours) rather than the sub-second tool gaps the Sessions
 // view formats.
+/** @param {number} ms @returns {string} */
 export function formatElapsed(ms) {
   if (!ms || ms <= 0) return '0s';
   const sec = Math.floor(ms / 1000);
@@ -122,6 +154,7 @@ export function formatElapsed(ms) {
 // graphStats walks the whole graph for the sidebar metric: how many
 // sessions, agents (main + sub), and currently-running agents. Tolerates
 // a null graph / missing children.
+/** @param {AgentGraph|null|undefined} graph @returns {{sessions: number, agents: number, running: number}} */
 export function graphStats(graph) {
   let agents = 0, running = 0;
   const sessions = (graph && graph.sessions) || [];
@@ -137,6 +170,7 @@ export function graphStats(graph) {
 // agentLabel is the short human name for an agent: "main" for the session
 // agent, otherwise its sub-agent type ("Explore", "general-purpose", …),
 // falling back to "subagent" when the type is missing.
+/** @param {AgentNode|null|undefined} a @returns {string} */
 export function agentLabel(a) {
   if (!a) return '';
   return a.kind === 'main' ? 'main' : (a.agent_type || 'subagent');
@@ -145,6 +179,7 @@ export function agentLabel(a) {
 // baseName returns the last path segment of a filesystem path (the
 // project folder name for a session cwd). Trailing slashes are ignored;
 // a null/empty/segmentless input yields ''.
+/** @param {string|null|undefined} path @returns {string} */
 export function baseName(path) {
   if (!path) return '';
   const parts = String(path).split('/').filter(Boolean);
@@ -154,8 +189,12 @@ export function baseName(path) {
 // agentTokens sums an agent's token tuple into a flat, 0-safe shape.
 // Reads the Go-marshalled field names (Tokens has no json tags), folding
 // the 5m + 1h cache-creation buckets into a single cacheWrite.
+/**
+ * @param {{tokens?: Tokens|null}|null|undefined} agent an AgentNode or AgentStep (anything carrying a Tokens tuple)
+ * @returns {{input: number, output: number, cacheWrite: number, cacheRead: number, total: number}}
+ */
 export function agentTokens(agent) {
-  const t = (agent && agent.tokens) || {};
+  const t = (agent && agent.tokens) || /** @type {Partial<Tokens>} */ ({});
   const input = t.InputTokens || 0;
   const output = t.OutputTokens || 0;
   const cacheWrite = (t.CacheCreate5mTokens || 0) + (t.CacheCreate1hTokens || 0);
@@ -167,11 +206,12 @@ export function agentTokens(agent) {
 // agent's most recent tool call — the last tool of the last step that has any,
 // mirroring the backend's lastToolName but yielding the kind so a running-agent
 // card can reuse the feed's badge + color. '' when there's no tool or no kind.
+/** @param {AgentNode|null|undefined} agent @returns {string} */
 export function currentToolKind(agent) {
   const steps = (agent && agent.steps) || [];
   for (let i = steps.length - 1; i >= 0; i--) {
     const tools = (steps[i] && steps[i].tools) || [];
-    if (tools.length) return (tools[tools.length - 1] || {}).kind || '';
+    if (tools.length) return (tools[tools.length - 1] || /** @type {Partial<ToolInvocation>} */ ({})).kind || '';
   }
   return '';
 }
@@ -183,6 +223,7 @@ export function currentToolKind(agent) {
 // A tool form always nests a step, so a toolIndex without a stepIndex is
 // dangling — it degrades to the agent form. Garbage (no sessionId /
 // non-numeric agentIndex) yields ''.
+/** @param {Ref|null|undefined} ref @returns {string} */
 export function refKey(ref) {
   if (!ref || !ref.sessionId || typeof ref.agentIndex !== 'number') return '';
   let key = `${ref.sessionId}#${ref.agentIndex}`;
@@ -196,6 +237,7 @@ export function refKey(ref) {
 // stepIndex, toolIndex, type } from a key string. Session ids are UUIDs
 // (no '#'), so the LAST '#' splits sessionId from the index tail.
 // stepIndex/toolIndex are numbers or null; malformed input → null.
+/** @param {string|null|undefined} key @returns {ParsedRef|null} */
 export function parseRefKey(key) {
   if (typeof key !== 'string' || !key) return null;
   const hash = key.lastIndexOf('#');
@@ -206,7 +248,9 @@ export function parseRefKey(key) {
   const [agentPart, rest] = splitOnce(tail, '.');
   const agentIndex = toInt(agentPart);
   if (agentIndex == null) return null;
-  let stepIndex = null, toolIndex = null, type = 'agent';
+  let stepIndex = null, toolIndex = null;
+  /** @type {'agent'|'step'|'tool'} */
+  let type = 'agent';
   if (rest != null) {
     const [stepPart, toolPart] = splitOnce(rest, ':');
     stepIndex = toInt(stepPart);
@@ -223,12 +267,14 @@ export function parseRefKey(key) {
 
 // splitOnce splits at the first occurrence of sep, returning [head, tail]
 // where tail is null when sep is absent (so '' after sep is distinguished).
+/** @param {string} s @param {string} sep @returns {[string, string|null]} */
 function splitOnce(s, sep) {
   const i = s.indexOf(sep);
   return i === -1 ? [s, null] : [s.slice(0, i), s.slice(i + 1)];
 }
 
 // toInt parses a non-negative integer string, or null if not numeric.
+/** @param {string} s @returns {number|null} */
 function toInt(s) {
   if (!/^\d+$/.test(s)) return null;
   return Number(s);
@@ -246,6 +292,7 @@ function toInt(s) {
 //   step s#a.t   → ancestor agent s#a
 //   agent s#a    → no ancestors
 // Input order is preserved; duplicates collapse (input is treated as a set).
+/** @param {Set<string>|string[]} refs @returns {string[]} */
 export function deepestRefs(refs) {
   const set = refs instanceof Set ? refs : new Set(refs);
   const nonLeaf = new Set();
@@ -269,6 +316,7 @@ export function deepestRefs(refs) {
 // defaultRef is the root selection: the first session (array order) that
 // has at least one agent, pinned to its main agent (agentIndex 0). Skips
 // leading empty sessions; null when no session has any agent.
+/** @param {AgentGraph|null|undefined} graph @returns {Ref|null} */
 export function defaultRef(graph) {
   const sessions = (graph && graph.sessions) || [];
   for (const s of sessions) {
@@ -286,6 +334,13 @@ export function defaultRef(graph) {
 // stale tool ref becomes a 'step' or 'agent' rather than throwing). Null
 // when the session or agent can't be found — the caller falls back to
 // defaultRef.
+/**
+ * @param {AgentGraph|null|undefined} graph
+ * @param {Ref|ParsedRef|string|null|undefined} ref
+ * @returns {{type: 'agent'|'step'|'tool', session: AgentSession, agent: AgentNode,
+ *   agentIndex: number, step: AgentStep|null, stepIndex: number|null,
+ *   tool: ToolInvocation|null, toolIndex: number|null}|null}
+ */
 export function resolveRef(graph, ref) {
   const r = typeof ref === 'string' ? parseRefKey(ref) : ref;
   if (!r || !r.sessionId) return null;
