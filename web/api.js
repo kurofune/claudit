@@ -94,4 +94,10 @@ export const fetchAgents = () => getJSON('/agents');
 export const fetchAgentToolFull = (sessionId, toolId) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&tool=' + encodeURIComponent(toolId));
+// fetchAgentTurnFull pulls the untruncated thinking/text for one turn back
+// from disk (the drawer's "show full" action on Reasoning/Message). Serve-mode
+// only, same as fetchAgentToolFull — the drawer guards on serve mode.
+export const fetchAgentTurnFull = (sessionId, turnUuid) =>
+  getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
+    '&turn=' + encodeURIComponent(turnUuid));
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));

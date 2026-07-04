@@ -1677,7 +1677,14 @@ export function resolveRef(graph, ref) {
 // truncated snippet so the drawer keeps expanded content sticky across live
 // re-renders; a field absent from the entry keeps its snippet. Ignored for
 // non-tool refs and when null/undefined (the default — existing callers).
-export function buildDrawerPayload(graph, ref, fullByTool = null) {
+//
+// `fullByTurn` (optional) mirrors `fullByTool` for the turn-level snippets:
+// keyed by turn uuid (the same value exposed as payload `turnUuid`); each
+// value is `{ thinking?, text? }`. A string field overrides the truncated
+// snippet for a STEP ref and for any TOOL ref sharing that uuid (a tool
+// inherits its parent turn's thinking/text). A field absent from the entry
+// keeps its snippet; ignored when null/undefined.
+export function buildDrawerPayload(graph, ref, fullByTool = null, fullByTurn = null) {
   const r = resolveRef(graph, ref);
   if (!r) return null;
   const { type, session, agent, agentIndex, step, stepIndex, tool, toolIndex } = r;
@@ -1694,9 +1701,14 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
   else if (type === 'step') { title = `Turn ${stepIndex + 1}`; status = ''; }
   else { title = tool.name || ''; status = tool.status || ''; }
 
-  // Turn-level fields come from the step (for a tool, its parent step).
-  const thinking = step ? (step.thinking || '') : '';
-  const text = step ? (step.text || '') : '';
+  // Turn-level fields come from the step (for a tool, its parent step). A
+  // previously loaded-full thinking/text (keyed by the step's uuid) overrides
+  // the snippet, mirroring the fullByTool mechanism above.
+  const fullTurn = (step && step.uuid && fullByTurn) ? fullByTurn[step.uuid] : null;
+  const thinking = typeof (fullTurn && fullTurn.thinking) === 'string'
+    ? fullTurn.thinking : step ? (step.thinking || '') : '';
+  const text = typeof (fullTurn && fullTurn.text) === 'string'
+    ? fullTurn.text : step ? (step.text || '') : '';
   const model = step ? (step.model || '') : '';
 
   // Tokens roll up to the agent for an agent ref and to the turn for a step
@@ -1736,6 +1748,10 @@ export function buildDrawerPayload(graph, ref, fullByTool = null) {
     // toolId lets the drawer's "show full" action fetch the untruncated I/O
     // back from disk (serve mode). Only a tool ref has one.
     toolId: type === 'tool' ? (tool.id || '') : '',
+    // turnUuid lets the drawer's "show full" action fetch the untruncated
+    // thinking/text for the turn. A tool inherits its parent step's uuid, the
+    // same way it inherits thinking/text; '' for agent refs or when absent.
+    turnUuid: step ? (step.uuid || '') : '',
     input: type === 'tool' ? toolInput : '',
     output: type === 'tool' ? toolOutput : '',
     // spawned: the sub-agent rollup on an Agent tool_use, enriched with a

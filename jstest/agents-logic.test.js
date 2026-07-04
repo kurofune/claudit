@@ -795,6 +795,7 @@ const DRAWER_GRAPH = {
       steps: [
         {
           timestamp: '2026-05-01T12:00:10Z', model: 'claude-opus-4',
+          uuid: 'turn-uuid-0',
           cost_usd: 0.10, duration_ms: 4200,
           thinking: 'plan the work', text: 'Listing files',
           tokens: {
@@ -1019,6 +1020,71 @@ test('buildDrawerPayload: fullByTool is ignored for agent and step refs', () => 
   const step = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 }, full);
   assert.equal(step.input, '');
   assert.equal(step.output, '');
+});
+
+test('buildDrawerPayload: a step payload carries the turn uuid so the drawer can load full reasoning', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 });
+  assert.equal(p.turnUuid, 'turn-uuid-0');
+});
+
+test('buildDrawerPayload: a tool payload inherits its parent step\'s turn uuid', () => {
+  const p = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 });
+  assert.equal(p.turnUuid, 'turn-uuid-0');
+});
+
+test('buildDrawerPayload: turnUuid is empty for an agent ref and for a step without a uuid', () => {
+  const agent = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 });
+  assert.equal(agent.turnUuid, '');
+  // Step 1 in the fixture carries no uuid (older payloads omit it).
+  const step1 = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 1 });
+  assert.equal(step1.turnUuid, '');
+});
+
+test('buildDrawerPayload: fullByTurn substitutes thinking and text on a step ref', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 },
+    null,
+    { 'turn-uuid-0': { thinking: 'FULL THINKING...', text: 'FULL TEXT...' } },
+  );
+  assert.equal(p.thinking, 'FULL THINKING...');
+  assert.equal(p.text, 'FULL TEXT...');
+});
+
+test('buildDrawerPayload: fullByTurn substitutes on a tool ref sharing the uuid; a partial entry keeps the other snippet', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 },
+    null,
+    { 'turn-uuid-0': { thinking: 'FULL THINKING...' } },
+  );
+  assert.equal(p.thinking, 'FULL THINKING...');
+  assert.equal(p.text, 'Listing files'); // no text override → snippet stays
+});
+
+test('buildDrawerPayload: fullByTurn with no entry for this turn keeps the snippets, and agent refs stay empty', () => {
+  const unrelated = { 'some-other-turn': { thinking: 'UNRELATED', text: 'UNRELATED' } };
+  const step = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0 }, null, unrelated);
+  assert.equal(step.thinking, 'plan the work');
+  assert.equal(step.text, 'Listing files');
+  // An agent ref has no turn — fullByTurn can never attach to it.
+  const agent = buildDrawerPayload(DRAWER_GRAPH, { sessionId: 'sess-uuid-1', agentIndex: 0 }, null,
+    { 'turn-uuid-0': { thinking: 'FULL THINKING...', text: 'FULL TEXT...' } });
+  assert.equal(agent.thinking, '');
+  assert.equal(agent.text, '');
+});
+
+test('buildDrawerPayload: fullByTool and fullByTurn compose on a tool ref without interfering', () => {
+  const p = buildDrawerPayload(
+    DRAWER_GRAPH,
+    { sessionId: 'sess-uuid-1', agentIndex: 0, stepIndex: 0, toolIndex: 0 },
+    { 'toolu_x': { output: 'FULL OUTPUT...' } },
+    { 'turn-uuid-0': { text: 'FULL TEXT...' } },
+  );
+  assert.equal(p.output, 'FULL OUTPUT...'); // fullByTool still applies
+  assert.equal(p.input, 'ls -la');
+  assert.equal(p.text, 'FULL TEXT...'); // fullByTurn applies alongside
+  assert.equal(p.thinking, 'plan the work');
 });
 
 test('looksTruncated detects the bounded-snippet ellipsis marker', () => {

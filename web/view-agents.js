@@ -52,7 +52,7 @@ import {
   buildTimeline,
   zoomClampPxPerMs, zoomAnchorScrollLeft, TL_MAX_PX_PER_MS,
 } from './agents-logic.js';
-import { fetchAgentToolFull } from './api.js';
+import { fetchAgentToolFull, fetchAgentTurnFull } from './api.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -146,6 +146,11 @@ let jumpFlashTimer = null;
 // fed into buildDrawerPayload on EVERY drawer paint, so a live SSE re-render
 // keeps the expanded content sticky instead of reverting to the snippet.
 let fullCache = {};
+
+// fullTurnCache is the turn-level twin: keyed by turn uuid → { thinking?,
+// text? }. Same sticky mechanism, feeding buildDrawerPayload's fullByTurn
+// param so expanded Reasoning/Message survive live repaints.
+let fullTurnCache = {};
 
 // Timeline lens state. prevTimelineKeys tracks which agent rows existed on the
 // last render so a genuinely NEW agent fades in (and the rest don't re-animate
@@ -304,6 +309,7 @@ export function reset() {
   lastGraph = null;
   selectedRef = null;
   fullCache = {};
+  fullTurnCache = {};
   prevTimelineKeys = new Set();
   timelinePinned.clear();
   playheadT = null;
@@ -633,6 +639,8 @@ function wireSelection(container) {
       if (copy) { copyText(copy.dataset.copy, copy); return; }
       const full = e.target.closest('[data-loadfull]');
       if (full) { loadFull(full); return; }
+      const fullTurn = e.target.closest('[data-loadfullturn]');
+      if (fullTurn) { loadFullTurn(fullTurn); return; }
       // A data-ref inside the drawer (the retry "attempt N of M" link) jumps the
       // shared selection — same delegate the lenses use.
       const el = e.target.closest('[data-ref]');
@@ -1172,7 +1180,7 @@ function kindBadge(kind) {
 function renderDrawer(container) {
   const drawer = container.querySelector('.agents-drawer');
   if (!drawer) return;
-  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache), retryInfoFor(selectedRef));
+  drawer.innerHTML = drawerHTML(buildDrawerPayload(lastGraph, selectedRef, fullCache, fullTurnCache), retryInfoFor(selectedRef));
 }
 
 // retryInfoFor reports whether the selected tool is a retry of an earlier
@@ -1243,8 +1251,8 @@ function drawerHTML(p, retry = null) {
   let sections;
   if (p.type === 'tool') {
     sections = [
-      drSection('Reasoning', p.thinking, true),
-      drSection('Message', p.text, true),
+      drTurnSection('Reasoning', p.thinking, 'thinking', p),
+      drTurnSection('Message', p.text, 'text', p),
       drIOSection('Input', p.input, 'input', p),
       drIOSection('Output', p.output, 'output', p),
       // A tool inherits its turn's tokens; drTokens self-collapses at 0.
@@ -1252,8 +1260,8 @@ function drawerHTML(p, retry = null) {
     ].join('');
   } else if (p.type === 'step') {
     sections = [
-      drSection('Reasoning', p.thinking, true),
-      drSection('Message', p.text, true),
+      drTurnSection('Reasoning', p.thinking, 'thinking', p),
+      drTurnSection('Message', p.text, 'text', p),
       drToolList(p.tools),
       drTokens(p.tokens),
     ].join('');
@@ -1319,6 +1327,25 @@ function drIOSection(label, content, field, p) {
   return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
 }
 
+// drTurnSection renders a turn's Reasoning/Message as a <pre>, with the same
+// "show full" affordance drIOSection gives tool I/O: when the snippet was
+// truncated (looksTruncated) and the turn has a uuid to fetch by, serve mode
+// gets a button that loads the untruncated content from disk; static mode
+// degrades to a "snippet only" label rather than a dead button.
+function drTurnSection(label, content, field, p) {
+  const empty = content == null || content === '';
+  if (empty) {
+    return `<section class="dr-sec is-empty"><h4 class="dr-sec-h">${escHtml(label)} <span class="dr-none">—</span></h4></section>`;
+  }
+  let affordance = '';
+  if (p.turnUuid && looksTruncated(content)) {
+    affordance = isServeMode()
+      ? `<button type="button" class="dr-full-btn" data-loadfullturn="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-turn="${escHtml(p.turnUuid)}">show full</button>`
+      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
+  }
+  return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
+}
+
 // loadFull handles a "show full" click: fetch the untruncated tool I/O from
 // the server and swap it into the section's <pre>. The button is removed once
 // the full content is in (there's nothing more to load); a failure re-enables
@@ -1336,6 +1363,29 @@ async function loadFull(btn) {
     // Cache by tool_use id so the next drawer paint (e.g. a live SSE tick)
     // re-applies the full content instead of reverting to the snippet.
     fullCache[tool] = { ...(fullCache[tool] || {}), [field]: fullText };
+    pre.textContent = fullText;
+    btn.remove();
+  } catch {
+    btn.textContent = 'failed — retry';
+    btn.disabled = false;
+  }
+}
+
+// loadFullTurn is loadFull's turn-level twin: fetch the untruncated
+// thinking/text for the turn and swap it into the section's <pre>. Cached by
+// turn uuid so the next drawer paint re-applies the full content instead of
+// reverting to the snippet; a failure re-enables the button for retry.
+async function loadFullTurn(btn) {
+  const sec = btn.closest('.dr-sec');
+  const pre = sec && sec.querySelector('.dr-pre');
+  const { session, turn, loadfullturn: field } = btn.dataset;
+  if (!pre || !session || !turn) return;
+  btn.disabled = true;
+  btn.textContent = 'loading…';
+  try {
+    const d = await fetchAgentTurnFull(session, turn);
+    const fullText = (field === 'text' ? d.text : d.thinking) || '';
+    fullTurnCache[turn] = { ...(fullTurnCache[turn] || {}), [field]: fullText };
     pre.textContent = fullText;
     btn.remove();
   } catch {
