@@ -107,6 +107,20 @@ type Server struct {
 	// TestServer_Singleflight_CollapsesConcurrentBuilds.
 	aggregateBuildN atomic.Int64
 
+	// promptMemoMu guards promptMemo, the per-generation cache of the
+	// query-independent corpus structures (PromptIndex + ReplaySet).
+	// Both are built from the unfiltered snapshot, so every query at
+	// the same snapshot generation produces bit-identical copies —
+	// cache exactly one generation and replace it on mismatch (older
+	// generations are unreachable the moment a newer one exists).
+	promptMemoMu sync.Mutex
+	promptMemo   *promptMemo
+
+	// promptIndexBuildN counts the number of PromptIndex+ReplaySet
+	// builds actually executed (i.e. memo misses). Test-only hook —
+	// see promptIndexBuildCount / prompt_memo_test.go.
+	promptIndexBuildN atomic.Int64
+
 	// shutdownTimeout caps the graceful-drain wait in serve(). Defaults
 	// to 3s; tests override it to force the deadline-exceeded path.
 	shutdownTimeout time.Duration
@@ -558,11 +572,48 @@ func (s *Server) aggregateBuildCount() int64 {
 	return s.aggregateBuildN.Load()
 }
 
+// promptMemo holds the query-independent structures built from one
+// snapshot generation. See Server.promptMemoMu for the caching policy.
+type promptMemo struct {
+	generation int64
+	idx        *aggregate.PromptIndex
+	replays    aggregate.ReplaySet
+}
+
+// promptData returns the PromptIndex and ReplaySet for the snapshot,
+// memoized per generation. The build runs under promptMemoMu: it is
+// pure CPU over the immutable snapshot, and sharedAggregateData's
+// singleflight already serializes same-query callers, so holding the
+// lock during the build is acceptable — it also guarantees concurrent
+// different-query callers at the same generation build exactly once
+// instead of racing to compute identical structures.
+func (s *Server) promptData(snap *Snapshot) (*aggregate.PromptIndex, aggregate.ReplaySet) {
+	s.promptMemoMu.Lock()
+	defer s.promptMemoMu.Unlock()
+	if m := s.promptMemo; m != nil && m.generation == snap.Generation {
+		return m.idx, m.replays
+	}
+	s.promptIndexBuildN.Add(1)
+	m := &promptMemo{
+		generation: snap.Generation,
+		idx:        aggregate.BuildPromptIndex(snap.Turns, snap.Users, snap.Links),
+		replays:    aggregate.BuildReplaySet(snap.Turns),
+	}
+	s.promptMemo = m
+	return m.idx, m.replays
+}
+
+// promptIndexBuildCount returns the number of PromptIndex+ReplaySet
+// builds executed since the server started. Test-only accessor.
+func (s *Server) promptIndexBuildCount() int64 {
+	return s.promptIndexBuildN.Load()
+}
+
 // buildAggregator runs the standard aggregation pipeline against the
 // snapshot. Mirrors what cmd/claudit/main.go does for `report --html`,
 // minus the file-walking stage (the snapshot already has parsed data).
 func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator {
-	promptIdx := aggregate.BuildPromptIndex(snap.Turns, snap.Users, snap.Links)
+	promptIdx, replays := s.promptData(snap)
 	agg := aggregate.New(s.opts.Prices).
 		WithFilter(q.Filter).
 		WithPeriod(q.Period).
@@ -570,7 +621,7 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 		WithPromptIndex(promptIdx).
 		// Same canonical replay dedup as the Sessions/Agents drill-downs, so the
 		// headline per-session figures match those views deterministically.
-		WithReplaySet(aggregate.BuildReplaySet(snap.Turns))
+		WithReplaySet(replays)
 	for _, t := range snap.Turns {
 		agg.AddWithSubagent(t, s.subagentLookup())
 	}
