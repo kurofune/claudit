@@ -106,7 +106,7 @@ func runReport(args []string) error {
 	agg := aggregate.New(prices).WithFilter(filter).WithPeriod(period).
 		WithPromptIndex(promptIdx).WithReplaySet(aggregate.BuildReplaySet(turns))
 
-	lookup := newSubagentLookup()
+	lookup := aggregate.NewMemoizedSubagentLookup()
 	for _, t := range turns {
 		agg.AddWithSubagent(t, lookup)
 	}

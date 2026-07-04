@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -36,26 +33,6 @@ func loadPrices(override string) (*pricing.Table, error) {
 		pricesFile = p
 	}
 	return pricing.Load(pricesFile)
-}
-
-// newSubagentLookup returns a SubagentLookup that lazily reads the
-// sibling .meta.json once per source file. Safe for concurrent use; the
-// aggregator is single-threaded but we share one lookup across diff's
-// two aggregators.
-func newSubagentLookup() aggregate.SubagentLookup {
-	var cache sync.Map
-	return func(t parse.Turn) (string, string) {
-		if !parse.IsSubagentFile(t.SourceFile) {
-			return "", ""
-		}
-		if v, ok := cache.Load(t.SourceFile); ok {
-			m := v.(parse.SubagentMeta)
-			return m.AgentType, m.Description
-		}
-		m, _ := parse.ReadSubagentMeta(t.SourceFile)
-		cache.Store(t.SourceFile, m)
-		return m.AgentType, m.Description
-	}
 }
 
 func emitWarnings(malformed int, fileErrs []error) {

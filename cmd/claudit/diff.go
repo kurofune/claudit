@@ -112,7 +112,9 @@ func runDiffWithRanges(
 		Since: sinceB, Until: untilB, ProjectSubstring: project,
 	}).WithPromptIndex(promptIdx).WithReplaySet(replays)
 
-	lookup := newSubagentLookup()
+	// One memoized lookup shared across diff's two aggregators so the
+	// sibling .meta.json is read at most once per source file.
+	lookup := aggregate.NewMemoizedSubagentLookup()
 	for _, t := range turns {
 		aAgg.AddWithSubagent(t, lookup)
 		bAgg.AddWithSubagent(t, lookup)

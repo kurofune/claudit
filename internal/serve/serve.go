@@ -22,7 +22,6 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -75,9 +74,10 @@ type Server struct {
 	opts  Options
 	mux   *http.ServeMux
 
-	// subagentCache memoizes the .meta.json read per source file so a
+	// subagentLookup memoizes the .meta.json read per source file so a
 	// stable session doesn't re-stat the same sibling on every render.
-	subagentCache sync.Map
+	// Built once in NewServer; the cache lives as long as the Server.
+	subagentLookup aggregate.SubagentLookup
 
 	// renderCache stores gzip-encoded and plain response bodies keyed
 	// on (canonical-query, section, generation) for every served-mode
@@ -160,6 +160,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 		cache:           cache,
 		opts:            opts,
 		mux:             http.NewServeMux(),
+		subagentLookup:  aggregate.NewMemoizedSubagentLookup(),
 		shutdownTimeout: 3 * time.Second,
 		shutdownCh:      make(chan struct{}),
 	}
@@ -632,26 +633,9 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 		// headline per-session figures match those views deterministically.
 		WithReplaySet(replays)
 	for _, t := range snap.Turns {
-		agg.AddWithSubagent(t, s.subagentLookup())
+		agg.AddWithSubagent(t, s.subagentLookup)
 	}
 	return agg
-}
-
-// subagentLookup returns a SubagentLookup backed by the per-server
-// memoization map.
-func (s *Server) subagentLookup() aggregate.SubagentLookup {
-	return func(t parse.Turn) (string, string) {
-		if !parse.IsSubagentFile(t.SourceFile) {
-			return "", ""
-		}
-		if v, ok := s.subagentCache.Load(t.SourceFile); ok {
-			m := v.(parse.SubagentMeta)
-			return m.AgentType, m.Description
-		}
-		m, _ := parse.ReadSubagentMeta(t.SourceFile)
-		s.subagentCache.Store(t.SourceFile, m)
-		return m.AgentType, m.Description
-	}
 }
 
 // handleHealthz is the cheapest possible liveness probe.
