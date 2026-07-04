@@ -1,9 +1,11 @@
 package serve
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -148,6 +150,12 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	} else {
 		agg, timelines, aerr := s.sharedAggregateData(r.Context(), snap, q)
 		if aerr != nil {
+			if isClientGone(aerr) {
+				// Client disconnected mid-aggregation (reload/navigation).
+				// Nothing to report to a socket that's already closed, and
+				// it isn't our failure — don't log at ERROR or write a 500.
+				return
+			}
 			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: aggregate failed",
 				slog.Any("err", aerr),
 				slog.String("section", spec.section))
@@ -165,6 +173,9 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		// which deserves a 400, not a 500.
 		if isUserInputError(err) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if isClientGone(err) {
 			return
 		}
 		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: section build failed",
@@ -255,6 +266,14 @@ func (e *userInputError) Unwrap() error { return e.err }
 func isUserInputError(err error) bool {
 	_, ok := err.(*userInputError)
 	return ok
+}
+
+// isClientGone reports whether err is the request context being
+// canceled or timing out — i.e. the browser disconnected mid-request
+// (reload/navigation). That is a client hang-up, not a server fault, so
+// handlers swallow it: no ERROR log, no 500 written to a dead socket.
+func isClientGone(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // API handlers — one per route. Each is a thin wrapper that names
