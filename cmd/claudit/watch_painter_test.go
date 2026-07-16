@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -27,26 +28,33 @@ func TestScreenPainterRenderDoesNotBlockOnSlowWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer func() {
-		if err := r.Close(); err != nil {
-			t.Errorf("close r: %v", err)
-		}
-	}()
-	defer func() {
-		if err := w.Close(); err != nil {
-			t.Errorf("close w: %v", err)
-		}
-	}()
 
 	// term.NewStyle on a pipe returns a colorless style — that's fine.
 	// We're not asserting on output content, only on call latency.
 	style := term.NewStyle(w)
 	p := newScreenPainter(w, style)
-	// Skip Close: with a stalled pipe the paint goroutine is parked
-	// inside scr.Paint, so Close would block waiting for it. That's
-	// the documented Close behavior — see the comment on Close. The
-	// test process exits cleanly because the goroutine is daemon-like.
-	_ = p
+
+	// Teardown, in order: the painter's background goroutines must stop
+	// touching w before w is closed. On Windows the resize watcher polls
+	// TerminalSize(w) (reading w.Fd()) on a ticker, so closing w out from
+	// under it is a data race (caught by -race in CI). p.Close() closes
+	// stopCh to stop that watcher, but it also waits for the paint
+	// goroutine — which is parked inside scr.Paint on the deliberately
+	// stalled pipe — so drain the reader first to unpark it, then close
+	// the pipe. Draining only starts here in teardown, so the pipe stays
+	// stalled for the assertions above.
+	defer func() {
+		drained := make(chan struct{})
+		go func() { _, _ = io.Copy(io.Discard, r); close(drained) }()
+		p.Close()
+		if err := w.Close(); err != nil {
+			t.Errorf("close w: %v", err)
+		}
+		<-drained
+		if err := r.Close(); err != nil {
+			t.Errorf("close r: %v", err)
+		}
+	}()
 
 	done := make(chan struct{})
 	go func() {
