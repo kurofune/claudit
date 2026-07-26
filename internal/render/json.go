@@ -25,7 +25,7 @@ func JSON(w io.Writer, a *aggregate.Aggregator) error {
 		AgentInvocations []aggregate.AgentInvocation         `json:"agent_invocations"`
 		ByPrompt         []aggregate.PromptBucket            `json:"by_prompt"`
 		Anomalies        []aggregate.Anomaly                 `json:"anomalies"`
-		UnknownModels    []string                            `json:"unknown_models"`
+		UnknownModels    []aggregate.UnknownModel            `json:"unknown_models"`
 		Forecast         aggregate.Forecast                  `json:"forecast"`
 	}{
 		Totals:           a.Totals(),

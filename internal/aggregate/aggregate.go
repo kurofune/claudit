@@ -150,7 +150,7 @@ type Aggregator struct {
 	projectSession map[string]map[string]struct{}
 	bySession      map[string]*SessionBucket
 
-	unknownModels map[string]struct{}
+	unknownModels map[string]*UnknownModel
 
 	// Cross-file dedup set, keyed by message.id. A resumed/forked session
 	// replays the prior transcript into a new file verbatim — same message.id,
@@ -213,7 +213,7 @@ func New(p *pricing.Table) *Aggregator {
 		sessions:          map[string]struct{}{},
 		projectSession:    map[string]map[string]struct{}{},
 		bySession:         map[string]*SessionBucket{},
-		unknownModels:     map[string]struct{}{},
+		unknownModels:     map[string]*UnknownModel{},
 		seenMessageID:     map[string]struct{}{},
 		byPrompt:          map[string]*promptBucketInternal{},
 	}
@@ -332,7 +332,15 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			t.Usage.CacheCreate5mTokens != 0 || t.Usage.CacheCreate1hTokens != 0 ||
 			t.Usage.CacheReadTokens != 0
 		if nonZero {
-			a.unknownModels[t.Model] = struct{}{}
+			u, ok := a.unknownModels[t.Model]
+			if !ok {
+				u = &UnknownModel{Model: t.Model}
+				a.unknownModels[t.Model] = u
+			}
+			u.Turns++
+			u.Tokens += int64(t.Usage.InputTokens) + int64(t.Usage.OutputTokens) +
+				int64(t.Usage.CacheCreate5mTokens) + int64(t.Usage.CacheCreate1hTokens) +
+				int64(t.Usage.CacheReadTokens)
 		}
 	}
 
@@ -726,12 +734,30 @@ func (a *Aggregator) AgentInvocations(filterType string) []AgentInvocation {
 	return out
 }
 
-// UnknownModels returns the sorted list of model names we couldn't price.
-func (a *Aggregator) UnknownModels() []string {
-	out := make([]string, 0, len(a.unknownModels))
-	for k := range a.unknownModels {
-		out = append(out, k)
+// UnknownModel is a model the price table didn't cover, with the volume that
+// went unpriced. The counts are what make the warning actionable: a stale
+// price table costs nothing if it missed three turns and a lot if it missed
+// thirty thousand.
+type UnknownModel struct {
+	Model string `json:"model"`
+	Turns int    `json:"turns"`
+	// Tokens is every bucket summed — input, output, both cache writes, and
+	// cache reads — since all of them would have been billed.
+	Tokens int64 `json:"tokens"`
+}
+
+// UnknownModels returns the models we couldn't price, heaviest first by
+// unpriced token volume, ties broken by name for a stable order.
+func (a *Aggregator) UnknownModels() []UnknownModel {
+	out := make([]UnknownModel, 0, len(a.unknownModels))
+	for _, u := range a.unknownModels {
+		out = append(out, *u)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Tokens != out[j].Tokens {
+			return out[i].Tokens > out[j].Tokens
+		}
+		return out[i].Model < out[j].Model
+	})
 	return out
 }

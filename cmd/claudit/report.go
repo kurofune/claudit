@@ -159,6 +159,7 @@ func runReport(args []string) error {
 	}
 
 	emitWarnings(snap.Malformed, snap.FileErrors)
+	emitUnpricedWarning(agg.UnknownModels())
 	return nil
 }
 

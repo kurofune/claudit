@@ -130,9 +130,15 @@ function trendSectionHTML(data, anomalies) {
     </div>`;
 }
 
-function warningsHTML(unknownModels) {
+// Unpriced turns are counted as $0, so every total on this page is low by
+// however much they would have cost. Show the volume behind each missing
+// model — the name alone doesn't say whether the gap is worth acting on.
+export function warningsHTML(unknownModels) {
   if (!unknownModels || unknownModels.length === 0) return '';
-  return `<div class="warning-card" role="alert"><strong class="danger">Unpriced models:</strong> ${unknownModels.map(escHtml).join(', ')} — add them to <code>~/.config/claudit/prices.yaml</code>.</div>`;
+  const items = unknownModels.map(m =>
+    `<li><code>${escHtml(m.model)}</code> — ${fmtNum(m.tokens)} tokens across ${fmtNum(m.turns)} ${m.turns === 1 ? 'turn' : 'turns'}</li>`
+  ).join('');
+  return `<div class="warning-card" role="alert"><strong class="danger">Unpriced models:</strong> these turns count as $0, so the totals below are understated. Add them to <code>~/.config/claudit/prices.yaml</code>.<ul class="warning-list">${items}</ul></div>`;
 }
 
 function wireHotspots(container, hotspots) {

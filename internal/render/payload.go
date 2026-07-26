@@ -56,13 +56,13 @@ type sidePart struct {
 // fetch — headline totals, the ranked hotspot stack, the totals trend
 // line, the month-end forecast, and any unknown-model warnings.
 type OverviewPayload struct {
-	Totals          aggregate.Totals       `json:"totals"`
-	OverallHitRatio float64                `json:"overall_hit_ratio"`
-	TotalTokens     int64                  `json:"total_tokens"`
-	Hotspots        []HotspotForJSON       `json:"hotspots"`
-	TrendTotals     []aggregate.TrendPoint `json:"trend_totals"`
-	Forecast        aggregate.Forecast     `json:"forecast"`
-	UnknownModels   []string               `json:"unknown_models"`
+	Totals          aggregate.Totals         `json:"totals"`
+	OverallHitRatio float64                  `json:"overall_hit_ratio"`
+	TotalTokens     int64                    `json:"total_tokens"`
+	Hotspots        []HotspotForJSON         `json:"hotspots"`
+	TrendTotals     []aggregate.TrendPoint   `json:"trend_totals"`
+	Forecast        aggregate.Forecast       `json:"forecast"`
+	UnknownModels   []aggregate.UnknownModel `json:"unknown_models"`
 	// Period is the bucket granularity of TrendTotals. The SPA reads it
 	// to label the trend axis ("hour" → HH:MM) instead of hardcoding day.
 	Period aggregate.Period `json:"period"`

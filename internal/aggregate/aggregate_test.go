@@ -463,8 +463,46 @@ func TestAggregate_UnknownModel(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices)
 	agg.Add(turn("not-a-model-2099", 1000, 0, false, "/p/foo", time.Now()))
-	if len(agg.UnknownModels()) != 1 || agg.UnknownModels()[0] != "not-a-model-2099" {
-		t.Errorf("unknown models: %v", agg.UnknownModels())
+	uk := agg.UnknownModels()
+	if len(uk) != 1 || uk[0].Model != "not-a-model-2099" {
+		t.Errorf("unknown models: %v", uk)
+	}
+}
+
+// The warning has to quantify what went unpriced — a bare model name doesn't
+// say whether the gap is worth acting on.
+func TestAggregate_UnknownModelsReportVolume(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	now := time.Now()
+	// Two turns of one unpriced model, one of another.
+	agg.Add(turn("zzz-model-2099", 1000, 200, false, "/p/foo", now))
+	agg.Add(turn("zzz-model-2099", 3000, 1800, false, "/p/foo", now))
+	aaa := turn("aaa-model-2099", 500, 0, false, "/p/foo", now)
+	aaa.Usage.CacheReadTokens = 4000
+	aaa.Usage.CacheCreate5mTokens = 500
+	agg.Add(aaa)
+
+	uk := agg.UnknownModels()
+	if len(uk) != 2 {
+		t.Fatalf("want 2 unpriced models, got %+v", uk)
+	}
+	// Sorted by unpriced volume desc so the worst offender reads first.
+	if uk[0].Model != "zzz-model-2099" || uk[1].Model != "aaa-model-2099" {
+		t.Errorf("want volume-desc order, got %+v", uk)
+	}
+	if uk[0].Turns != 2 {
+		t.Errorf("zzz turns = %d, want 2", uk[0].Turns)
+	}
+	if uk[0].Tokens != 6000 { // 1000+200+3000+1800
+		t.Errorf("zzz tokens = %d, want 6000", uk[0].Tokens)
+	}
+	if uk[1].Turns != 1 {
+		t.Errorf("aaa turns = %d, want 1", uk[1].Turns)
+	}
+	// Cache buckets count toward volume too.
+	if uk[1].Tokens != 5000 { // 500 + 4000 + 500
+		t.Errorf("aaa tokens = %d, want 5000", uk[1].Tokens)
 	}
 }
 

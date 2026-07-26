@@ -125,9 +125,13 @@ func MarkdownWithOptions(w io.Writer, a *aggregate.Aggregator, opt Options) erro
 	ew.Println()
 
 	if uk := a.UnknownModels(); len(uk) > 0 {
-		ew.Println("> **Warning:** unpriced models seen — add them to ~/.config/claudit/prices.yaml:")
+		ew.Println("> **Warning:** unpriced models seen — these turns are counted as $0, so the totals above are understated. Add them to ~/.config/claudit/prices.yaml:")
 		for _, m := range uk {
-			ew.Printf("> - `%s`\n", m)
+			turns := "turns"
+			if m.Turns == 1 {
+				turns = "turn"
+			}
+			ew.Printf("> - `%s` — %s tokens across %s %s\n", m.Model, num(m.Tokens), num(int64(m.Turns)), turns)
 		}
 		ew.Println()
 	}

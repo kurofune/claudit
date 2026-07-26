@@ -606,6 +606,13 @@
     margin-bottom: var(--s-3);
   }
 
+  /* Per-model breakdown inside a warning callout. */
+  .warning-list {
+    margin: var(--s-2) 0 0;
+    padding-left: var(--s-4);
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
   /* Reading guide — collapsible "how to interpret this section" callout.
      Sits under each view-head; default open so first-time readers get
      oriented, but a click on the summary hides it for subsequent visits. */
