@@ -20,7 +20,7 @@ import (
 func testPrices(t *testing.T) *pricing.Table {
 	t.Helper()
 	return &pricing.Table{Models: map[string]pricing.ModelPrice{
-		"claude-test": {Output: 1.0}, // $1 per 1M output tokens
+		"claude-test": {Rate: pricing.Rate{Output: 1.0}}, // $1 per 1M output tokens
 	}}
 }
 

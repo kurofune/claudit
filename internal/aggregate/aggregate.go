@@ -320,7 +320,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		}
 		a.seenMessageID[t.MessageID] = struct{}{}
 	}
-	cost, known := a.prices.Cost(t.Model,
+	cost, known := a.prices.CostAt(t.Model, t.Timestamp,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 		t.Usage.CacheReadTokens)

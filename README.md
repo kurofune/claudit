@@ -120,6 +120,31 @@ models:
 
 Override the path with `--prices=path/to/file.yaml`. Models that appear in your sessions but are missing from both the bundle and your overlay show up in the report's `unknown_models` block with zero attributed cost — add them to your YAML to get them priced.
 
+### Rates that change over time
+
+claudit prices *historical* sessions, so a rate change isn't a simple edit: bump the number and old turns re-price at rates that were never charged; leave it and new turns are wrong. A model's top-level fields are therefore the rate in effect **now**, and an optional `rates:` list holds what came before:
+
+```yaml
+models:
+  claude-sonnet-5:
+    input_per_mtok: 3.00          # in effect now
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+    rates:
+      - until: 2026-08-31         # inclusive — introductory pricing
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+        cache_read_per_mtok: 0.20
+        cache_write_5m_per_mtok: 2.50
+        cache_write_1h_per_mtok: 4.00
+```
+
+Each turn is priced at the rate in effect when it ran. `until` is **inclusive** and interpreted in UTC — the period covers everything through 23:59:59 on that date. Periods may be listed in any order; claudit picks the narrowest one covering the turn. A turn with no usable timestamp prices at the current (top-level) rate.
+
+The `rates:` key is optional and purely additive — an overlay written in the flat form keeps working unchanged. Overlay semantics are unchanged too: defining a model replaces the bundled entry **entirely**, rate history included, so a flat override makes your rate apply at every timestamp.
+
 ## Subcommands
 
 | Command | Purpose |
@@ -136,6 +161,7 @@ Override the path with `--prices=path/to/file.yaml`. Models that appear in your 
 - The **Agents view** is `claudit serve` only — a one-shot `claudit report` HTML file does not include it.
 - The JSONL schema is Claude Code's. If Anthropic changes it, the parser may need to catch up.
 - Prices are manually maintained in `prices.yaml`. When Anthropic publishes new rates, you update the YAML.
+- The price table is keyed on model id and date. Rate changes over time are handled ([see above](#rates-that-change-over-time)) — Sonnet 5's introductory window through 2026-08-31 is encoded, so turns on either side of it price correctly. What the table still cannot express is a rate that varies *within* a model on the same day: **fast mode** (Opus 5 / Opus 4.8, billed $10/$50) is a per-turn rate selected by the transcript's `speed` field, which claudit does not read, so fast-mode turns price at the standard rate. Override in your own `prices.yaml` if it matters to your numbers.
 - Developed and dogfooded on macOS. CI runs the test suite on Linux, macOS, and Windows. On Windows, `claudit watch`'s live status line uses ANSI escape sequences — Windows Terminal and PowerShell 7 render them correctly; legacy `cmd.exe` will show the escapes literally.
 - The HTML report is a single file with all data, CSS, and JS inline. Typography uses Inter via Google Fonts (the lone external request); offline it falls back to system sans-serif.
 

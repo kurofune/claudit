@@ -1,128 +1,179 @@
 # claudit pricing — USD per million tokens.
 #
-# Prices verified against https://platform.claude.com/docs/en/about-claude/pricing
-# on 2026-05-29; Sonnet 5 added 2026-07-03. Sources are tagged with the date
-# they were verified — refresh those tags if you re-check the page.
+# Every rate below was re-verified against
+# https://platform.claude.com/docs/en/about-claude/pricing on 2026-07-26
+# (Opus 5 added then). Entries are tagged with the date they were last
+# checked — refresh those tags if you re-check the page.
 #
 # Cache pricing follows Anthropic's standard ratios off the input rate:
 #   cache_read     = input * 0.10
 #   cache_write_5m = input * 1.25
 #   cache_write_1h = input * 2.00
 #
-# 1M-context-window pricing: Fable 5, Mythos 5, Opus 4.6, Opus 4.7, Opus 4.8,
-# Sonnet 5, and Sonnet 4.6 include the full 1M context at *standard* rates — no
-# premium tier. The
-# "[1m]" suffix claudit may see in the wild is just a context-mode marker,
-# not a pricing tier, so we list those at the same prices as their base model.
+# 1M-context-window pricing: Fable 5, Mythos 5, Opus 5, Opus 4.6, Opus 4.7,
+# Opus 4.8, Sonnet 5, and Sonnet 4.6 include the full 1M context at *standard*
+# rates — no premium tier. The "[1m]" suffix claudit may see in the wild is
+# just a context-mode marker, not a pricing tier, so we list those at the same
+# prices as their base model.
+#
+# Rate changes: a model's top-level fields are the rate in effect *now*.
+# When a rate changes, move the outgoing rate into a `rates:` entry tagged
+# with the last date it applied (inclusive, UTC) and update the top-level
+# fields to the new rate — see claude-sonnet-5 below. Turns are then priced
+# at whatever was in effect when they ran. Periods may be listed in any
+# order; a turn with no usable timestamp prices at the current rate.
+#
+# Known gap (needs code, not just a rate edit — see README):
+#   * Fast mode (Opus 5 / Opus 4.8, $10 / $50) is a per-turn rate, not a
+#     per-model one. Transcripts carry the "speed" field that would select
+#     it, but claudit keys pricing on model id alone, so fast-mode turns
+#     price at the standard rate.
 
 models:
   # ── Fable 5 / Mythos 5 — $10 / $50 base ──
   # Mythos 5 is limited-availability (Project Glasswing) but shares Fable 5's
   # rate card; claudit prices it identically if the id shows up in a session.
-  claude-fable-5:                   # verified 2026-06-10
+  claude-fable-5:                   # verified 2026-07-26
     input_per_mtok: 10.00
     output_per_mtok: 50.00
     cache_read_per_mtok: 1.00
     cache_write_5m_per_mtok: 12.50
     cache_write_1h_per_mtok: 20.00
 
-  "claude-fable-5[1m]":              # verified 2026-06-10 — 1M context bundled at standard rates
+  "claude-fable-5[1m]":              # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 10.00
     output_per_mtok: 50.00
     cache_read_per_mtok: 1.00
     cache_write_5m_per_mtok: 12.50
     cache_write_1h_per_mtok: 20.00
 
-  claude-mythos-5:                  # verified 2026-06-10
+  claude-mythos-5:                  # verified 2026-07-26
     input_per_mtok: 10.00
     output_per_mtok: 50.00
     cache_read_per_mtok: 1.00
     cache_write_5m_per_mtok: 12.50
     cache_write_1h_per_mtok: 20.00
 
-  "claude-mythos-5[1m]":            # verified 2026-06-10 — 1M context bundled at standard rates
+  "claude-mythos-5[1m]":            # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 10.00
     output_per_mtok: 50.00
     cache_read_per_mtok: 1.00
     cache_write_5m_per_mtok: 12.50
     cache_write_1h_per_mtok: 20.00
 
-  # ── Opus 4.5/4.6/4.7/4.8 family — $5 / $25 base ──
-  claude-opus-4-8:                  # verified 2026-05-29
+  # ── Opus 5 + Opus 4.5/4.6/4.7/4.8 family — $5 / $25 base ──
+  # Opus 5 ships as a drop-in at Opus 4.8's rate card.
+  claude-opus-5:                    # verified 2026-07-26
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  "claude-opus-4-8[1m]":             # verified 2026-05-29 — 1M context bundled at standard rates
+  "claude-opus-5[1m]":              # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  claude-opus-4-7:                  # verified 2026-05-29
+  claude-opus-4-8:                  # verified 2026-07-26
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  "claude-opus-4-7[1m]":             # verified 2026-05-29 — 1M context bundled at standard rates
+  "claude-opus-4-8[1m]":             # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  claude-opus-4-6:                  # verified 2026-05-29
+  claude-opus-4-7:                  # verified 2026-07-26
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  claude-opus-4-5-20251101:         # verified 2026-05-29 — Opus 4.5 dated id
+  "claude-opus-4-7[1m]":             # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     cache_read_per_mtok: 0.50
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  # ── Sonnet 5 — introductory $2 / $10 base (through 2026-08-31) ──
-  # Reverts to standard $3 / $15 on 2026-09-01 — bump these entries then
-  # (and the cache rates: read 0.30, 5m 3.75, 1h 6.00).
-  claude-sonnet-5:                  # verified 2026-07-03 — intro pricing
-    input_per_mtok: 2.00
-    output_per_mtok: 10.00
-    cache_read_per_mtok: 0.20
-    cache_write_5m_per_mtok: 2.50
-    cache_write_1h_per_mtok: 4.00
+  claude-opus-4-6:                  # verified 2026-07-26
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
 
-  "claude-sonnet-5[1m]":            # verified 2026-07-03 — 1M context bundled at standard rates
-    input_per_mtok: 2.00
-    output_per_mtok: 10.00
-    cache_read_per_mtok: 0.20
-    cache_write_5m_per_mtok: 2.50
-    cache_write_1h_per_mtok: 4.00
+  "claude-opus-4-6[1m]":            # verified 2026-07-26 — 1M context bundled at standard rates
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  claude-opus-4-5-20251101:         # verified 2026-07-26 — Opus 4.5 dated id
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    cache_read_per_mtok: 0.50
+    cache_write_5m_per_mtok: 6.25
+    cache_write_1h_per_mtok: 10.00
+
+  # ── Sonnet 5 — standard $3 / $15 base from 2026-09-01 ──
+  # Launched under introductory pricing ($2 / $10) which ran through
+  # 2026-08-31; that window is kept below as a rate period so turns from it
+  # still price at what they actually cost.
+  claude-sonnet-5:                  # verified 2026-07-26
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+    rates:
+      - until: 2026-08-31           # inclusive — introductory pricing
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+        cache_read_per_mtok: 0.20
+        cache_write_5m_per_mtok: 2.50
+        cache_write_1h_per_mtok: 4.00
+
+  "claude-sonnet-5[1m]":            # verified 2026-07-26 — 1M context bundled at standard rates
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    cache_read_per_mtok: 0.30
+    cache_write_5m_per_mtok: 3.75
+    cache_write_1h_per_mtok: 6.00
+    rates:
+      - until: 2026-08-31           # inclusive — introductory pricing
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+        cache_read_per_mtok: 0.20
+        cache_write_5m_per_mtok: 2.50
+        cache_write_1h_per_mtok: 4.00
 
   # ── Sonnet 4.x family — $3 / $15 base ──
-  claude-sonnet-4-6:                # verified 2026-05-29
+  claude-sonnet-4-6:                # verified 2026-07-26
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     cache_read_per_mtok: 0.30
     cache_write_5m_per_mtok: 3.75
     cache_write_1h_per_mtok: 6.00
 
-  "claude-sonnet-4-6[1m]":           # verified 2026-05-29 — 1M context bundled at standard rates
+  "claude-sonnet-4-6[1m]":           # verified 2026-07-26 — 1M context bundled at standard rates
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     cache_read_per_mtok: 0.30
     cache_write_5m_per_mtok: 3.75
     cache_write_1h_per_mtok: 6.00
 
-  claude-sonnet-4-5-20250929:       # verified 2026-05-29 — Sonnet 4.5 dated id
+  claude-sonnet-4-5-20250929:       # verified 2026-07-26 — Sonnet 4.5 dated id
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     cache_read_per_mtok: 0.30
@@ -130,7 +181,7 @@ models:
     cache_write_1h_per_mtok: 6.00
 
   # ── Haiku 4.5 — $1 / $5 base ──
-  claude-haiku-4-5-20251001:        # verified 2026-05-29
+  claude-haiku-4-5-20251001:        # verified 2026-07-26
     input_per_mtok: 1.00
     output_per_mtok: 5.00
     cache_read_per_mtok: 0.10
@@ -140,26 +191,26 @@ models:
   # ── Legacy models (pre-Opus-4.5) ──
   # Keyed on the dated ids Claude Code wrote into old transcripts (the
   # lookup is an exact map match). Without these, sessions from before
-  # ~late 2025 price at $0. Opus 4.1/4, Sonnet 4, and Haiku 3.5 rates
-  # verified on the live pricing page 2026-07-03; the fully retired 3.x
-  # models are delisted there, so those carry their last published
-  # official rates (historical).
+  # ~late 2025 price at $0. Opus 4.1/4, Sonnet 4, and Haiku 3.5 are still
+  # listed on the live pricing page and were verified there 2026-07-26; the
+  # fully retired 3.x models are delisted, so those carry their last
+  # published official rates (historical).
 
-  claude-opus-4-1-20250805:         # verified 2026-07-03 — deprecated, $15 / $75
+  claude-opus-4-1-20250805:         # verified 2026-07-26 — deprecated, $15 / $75
     input_per_mtok: 15.00
     output_per_mtok: 75.00
     cache_read_per_mtok: 1.50
     cache_write_5m_per_mtok: 18.75
     cache_write_1h_per_mtok: 30.00
 
-  claude-opus-4-20250514:           # verified 2026-07-03 — retired, $15 / $75
+  claude-opus-4-20250514:           # verified 2026-07-26 — retired, $15 / $75
     input_per_mtok: 15.00
     output_per_mtok: 75.00
     cache_read_per_mtok: 1.50
     cache_write_5m_per_mtok: 18.75
     cache_write_1h_per_mtok: 30.00
 
-  claude-sonnet-4-20250514:         # verified 2026-07-03 — retired, $3 / $15
+  claude-sonnet-4-20250514:         # verified 2026-07-26 — retired, $3 / $15
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     cache_read_per_mtok: 0.30
@@ -187,7 +238,7 @@ models:
     cache_write_5m_per_mtok: 3.75
     cache_write_1h_per_mtok: 6.00
 
-  claude-3-5-haiku-20241022:        # verified 2026-07-03 — retired, $0.80 / $4
+  claude-3-5-haiku-20241022:        # verified 2026-07-26 — retired, $0.80 / $4
     input_per_mtok: 0.80
     output_per_mtok: 4.00
     cache_read_per_mtok: 0.08

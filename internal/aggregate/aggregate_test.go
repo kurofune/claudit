@@ -2,6 +2,7 @@ package aggregate
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -424,6 +425,37 @@ func TestAggregate_AgentInvocations(t *testing.T) {
 	gp := agg.AgentInvocations("general-purpose")
 	if len(gp) != 1 || gp[0].SourceFile != "/sub/agent-aaa.jsonl" {
 		t.Errorf("filter: %+v", gp)
+	}
+}
+
+// Turns are priced at the rate in effect when they ran, not today's rate:
+// two identical Sonnet 5 turns on either side of the 2026-08-31 intro-rate
+// cliff cost different amounts.
+func TestAggregate_PricesTurnsAtTheirOwnDateRate(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+
+	intro := New(prices)
+	intro.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo",
+		time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC)))
+	if got := intro.Totals().CostUSD; math.Abs(got-12.0) > 0.001 {
+		t.Errorf("intro-period turn cost %v, want 12 ($2/$10)", got)
+	}
+
+	std := New(prices)
+	std.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo",
+		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
+	if got := std.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
+		t.Errorf("post-cliff turn cost %v, want 18 ($3/$15)", got)
+	}
+}
+
+// A turn with no usable timestamp prices at the model's current rate.
+func TestAggregate_ZeroTimestampUsesCurrentRate(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	agg.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo", time.Time{}))
+	if got := agg.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
+		t.Errorf("zero-timestamp turn cost %v, want current rate 18", got)
 	}
 }
 
