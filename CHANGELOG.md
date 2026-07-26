@@ -33,6 +33,10 @@ This release gives the price table a **time dimension**: each turn is priced at 
 
 - **An unpriced-model warning on stderr.** The default HTML path writes the report to stdout and previously said nothing in the terminal, so a stale price table surfaced only as totals that were quietly low. `claudit report` now prints the affected models and their volume to stderr.
 
+### Fixed
+
+- **Flaky `claudit watch` painter test under `-race` on Windows.** The Windows resize watcher polls `TerminalSize` on a ticker — Unix uses `SIGWINCH` and has no polling goroutine — so the test's deferred pipe close raced with that read and intermittently failed the `windows-latest` CI leg. Teardown now drains the reader to unpark the parked paint goroutine, so the painter stops the watcher before the pipe closes. Test-only; `watch` behavior is unchanged.
+
 ## [1.7.0] — 2026-07-15
 
 This release grows the **Agents** trace viewer from a flat Gantt into a genuine trace waterfall — a session narrative strip, prompt-segmented bands, nested sub-agent rows, and a where-did-the-time-go breakdown — and corrects a class of **cost double-counting** for resumed/forked sessions so headline spend and every drill-down now reconcile exactly. It also adds **Claude Sonnet 5** and legacy pre-Opus-4.5 pricing, ships **prebuilt release binaries**, and hardens `claudit serve`'s memory footprint.
