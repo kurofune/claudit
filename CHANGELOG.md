@@ -2,6 +2,37 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-07-26
+
+This release gives the price table a **time dimension**: each turn is priced at the rate that was in effect when it ran, rather than at today's rate. That closes a silent-error class arriving on 2026-09-01, when **Claude Sonnet 5**'s introductory pricing expires — until now there was no correct value to put in the table, since one number had to serve both historical and future turns. It also adds **Claude Opus 5** (previously missing, and therefore free), and makes the unpriced-model warning report what the gap is actually costing you.
+
+### Changed
+
+- **`unknown_models` changed shape in JSON output — update any script that reads it.** It was an array of model-name strings; it is now an array of objects, `{"model": "…", "turns": N, "tokens": N}`, sorted by unpriced token volume descending. This affects both `claudit report --json` and the `/_claudit/api/overview` endpoint. A script reading `.unknown_models[]` should now read `.unknown_models[].model`.
+- **Sonnet 5 turns dated 2026-09-01 or later price at the standard $3/$15 automatically.** The bundled entry now carries the standard rate, with the introductory $2/$10 recorded as a dated period ending 2026-08-31. Existing spend is unaffected — July and August turns still price at the introductory rate they were actually billed at — and no upgrade is needed when the cliff passes.
+
+### Added
+
+- **Date-effective pricing.** A model entry may now carry an optional `rates:` list of historical periods alongside its current rate:
+
+  ```yaml
+  claude-sonnet-5:
+    input_per_mtok: 3.00          # the rate in effect now
+    output_per_mtok: 15.00
+    rates:
+      - until: 2026-08-31         # inclusive, UTC — introductory pricing
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+  ```
+
+  Each turn is priced by its own timestamp. `until` is inclusive through 23:59:59 UTC on that date; periods may be listed in any order (the narrowest one covering the turn wins), so there is no oldest- or newest-first convention to get wrong; and a turn with no usable timestamp falls back to the current rate. The key is optional and purely additive — existing flat `~/.config/claudit/prices.yaml` overlays keep working unchanged, and per-model replacement still swaps the whole entry, rate history included.
+
+- **Pricing: Claude Opus 5.** `claude-opus-5` and `claude-opus-5[1m]` were absent from the bundled table, so those turns landed in `unknown_models` and contributed **nothing** to reported spend. Added at the Opus 4.8 rate card ($5 / $25 base; cache 0.50 / 6.25 / 10.00). Every other bundled rate was re-verified against the live pricing page on 2026-07-26 and none had drifted.
+
+- **Unpriced-model warnings now quantify the gap.** Every surface that lists unpriced models — HTML, markdown, and JSON — now reports the turn count and token volume behind each one, worst first, and says plainly that those turns count as $0 and the totals are therefore understated. Three unpriced turns and thirty thousand are very different problems, and the old warning couldn't tell them apart.
+
+- **An unpriced-model warning on stderr.** The default HTML path writes the report to stdout and previously said nothing in the terminal, so a stale price table surfaced only as totals that were quietly low. `claudit report` now prints the affected models and their volume to stderr.
+
 ## [1.7.0] — 2026-07-15
 
 This release grows the **Agents** trace viewer from a flat Gantt into a genuine trace waterfall — a session narrative strip, prompt-segmented bands, nested sub-agent rows, and a where-did-the-time-go breakdown — and corrects a class of **cost double-counting** for resumed/forked sessions so headline spend and every drill-down now reconcile exactly. It also adds **Claude Sonnet 5** and legacy pre-Opus-4.5 pricing, ships **prebuilt release binaries**, and hardens `claudit serve`'s memory footprint.
@@ -252,7 +283,10 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/kurofune/claudit/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/kurofune/claudit/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/kurofune/claudit/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/kurofune/claudit/compare/v1.4.3...v1.5.0
 [1.4.3]: https://github.com/kurofune/claudit/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/kurofune/claudit/compare/v1.4.1...v1.4.2
