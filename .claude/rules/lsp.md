@@ -1,3 +1,7 @@
+---
+paths:
+  - "**/*.go"
+---
 # Go Code Intelligence — Use the LSP Tool
 
 The `LSP` tool is backed by `gopls` (plugin `gopls-lsp@claude-plugins-official`, enabled in `.claude/settings.json`). It is a first-class tool for Go symbol queries — reach for it instead of grep when the question is about Go semantics.

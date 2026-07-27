@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
-    "impeccable@impeccable": true
+    "impeccable@impeccable": true,
+    "gopls-lsp@claude-plugins-official": true
   },
   "hooks": {
     "PostToolUse": [
