@@ -27,6 +27,7 @@ After that, call it like any other tool.
 | What implements `<GoInterface>`? | **LSP** `goToImplementation` |
 | What symbols does this file expose? | **LSP** `documentSymbol` |
 | Find a string / regex across mixed file types (TOML, MD, comments, string literals) | **grep** |
+| Find a symbol in `.svelte` / `.ts` / non-Go | **grep** |
 
 Rule of thumb: if the question is "where is this Go symbol defined / who calls it / what's its type," use LSP. If the question is "find this string / find this pattern," use grep. If both fit, prefer LSP for `.go` files and grep for everything else.
 
