@@ -1,1 +1,0 @@
-When giving time estimates, calculate them for AI agents, not Humans.  Agents are a lot faster.

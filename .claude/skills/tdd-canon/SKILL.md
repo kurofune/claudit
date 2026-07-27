@@ -1,5 +1,5 @@
 ---
-name: tdd
+name: tdd-canon
 description: >
   Practice Kent Beck's Canon Test-Driven Development with strict Red-Green-Refactor
   discipline. Use this skill whenever the user mentions TDD, test-driven development,
