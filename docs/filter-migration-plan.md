@@ -1,6 +1,6 @@
 # Plan: replace the global filter bar with per-view local filters
 
-Status: **not started** (design approved, no implementation landed). Written 2026-06-14.
+Status: **SHIPPED in v1.6.0** (per-view filter bars landed; the global bar was removed). Written 2026-06-14.
 
 ## Why
 
