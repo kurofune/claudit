@@ -10,4 +10,3 @@ For Go symbol queries (definitions, references, callers, hover, implementations)
 
 - `testing.md` — TDD is required for backend and frontend-logic code; UI styling is exempt.
 - `lsp.md` — use the `LSP` tool (gopls-backed) for Go symbol queries; grep for everything else.
-- `time-estimations.md` — estimate for AI agents, not humans.
