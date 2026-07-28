@@ -5,3 +5,18 @@ Go CLI that audits Claude Code sessions from the `.jsonl` logs under `~/.claude/
 ## Testing policy (all agents)
 
 All backend and logic code follows Kent Beck's TDD — red (failing test first), green (minimal code to pass), refactor. This is not optional. The full policy, including the frontend carve-outs and the no-implicit-override clause, is in `.claude/rules/testing.md`; agents that don't auto-load that directory should read it before writing code.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in the repo's GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary as GitHub labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root, created
+lazily. See `docs/agents/domain.md`.
