@@ -59,6 +59,11 @@ Before starting, determine the project's test framework and runner:
 3. Determine the test run command (`npx vitest run`, `npm test`, `pytest`, `go test`,
    `cargo test`, `ctest`, etc.).
 4. If no framework exists, ask the user which framework to set up. Do not assume.
+5. If a `CONTEXT.md` exists at the repo root (or per-context, located via a root
+   `CONTEXT-MAP.md`), read it and use its canonical terms in test names, fixtures,
+   and scenario descriptions — never a term the glossary lists under _Avoid_.
+   Check `docs/adr/` for decisions in the area you're touching before the test
+   list commits to an interface.
 
 Store this context mentally. You will need the run command throughout.
 
