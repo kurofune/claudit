@@ -6,6 +6,7 @@ report.html
 # the *.html rule above exists to keep generated `report.html` out
 # of the repo, not to ignore source.
 !web/*.html
+!SITUATION_ROOM.html
 
 # Build artifacts
 /claudit
