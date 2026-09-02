@@ -7,20 +7,21 @@
 Anthropic's published rates, the parser current with Claude Code's JSONL schema.
 Ship fixes and small features as they earn their place.
 
-**Last change:** v1.8.0 (2026-07-26) — date-effective pricing (each turn priced
-at the rate in effect when it ran), Opus 5 rate card, quantified unpriced-model
-warnings. Since then: docs/tooling only (AGENTS.md split, skill wiring, LSP rules).
+**Last change:** 2026-09-01 pricing refresh (unreleased) — Fable 5.1 / Mythos 5.1
+rate cards added (cache hits at 0.025x input, not 0.1x); Sonnet 5's 2026-09-01
+increase was cancelled upstream, so its dated rate period is removed and it is a
+flat $2 / $10. Before that: v1.8.0 (2026-07-26) date-effective pricing, Opus 5.
 
 **Assumptions:**
-- The Sonnet 5 introductory→standard transition (2026-09-01) is already encoded
-  as a dated rate period in the bundled table; no release is needed at the cliff.
+- No bundled model needs rate history right now; the mechanism stays because the
+  next real rate change will. An un-upgraded claudit over-reports Sonnet 5 spend
+  from 2026-09-01 by 50%, so this refresh wants a release.
 - Fast-mode turns (Opus 5 / 4.8 `speed` field) price at the standard rate — a
   known, documented gap (README "Status and limitations").
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** After 2026-09-01 — spot-check that Sonnet 5 turns on both
-sides of the cliff price correctly on the real corpus.
+**Next checkpoint:** Cut a release carrying the 2026-09-01 pricing refresh.
 
 **Stop conditions:**
 - Claude Code changes the JSONL schema → parser catch-up becomes the priority.

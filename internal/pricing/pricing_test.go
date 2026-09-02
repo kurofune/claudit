@@ -61,6 +61,34 @@ func TestDefault_Fable5AndMythos5(t *testing.T) {
 	}
 }
 
+func TestDefault_Fable51AndMythos51(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fable 5.1 and Mythos 5.1 share Fable 5's $10 / $50 base and write
+	// rates, but cache hits are priced at 0.025x input ($0.25) rather than
+	// the 0.1x every other model uses.
+	for _, m := range []string{
+		"claude-fable-5-1",
+		"claude-fable-5-1[1m]",
+		"claude-mythos-5-1",
+		"claude-mythos-5-1[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 10.00 || p.Output != 50.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
+		}
+		if p.CacheRead != 0.25 || p.CacheWrite5m != 12.50 || p.CacheWrite1h != 20.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
+		}
+	}
+}
+
 func TestDefault_Opus5(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
@@ -94,6 +122,8 @@ func TestDefault_OneMillionContextVariantsMatchBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, base := range []string{
+		"claude-fable-5-1",
+		"claude-mythos-5-1",
 		"claude-fable-5",
 		"claude-mythos-5",
 		"claude-opus-5",
@@ -135,10 +165,11 @@ func TestDefault_Sonnet5(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sonnet 5's current rate is the standard $3 input / $15 output, with
-	// cache rates on the standard ratios off the $3 input rate. The
-	// introductory $2 / $10 window that ran through 2026-08-31 lives in the
-	// rate history — see TestDefault_Sonnet5HasIntroPeriod.
+	// Sonnet 5 is $2 input / $10 output, with cache rates on the standard
+	// ratios off the $2 input rate. What launched as introductory pricing
+	// through 2026-08-31 became the standard price — the scheduled increase
+	// to $3 / $15 was cancelled — so there is no cliff and no rate history;
+	// see TestDefault_Sonnet5HasNoRateHistory.
 	for _, m := range []string{
 		"claude-sonnet-5",
 		"claude-sonnet-5[1m]",
@@ -148,10 +179,10 @@ func TestDefault_Sonnet5(t *testing.T) {
 			t.Errorf("default missing %q", m)
 			continue
 		}
-		if p.Input != 3.00 || p.Output != 15.00 {
+		if p.Input != 2.00 || p.Output != 10.00 {
 			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
 		}
-		if p.CacheRead != 0.30 || p.CacheWrite5m != 3.75 || p.CacheWrite1h != 6.00 {
+		if p.CacheRead != 0.20 || p.CacheWrite5m != 2.50 || p.CacheWrite1h != 4.00 {
 			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
 		}
 	}
@@ -238,29 +269,23 @@ func TestRateAt_OrderIndependent(t *testing.T) {
 	}
 }
 
-func TestCostAt_Sonnet5AcrossTheCliff(t *testing.T) {
+func TestCostAt_Sonnet5FlatAcrossTheCancelledCliff(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 1M input + 1M output under intro pricing ($2 / $10) = $12.
-	cost, known := tab.CostAt("claude-sonnet-5", mustTime(t, "2026-07-26T00:00:00Z"), 1_000_000, 1_000_000, 0, 0, 0)
-	if !known || math.Abs(cost-12.0) > 0.001 {
-		t.Errorf("intro-period sonnet-5: cost=%v known=%v, want 12", cost, known)
-	}
-	// Same turn on 2026-09-01 under standard pricing ($3 / $15) = $18.
-	cost, known = tab.CostAt("claude-sonnet-5", mustTime(t, "2026-09-01T00:00:00Z"), 1_000_000, 1_000_000, 0, 0, 0)
-	if !known || math.Abs(cost-18.0) > 0.001 {
-		t.Errorf("post-cliff sonnet-5: cost=%v known=%v, want 18", cost, known)
-	}
-	// Cache rates move with the base rate: 10M cache reads = $2 then $3.
-	cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, "2026-07-26T00:00:00Z"), 0, 0, 0, 0, 10_000_000)
-	if math.Abs(cost-2.0) > 0.001 {
-		t.Errorf("intro-period sonnet-5 cache read: %v, want 2", cost)
-	}
-	cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, "2026-09-01T00:00:00Z"), 0, 0, 0, 0, 10_000_000)
-	if math.Abs(cost-3.0) > 0.001 {
-		t.Errorf("post-cliff sonnet-5 cache read: %v, want 3", cost)
+	// 1M input + 1M output at $2 / $10 = $12, on both sides of the
+	// 2026-09-01 date the increase to $3 / $15 was once scheduled for.
+	for _, ts := range []string{"2026-07-26T00:00:00Z", "2026-09-01T00:00:00Z"} {
+		cost, known := tab.CostAt("claude-sonnet-5", mustTime(t, ts), 1_000_000, 1_000_000, 0, 0, 0)
+		if !known || math.Abs(cost-12.0) > 0.001 {
+			t.Errorf("sonnet-5 at %s: cost=%v known=%v, want 12", ts, cost, known)
+		}
+		// 10M cache reads at $0.20/MTok = $2.
+		cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, ts), 0, 0, 0, 0, 10_000_000)
+		if math.Abs(cost-2.0) > 0.001 {
+			t.Errorf("sonnet-5 cache read at %s: %v, want 2", ts, cost)
+		}
 	}
 }
 
@@ -283,15 +308,14 @@ func TestCost_MatchesCostAtCurrentRate(t *testing.T) {
 	if !known || math.Abs(got-want) > 0.000001 {
 		t.Errorf("Cost=%v, CostAt(zero)=%v", got, want)
 	}
-	// And the current rate is the post-cliff standard rate, not the intro one.
-	if math.Abs(got-18.0) > 0.001 {
-		t.Errorf("current sonnet-5 rate should be $3/$15 => 18, got %v", got)
+	if math.Abs(got-12.0) > 0.001 {
+		t.Errorf("current sonnet-5 rate should be $2/$10 => 12, got %v", got)
 	}
 }
 
-// Sonnet 5's intro window is encoded as history, so a July turn still prices
-// at $2 / $10 after the flat fields were bumped to the standard rate.
-func TestDefault_Sonnet5HasIntroPeriod(t *testing.T) {
+// Sonnet 5's introductory rate became the standard rate, so the entry carries
+// no rate history: every turn, at any date, prices at $2 / $10.
+func TestDefault_Sonnet5HasNoRateHistory(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -302,19 +326,8 @@ func TestDefault_Sonnet5HasIntroPeriod(t *testing.T) {
 			t.Errorf("default missing %q", m)
 			continue
 		}
-		if len(p.Rates) != 1 {
-			t.Errorf("%s: want 1 historical rate period, got %d", m, len(p.Rates))
-			continue
-		}
-		intro := p.Rates[0]
-		if !intro.Until.Equal(mustTime(t, "2026-08-31T00:00:00Z")) {
-			t.Errorf("%s: intro period ends %v, want 2026-08-31", m, intro.Until)
-		}
-		if intro.Input != 2.00 || intro.Output != 10.00 {
-			t.Errorf("%s intro base rates wrong: %+v", m, intro.Rate)
-		}
-		if intro.CacheRead != 0.20 || intro.CacheWrite5m != 2.50 || intro.CacheWrite1h != 4.00 {
-			t.Errorf("%s intro cache rates wrong: %+v", m, intro.Rate)
+		if len(p.Rates) != 0 {
+			t.Errorf("%s: want no historical rate periods, got %d", m, len(p.Rates))
 		}
 	}
 }

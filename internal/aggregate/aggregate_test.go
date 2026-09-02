@@ -428,34 +428,49 @@ func TestAggregate_AgentInvocations(t *testing.T) {
 	}
 }
 
-// Turns are priced at the rate in effect when they ran, not today's rate:
-// two identical Sonnet 5 turns on either side of the 2026-08-31 intro-rate
-// cliff cost different amounts.
+// Turns are priced at the rate in effect when they ran, not today's rate.
+// The table is synthetic on purpose: this asserts that Aggregate threads a
+// turn's timestamp into the price lookup, not what any real model costs.
 func TestAggregate_PricesTurnsAtTheirOwnDateRate(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
+	prices := &pricing.Table{Models: map[string]pricing.ModelPrice{
+		"model-with-history": {
+			Rate: pricing.Rate{Input: 3.00, Output: 15.00},
+			Rates: []pricing.RatePeriod{{
+				Until: time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
+				Rate:  pricing.Rate{Input: 2.00, Output: 10.00},
+			}},
+		},
+	}}
 
-	intro := New(prices)
-	intro.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo",
+	old := New(prices)
+	old.Add(turn("model-with-history", 1_000_000, 1_000_000, false, "/p/foo",
 		time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC)))
-	if got := intro.Totals().CostUSD; math.Abs(got-12.0) > 0.001 {
-		t.Errorf("intro-period turn cost %v, want 12 ($2/$10)", got)
+	if got := old.Totals().CostUSD; math.Abs(got-12.0) > 0.001 {
+		t.Errorf("earlier-period turn cost %v, want 12 ($2/$10)", got)
 	}
 
-	std := New(prices)
-	std.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo",
+	cur := New(prices)
+	cur.Add(turn("model-with-history", 1_000_000, 1_000_000, false, "/p/foo",
 		time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
-	if got := std.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
-		t.Errorf("post-cliff turn cost %v, want 18 ($3/$15)", got)
+	if got := cur.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
+		t.Errorf("current-period turn cost %v, want 18 ($3/$15)", got)
+	}
+
+	// A turn with no usable timestamp prices at the model's current rate.
+	zero := New(prices)
+	zero.Add(turn("model-with-history", 1_000_000, 1_000_000, false, "/p/foo", time.Time{}))
+	if got := zero.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
+		t.Errorf("zero-timestamp turn cost %v, want current rate 18", got)
 	}
 }
 
-// A turn with no usable timestamp prices at the model's current rate.
+// The bundled table is the real thing: Sonnet 5 is a flat $2 / $10 at any date.
 func TestAggregate_ZeroTimestampUsesCurrentRate(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices)
 	agg.Add(turn("claude-sonnet-5", 1_000_000, 1_000_000, false, "/p/foo", time.Time{}))
-	if got := agg.Totals().CostUSD; math.Abs(got-18.0) > 0.001 {
-		t.Errorf("zero-timestamp turn cost %v, want current rate 18", got)
+	if got := agg.Totals().CostUSD; math.Abs(got-12.0) > 0.001 {
+		t.Errorf("zero-timestamp turn cost %v, want current rate 12", got)
 	}
 }
 

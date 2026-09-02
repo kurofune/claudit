@@ -2,6 +2,18 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Pricing refresh against the live pricing page on 2026-09-01: **Claude Fable 5.1** and **Claude Mythos 5.1** are added, and **Claude Sonnet 5**'s scheduled price increase — which this project encoded ahead of time — was cancelled, so the table drops it.
+
+### Added
+
+- **Pricing: Claude Fable 5.1 and Claude Mythos 5.1.** `claude-fable-5-1`, `claude-mythos-5-1` and their `[1m]` variants were absent from the bundled table, so those turns landed in `unknown_models` and contributed **nothing** to reported spend. Added at $10 / $50 base with 5m/1h cache writes of $12.50 / $20 — the Fable 5 card — but with **cache hits at $0.25/MTok**, a 0.025x multiplier off input rather than the 0.1x every other model uses. On a cache-heavy agent session that difference is most of the bill, so it is not a rounding detail.
+
+### Changed
+
+- **Sonnet 5 is a flat $2 / $10 at every date; the 2026-08-31 rate cliff is gone.** Anthropic cancelled the increase to $3 / $15 that was scheduled for 2026-09-01 and made the introductory rate standard. v1.8.0 shipped the cliff encoded as a dated rate period, which means **an un-upgraded claudit over-reports Sonnet 5 spend from 2026-09-01 onward by 50%.** The bundled entry now carries $2 / $10 with no rate history, so every turn prices the same regardless of date. Date-effective pricing itself is unchanged and still exercised by tests — no bundled model happens to need it right now.
+
 ## [1.8.0] — 2026-07-26
 
 This release gives the price table a **time dimension**: each turn is priced at the rate that was in effect when it ran, rather than at today's rate. That closes a silent-error class arriving on 2026-09-01, when **Claude Sonnet 5**'s introductory pricing expires — until now there was no correct value to put in the table, since one number had to serve both historical and future turns. It also adds **Claude Opus 5** (previously missing, and therefore free), and makes the unpriced-model warning report what the gap is actually costing you.
