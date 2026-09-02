@@ -1,0 +1,48 @@
+# situation-room builder config — repo-specific counters and slots.
+# Protocol defaults (datestamps, DECISIONS.md counters, the three state-file
+# panes) are supplied by sr.py and are not repeated here.
+
+[counters.open_questions]
+# DECISIONS.md keeps its open questions as bullets, not a table, so the
+# default md_table_rows counter cannot read them.
+kind = "md_section_bullets"
+file = "DECISIONS.md"
+section = "Open questions"
+
+[counters.priced_models]
+kind = "shell"
+cmd = "grep -cE '^  \"?claude' internal/pricing/default.yaml"
+
+[counters.rate_periods]
+# Dated rate periods actually in use in the bundled table. The date-effective
+# mechanism ships; this counts whether any bundled model needs it today.
+kind = "shell"
+cmd = "grep -cE '^ +- until:' internal/pricing/default.yaml || true"
+
+[counters.go_tests]
+kind = "shell"
+cmd = "grep -rhoE '^func (Test|Fuzz|Benchmark)[A-Za-z0-9_]+' --include='*_test.go' . | wc -l | tr -d ' '"
+
+[counters.js_tests]
+kind = "shell"
+cmd = "grep -rhoE '\\b(test|it)\\(' jstest/*.js | wc -l | tr -d ' '"
+
+[counters.tests_total]
+kind = "shell"
+cmd = "echo $(( $(grep -rhoE '^func (Test|Fuzz|Benchmark)[A-Za-z0-9_]+' --include='*_test.go' . | wc -l) + $(grep -rhoE '\\b(test|it)\\(' jstest/*.js | wc -l) ))"
+
+[counters.releases]
+kind = "shell"
+cmd = "git tag --list 'v*' | wc -l | tr -d ' '"
+
+[counters.commits]
+kind = "git_commits"
+
+[slots]
+"eyebrow.commits" = "{commits} commits"
+"v.models.n" = "{priced_models}"
+"v.tests.n" = "{tests_total}"
+"v.tests.sub" = "{go_tests} Go tests. {js_tests} JS tests. Both suites run under <code>make test</code>."
+"v.releases.n" = "{releases}"
+"v.rateperiods.n" = "{rate_periods}"
+"ruled.note" = "{rulings} rulings · newest first · the source doc wins"

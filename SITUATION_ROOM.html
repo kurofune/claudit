@@ -1,332 +1,1409 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>claudit Situation Room</title>
 <style>
-  :root {
-    --bg: #f7faf9;
-    --panel: #ffffff;
-    --panel-2: #eef4f2;
-    --ink: #17211f;
-    --muted: #5e6e6b;
-    --line: #d8e2df;
-    --accent: #0f8a7c;
-    --accent-ink: #0b6b61;
-    --good: #2e7d4f;
-    --warn: #9a6b0a;
-    --warn-bg: #fdf6e3;
-    --open: #8a4b0f;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #101615;
-      --panel: #17201e;
-      --panel-2: #1d2926;
-      --ink: #e3ebe9;
-      --muted: #8fa19d;
-      --line: #2a3835;
-      --accent: #33bca9;
-      --accent-ink: #4fd0bd;
-      --good: #55b57f;
-      --warn: #d9a53d;
-      --warn-bg: #241f10;
-      --open: #d08a4a;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #101615;
-    --panel: #17201e;
-    --panel-2: #1d2926;
-    --ink: #e3ebe9;
-    --muted: #8fa19d;
-    --line: #2a3835;
-    --accent: #33bca9;
-    --accent-ink: #4fd0bd;
-    --good: #55b57f;
-    --warn: #d9a53d;
-    --warn-bg: #241f10;
-    --open: #d08a4a;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font-family: var(--sans);
-    line-height: 1.55;
-    padding: 48px 24px 64px;
-  }
-  .wrap { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px; }
-  a { color: var(--accent-ink); }
-  code { font-family: var(--mono); font-size: 0.86em; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
-  h2 {
-    font-family: var(--mono); font-size: 13px; font-weight: 600;
-    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
-    margin-bottom: 16px;
-  }
-  h2 .n { color: var(--accent); margin-right: 8px; }
+/* ═══════════════════════════════════════════════════════════════════════
+   claudit — situation room. Structure from the skill template; the skin
+   (teal observability palette, mono display face) is claudit's own and is
+   carried forward unchanged on every regeneration.
+   ═══════════════════════════════════════════════════════════════════════ */
 
-  /* Hero */
-  header .wordmark { font-family: var(--mono); font-size: 40px; font-weight: 700; letter-spacing: -0.02em; }
-  header .wordmark .cursor { color: var(--accent); }
-  header .tagline { font-size: 19px; max-width: 62ch; margin-top: 10px; text-wrap: balance; }
-  header .sub { color: var(--muted); margin-top: 8px; max-width: 70ch; }
-
-  /* Mode banner */
-  .mode {
-    border: 1px solid var(--line); border-left: 4px solid var(--accent);
-    background: var(--panel); border-radius: 8px; padding: 16px 20px;
-    display: flex; flex-wrap: wrap; gap: 6px 24px; align-items: baseline;
+/* ─── tokens · claudit palette ───────────────────────────────────────── */
+:root {
+  --bg:        #f7faf9;
+  --surface:   #ffffff;
+  --raised:    #eef4f2;
+  --sunk:      #e5eeeb;
+  --ink:       #17211f;
+  --ink-soft:  #556663;
+  --ink-faint: #85918e;
+  --line:      #d8e2df;
+  --line-soft: #e7eeeb;
+  --accent:      #0d7a6e;
+  --accent-soft: #dcece8;
+  --done:  #2e7d4f; --done-bg:  #e2f0e7;
+  --now:   #a0521a; --now-bg:   #f8e8d9;
+  --hold:  #86680f; --hold-bg:  #f5edd4;
+  --dead:  #74807d; --dead-bg:  #e9efed;
+  --wall:  #4d6a88; --wall-bg:  #e4ecf3;
+  --grid:   rgba(23,33,31,.045);
+  --scrim:  rgba(15,26,24,.32);
+  --shadow: 0 1px 2px rgba(23,33,31,.05), 0 8px 24px -12px rgba(23,33,31,.22);
+  --mono:  ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --display: var(--mono);
+  --body-face: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --serif: var(--body-face);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#101615; --surface:#17201e; --raised:#1d2926; --sunk:#131b19;
+    --ink:#e3ebe9; --ink-soft:#9fb0ac; --ink-faint:#77837f;
+    --line:#2a3835; --line-soft:#202b29;
+    --accent:#33bca9; --accent-soft:#173029;
+    --done:#55b57f; --done-bg:#1a3025;
+    --now:#dc8b4d; --now-bg:#33210f;
+    --hold:#d9a53d; --hold-bg:#2e2611;
+    --dead:#8e9a97; --dead-bg:#232d2b;
+    --wall:#8fa6c4; --wall-bg:#1c2733;
+    --grid: rgba(227,235,233,.05);
+    --scrim: rgba(0,0,0,.55);
+    --shadow: 0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.75);
   }
-  .mode .label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-ink); font-weight: 700; }
-  .mode p { flex: 1 1 40ch; }
+}
+:root[data-theme="dark"] {
+  --bg:#101615; --surface:#17201e; --raised:#1d2926; --sunk:#131b19;
+  --ink:#e3ebe9; --ink-soft:#9fb0ac; --ink-faint:#77837f;
+  --line:#2a3835; --line-soft:#202b29;
+  --accent:#33bca9; --accent-soft:#173029;
+  --done:#55b57f; --done-bg:#1a3025;
+  --now:#dc8b4d; --now-bg:#33210f;
+  --hold:#d9a53d; --hold-bg:#2e2611;
+  --dead:#8e9a97; --dead-bg:#232d2b;
+  --wall:#8fa6c4; --wall-bg:#1c2733;
+  --grid: rgba(227,235,233,.05);
+  --scrim: rgba(0,0,0,.55);
+  --shadow: 0 1px 2px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.75);
+}
 
-  /* Release rail */
-  .rail { display: flex; gap: 0; overflow-x: auto; padding-bottom: 6px; }
-  .stop { flex: 1 0 150px; position: relative; padding: 18px 14px 0 0; }
-  .stop::before {
-    content: ""; position: absolute; top: 5px; left: 0; right: 0; height: 2px; background: var(--line);
-  }
-  .stop::after {
-    content: ""; position: absolute; top: 0; left: 0; width: 12px; height: 12px;
-    border-radius: 50%; background: var(--good); border: 2px solid var(--bg);
-  }
-  .stop.now::after { background: var(--accent); }
-  .stop.future::after { background: var(--panel); border: 2px solid var(--muted); }
-  .stop.future::before { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 12px); }
-  .stop .v { font-family: var(--mono); font-size: 13px; font-weight: 700; }
-  .stop .d { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .stop p { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
-  .stop.now .v { color: var(--accent-ink); }
+/* ─── base ───────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body { margin: 0; background-color: var(--bg); color: var(--ink);
+  font-family: var(--body-face); font-size: 15.5px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
+a:hover { border-bottom-color: var(--accent); }
+code, .mono { font-family: var(--mono); }
 
-  /* Architecture */
-  .figure { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 20px; overflow-x: auto; }
-  .figure svg { display: block; min-width: 860px; width: 100%; height: auto; }
-  .figure .cap { font-size: 13px; color: var(--muted); margin-top: 10px; }
-  svg text { font-family: var(--mono); fill: var(--ink); }
-  svg .box { fill: var(--panel-2); stroke: var(--line); rx: 6; }
-  svg .box-accent { fill: var(--panel-2); stroke: var(--accent); rx: 6; }
-  svg .lbl { font-size: 12px; font-weight: 600; }
-  svg .sublbl { font-size: 10px; fill: var(--muted); }
-  svg .stage { font-size: 10px; fill: var(--muted); letter-spacing: 0.1em; }
-  svg .arrow { stroke: var(--muted); stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+.shell { max-width: 1580px; margin: 0 auto; padding: 34px 14px 90px;
+  display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 0 40px; }
+@media (max-width: 940px) { .shell { grid-template-columns: minmax(0,1fr); gap: 0; } }
 
-  /* Evidence cards */
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-  .card { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-  .card h3 { font-size: 15px; }
-  .verdict { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--good); }
-  .card ul { padding-left: 18px; font-size: 13.5px; display: flex; flex-direction: column; gap: 5px; }
-  .card .src { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); }
+/* ─── side rail ──────────────────────────────────────────────────────── */
+.rail { position: sticky; top: 26px; align-self: start; padding-top: 8px; }
+@media (max-width: 940px) { .rail { display: none; } }
+.rail ol { list-style: none; margin: 0; padding: 0; }
+.rail a { display: block; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  padding: 5px 0 5px 12px; border-left: 2px solid var(--line); border-bottom: 0; }
+.rail a:hover { color: var(--ink); border-left-color: var(--accent); }
+.rail a b { font-weight: 400; color: var(--line); margin-right: 7px; }
+.rail-foot { margin-top: 18px; padding-left: 14px; font-family: var(--mono);
+  font-size: 10px; line-height: 1.7; color: var(--ink-faint); }
+#themeToggle { margin: 14px 0 0 12px; cursor: pointer; font-family: var(--mono);
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 4px 8px; }
+#themeToggle:hover { color: var(--ink); border-color: var(--accent); }
 
-  /* Ruled vs open */
-  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
-  .col { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 18px 20px; }
-  .col h3 { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
-  .col.ruled h3 { color: var(--good); }
-  .col.open h3 { color: var(--open); }
-  .col ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-  .col li { font-size: 13.5px; padding-left: 16px; position: relative; }
-  .col.ruled li::before { content: "✓"; position: absolute; left: 0; color: var(--good); font-weight: 700; }
-  .col.open li::before { content: "?"; position: absolute; left: 0; color: var(--open); font-family: var(--mono); font-weight: 700; }
-  .col li .why { color: var(--muted); }
-  .col li .date { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .rejected { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
-  .rejected b { color: var(--ink); }
+/* ─── masthead ───────────────────────────────────────────────────────── */
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 24px; }
+.eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--ink-faint);
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.eyebrow .sep { color: var(--line); }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(2.1rem, 5.2vw, 3.15rem);
+  letter-spacing: -.03em; line-height: 1.04; margin: 12px 0 0; }
+h1 .thin { color: var(--ink-faint); font-weight: 400; }
+h1 .cursor { color: var(--accent); }
+.standfirst { margin: 12px 0 0; max-width: 80ch; font-size: 17px; line-height: 1.5; color: var(--ink-soft); }
+.mode-banner { margin-top: 18px; border: 1px solid var(--accent); border-left: 4px solid var(--accent);
+  background: var(--accent-soft); border-radius: 5px; padding: 13px 16px; }
+.mode-banner .m-t { font-family: var(--mono); font-size: 12px; font-weight: 700;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.mode-banner .m-b { margin-top: 5px; font-size: 15px; line-height: 1.5; color: var(--ink);
+  max-width: 92ch; }
+.m-b ul { margin: 8px 0 0; padding-left: 19px; }
+.m-b li { margin: 4px 0; font-size: 14px; line-height: 1.5; }
+.m-b li::marker { color: var(--ink-faint); }
 
-  .note { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; font-size: 13.5px; }
-  .note .k { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--warn); margin-right: 8px; }
+.status-strip { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; margin-top: 16px; }
+@media (max-width: 900px) { .status-strip { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+@media (max-width: 560px) { .status-strip { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+.status-cell { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 17px 15px; }
+.status-cell .k { font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-faint); display: block; }
+.status-cell .v { font-family: var(--mono); font-size: 17px; font-weight: 600;
+  letter-spacing: -.01em; margin-top: 7px; display: block; }
+.pulse { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: 1px; }
+.pulse.ok { background: var(--done); box-shadow: 0 0 0 3px var(--done-bg); }
+.pulse.watch { background: var(--now); box-shadow: 0 0 0 3px var(--now-bg); }
 
-  footer { border-top: 1px solid var(--line); padding-top: 16px; font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.7; }
+/* ─── section skeleton ───────────────────────────────────────────────── */
+section { margin-top: 46px; scroll-margin-top: 20px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 18px; }
+.sec-num { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: .1em; }
+h2 { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .16em;
+  text-transform: uppercase; margin: 0; }
+.sec-note { margin-left: auto; font-family: var(--mono); font-size: 10.5px;
+  color: var(--ink-faint); letter-spacing: .04em; }
+.src { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+
+/* ─── 01 vitals ──────────────────────────────────────────────────────── */
+.vitals { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+@media (max-width: 900px) { .vitals { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .vitals { grid-template-columns: repeat(2, 1fr); } }
+.vital { background: var(--surface); padding: 15px 14px 13px; }
+.vital .n { font-family: var(--mono); font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+.vital .n small { font-size: 14px; color: var(--ink-faint); letter-spacing: 0; font-weight: 400; }
+.vital .n.zero { color: var(--accent); }
+.vital .l { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-faint); margin-top: 8px; }
+.vital .sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.35; }
+
+/* ─── 02 your calls ──────────────────────────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+@media (max-width: 780px) { .cards { grid-template-columns: minmax(0,1fr); } }
+@media (min-width: 1340px) { .cards { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 16px 17px 14px; box-shadow: var(--shadow); }
+.card.lead { grid-column: 1 / -1; border-color: var(--accent); }
+.card h3 { font-family: var(--serif); font-weight: 600; font-size: 19px; letter-spacing: -.012em;
+  margin: 8px 0 0; line-height: 1.25; }
+.card p { margin: 9px 0 0; color: var(--ink-soft); font-size: 14.5px; line-height: 1.55; }
+.card ul { margin: 9px 0 0; padding-left: 19px; }
+.card li { margin: 5px 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
+.card li::marker { color: var(--ink-faint); }
+.card.lead p, .card.lead ul, .card.lead h3 { max-width: 88ch; }
+.card .foot { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--line-soft);
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.closes { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+.closes b { color: var(--ink-faint); font-weight: 400; letter-spacing: .1em;
+  text-transform: uppercase; font-size: 9.5px; margin-right: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: .11em; text-transform: uppercase; font-weight: 700;
+  padding: 3px 8px; border-radius: 3px; border: 1px solid transparent; }
+.chip.decide { color: var(--now); background: var(--now-bg); border-color: var(--now); }
+.chip.gates  { color: var(--wall); background: var(--wall-bg); border-color: var(--wall); }
+.chip.parked { color: var(--hold); background: var(--hold-bg); border-color: var(--hold); }
+.chip.ruled  { color: var(--done); background: var(--done-bg); border-color: var(--done); }
+.chip.idle   { color: var(--dead); background: var(--dead-bg); border-color: var(--line); }
+
+/* ─── 03 mechanism ───────────────────────────────────────────────────── */
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px 4px; overflow-x: auto; box-shadow: var(--shadow); }
+.figure svg { display: block; min-width: 860px; width: 100%; height: auto; }
+.fig-cap { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+  margin-top: 10px; line-height: 1.7; }
+svg .box  { fill: var(--raised); stroke: var(--line); stroke-width: 1; }
+svg .boxq { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 4; }
+svg .truth{ fill: var(--surface); stroke: var(--accent); stroke-width: 1.6; }
+svg .t    { fill: var(--ink); font-family: var(--mono); font-size: 11.5px; }
+svg .tb   { fill: var(--ink); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+svg .ts   { fill: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
+svg .ta   { fill: var(--accent); font-family: var(--mono); font-size: 10px; }
+svg .stage{ fill: var(--ink-faint); font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; }
+svg .flow { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+svg .flow-q { stroke: var(--line); stroke-width: 1.4; fill: none; stroke-dasharray: 4 4; }
+svg .spine { stroke: var(--ink); stroke-width: 2; fill: none; }
+svg .ahd  { fill: var(--accent); }
+
+/* ─── 04 evidence ────────────────────────────────────────────────────── */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 15px 17px 16px; box-shadow: var(--shadow); }
+.panel h3 { font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 0 0 13px; font-weight: 700; }
+.vlist { margin: 0; }
+.vrow { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.vrow:last-child { border-bottom: 0; }
+.vrow .vv { font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; align-self: start; padding-top: 3px; }
+.vrow .vt { font-size: 14px; line-height: 1.4; }
+.vrow .vt em { font-style: normal; color: var(--ink-faint); font-family: var(--mono); font-size: 11px; }
+
+/* ─── 05 canon ───────────────────────────────────────────────────────── */
+.rulings { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0 26px; }
+@media (max-width: 780px) { .rulings { grid-template-columns: minmax(0,1fr); } }
+@media (min-width: 1340px) { .rulings { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+.ruling { padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+.ruling .r-d { font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  color: var(--ink-faint); margin-bottom: 3px; }
+.ruling .r-t { font-size: 14.5px; line-height: 1.4; }
+.ruling .r-w { font-size: 13px; color: var(--ink-soft); margin-top: 3px; line-height: 1.45; }
+.sig { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-right: 7px; }
+.flag { color: var(--hold); font-family: var(--mono); font-size: 10px; margin-left: 6px; white-space: nowrap; }
+
+/* ─── 06 history ─────────────────────────────────────────────────────── */
+.tl { border-left: 1px solid var(--line); margin-left: 6px; }
+.tl-day { position: relative; padding: 0 0 4px 26px; }
+.tl-day::before { content: ""; position: absolute; left: -4.5px; top: 7px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink-faint); }
+.tl-day.hot::before { background: var(--accent); border-color: var(--accent); }
+.tl-date { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; font-weight: 700; padding-top: 2px; }
+.tl-date em { font-style: normal; color: var(--ink-faint); font-weight: 400; margin-left: 8px; letter-spacing: 0; }
+.tl-items { margin: 6px 0 20px; }
+.tl-item { display: flex; gap: 10px; padding: 5px 0; font-size: 14px; line-height: 1.45; }
+.tl-item .ev { font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
+  background: var(--dead-bg); border-radius: 3px; padding: 2px 5px; align-self: flex-start;
+  margin-top: 2px; white-space: nowrap; }
+details.older > summary { cursor: pointer; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  list-style: none; padding: 7px 0 7px 26px; position: relative; }
+details.older > summary::-webkit-details-marker { display: none; }
+details.older > summary::before { content: "+"; position: absolute; left: -4.5px; top: 6px;
+  width: 9px; height: 9px; line-height: 8px; text-align: center; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--line); font-size: 9px; color: var(--ink-faint); }
+details.older[open] > summary::before { content: "–"; }
+details.older > summary:hover { color: var(--ink); }
+
+/* ─── 07 tripwires ───────────────────────────────────────────────────── */
+.wires { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+@media (max-width: 780px) { .wires { grid-template-columns: minmax(0,1fr); } }
+.wire { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--surface);
+  border-radius: 4px; padding: 12px 14px; }
+.wire .w-if { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.wire .w-then { font-size: 14px; margin-top: 5px; line-height: 1.4; }
+
+/* ─── 08 source files ────────────────────────────────────────────────── */
+.srcnote { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+  line-height: 1.7; margin: 0 0 14px; max-width: 78ch; }
+details.srcfile { border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); margin-bottom: 8px; }
+details.srcfile > summary { cursor: pointer; list-style: none; padding: 12px 16px;
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+details.srcfile > summary::-webkit-details-marker { display: none; }
+details.srcfile > summary::before { content: "▸"; color: var(--ink-faint);
+  font-family: var(--mono); font-size: 11px; }
+details.srcfile[open] > summary::before { content: "▾"; color: var(--accent); }
+details.srcfile[open] > summary { border-bottom: 1px solid var(--line); }
+.sf-name { font-family: var(--mono); font-size: 12.5px; font-weight: 700; }
+.sf-note { font-size: 13.5px; color: var(--ink-soft); }
+.sf-lines { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+.sf-body { padding: 6px 26px 22px; max-height: 640px; overflow-y: auto; }
+.sf-body h3 { font-family: var(--serif); font-weight: 600; font-size: 21px;
+  letter-spacing: -.01em; margin: 22px 0 6px; }
+.sf-body h4 { font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 22px 0 6px; font-weight: 700; }
+.sf-body h5, .sf-body h6 { font-family: var(--serif); font-weight: 600; font-size: 16px; margin: 16px 0 4px; }
+.sf-body p { margin: 8px 0; font-size: 14.5px; line-height: 1.6; }
+.sf-body ul, .sf-body ol { margin: 8px 0; padding-left: 22px; }
+.sf-body li { font-size: 14.5px; line-height: 1.55; margin: 4px 0; }
+.sf-body code { font-size: 12.5px; background: var(--sunk); padding: 1px 4px; border-radius: 3px; }
+.sf-body pre { background: var(--sunk); padding: 12px 14px; border-radius: 5px; overflow-x: auto; }
+.sf-body pre code { background: none; padding: 0; }
+.sf-body hr { border: 0; border-top: 1px solid var(--line-soft); margin: 20px 0; }
+.sf-body blockquote { margin: 10px 0; padding-left: 14px; border-left: 2px solid var(--line);
+  color: var(--ink-soft); font-size: 14.5px; }
+.sf-body .tw { overflow-x: auto; margin: 10px 0; }
+.sf-body table { font-size: 13px; min-width: 100%; border-collapse: collapse; }
+.sf-body th, .sf-body td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; }
+.sf-body th { white-space: nowrap; }
+.sf-body td { vertical-align: top; line-height: 1.5; }
+
+footer { margin-top: 54px; padding-top: 16px; border-top: 2px solid var(--ink);
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); line-height: 1.85; }
+footer strong { color: var(--ink-soft); font-weight: 700; }
+
+/* ─── detail layer ───────────────────────────────────────────────────── */
+[data-panel] { cursor: pointer; }
+[data-panel]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.card[data-panel] { transition: border-color .14s, transform .14s; }
+.card[data-panel]:hover { border-color: var(--accent); transform: translateY(-1px); }
+.phase[data-panel]:hover, .ruling[data-panel]:hover, .tl-item[data-panel]:hover,
+.vrow[data-panel]:hover { background: var(--sunk); }
+.ruling[data-panel], .tl-item[data-panel], .vrow[data-panel] { border-radius: 4px; }
+.ruling[data-panel]:hover, .tl-item[data-panel]:hover, .vrow[data-panel]:hover {
+  box-shadow: -8px 0 0 var(--sunk), 8px 0 0 var(--sunk); }
+svg [data-panel] { transition: opacity .14s; }
+svg [data-panel]:hover { opacity: .75; }
+.card[data-panel] .foot::after {
+  content: "▸ open"; font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-faint); margin-left: auto; white-space: nowrap; }
+.card[data-panel]:hover .foot::after { color: var(--accent); }
+.hint { margin-top: 14px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
+  color: var(--ink-faint); }
+.hint b { color: var(--accent); font-weight: 400; }
+
+#scrim { position: fixed; inset: 0; background: var(--scrim); opacity: 0; z-index: 39;
+  pointer-events: none; transition: opacity .18s ease; }
+#scrim.on { opacity: 1; pointer-events: auto; }
+#dive { position: fixed; top: 0; right: 0; height: 100vh; width: min(640px, 94vw);
+  z-index: 40; background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: -24px 0 60px -34px rgba(0,0,0,.6);
+  display: flex; flex-direction: column; transform: translateX(103%);
+  transition: transform .22s cubic-bezier(.22,.61,.36,1); }
+#dive.on { transform: none; }
+#dive:focus { outline: none; }
+@media (prefers-reduced-motion: reduce) { #dive { transition: none; } }
+.dd-head { padding: 18px 22px 15px; border-bottom: 1px solid var(--line); }
+.dd-back { display: block; margin: 0 0 10px; max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-family: var(--mono);
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  background: var(--raised); border: 1px solid var(--line); border-radius: 3px; padding: 4px 9px; }
+.dd-back:hover { color: var(--accent); border-color: var(--accent); }
+.dd-back[hidden] { display: none; }
+.dd-kind { font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent); }
+.dd-head h3 { font-family: var(--serif); font-weight: 600; font-size: 24px;
+  letter-spacing: -.015em; line-height: 1.2; margin: 8px 34px 0 0; }
+.dd-meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); margin-top: 8px; }
+.dd-close { position: absolute; top: 14px; right: 16px; cursor: pointer;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  background: var(--raised); border: 1px solid var(--line); border-radius: 3px;
+  padding: 3px 8px; line-height: 1.5; }
+.dd-close:hover { color: var(--ink); border-color: var(--accent); }
+.dd-body { flex: 1; overflow-y: auto; padding: 16px 24px 34px; overscroll-behavior: contain; }
+.dd-body p { margin: 0 0 13px; font-size: 15px; line-height: 1.62; }
+.dd-body p:last-child { margin-bottom: 0; }
+.dd-body ul, .dd-body ol { margin: 0 0 13px; padding-left: 20px; }
+.dd-body li { font-size: 15px; line-height: 1.6; margin: 5px 0; }
+.dd-body li::marker { color: var(--ink-faint); }
+.dd-body code { font-size: 12.5px; background: var(--sunk); padding: 1px 4px; border-radius: 3px; }
+.flink { border-bottom: 1px dotted var(--accent); }
+.flink::after { content: "\2197"; font-size: .8em; margin-left: 2px; opacity: .7; }
+.dd-body code .flink, .src .flink, .dd-src .flink { color: var(--accent); }
+.dd-foot { border-top: 1px solid var(--line); padding: 10px 22px 12px;
+  display: flex; align-items: center; gap: 12px; background: var(--raised); }
+.dd-src { flex: 1; font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  color: var(--ink-faint); word-break: break-word; }
+.dd-src b { color: var(--ink-soft); font-weight: 400; }
+.dd-nav { display: flex; gap: 6px; }
+.dd-nav button { cursor: pointer; font-family: var(--mono); font-size: 11px;
+  color: var(--ink-faint); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 3px; padding: 3px 9px; }
+.dd-nav button:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); }
+.dd-nav button:disabled { opacity: .35; cursor: default; }
+.dd-links { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.dd-links h4 { font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 0 0 10px; font-weight: 700; }
+.dl { display: flex; width: 100%; text-align: left; align-items: baseline; gap: 10px;
+  padding: 9px 10px; margin-bottom: 4px; cursor: pointer; font: inherit;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 4px;
+  color: var(--ink); text-decoration: none; }
+.dl:hover { border-color: var(--accent); background: var(--sunk); }
+.dl-l { flex: 1; font-size: 14px; line-height: 1.4; }
+.dl:hover .dl-l { color: var(--accent); }
+.dl-p { font-family: var(--mono); font-size: 9.5px; letter-spacing: .04em; color: var(--ink-faint);
+  text-align: right; max-width: 46%; word-break: break-word; }
+.xref { font: inherit; color: var(--accent); background: none; border: 0; padding: 0;
+  cursor: pointer; border-bottom: 1px dotted var(--accent); }
+.xref:hover { background: var(--accent-soft); }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="shell">
 
-  <header>
-    <div class="wordmark">claudit<span class="cursor">▌</span></div>
-    <p class="tagline">Audit what your Claude Code agents actually did — and what it cost.</p>
-    <p class="sub">A Go CLI that reads the <code>.jsonl</code> session logs under <code>~/.claude/projects/</code> and reconstructs each session as a trace you can read, filter, and interrogate — every turn, tool call, and sub-agent on a real timeline with automatic anomaly detection — alongside full cost, token, and cache accounting. Runs entirely local. MIT, shipped as <code>go install</code> + prebuilt binaries.</p>
-  </header>
+<nav class="rail" aria-label="Sections">
+  <ol>
+    <li><a href="#vitals"><b>01</b>Vitals</a></li>
+    <li><a href="#open"><b>02</b>Your calls</a></li>
+    <li><a href="#mechanism"><b>03</b>Mechanism</a></li>
+    <li><a href="#evidence"><b>04</b>Evidence</a></li>
+    <li><a href="#ruled"><b>05</b>Canon</a></li>
+    <li><a href="#history"><b>06</b>History</a></li>
+    <li><a href="#wires"><b>07</b>Tripwires</a></li>
+    <li><a href="#sources"><b>08</b>Source files</a></li>
+  </ol>
+  <button id="themeToggle" type="button">Theme</button>
+  <div class="rail-foot">
+    Generated<br><span data-sr="gen-date.rail">2026-09-01</span><br>
+    <span style="color:var(--done)">●</span> in sync
+  </div>
+</nav>
 
-  <div class="mode">
-    <span class="label">Mode</span>
-    <p><strong>Steady-state maintenance.</strong> Both roadmaps (Phoenix trace viewer, Honeycomb observability) are fully shipped and the 2026-07 principal-engineer audit is fully executed. Current work is keeping claudit correct against upstream reality: pricing vs. Anthropic's published rates, parser vs. Claude Code's JSONL schema. Latest release: <strong>v1.8.0</strong> (2026-07-26). <span class="date">→ CURRENT.md</span></p>
+<main>
+<header class="masthead">
+  <div class="eyebrow">
+    <span>Situation Room</span><span class="sep">/</span>
+    <span>claudit</span><span class="sep">/</span>
+    <span>Go CLI</span><span class="sep">/</span>
+    <span>MIT</span><span class="sep">/</span>
+    <span data-sr="eyebrow.commits">277 commits</span>
+  </div>
+  <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
+  <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
+
+  <div class="mode-banner">
+    <div class="m-t">Steady-state maintenance</div>
+    <div class="m-b">No initiative is running. Both roadmaps shipped and the 2026-07 audit is executed. The work is keeping claudit correct against upstream reality.
+      <ul>
+        <li>Pricing must track Anthropic's published rates.</li>
+        <li>The parser must track Claude Code's JSONL schema.</li>
+        <li>One pricing fix is landed but unreleased. That is the live call.</li>
+      </ul>
+    </div>
   </div>
 
-  <section>
-    <h2><span class="n">01</span>Release arc</h2>
-    <div class="rail">
-      <div class="stop"><span class="v">v1.0</span> <span class="d">05-16</span><p>Spend report: cost by model, project, tool, prompt</p></div>
-      <div class="stop"><span class="v">v1.1–1.2</span> <span class="d">05-17</span><p><code>serve</code> daemon + <code>watch</code> live TUI</p></div>
-      <div class="stop"><span class="v">v1.3–1.4</span> <span class="d">05-23</span><p>SPA with lazy sections, SSE, themes; unified corpus loader</p></div>
-      <div class="stop"><span class="v">v1.6</span> <span class="d">06-15</span><p>The reframe: Agents trace viewer — 5 lenses, signals, filters</p></div>
-      <div class="stop"><span class="v">v1.7</span> <span class="d">07-15</span><p>Trace waterfall; replay dedup — drill-downs reconcile to the penny</p></div>
-      <div class="stop now"><span class="v">v1.8</span> <span class="d">07-26</span><p>Date-effective pricing; Opus 5 rates; quantified unpriced warnings</p></div>
-      <div class="stop future"><span class="v">next</span> <span class="d">—</span><p>Unscheduled. Checkpoint: verify Sonnet 5 cliff pricing after 09-01</p></div>
+  <div class="status-strip">
+    <div class="status-cell"><span class="k">Mode</span><span class="v">maintenance</span></div>
+    <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>09-01 pricing</span></div>
+    <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>6 calls</span></div>
+    <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">cut the release</span></div>
+    <div class="status-cell"><span class="k">Updated</span><span class="v" data-sr="updated">2026-09-01</span></div>
+  </div>
+</header>
+
+<!-- ══ 01 vitals ══ -->
+<section id="vitals">
+  <div class="sec-head"><span class="sec-num">01</span><h2>Vitals</h2>
+    <span class="sec-note">counted from the repo at generation time</span></div>
+  <div class="vitals">
+    <div class="vital"><div class="n" data-sr="v.models.n">32</div><div class="l">Priced model ids</div>
+      <div class="sub">Re-verified against the live pricing page on 2026-09-01.</div></div>
+    <div class="vital"><div class="n" data-sr="v.tests.n">923</div><div class="l">Tests</div>
+      <div class="sub" data-sr="v.tests.sub">478 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
+    <div class="vital"><div class="n" data-sr="v.rulings.n">11</div><div class="l">Standing rulings</div>
+      <div class="sub" data-sr="v.rulings.sub">3 questions still open</div></div>
+    <div class="vital"><div class="n" data-sr="v.releases.n">13</div><div class="l">Releases shipped</div>
+      <div class="sub">v1.8.0 on 2026-07-26. The pricing fix is landed but unreleased.</div></div>
+    <div class="vital"><div class="n zero">0</div><div class="l">Open issues</div>
+      <div class="sub">GitHub Issues is empty. No successor initiative is proposed.</div></div>
+    <div class="vital"><div class="n zero" data-sr="v.rateperiods.n">0</div><div class="l">Dated rate periods</div>
+      <div class="sub">The date-effective mechanism ships. No bundled model needs it today.</div></div>
+  </div>
+</section>
+
+<!-- ══ 02 your calls ══ -->
+<section id="open">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Your calls</h2>
+    <span class="sec-note">6 calls · the complete set, nothing folded away</span></div>
+  <div class="cards">
+
+    <article class="card lead" data-panel="card-release">
+      <span class="chip decide">decide</span>
+      <h3>Cut the release that carries the 2026-09-01 pricing fix.</h3>
+      <p>Anthropic cancelled the Sonnet 5 increase to $3 / $15 and made the introductory $2 / $10 standard. v1.8.0 shipped that increase pre-encoded as a dated rate period. Every installed claudit therefore over-reports Sonnet 5 spend by 50% from 2026-09-01. The fix is on <code>main</code> and unreleased, so the wrong number is still the shipped number.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> a tag ships the refreshed price table.</span>
+        <span class="src">→ <code>CURRENT.md</code></span>
+      </div>
+    </article>
+
+    <article class="card" data-panel="card-fastmode">
+      <span class="chip decide">decide</span>
+      <h3>Should claudit read the fast-mode <code>speed</code> field?</h3>
+      <p>Opus 5 and Opus 4.8 fast mode bills $10 / $50 per turn. The transcript carries a <code>speed</code> field that selects it. claudit keys pricing on model id alone, so fast turns price at the standard rate and under-report. The gap is documented, not ruled on.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> the owner rules: read the field, or leave it to a per-user overlay.</span>
+        <span class="src">→ <code>DECISIONS.md</code></span>
+      </div>
+    </article>
+
+    <article class="card" data-panel="card-successor">
+      <span class="chip decide">decide</span>
+      <h3>Pick a successor initiative, or rule that there is none.</h3>
+      <p>Both roadmaps are fully shipped. The 2026-07 principal-engineer audit is fully executed. GitHub Issues is empty. Nothing has been proposed since, so the repo has no next target. Unpicked is a real state, not a gap in this page.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> an initiative is written down, or maintenance-only is ruled explicitly.</span>
+        <span class="src">→ <code>CURRENT.md</code></span>
+      </div>
+    </article>
+
+    <article class="card" data-panel="card-querydsl">
+      <span class="chip parked">parked</span>
+      <h3>Query-DSL filter form for the trace filter.</h3>
+      <p>Drafted as a Phase-2 follow-up in the audit roadmap. It was never reviewed and never scheduled. Work exists on paper. No ruling has closed it either way.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> the roadmap follow-up is scheduled or dropped by ruling.</span>
+        <span class="src">→ <code>docs/agents-audit-roadmap.md</code></span>
+      </div>
+    </article>
+
+    <article class="card" data-panel="card-playhead">
+      <span class="chip parked">parked</span>
+      <h3>Intersect the trace filter with the playhead window.</h3>
+      <p>The second deferred Phase-2 follow-up. Same status as the query DSL: drafted, unreviewed, unscheduled. Calling it untouched would be wrong. Calling it decided would be worse.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> the same roadmap follow-up decision is taken.</span>
+        <span class="src">→ <code>docs/agents-audit-roadmap.md</code></span>
+      </div>
+    </article>
+
+    <article class="card" data-panel="card-annotations">
+      <span class="chip parked">parked</span>
+      <h3>The annotations phase.</h3>
+      <p>Explicitly deferred in the audit roadmap. No design exists for it. This is a ruled deferral, not an oversight, so it stays parked until someone reopens it with a design.</p>
+      <div class="foot">
+        <span class="closes"><b>Closes when</b> someone reopens it with a design.</span>
+        <span class="src">→ <code>docs/agents-audit-roadmap.md</code></span>
+      </div>
+    </article>
+
+  </div>
+  <p class="hint">Click any card for the <b>brief</b> behind it — argument, evidence, and the source to go read.</p>
+</section>
+
+<!-- ══ 03 mechanism ══ -->
+<section id="mechanism">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Mechanism</h2>
+    <span class="sec-note">reconciled against the 2026-09-01 ruling</span></div>
+  <div class="figure">
+    <svg viewBox="0 0 960 290" role="img" aria-label="claudit data pipeline: one loader, one aggregate layer, four surfaces">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path class="ahd" d="M0,0 L10,5 L0,10 z"/>
+        </marker>
+      </defs>
+
+      <text class="stage" x="10" y="18">SOURCE</text>
+      <rect class="box" rx="5" x="8" y="26" width="150" height="76" data-panel="alt-source"/>
+      <text class="tb" x="22" y="52">~/.claude/</text>
+      <text class="ts" x="22" y="70">projects/*.jsonl</text>
+      <text class="ts" x="22" y="85">+ .meta.json sidecars</text>
+
+      <text class="stage" x="192" y="18">LOAD &amp; PARSE</text>
+      <rect class="box" rx="5" x="190" y="26" width="140" height="76"/>
+      <text class="tb" x="204" y="52">corpus</text>
+      <text class="ts" x="204" y="70">cold load, mtime</text>
+      <text class="ts" x="204" y="85">pre-filter, poll</text>
+
+      <rect class="box" rx="5" x="362" y="26" width="140" height="76"/>
+      <text class="tb" x="376" y="52">parse</text>
+      <text class="ts" x="376" y="70">turns, tools,</text>
+      <text class="ts" x="376" y="85">sub-agent links</text>
+
+      <text class="stage" x="550" y="18">MODEL</text>
+      <rect class="box" rx="5" x="548" y="26" width="176" height="80" data-panel="alt-aggregate"/>
+      <text class="tb" x="562" y="50">aggregate</text>
+      <text class="ts" x="562" y="68">roll-ups, session</text>
+      <text class="ts" x="562" y="83">timelines, rolling totals</text>
+      <text class="ta" x="562" y="99">dedup by message.id</text>
+
+      <rect class="box" rx="5" x="362" y="148" width="140" height="80" data-panel="alt-pricing"/>
+      <text class="tb" x="376" y="172">pricing</text>
+      <text class="ts" x="376" y="190">bundled + overlay</text>
+      <text class="ts" x="376" y="205">date-effective</text>
+      <text class="ta" x="376" y="221">0 periods in use</text>
+
+      <rect class="box" rx="5" x="548" y="148" width="176" height="80" data-panel="alt-agentflow"/>
+      <text class="tb" x="562" y="172">agentflow</text>
+      <text class="ts" x="562" y="190">session → agent →</text>
+      <text class="ts" x="562" y="205">step → tool</text>
+
+      <text class="stage" x="758" y="18">SURFACE</text>
+      <rect class="truth" rx="5" x="756" y="26" width="196" height="104" data-panel="alt-serve"/>
+      <text class="tb" x="770" y="50">serve · web SPA</text>
+      <text class="ts" x="770" y="68">5 Agents lenses, SSE,</text>
+      <text class="ts" x="770" y="83">ETag cache, signals</text>
+      <text class="ts" x="770" y="98">pure *-logic.js (TDD)</text>
+      <text class="ts" x="770" y="113">+ DOM view-*.js</text>
+
+      <rect class="box" rx="5" x="756" y="146" width="196" height="58"/>
+      <text class="tb" x="770" y="170">report · diff</text>
+      <text class="ts" x="770" y="188">one-shot HTML/md/json</text>
+
+      <rect class="box" rx="5" x="756" y="218" width="196" height="52"/>
+      <text class="tb" x="770" y="242">watch</text>
+      <text class="ts" x="770" y="260">live TUI, budgets</text>
+
+      <path class="flow" marker-end="url(#ah)" d="M158,64 H184"/>
+      <path class="flow" marker-end="url(#ah)" d="M330,64 H356"/>
+      <path class="flow" marker-end="url(#ah)" d="M502,52 C524,52 524,60 542,60"/>
+      <path class="flow" marker-end="url(#ah)" d="M502,88 C526,88 526,182 542,182"/>
+      <path class="flow" marker-end="url(#ah)" d="M502,166 C524,166 524,88 542,88"/>
+      <path class="flow" marker-end="url(#ah)" d="M502,200 H542"/>
+      <path class="flow" marker-end="url(#ah)" d="M724,54 C742,54 742,62 750,62"/>
+      <path class="flow" marker-end="url(#ah)" d="M724,86 C744,86 744,172 750,172"/>
+      <path class="flow" marker-end="url(#ah)" d="M724,98 C746,98 746,244 750,244"/>
+      <path class="flow" marker-end="url(#ah)" d="M724,188 C742,188 742,100 750,100"/>
+    </svg>
+  </div>
+  <p class="fig-cap">One data layer, four surfaces. Every command loads through <code>internal/corpus</code> and rolls up through the same <code>aggregate</code> pipeline, so <code>watch</code>'s totals match <code>report</code>'s by construction. The Agents trace viewer is serve-only by ruling. Pricing is date-effective in code and carries zero dated periods today — the 2026-09-01 ruling removed the last one.</p>
+</section>
+
+<!-- ══ 04 evidence ══ -->
+<section id="evidence">
+  <div class="sec-head"><span class="sec-num">04</span><h2>Evidence</h2>
+    <span class="sec-note">the pack outranks any restatement here</span></div>
+  <div class="panel">
+    <div class="vlist">
+      <div class="vrow" data-panel="ev-redesign">
+        <div class="vv" style="color:var(--done)">Shipped</div>
+        <div class="vt">The Agents view redesign closed all six phases. Browser-verified. <em>→ docs/agents-redesign.md · 2026-06-07</em></div>
+      </div>
+      <div class="vrow" data-panel="ev-phoenix">
+        <div class="vv" style="color:var(--done)">Shipped</div>
+        <div class="vt">The Phoenix audit roadmap closed all five phases. <em>→ docs/agents-audit-roadmap.md · 2026-06-08</em></div>
+      </div>
+      <div class="vrow" data-panel="ev-honeycomb">
+        <div class="vv" style="color:var(--done)">Shipped</div>
+        <div class="vt">The Honeycomb observability program closed all four phases. <em>→ docs/agents-audit-roadmap.md · 2026-06-13</em></div>
+      </div>
+      <div class="vrow" data-panel="ev-audit">
+        <div class="vv" style="color:var(--done)">Executed</div>
+        <div class="vt">The principal-engineer audit landed across 17 commits. Serve RSS settled from 2.48 GB to 1.69 GB. <em>→ CHANGELOG.md v1.7.0 · 2026-07-03</em></div>
+      </div>
+      <div class="vrow" data-panel="ev-dedup">
+        <div class="vv" style="color:var(--done)">Confirmed</div>
+        <div class="vt">Replay dedup removed exactly the duplicated volume: 53M tokens and 291 turns. <em>→ CHANGELOG.md v1.7.0 · 2026-07-15</em></div>
+      </div>
+      <div class="vrow" data-panel="ev-pricing">
+        <div class="vv" style="color:var(--now)">Corrected</div>
+        <div class="vt">The Sonnet 5 rate cliff was cancelled upstream. Shipped copies over-report by 50%. <em>→ DECISIONS.md log · 2026-09-01</em></div>
+      </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section>
-    <h2><span class="n">02</span>The pipeline</h2>
-    <div class="figure">
-      <svg viewBox="0 0 900 240" role="img" aria-label="claudit data pipeline">
-        <defs>
-          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L10,5 L0,10 z" fill="currentColor" opacity="0.6"/>
-          </marker>
-        </defs>
-        <text class="stage" x="10" y="16">SOURCE</text>
-        <rect class="box" x="10" y="26" width="130" height="64"/>
-        <text class="lbl" x="24" y="52">~/.claude/</text>
-        <text class="lbl" x="24" y="66">projects/*.jsonl</text>
-        <text class="sublbl" x="24" y="81">+ .meta.json</text>
+<!-- ══ 05 canon ══ -->
+<section id="ruled">
+  <div class="sec-head"><span class="sec-num">05</span><h2>Canon</h2>
+    <span class="sec-note" data-sr="ruled.note">11 rulings · newest first · the source doc wins</span></div>
+  <div class="rulings">
 
-        <path class="arrow" d="M140,58 H176"/>
+    <div class="ruling" data-panel="ruling-tracker"><div class="r-d">2026-08-15</div>
+      <div class="r-t">Issues live in GitHub Issues via <code>gh</code>, with five-role triage labels.</div>
+      <div class="r-w">Wired as the repo's tracker; the label vocabulary is the default five roles.</div></div>
 
-        <text class="stage" x="180" y="16">LOAD &amp; PARSE</text>
-        <rect class="box" x="180" y="26" width="120" height="64"/>
-        <text class="lbl" x="194" y="52">corpus</text>
-        <text class="sublbl" x="194" y="67">cold load ·</text>
-        <text class="sublbl" x="194" y="80">mtime poll</text>
-        <path class="arrow" d="M300,58 H336"/>
-        <rect class="box" x="340" y="26" width="120" height="64"/>
-        <text class="lbl" x="354" y="52">parse</text>
-        <text class="sublbl" x="354" y="67">turns · tools ·</text>
-        <text class="sublbl" x="354" y="80">sub-agent links</text>
+    <div class="ruling" data-panel="ruling-tdd"><div class="r-d">2026-07-28</div>
+      <div class="r-t">TDD for all backend and frontend-logic code. Browser verification for UI.</div>
+      <div class="r-w">Written knowing it would sometimes feel slow. No implicit override.</div></div>
 
-        <path class="arrow" d="M460,44 C495,44 495,44 516,44"/>
-        <path class="arrow" d="M460,72 C495,72 495,150 516,150"/>
+    <div class="ruling" data-panel="ruling-dateeffective"><div class="r-d">2026-07-26</div>
+      <div class="r-t">Pricing is date-effective: each turn prices at the rate in effect when it ran.<span class="flag">⚑ 0 periods in use</span></div>
+      <div class="r-w">One flat number cannot serve both historical and future turns across a rate change.</div></div>
 
-        <text class="stage" x="520" y="16">MODEL</text>
-        <rect class="box" x="520" y="26" width="150" height="64"/>
-        <text class="lbl" x="534" y="46">aggregate</text>
-        <text class="sublbl" x="534" y="61">roll-ups · ReplaySet</text>
-        <text class="sublbl" x="534" y="76">dedup by message.id</text>
-        <rect class="box" x="520" y="118" width="150" height="64"/>
-        <text class="lbl" x="534" y="138">agentflow</text>
-        <text class="sublbl" x="534" y="153">trace graph: session →</text>
-        <text class="sublbl" x="534" y="168">agent → step → tool</text>
-        <rect class="box" x="340" y="118" width="120" height="64"/>
-        <text class="lbl" x="354" y="138">pricing</text>
-        <text class="sublbl" x="354" y="153">bundled + overlay</text>
-        <text class="sublbl" x="354" y="168">date-effective</text>
-        <path class="arrow" d="M460,150 H516"/>
+    <div class="ruling" data-panel="ruling-dedup"><div class="r-d">2026-07-15</div>
+      <div class="r-t">Spend dedups by <code>message.id</code> via a deterministic <code>ReplaySet</code>.</div>
+      <div class="r-w">Resumed and forked sessions replay turns into new files; per-file counting inflated totals.</div></div>
 
-        <path class="arrow" d="M670,58 C700,58 700,58 726,58"/>
-        <path class="arrow" d="M670,150 C700,150 700,86 726,80"/>
+    <div class="ruling" data-panel="ruling-rejected"><div class="r-d">2026-07-03</div>
+      <div class="r-t">Six ideas are rejected and must not be re-proposed.</div>
+      <div class="r-w">Sankey, cost treemap, config file, streaming aggregation, bundler migration, multi-session Gantt.</div></div>
 
-        <text class="stage" x="730" y="16">SURFACE</text>
-        <rect class="box-accent" x="730" y="26" width="160" height="88"/>
-        <text class="lbl" x="744" y="46">serve · web SPA</text>
-        <text class="sublbl" x="744" y="61">Agents lenses · SSE ·</text>
-        <text class="sublbl" x="744" y="74">ETag cache · signals</text>
-        <text class="sublbl" x="744" y="87">pure *-logic.js (TDD)</text>
-        <text class="sublbl" x="744" y="100">+ DOM view-*.js</text>
-        <rect class="box" x="730" y="130" width="160" height="52"/>
-        <text class="lbl" x="744" y="150">report · diff</text>
-        <text class="sublbl" x="744" y="165">one-shot HTML/md/json</text>
-        <rect class="box" x="730" y="190" width="160" height="40"/>
-        <text class="lbl" x="744" y="210">watch</text>
-        <text class="sublbl" x="744" y="224">live TUI · budgets</text>
-        <path class="arrow" d="M670,88 C700,88 700,156 726,156"/>
-        <path class="arrow" d="M670,96 C700,96 700,210 726,210"/>
-      </svg>
-      <p class="cap">One data layer, four surfaces. Every command loads through <code>internal/corpus</code> and rolls up through the same <code>aggregate</code> pipeline — <code>watch</code>'s totals match <code>report</code>'s by construction (v1.4.0 unification). The Agents trace viewer is <strong>serve-only</strong> by ruling.</p>
-    </div>
-  </section>
+    <div class="ruling" data-panel="ruling-auditor"><div class="r-d">2026-06-15</div>
+      <div class="r-t">claudit is a session auditor, not a spend report.</div>
+      <div class="r-w">The vision is auditing what agents did. Cost is one dimension among many.</div></div>
 
-  <section>
-    <h2><span class="n">03</span>Evidence tracks</h2>
-    <div class="cards">
-      <div class="card">
-        <h3>Phoenix roadmap — one trace you can interrogate</h3>
-        <span class="verdict">✓ Shipped 2026-06-08 · 5/5 phases</span>
-        <ul>
-          <li>Tool <code>kind</code> enum as the queryable spine</li>
-          <li>Cross-lens trace filter with dimming and match navigation</li>
-          <li>Errors + retry chains first-class (<code>↻ attempt N of M</code>)</li>
-          <li>Sub-agent spawn rollups — attribution without double-count</li>
-          <li>Conversation lens sharing the same drawer refKeys</li>
-        </ul>
-        <span class="src">→ docs/agents-audit-roadmap.md</span>
-      </div>
-      <div class="card">
-        <h3>Honeycomb program — a trace that interrogates itself</h3>
-        <span class="verdict">✓ Shipped 2026-06-13 · 4/4 phases</span>
-        <ul>
-          <li>Timeline → waterfall: kind-colored segments, idle gaps, critical path</li>
-          <li>Insights lens: tool mix, latency p50/p95, cost Pareto, token growth</li>
-          <li><code>detectSignals</code>: cost whales, retry storms, stalls, runaway context</li>
-          <li>378 jstest + full Go suite green; playwright sweep verified</li>
-        </ul>
-        <span class="src">→ docs/agents-audit-roadmap.md (successor program)</span>
-      </div>
-      <div class="card">
-        <h3>2026-07 principal-engineer audit</h3>
-        <span class="verdict">✓ Executed 2026-07-03 · 17 commits</span>
-        <ul>
-          <li>Serve RSS 2.48 GB → 1.69 GB settled, flat under repeat traffic</li>
-          <li>Render cache byte budget + generation sweep; 1.5 GiB soft limit</li>
-          <li>Snippet capping with on-demand full-text fetch</li>
-          <li><code>-race</code>/staticcheck CI, release binary matrix, JS split by lens</li>
-        </ul>
-        <span class="src">→ memory: audit-2026-07-rejected-ideas · v1.7.0 changelog</span>
-      </div>
-      <div class="card">
-        <h3>Cost correctness — dedup & date-effective rates</h3>
-        <span class="verdict">✓ Shipped v1.7.0–v1.8.0</span>
-        <ul>
-          <li>Replay dedup removed exactly the duplicated volume: −53M tokens, −291 turns</li>
-          <li>Every drill-down reconciles to the headline to the penny (<code>ReplaySet</code>)</li>
-          <li>Each turn priced at the rate in effect when it ran; Sonnet 5 cliff pre-encoded</li>
-          <li>Unpriced-model warnings quantify turns + tokens, on every surface</li>
-        </ul>
-        <span class="src">→ CHANGELOG.md v1.7.0, v1.8.0</span>
+    <div class="ruling"><div class="r-d">2026-06-15</div>
+      <div class="r-t">Filters are per-view and local. The global filter bar is removed.</div>
+      <div class="r-w">The global bar had no wiring and falsely advertised filtering everything.</div></div>
+
+    <div class="ruling" data-panel="ruling-serveonly"><div class="r-d">2026-06-13</div>
+      <div class="r-t">The Agents view is serve-only. There is no static-report parity.</div>
+      <div class="r-w">Live data, on-demand I/O fetches, and payload size do not fit a one-shot file.</div></div>
+
+    <div class="ruling"><div class="r-d">2026-05-29</div>
+      <div class="r-t">The pricing loader is overlay-style, not copy-on-first-run.</div>
+      <div class="r-w">Bundled defaults always load; a user file overlays per model, replacing an entry entirely.</div></div>
+
+    <div class="ruling"><div class="r-d">2026-05-27</div>
+      <div class="r-t">Date filters resolve in local time at midnight.</div>
+      <div class="r-w">UTC boundaries shifted windows for non-UTC users and left serve internally inconsistent.</div></div>
+
+    <div class="ruling"><div class="r-d">undated · owner ruling</div>
+      <div class="r-t">Desktop-only. There is no responsive or mobile pass.</div>
+      <div class="r-w">A dogfooding tool for a desktop workflow.</div></div>
+
+  </div>
+</section>
+
+<!-- ══ 06 history ══ -->
+<section id="history">
+  <div class="sec-head"><span class="sec-num">06</span><h2>History</h2>
+    <span class="sec-note">git log + CHANGELOG.md · newest first</span></div>
+  <div class="tl" data-sr="history">
+<!-- sr:history-top -->
+<div class="tl-day hot">
+      <div class="tl-date">2026-09-01 <em>Pricing refreshed against the live page</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0901"><span class="ev">pricing</span><span>Fable 5.1 and Mythos 5.1 added. Cache hits price at 0.025x input, the first entry to break the 0.1x ratio.</span></div>
+        <div class="tl-item"><span class="ev">pricing</span><span>Sonnet 5's dated rate period removed. Anthropic cancelled the 2026-09-01 increase.</span></div>
+        <div class="tl-item"><span class="ev">state</span><span>CURRENT.md and DECISIONS.md updated. The release is now the next checkpoint.</span></div>
       </div>
     </div>
-  </section>
-
-  <section>
-    <h2><span class="n">04</span>Ruled vs. not yet decided</h2>
-    <div class="split">
-      <div class="col ruled">
-        <h3>Standing decisions</h3>
-        <ul>
-          <li>Session <strong>auditor</strong>, not spend report — behavior first, cost one dimension. <span class="date">2026-06-07</span></li>
-          <li>TDD for all backend + frontend logic; browser verification for UI. No implicit override. <span class="why">(.claude/rules/testing.md)</span></li>
-          <li>Agents view is serve-only — no static-report parity.</li>
-          <li>Per-view local filters; the dishonest global bar is gone. <span class="date">v1.6.0</span></li>
-          <li>Spend dedups by <code>message.id</code>; drill-downs must reconcile. <span class="date">v1.7.0</span></li>
-          <li>Pricing is overlay-style and date-effective. <span class="date">v1.4.3, v1.8.0</span></li>
-          <li>Date filters resolve in local time. <span class="date">v1.4.0</span></li>
-          <li>Desktop-only — no mobile/responsive pass.</li>
-          <li>Tracker is GitHub Issues (<code>gh</code>), five-role triage labels. <span class="date">2026-08-15</span></li>
-        </ul>
-        <div class="rejected"><b>Rejected 2026-07-03 — do not re-propose:</b> Sankey diagram · cost treemap/icicle · config file · streaming aggregation · bundler migration · multi-session stacked Gantt.</div>
-      </div>
-      <div class="col open">
-        <h3>Not yet decided</h3>
-        <ul>
-          <li><strong>Fast-mode pricing.</strong> Fast turns (Opus 5/4.8, $10/$50) price at standard rates because claudit doesn't read the transcript's <code>speed</code> field. Documented gap; no ruling on whether to close it.</li>
-          <li><strong>Query-DSL filter form</strong> — drafted in the Phase-2 follow-ups, unreviewed, never scheduled.</li>
-          <li><strong>Filter ∩ playhead window</strong> — same status: drafted, deferred.</li>
-          <li><strong>Annotations phase</strong> — explicitly deferred in the roadmap; no design exists.</li>
-          <li><strong>What's next at all</strong> — no successor initiative has been proposed or ruled on since the audit closed. The backlog (GitHub Issues) is empty.</li>
-        </ul>
-        <div class="note" style="margin-top:14px"><span class="k">Dated</span>2026-09-01: Sonnet 5 introductory pricing expires. Handled — the standard rate and dated intro period shipped in v1.8.0; the checkpoint is verification, not a release.</div>
+<div class="tl-day">
+      <div class="tl-date">2026-08-27 <em>Framing cleanup</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">docs</span><span>The README tagline was aligned with the session-auditor framing.</span></div>
       </div>
     </div>
-  </section>
+<div class="tl-day">
+      <div class="tl-date">2026-08-16 <em>Project State Protocol adopted</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0816"><span class="ev">state</span><span>CURRENT.md, DECISIONS.md and CONTEXT_MAP.md were scaffolded from CHANGELOG.md, docs/ and session memory.</span></div>
+        <div class="tl-item"><span class="ev">state</span><span>The first SITUATION_ROOM.html front door was generated.</span></div>
+      </div>
+    </div>
+<details class="older">
+      <summary>18 more rows · 2026-05-16 → 2026-07-28</summary>
+<div class="tl-day">
+      <div class="tl-date">2026-07-28 <em>Agent workflow wired</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">agents</span><span>GitHub Issues tracker, five-role triage labels, and domain docs conventions landed.</span></div>
+        <div class="tl-item"><span class="ev">agents</span><span>The tdd-canon skill was synced from canon and now reads CONTEXT.md and ADRs in Phase 0.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-07-27 <em>Instructions split</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">docs</span><span>Project instructions moved into AGENTS.md; CLAUDE.md became a one-line import.</span></div>
+        <div class="tl-item"><span class="ev">rules</span><span>gopls-lsp was enabled and lsp.md was path-scoped to Go files.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-07-26 <em>v1.8.0 — the price table gains a time dimension</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0726"><span class="ev">v1.8.0</span><span>Date-effective pricing shipped. Each turn prices at the rate in effect when it ran.</span></div>
+        <div class="tl-item"><span class="ev">v1.8.0</span><span>Claude Opus 5 was added. Those turns had been priced at $0.</span></div>
+        <div class="tl-item"><span class="ev">v1.8.0</span><span>Unpriced-model warnings now quantify the affected turns and tokens.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-07-15 <em>v1.7.0 — waterfall and dedup</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0715"><span class="ev">v1.7.0</span><span>Spend dedup by message.id removed 53M tokens and 291 turns of double-counting.</span></div>
+        <div class="tl-item"><span class="ev">v1.7.0</span><span>The Timeline lens became a nested, prompt-segmented trace waterfall.</span></div>
+        <div class="tl-item"><span class="ev">v1.7.0</span><span>Prebuilt release binaries now attach to every v* tag.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-07-03 <em>Principal-engineer audit executed</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">perf</span><span>Serve RSS settled from 2.48 GB to 1.69 GB via a byte-budgeted render cache and snippet caps.</span></div>
+        <div class="tl-item"><span class="ev">ci</span><span>Tests now run under -race, and a staticcheck job was added.</span></div>
+        <div class="tl-item"><span class="ev">web</span><span>The Agents SPA was split by lens; editor-level type checking was added.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-06-15 <em>v1.6.0 — the reframe</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">v1.6.0</span><span>claudit became a session auditor. The Agents trace viewer shipped with five lenses.</span></div>
+        <div class="tl-item"><span class="ev">v1.6.0</span><span>The dishonest global filter bar was removed in favour of per-view local filters.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-06-13 <em>Honeycomb program complete</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">roadmap</span><span>All four observability phases closed: waterfall, Insights lens, and signal detection.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-06-07 <em>Phoenix roadmap captured</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">roadmap</span><span>The Agents view redesign closed its six phases; the audit roadmap succeeded it.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
+      <div class="tl-date">2026-05-16 <em>v1.0.0</em></div>
+      <div class="tl-items">
+        <div class="tl-item"><span class="ev">v1.0.0</span><span>First release: a spend report by model, project, tool and prompt.</span></div>
+      </div>
+    </div>
+    </details>
+  </div>
+</section>
 
-  <footer>
-    Updated 2026-08-16 · sources: CURRENT.md · DECISIONS.md · CONTEXT_MAP.md · CHANGELOG.md · docs/agents-audit-roadmap.md<br>
-    This page holds no authority — where it disagrees with a source doc, the source wins. It is regenerated (situation-room skill) at session close whenever a phase moves, a verdict lands, or a ruling changes.
-  </footer>
+<!-- ══ 07 tripwires ══ -->
+<section id="wires">
+  <div class="sec-head"><span class="sec-num">07</span><h2>Tripwires</h2>
+    <span class="sec-note">stop conditions</span></div>
+  <div class="wires">
+    <div class="wire">
+      <div class="w-if">IF Claude Code changes the JSONL schema</div>
+      <div class="w-then">Parser catch-up becomes the priority. Everything else waits.</div>
+    </div>
+    <div class="wire">
+      <div class="w-if">IF Anthropic publishes new model rates</div>
+      <div class="w-then">Refresh <code>internal/pricing/default.yaml</code> and cut a release.</div>
+    </div>
+    <div class="wire">
+      <div class="w-if">IF a rate change is dated rather than immediate</div>
+      <div class="w-then">Record it as a <code>rates:</code> period, not a flat edit. That is what the mechanism is for.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 08 source files ══ -->
+<section id="sources">
+  <div class="sec-head"><span class="sec-num">08</span><h2>Source files</h2>
+    <span class="sec-note">copied at generation time · the file on disk wins</span></div>
+  <p class="srcnote">
+    Everything above is a reading of these files. They are reproduced as they stood when this
+    page was generated — if one has changed since, the file on disk is right and this page is
+    the cleanup target.
+  </p>
+  <details class="srcfile" id="src-current">
+    <summary><span class="sf-name">CURRENT.md</span><span class="sf-note">Live state — outranks every other doc on "what are we doing now"</span><span class="sf-lines" data-sr="pane.current.lines">29 lines</span></summary>
+    <div class="sf-body" data-sr="pane.current">
+<h3>CURRENT</h3>
+<p><strong>Mode:</strong> Steady-state maintenance. No active initiative — both roadmaps (<code>docs/agents-redesign.md</code>, <code>docs/agents-audit-roadmap.md</code>) are fully shipped.</p>
+<p><strong>Goal:</strong> Keep claudit correct against upstream reality: pricing current with Anthropic's published rates, the parser current with Claude Code's JSONL schema. Ship fixes and small features as they earn their place.</p>
+<p><strong>Last change:</strong> 2026-09-01 pricing refresh (unreleased) — Fable 5.1 / Mythos 5.1 rate cards added (cache hits at 0.025x input, not 0.1x); Sonnet 5's 2026-09-01 increase was cancelled upstream, so its dated rate period is removed and it is a flat $2 / $10. Before that: v1.8.0 (2026-07-26) date-effective pricing, Opus 5.</p>
+<p><strong>Assumptions:</strong></p>
+<ul>
+<li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. An un-upgraded claudit over-reports Sonnet 5 spend from 2026-09-01 by 50%, so this refresh wants a release.</li>
+<li>Fast-mode turns (Opus 5 / 4.8 <code>speed</code> field) price at the standard rate — a known, documented gap (README "Status and limitations").</li>
+</ul>
+<p><strong>Open questions:</strong> see DECISIONS.md → Open questions.</p>
+<p><strong>Next checkpoint:</strong> Cut a release carrying the 2026-09-01 pricing refresh.</p>
+<p><strong>Stop conditions:</strong></p>
+<ul>
+<li>Claude Code changes the JSONL schema → parser catch-up becomes the priority.</li>
+<li>Anthropic publishes new model rates → refresh <code>internal/pricing/default.yaml</code> and cut a release.</li>
+</ul>
+</div>
+  </details>
+  <details class="srcfile" id="src-decisions">
+    <summary><span class="sf-name">DECISIONS.md</span><span class="sf-note">The decision log — settled choices, open questions, dated rows</span><span class="sf-lines" data-sr="pane.decisions.lines">36 lines</span></summary>
+    <div class="sf-body" data-sr="pane.decisions">
+<h3>DECISIONS</h3>
+<p>Settled choices and why. On settled questions this file beats every other doc; a contradicting doc is a cleanup target. Supersede, don't delete.</p>
+<h4>Decided</h4>
+<div class="tw"><table><thead><tr><th>Decision</th><th>Why</th><th>Evidence</th></tr></thead><tbody><tr><td>claudit is a <strong>session auditor</strong>, not a spend report</td><td>The vision is auditing what agents <em>did</em> (errors, retries, blast radius), with cost one dimension among many</td><td>v1.6.0 reframe; <code>docs/agents-audit-roadmap.md</code> preamble</td></tr><tr><td>TDD (Kent Beck red-green-refactor) for all backend and frontend-logic code; browser verification for UI</td><td>Written knowing it would sometimes feel slow; no implicit override</td><td><code>.claude/rules/testing.md</code></td></tr><tr><td>The Agents view is <strong>serve-only</strong> — no static-report parity</td><td>Live data, on-demand I/O fetches, and payload size don't fit a one-shot file</td><td><code>docs/agents-audit-roadmap.md</code> conventions; README "Status and limitations"</td></tr><tr><td>Per-view <strong>local filters</strong>; the global filter bar is removed</td><td>The global bar had no wiring and falsely advertised filtering everything</td><td>v1.6.0 changelog; <code>docs/filter-migration-plan.md</code></td></tr><tr><td>Spend <strong>dedups by <code>message.id</code></strong> via a deterministic <code>ReplaySet</code>; every drill-down must reconcile to the headline</td><td>Resumed/forked sessions replay turns into new files; per-file counting inflated totals (−53M tokens / −291 turns on the real corpus)</td><td>v1.7.0 changelog</td></tr><tr><td><strong>Date-effective pricing</strong>: each turn priced at the rate in effect when it ran (<code>rates:</code> periods, inclusive UTC <code>until</code>)</td><td>One flat number cannot serve both historical and future turns across a rate change</td><td>v1.8.0 changelog; the motivating case (Sonnet 5 cliff) was later cancelled — see log 2026-09-01</td></tr><tr><td>Pricing loader is <strong>overlay-style</strong>: bundled defaults always load; <code>~/.config/claudit/prices.yaml</code> overlays per-model, replacing an entry entirely</td><td>The old copy-on-first-run pinned users to their first install's prices forever</td><td>v1.4.3 changelog</td></tr><tr><td>Date filters resolve in <strong>local time</strong> at midnight</td><td>UTC boundaries shifted windows for non-UTC users and left serve internally inconsistent</td><td>v1.4.0 changelog</td></tr><tr><td><strong>Desktop-only</strong> — no responsive/mobile pass</td><td>Dogfooding tool for a desktop workflow</td><td>Owner ruling (memory: no-mobile-pass)</td></tr><tr><td>Issue tracker is <strong>GitHub Issues</strong> via <code>gh</code>; five-role triage labels</td><td>Wired 2026-08-15</td><td><code>docs/agents/issue-tracker.md</code>; commit 131618a</td></tr><tr><td><strong>Rejected</strong> (2026-07-03 audit — do not re-propose): Sankey diagram, cost treemap/icicle, config file, incremental/streaming aggregation, framework/bundler migration, multi-session stacked Gantt</td><td>Each evaluated against the trace-audit vision and rejected (e.g. Sankey answers a flow question, not a trace question)</td><td>2026-07 principal-engineer audit (memory: audit-2026-07-rejected-ideas)</td></tr></tbody></table></div>
+<h4>Open questions (NOT settled)</h4>
+<ul>
+<li><strong>Fast-mode pricing.</strong> Opus 5 / 4.8 fast mode bills $10/$50 per-turn via the transcript's <code>speed</code> field, which claudit doesn't read; fast turns price at standard rates. Worth reading the field, or leave to per-user overlay?</li>
+<li><strong>Deferred Phase-2 follow-ups</strong> (drafted in the roadmap, never scheduled): query-DSL filter form; intersecting the trace filter with the playhead window.</li>
+<li><strong>Annotations phase</strong> — explicitly deferred in <code>docs/agents-audit-roadmap.md</code>.</li>
+</ul>
+<h4>Log</h4>
+<div class="tw"><table><thead><tr><th>Date</th><th>Change</th></tr></thead><tbody><tr><td>2026-08-16</td><td>File scaffolded (Project State Protocol adopted). Rows above reconstructed from CHANGELOG.md, docs/, and session memory — each row links its primary source.</td></tr><tr><td>2026-09-01</td><td>Pricing refreshed against the live page. Added Fable 5.1 / Mythos 5.1 (+<code>[1m]</code>) at $10 / $50 with <strong>cache hits at $0.25/MTok</strong> — a 0.025x multiplier, the first model card that breaks the 0.1x cache-read ratio. Removed Sonnet 5's dated rate period: Anthropic cancelled the 2026-09-01 increase to $3 / $15 and made the introductory $2 / $10 standard, so an un-upgraded claudit over-reports Sonnet 5 spend by 50% from that date. Date-effective pricing stays — no bundled model needs it today. Evidence: https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-09-01); <code>internal/pricing/default.yaml</code>.</td></tr></tbody></table></div>
+</div>
+  </details>
+  <details class="srcfile" id="src-contextmap">
+    <summary><span class="sf-name">CONTEXT_MAP.md</span><span class="sf-note">What exists and where — pointers only</span><span class="sf-lines" data-sr="pane.contextmap.lines">33 lines</span></summary>
+    <div class="sf-body" data-sr="pane.contextmap">
+<h3>CONTEXT MAP</h3>
+<p>Pointers only — what exists and where.</p>
+<h4>State &amp; front door</h4>
+<ul>
+<li><code>CURRENT.md</code> — live state (mode, goal, checkpoints)</li>
+<li><code>DECISIONS.md</code> — settled choices + open questions</li>
+<li><code>SITUATION_ROOM.html</code> — generated director brief (via the <code>situation-room</code> skill; never hand-edit)</li>
+<li><code>AGENTS.md</code> / <code>CLAUDE.md</code> — how to work here; <code>.claude/rules/testing.md</code> — TDD policy</li>
+</ul>
+<h4>Code</h4>
+<ul>
+<li><code>cmd/claudit/</code> — CLI entry: <code>report</code>, <code>diff</code>, <code>serve</code>, <code>watch</code> subcommands</li>
+<li><code>internal/corpus/</code> — unified JSONL loader (cold load, incremental poll, mtime pre-filter)</li>
+<li><code>internal/parse/</code> — JSONL line → turns; sub-agent detection via <code>.meta.json</code></li>
+<li><code>internal/aggregate/</code> — roll-ups, dedup (<code>ReplaySet</code>), session timelines, rolling totals</li>
+<li><code>internal/agentflow/</code> — the Agents trace graph (<code>AgentGraph → AgentSession → AgentNode → AgentStep → ToolInvocation</code>)</li>
+<li><code>internal/pricing/</code> — bundled <code>default.yaml</code> + overlay loader, date-effective rates</li>
+<li><code>internal/render/</code> — report/diff HTML, tokens.css, static SPA bundling</li>
+<li><code>internal/serve/</code> — web daemon: API, ETag/render cache, SSE <code>/events</code></li>
+<li><code>internal/watch/</code>, <code>internal/notify/</code>, <code>internal/stat/</code> — live TUI, desktop notify, stats</li>
+<li><code>web/</code> — the SPA: <code>view-*.js</code> (DOM) + <code>*-logic.js</code> (pure, TDD'd), 16 theme CSS files</li>
+<li><code>jstest/</code> — Node-runner JS unit tests; <code>web_embed.go</code> — embeds <code>web/</code> into the binary</li>
+</ul>
+<h4>Docs &amp; history</h4>
+<ul>
+<li><code>README.md</code> — user-facing; <code>CHANGELOG.md</code> — the release record (richest history source)</li>
+<li><code>docs/agents-redesign.md</code> — trace-viewer redesign (shipped)</li>
+<li><code>docs/agents-audit-roadmap.md</code> — Phoenix + Honeycomb programs (shipped; deferred items listed)</li>
+<li><code>docs/filter-migration-plan.md</code> — historical (shipped in v1.6.0)</li>
+<li><code>docs/design.md</code> — design notes; <code>docs/agents/</code> — tracker/triage/domain conventions</li>
+<li>Issues: GitHub Issues (<code>gh issue list</code>) — currently empty</li>
+</ul>
+</div>
+  </details>
+</section>
+
+<footer>
+  <strong>Sources</strong> — CURRENT.md, DECISIONS.md, CONTEXT_MAP.md, CHANGELOG.md, docs/agents-audit-roadmap.md, docs/agents-redesign.md, internal/pricing/default.yaml, git log.<br>
+  <strong>Authority</strong> — this page holds none. Where it and a source disagree, the source wins and this page is the cleanup target.<br>
+  <strong>Regeneration</strong> — rewritten at session close when a phase moves, a verdict lands, or a ruling changes.<br>
+  Generated <span data-sr="gen-date.foot">2026-09-01</span> · <code>skills/situation-room</code>
+</footer>
+
+</main>
+</div>
+
+<!-- ══ detail layer ══ -->
+<div id="scrim"></div>
+<aside id="dive" role="dialog" aria-modal="false" aria-labelledby="ddTitle" aria-hidden="true" tabindex="-1">
+  <div class="dd-head">
+    <button class="dd-back" id="ddBack" type="button" hidden></button>
+    <div class="dd-kind" id="ddKind"></div>
+    <button class="dd-close" id="ddClose" type="button" aria-label="Close (Esc)">esc ✕</button>
+    <h3 id="ddTitle"></h3>
+    <div class="dd-meta" id="ddMeta"></div>
+  </div>
+  <div class="dd-body" id="ddBody"></div>
+  <div class="dd-foot">
+    <div class="dd-src" id="ddSrc"></div>
+    <div class="dd-nav">
+      <button id="ddPrev" type="button" title="Previous (←)">←</button>
+      <button id="ddNext" type="button" title="Next (→)">→</button>
+    </div>
+  </div>
+</aside>
+
+<div id="dossier" hidden>
+<!-- sr:panels-top -->
+
+  <template data-panel-content="card-release" data-kind="Your call · lead"
+            data-title="Cut the release carrying the pricing fix" data-meta="2026-09-01 · decide · the live call"
+            data-src="CURRENT.md → Next checkpoint">
+    <p>This is the one call with a clock on it. v1.8.0 shipped date-effective pricing and used it immediately: Sonnet 5 carried a dated period ending 2026-08-31, after which the rate rose to $3 / $15. Anthropic then cancelled that increase and made the introductory $2 / $10 the standard rate.</p>
+    <p>The bundled table on <code>main</code> is now correct — flat $2 / $10, no rate history. Every copy anyone installed is not. From 2026-09-01 onward an un-upgraded claudit prices Sonnet 5 turns 50% high, silently, with no warning to fire: the model is priced, just priced wrong. Unpriced-model warnings do not catch a wrong rate.</p>
+    <p>The fix is committed and unreleased, so the wrong number is still the shipped number. See <button class="xref" data-panel="ruling-dateeffective">the date-effective ruling</button> for why the mechanism stays even though nothing uses it.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CURRENT.md" target="_blank"><span class="dl-l">Live state: the checkpoint and the assumption behind it</span><span class="dl-p">CURRENT.md</span></a>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The bundled price table as it now stands</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section spelling out the 50% error</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-pane="src-decisions"><span class="dl-l">The 2026-09-01 log row, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="card-fastmode" data-kind="Your call"
+            data-title="Should claudit read the fast-mode speed field?" data-meta="open · decide · no ruling exists"
+            data-src="DECISIONS.md → Open questions">
+    <p>Fast mode is the one rate in Anthropic's table that is not a property of the model. Opus 5 and Opus 4.8 bill $10 / $50 when a turn runs fast, against $5 / $25 standard. The selector is a <code>speed</code> field on the transcript line, not part of the model id.</p>
+    <p>claudit keys its whole pricing path on model id alone, so a fast turn prices at the standard rate and the total reads low. The gap is written into the price table's header comment and into the README's limitations, so it is disclosed rather than hidden.</p>
+    <p>Two honest answers exist. Read the field and price per turn, which means threading a second key through the pricing path. Or declare it out of scope and let a user who runs fast mode override the model entry through <code>~/.config/claudit/prices.yaml</code>. Neither has been ruled.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The open question as recorded</span><span class="dl-p">DECISIONS.md</span></a>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The "Known gap" header comment</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <a class="dl" href="README.md" target="_blank"><span class="dl-l">Status and limitations</span><span class="dl-p">README.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="card-successor" data-kind="Your call"
+            data-title="Pick a successor initiative, or rule that there is none" data-meta="open · decide · the repo has no next target"
+            data-src="CURRENT.md → Mode">
+    <p>claudit has finished everything it wrote down. The Agents view redesign closed six phases. The Phoenix audit roadmap closed five. The Honeycomb observability program closed four. The 2026-07 principal-engineer audit was fully executed and produced a rejected-ideas list rather than a backlog.</p>
+    <p>What is left is three parked roadmap follow-ups, one open pricing question, and an empty issue tracker. That is a maintained tool, not a stalled project — but the page must not style maintenance as a plan the owner never made.</p>
+    <p>The call is whether to name a successor program or to rule maintenance-only explicitly. Ruling it explicitly is a real outcome: it would close this card and let the phases section stay dropped without ambiguity.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CURRENT.md" target="_blank"><span class="dl-l">Mode and goal as recorded</span><span class="dl-p">CURRENT.md</span></a>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">Both shipped programs and their deferred items</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <button class="dl" data-panel="ruling-rejected"><span class="dl-l">What the audit ruled out</span><span class="dl-p">Ruling</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="card-querydsl" data-kind="Your call"
+            data-title="Query-DSL filter form" data-meta="drafted, unreviewed · parked"
+            data-src="docs/agents-audit-roadmap.md → deferred follow-ups">
+    <p>The Agents trace filter today is a cross-lens text filter with dimming and match navigation. The Phase-2 follow-up proposed a structured query form on top of it, so a reader could ask for a tool kind, an error state, or a cost band rather than typing a substring.</p>
+    <p>It was drafted inside the roadmap and never taken further. No design document, no issue, no schedule. The roadmap's own status line lists it among the two explicitly-deferred Phase-2 follow-ups.</p>
+    <p>The reason it appears here rather than in the canon is the three-tier rule: drafted and unreviewed is neither ruled nor untouched. Treating it as open work that nobody has judged is the accurate reading.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The roadmap status line and the deferred list</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">Recorded under Open questions</span><span class="dl-p">DECISIONS.md</span></a>
+      <button class="dl" data-panel="card-playhead"><span class="dl-l">Its sibling follow-up</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="card-playhead" data-kind="Your call"
+            data-title="Filter intersected with the playhead window" data-meta="drafted, unreviewed · parked"
+            data-src="docs/agents-audit-roadmap.md → deferred follow-ups">
+    <p>The Timeline lens has a playhead that scrubs a time window. The trace filter selects steps by content. The follow-up proposed intersecting them, so a filter would apply only inside the scrubbed window rather than across the whole session.</p>
+    <p>Like the query DSL, it exists only as roadmap prose. It was never reviewed and never scheduled, and no ruling has closed it in either direction.</p>
+    <p>Both follow-ups would most sensibly be decided together, since they touch the same filter surface. That is the shape of the closing condition on both cards.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The roadmap status line and the deferred list</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <button class="dl" data-panel="card-querydsl"><span class="dl-l">Its sibling follow-up</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="card-annotations" data-kind="Your call"
+            data-title="The annotations phase" data-meta="deferred by ruling · parked"
+            data-src="docs/agents-audit-roadmap.md">
+    <p>Annotations would let a reader mark up a trace — flagging a turn, leaving a note on a tool call, naming a stretch of a session. The roadmap names the phase and then explicitly defers it.</p>
+    <p>That deferral is a ruling, not an omission, which is why this card is parked rather than idle. Nothing about it has been designed: there is no data model for an annotation, no decision on where one would be stored, and no view that would render one.</p>
+    <p>It is listed here so a reader does not mistake silence for a plan. If it reopens, it reopens as a design task, not as scheduled work.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">Where the phase is named and deferred</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">Recorded under Open questions</span><span class="dl-p">DECISIONS.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="alt-source" data-kind="Mechanism · box"
+            data-title="The session logs claudit reads" data-meta="input · read-only · never written"
+            data-src="internal/corpus, internal/parse">
+    <p>Claude Code writes one JSONL file per session under <code>~/.claude/projects/</code>, with a directory per project. Each line is a turn record carrying the model id, usage counts, timestamps, and tool calls. Sub-agent sessions get a <code>.meta.json</code> sidecar that links a child session back to the tool call that spawned it.</p>
+    <p>claudit only reads. It never writes into the projects tree, and it runs entirely local — no network call is made to price or analyse a session.</p>
+    <p>Two facts about this input shape the rest of the pipeline. Resumed and forked sessions replay earlier turns into a new file with the same <code>message.id</code>, which is why dedup exists. And a turn's model id is the only pricing key available on the line, which is why fast mode is an open question.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CONTEXT_MAP.md" target="_blank"><span class="dl-l">Where each package lives</span><span class="dl-p">CONTEXT_MAP.md</span></a>
+      <button class="dl" data-panel="ruling-dedup"><span class="dl-l">Why replayed turns must be deduped</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="card-fastmode"><span class="dl-l">The pricing key the line does not give us</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="alt-aggregate" data-kind="Mechanism · box"
+            data-title="aggregate — the reconciliation layer" data-meta="internal/aggregate · dedup by message.id"
+            data-src="internal/aggregate">
+    <p><code>aggregate</code> turns parsed turns into every number claudit reports: roll-ups by model, project, tool and prompt; per-session timelines; and the rolling totals <code>watch</code> paints.</p>
+    <p>Its load-bearing invariant is reconciliation. A deterministic <code>ReplaySet</code> picks the lexicographically-smallest source file as canonical for a duplicated <code>message.id</code> and flags the rest as replays. The headline aggregator and both drill-down builders share that set, so expanding any view sums to the headline exactly.</p>
+    <p>Before that, the headline deduped by first-arrival order while drill-downs summed raw turns, so a forked session's cost could land on different sessions in different views and shift between runs. Sharing the set made attribution stable as well as correct.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <button class="dl" data-panel="ruling-dedup"><span class="dl-l">The dedup ruling and its evidence</span><span class="dl-p">Ruling</span></button>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.7.0 — the three Fixed entries with the mechanics</span><span class="dl-p">CHANGELOG.md</span></a>
+      <a class="dl" href="CONTEXT_MAP.md" target="_blank"><span class="dl-l">Package map</span><span class="dl-p">CONTEXT_MAP.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="alt-pricing" data-kind="Mechanism · box"
+            data-title="pricing — bundled table, user overlay, dated rates" data-meta="internal/pricing · 0 dated periods in use"
+            data-src="internal/pricing/default.yaml">
+    <p>The bundled <code>default.yaml</code> carries every model id claudit knows, each tagged with the date it was last verified against Anthropic's published page. A user file at <code>~/.config/claudit/prices.yaml</code> overlays it per model, replacing an entry entirely rather than merging fields.</p>
+    <p>Each entry may also carry a <code>rates:</code> list of dated periods, so a turn prices at whatever was in effect when it ran. The <code>until</code> date is inclusive through 23:59:59 UTC, periods may be listed in any order, and a turn with no usable timestamp falls back to the current rate.</p>
+    <p>Today no bundled model uses a period — the box reads "0 periods in use" because the 2026-09-01 refresh removed the last one. The mechanism stays because the next real dated change will need it, and it is still covered by tests against synthetic tables.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The table, its header rules, and the known gap</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <button class="dl" data-panel="ruling-dateeffective"><span class="dl-l">The date-effective ruling</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="card-release"><span class="dl-l">Why this must ship</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="alt-agentflow" data-kind="Mechanism · box"
+            data-title="agentflow — the trace graph" data-meta="internal/agentflow · feeds the Agents view only"
+            data-src="internal/agentflow">
+    <p><code>agentflow</code> builds the graph the Agents view renders: <code>AgentGraph → AgentSession → AgentNode → AgentStep → ToolInvocation</code>. Sub-agents re-parent under the exact turn that spawned them via <code>parent_tool_use_id</code>, so nesting reflects the real spawn chain rather than time containment.</p>
+    <p>Each step carries the enrichment the observability lenses need: generate time, tool I/O size, collapsed invocation counts, and context tokens. Those fields are the substrate for the waterfall, the Insights lens, and signal detection.</p>
+    <p>This graph feeds <code>serve</code> alone. The static report has no Agents view by ruling, and degrades gracefully rather than rendering a partial one.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <button class="dl" data-panel="ruling-serveonly"><span class="dl-l">Why the Agents view is serve-only</span><span class="dl-p">Ruling</span></button>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The phases that built this substrate</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <a class="dl" href="CONTEXT_MAP.md" target="_blank"><span class="dl-l">Package map</span><span class="dl-p">CONTEXT_MAP.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="alt-serve" data-kind="Mechanism · box"
+            data-title="serve — the only surface with the trace viewer" data-meta="internal/serve + web/ · SSE, ETag cache"
+            data-src="internal/serve, web/">
+    <p><code>serve</code> is the web daemon: an API over the aggregate layer, a render cache keyed by query, section and snapshot generation, and an SSE <code>/events</code> stream that repaints the SPA as new turns land.</p>
+    <p>The SPA splits deliberately. Pure logic lives in <code>*-logic.js</code> and is TDD'd under <code>jstest/</code>; DOM work lives in <code>view-*.js</code> and is browser-verified. That split is what makes the testing policy workable on a frontend this size.</p>
+    <p>The 2026-07 audit hardened this surface hardest. The render cache gained a byte budget and a stale-generation sweep, turn text was capped to bounded snippets with full text one request away, and serve mode sets a soft memory limit. Resident memory settled from 2.48 GB to 1.69 GB.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <button class="dl" data-panel="ev-audit"><span class="dl-l">The audit verdict and its numbers</span><span class="dl-p">Verdict</span></button>
+      <button class="dl" data-panel="ruling-tdd"><span class="dl-l">Why the logic/DOM split exists</span><span class="dl-p">Ruling</span></button>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.7.0 — the serve memory work in full</span><span class="dl-p">CHANGELOG.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-redesign" data-kind="Verdict"
+            data-title="Agents view redesign — shipped" data-meta="2026-06-07 · 6 of 6 phases · browser-verified"
+            data-src="docs/agents-redesign.md">
+    <p>The Agents tab began as three disconnected views — Mission Control, Inspector, Flow — that could not answer a simple question like "main read a .md file, but which one?". The redesign turned them into one trace viewer.</p>
+    <p>All six phases closed, tests green and browser-verified, and the document records its decisions as locked. Its successor is the Phoenix audit roadmap, which took the same trace and made it interrogable.</p>
+    <p>The framing shift this produced is now canon: claudit audits what agents did, and cost is one dimension of that trace rather than the product.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-redesign.md" target="_blank"><span class="dl-l">The redesign roadmap and its progress log</span><span class="dl-p">docs/agents-redesign.md</span></a>
+      <button class="dl" data-panel="ruling-auditor"><span class="dl-l">The framing this established</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="ev-phoenix"><span class="dl-l">Its successor program</span><span class="dl-p">Verdict</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-phoenix" data-kind="Verdict"
+            data-title="Phoenix audit roadmap — shipped" data-meta="2026-06-08 · 5 of 5 phases"
+            data-src="docs/agents-audit-roadmap.md">
+    <p>Phoenix made the trace interrogable. A tool <code>kind</code> enum became the queryable spine; a cross-lens trace filter added dimming and match navigation; errors and retry chains became first-class, with attempt counters on the rows.</p>
+    <p>Sub-agent spawns roll up as attribution rather than double-count — a clickable row showing added cost, tool count and error count, jumping to the child, while session totals stay unchanged. A Conversation lens joined the set, sharing the same drawer refKeys so one click opens the same detail from any lens.</p>
+    <p>Two Phase-2 follow-ups were deferred and remain open calls today: the query-DSL filter form and intersecting the filter with the playhead window.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">Phase list, commits, and verification notes</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <button class="dl" data-panel="card-querydsl"><span class="dl-l">The deferred follow-up</span><span class="dl-p">Your call</span></button>
+      <button class="dl" data-panel="ev-honeycomb"><span class="dl-l">Its successor program</span><span class="dl-p">Verdict</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-honeycomb" data-kind="Verdict"
+            data-title="Honeycomb observability program — shipped" data-meta="2026-06-13 · 4 of 4 phases"
+            data-src="docs/agents-audit-roadmap.md">
+    <p>The successor program made the trace interrogate itself. Phase 0 enriched the backend with per-turn generate time, tool I/O size, collapsed invocation counts and context tokens. Phase 1 turned the Timeline into a waterfall with kind-colored segments, idle gaps and critical-path marks.</p>
+    <p>Phase 2 added an Insights lens: tool mix, latency percentiles, a cost Pareto and token growth, with a scope toggle. Phase 3 added <code>detectSignals</code> — cost whales, retry storms, stalls and runaway context — with <code>nowMs</code> passed in from the view layer so detection stays testable.</p>
+    <p>Verification was end-to-end: the full Go suite and the jstest suite green, a playwright sweep across Timeline and Insights, and a static-report check confirming the Agents view is absent by design with no console errors.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The successor program section</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <button class="dl" data-panel="ruling-serveonly"><span class="dl-l">Why none of this reaches the static report</span><span class="dl-p">Ruling</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-audit" data-kind="Verdict"
+            data-title="2026-07 principal-engineer audit — executed" data-meta="2026-07-03 · 17 commits · fully executed"
+            data-src="CHANGELOG.md v1.7.0">
+    <p>The audit was executed in full rather than filed as a backlog. Its largest finding was memory: the render cache evicted by entry count while its generation-keyed entries stranded older payloads as unreachable weight, pushing resident memory past 3 GB on a corpus where one Agents payload runs about 186 MB.</p>
+    <p>The fixes were a byte-budgeted cache with a stale-generation sweep, 2000-rune snippet caps on turn and prompt text with full text one request away, and a soft memory limit in serve mode. Resident memory settled from 2.48 GB to 1.69 GB and stayed flat under repeat traffic.</p>
+    <p>It also hardened the build: <code>-race</code> and staticcheck in CI, prebuilt release binaries across six platform pairs, and the Agents SPA split by lens. Its rejected-ideas list is now canon.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.7.0 — the audit work in full</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="ruling-rejected"><span class="dl-l">What the audit ruled out</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="alt-serve"><span class="dl-l">The surface it hardened</span><span class="dl-p">Mechanism</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-dedup" data-kind="Verdict"
+            data-title="Replay dedup — confirmed against the real corpus" data-meta="2026-07-15 · −53M tokens · −291 turns"
+            data-src="CHANGELOG.md v1.7.0">
+    <p>A resumed or forked session replays the prior transcript into a new JSONL file: same <code>message.id</code> and identical usage, but a fresh <code>uuid</code> and <code>sessionId</code>. The old per-file dedup billed every replayed generation once per file it appeared in.</p>
+    <p>Deduping by <code>message.id</code> at every aggregation point removed exactly the duplicated volume on the real corpus — 53M tokens and 291 turns. Reported cost went down for anyone with resumed sessions. That is a correction, not a regression.</p>
+    <p>The number is the evidence: it matches the duplicated volume rather than merely being smaller. Legacy single-line transcripts with an empty <code>message.id</code> cannot be keyed and always count.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.7.0 — the three Fixed entries</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="ruling-dedup"><span class="dl-l">The standing ruling</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="alt-aggregate"><span class="dl-l">Where ReplaySet lives</span><span class="dl-p">Mechanism</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ev-pricing" data-kind="Verdict"
+            data-title="Sonnet 5 cliff cancelled — corrected on main" data-meta="2026-09-01 · shipped copies over-report by 50%"
+            data-src="DECISIONS.md log · 2026-09-01">
+    <p>v1.8.0's motivating case was a real dated rate change: Sonnet 5's introductory $2 / $10 was to expire on 2026-08-31 and rise to $3 / $15. claudit encoded that ahead of time as a dated period so no upgrade would be needed when the cliff passed.</p>
+    <p>Anthropic cancelled the increase and made the introductory rate standard. The pre-encoding then became the error it was designed to prevent: from 2026-09-01, an un-upgraded claudit prices Sonnet 5 turns 50% high.</p>
+    <p>The same refresh added Fable 5.1 and Mythos 5.1, which had been landing in <code>unknown_models</code> at $0. They are the first entries whose cache hits break the 0.1x ratio, pricing at 0.025x input. On a cache-heavy agent session that difference is most of the bill.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The dated log row with its evidence link</span><span class="dl-p">DECISIONS.md</span></a>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="card-release"><span class="dl-l">Why this needs a release</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-tracker" data-kind="Ruling"
+            data-title="Issues live in GitHub Issues, via gh" data-meta="2026-08-15 · ruled · tracker is empty today"
+            data-src="DECISIONS.md → Decided; docs/agents/issue-tracker.md">
+    <p>claudit uses the repo's GitHub Issues as its tracker, driven from the <code>gh</code> CLI rather than a local database. Triage uses the default five-role label vocabulary, also as GitHub labels.</p>
+    <p>The conventions live in <code>docs/agents/issue-tracker.md</code> and <code>docs/agents/triage-labels.md</code>, wired alongside the domain-docs convention in the same pass.</p>
+    <p>The tracker is currently empty, which is why the vitals strip carries a zero that matters rather than omitting the count. An empty backlog on a finished roadmap is a state worth showing, not a gap.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents/issue-tracker.md" target="_blank"><span class="dl-l">Tracker conventions</span><span class="dl-p">docs/agents/issue-tracker.md</span></a>
+      <a class="dl" href="docs/agents/triage-labels.md" target="_blank"><span class="dl-l">The five-role label vocabulary</span><span class="dl-p">docs/agents/triage-labels.md</span></a>
+      <button class="dl" data-pane="src-decisions"><span class="dl-l">The Decided table, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-tdd" data-kind="Ruling"
+            data-title="TDD for backend and frontend logic; browser verification for UI" data-meta="2026-07-28 · ruled · no implicit override"
+            data-src=".claude/rules/testing.md">
+    <p>All backend code and all frontend logic — stores, utilities, data transforms, complex reactive state — must use Kent Beck's red-green-refactor. UI work is exempt from TDD and verified in the browser instead, with interaction and edge-case tests written after visual confirmation.</p>
+    <p>The rule carries an explicit no-implicit-override clause. Urgency, deadlines, "just build it" and "from scratch" are not permission to skip it. Only the owner saying "skip TDD" overrides it.</p>
+    <p>This is what makes the <code>*-logic.js</code> / <code>view-*.js</code> split load-bearing rather than stylistic: the pure half is where the test suite lives.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href=".claude/rules/testing.md" target="_blank"><span class="dl-l">The full policy, including the carve-outs</span><span class="dl-p">.claude/rules/testing.md</span></a>
+      <a class="dl" href="AGENTS.md" target="_blank"><span class="dl-l">How agents are told to work here</span><span class="dl-p">AGENTS.md</span></a>
+      <button class="dl" data-panel="alt-serve"><span class="dl-l">Where the split shows up in the code</span><span class="dl-p">Mechanism</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-dateeffective" data-kind="Ruling"
+            data-title="Pricing is date-effective" data-meta="2026-07-26 · ruled · 0 periods in use since 2026-09-01"
+            data-src="DECISIONS.md → Decided; CHANGELOG.md v1.8.0">
+    <p>A model entry may carry a <code>rates:</code> list of historical periods alongside its current rate, and each turn is priced by its own timestamp. The <code>until</code> date is inclusive through 23:59:59 UTC, periods may be listed in any order (the narrowest match wins), and a turn with no usable timestamp falls back to the current rate.</p>
+    <p>The reasoning is that one flat number cannot serve both historical and future turns across a rate change. Existing flat overlays keep working; the key is purely additive.</p>
+    <p>The flag on this row is honest bookkeeping. The case that motivated it — the Sonnet 5 cliff — was cancelled upstream, so no bundled model uses a dated period today. The mechanism stays because the next real dated change will need it, and tests exercise it against synthetic tables rather than against a live entry.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.8.0 — the schema and its rules</span><span class="dl-p">CHANGELOG.md</span></a>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The header comment describing rate changes</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <button class="dl" data-panel="ev-pricing"><span class="dl-l">Why the flag is there</span><span class="dl-p">Verdict</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-dedup" data-kind="Ruling"
+            data-title="Spend dedups by message.id; drill-downs must reconcile" data-meta="2026-07-15 · ruled · v1.7.0"
+            data-src="DECISIONS.md → Decided; CHANGELOG.md v1.7.0">
+    <p>Every cost and token aggregation point deduplicates by <code>message.id</code> through a shared, deterministic <code>ReplaySet</code>: the lexicographically-smallest source file is canonical, the rest are flagged replays. Report, serve, diff and both watch panels use it.</p>
+    <p>The second half of the ruling is the invariant that matters day to day: every drill-down must reconcile to the headline. Before it, expanding a session or the Agents view showed spend the headline did not contain.</p>
+    <p>Sharing one set also made attribution deterministic. Snapshot turn order is non-deterministic because parsing is concurrent, so first-arrival dedup could land a forked session's cost on different sessions run to run.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">v1.7.0 — mechanics and corpus numbers</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="ev-dedup"><span class="dl-l">The confirming measurement</span><span class="dl-p">Verdict</span></button>
+      <button class="dl" data-panel="alt-aggregate"><span class="dl-l">Where it lives in the pipeline</span><span class="dl-p">Mechanism</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-rejected" data-kind="Ruling"
+            data-title="Six ideas are rejected — do not re-propose" data-meta="2026-07-03 · ruled · audit outcome"
+            data-src="DECISIONS.md → Decided; session memory">
+    <p>The 2026-07 principal-engineer audit evaluated and rejected six recurring proposals: a Sankey diagram, a cost treemap or icicle chart, a config file, incremental or streaming aggregation, a framework or bundler migration, and a multi-session stacked Gantt.</p>
+    <p>Each was judged against the trace-audit vision rather than on general merit. The Sankey is the clearest example: it answers a flow question, and claudit's question is a trace question.</p>
+    <p>The row exists because these ideas keep coming back. Recording the rejection with its reasoning is cheaper than re-litigating them, and it is why the ideas do not appear as open calls in section 02.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The rejection row and its evidence pointer</span><span class="dl-p">DECISIONS.md</span></a>
+      <button class="dl" data-panel="ev-audit"><span class="dl-l">The audit that produced it</span><span class="dl-p">Verdict</span></button>
+      <button class="dl" data-panel="card-successor"><span class="dl-l">What is left to pick from</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-auditor" data-kind="Ruling"
+            data-title="claudit is a session auditor, not a spend report" data-meta="2026-06-15 · ruled · the reframe"
+            data-src="DECISIONS.md → Decided; docs/agents-audit-roadmap.md">
+    <p>claudit started as a spend report. The v1.6.0 reframe made it a tool for auditing a whole Claude session: what happened, in what order, why, and where it went wrong. Cost is one dimension of that trace, not the product.</p>
+    <p>This ruling is the one that decides arguments. It is why errors, retries and blast radius are first-class, why the Agents trace viewer is the centre of the tool, and why a cost visualisation that answers a flow question rather than a trace question was rejected.</p>
+    <p>It also sets the page's own framing: the standfirst leads with the trace and mentions cost second, because that is the order the ruling establishes.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The roadmap preamble stating the framing</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <a class="dl" href="README.md" target="_blank"><span class="dl-l">The user-facing framing</span><span class="dl-p">README.md</span></a>
+      <button class="dl" data-panel="ruling-rejected"><span class="dl-l">What the framing ruled out</span><span class="dl-p">Ruling</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="ruling-serveonly" data-kind="Ruling"
+            data-title="The Agents view is serve-only" data-meta="2026-06-13 · ruled · no static-report parity"
+            data-src="DECISIONS.md → Decided; docs/agents-audit-roadmap.md">
+    <p>The Agents trace viewer exists only under <code>claudit serve</code>. The one-shot HTML report has no equivalent and is not going to grow one.</p>
+    <p>Three reasons, all structural. The view reads live data and repaints from SSE. It fetches full tool I/O and turn text on demand, which a static file cannot do. And the payload is large enough that inlining it would dominate the report — one Agents payload runs about 186 MB on a real corpus before snippet capping.</p>
+    <p>The static report degrades gracefully rather than half-rendering: the Agents view is absent by design, verified with no console errors as part of the Honeycomb program's sign-off.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="docs/agents-audit-roadmap.md" target="_blank"><span class="dl-l">The conventions section stating it</span><span class="dl-p">docs/agents-audit-roadmap.md</span></a>
+      <a class="dl" href="README.md" target="_blank"><span class="dl-l">Status and limitations</span><span class="dl-p">README.md</span></a>
+      <button class="dl" data-panel="alt-agentflow"><span class="dl-l">The graph it gates</span><span class="dl-p">Mechanism</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="h-0901" data-kind="Decision log"
+            data-title="2026-09-01 — pricing refreshed against the live page" data-meta="unreleased · the fix is on main"
+            data-src="DECISIONS.md log · CHANGELOG.md Unreleased">
+    <p>Two changes landed together. Fable 5.1 and Mythos 5.1, plus their <code>[1m]</code> variants, were absent from the bundled table and were therefore contributing nothing to reported spend. They take the Fable 5 card at $10 / $50, but their cache hits price at $0.25 per MTok — a 0.025x multiplier off input, where every other entry uses 0.1x.</p>
+    <p>Second, Sonnet 5's dated rate period was removed. Anthropic cancelled the 2026-09-01 increase and made the introductory $2 / $10 standard, so the entry is now flat with no rate history.</p>
+    <p>Date-effective pricing itself is unchanged and still exercised by tests. The state files were updated in the same pass, which is what made the release the next checkpoint.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The dated log row</span><span class="dl-p">DECISIONS.md</span></a>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="card-release"><span class="dl-l">The call this created</span><span class="dl-p">Your call</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="h-0816" data-kind="Decision log"
+            data-title="2026-08-16 — Project State Protocol adopted" data-meta="scaffolded from existing sources"
+            data-src="DECISIONS.md log · 2026-08-16">
+    <p>claudit adopted the four-file state protocol: <code>CURRENT.md</code> for live state, <code>DECISIONS.md</code> for settled choices and open questions, <code>CONTEXT_MAP.md</code> for pointers, alongside the existing <code>AGENTS.md</code>.</p>
+    <p>Nothing was invented in the process. Every row in the Decided table was reconstructed from <code>CHANGELOG.md</code>, the roadmap documents, and session memory, and each links its primary source. The log row records that provenance explicitly.</p>
+    <p>The first <code>SITUATION_ROOM.html</code> was generated in the same pass as the front door onto those files.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <button class="dl" data-pane="src-decisions"><span class="dl-l">The scaffolding log row, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+      <button class="dl" data-pane="src-contextmap"><span class="dl-l">What the map points at</span><span class="dl-p">inlined in full · section 08</span></button>
+      <a class="dl" href="AGENTS.md" target="_blank"><span class="dl-l">The stable instructions file</span><span class="dl-p">AGENTS.md</span></a>
+    </div>
+  </template>
+
+  <template data-panel-content="h-0726" data-kind="Release"
+            data-title="v1.8.0 — the price table gains a time dimension" data-meta="2026-07-26 · latest release"
+            data-src="CHANGELOG.md v1.8.0">
+    <p>v1.8.0 closed a silent-error class: until then one number in the price table had to serve both historical and future turns, so a rate change made one of them wrong. Dated <code>rates:</code> periods let each turn price at what it was actually billed at.</p>
+    <p>It also added Claude Opus 5, which had been missing and therefore free, and re-verified every other bundled rate against the live page. Unpriced-model warnings gained turn and token counts, because three unpriced turns and thirty thousand are different problems.</p>
+    <p>One breaking shape change came with it: <code>unknown_models</code> in JSON output went from an array of strings to an array of objects, sorted by unpriced token volume.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.8.0 entry in full</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="ruling-dateeffective"><span class="dl-l">The standing ruling it established</span><span class="dl-p">Ruling</span></button>
+      <button class="dl" data-panel="ev-pricing"><span class="dl-l">What happened to its motivating case</span><span class="dl-p">Verdict</span></button>
+    </div>
+  </template>
+
+  <template data-panel-content="h-0715" data-kind="Release"
+            data-title="v1.7.0 — waterfall, dedup, and the audit" data-meta="2026-07-15 · cost correction release"
+            data-src="CHANGELOG.md v1.7.0">
+    <p>The Timeline lens grew from a flat Gantt into a real trace waterfall: prompt bands segmenting each session, sub-agents re-parented under the turn that spawned them, and progressive disclosure that dropped a 13-agent, 754-tool session from about 1,300 always-on SVG nodes to about 210.</p>
+    <p>Alongside it came the cost correction. Deduping by <code>message.id</code> lowered reported spend for anyone with resumed or forked sessions, and made every drill-down reconcile with the headline.</p>
+    <p>The release also carried most of the principal-engineer audit's output: serve memory work, CI hardening, and prebuilt release binaries for six platform pairs.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.7.0 entry in full</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="ev-dedup"><span class="dl-l">The dedup measurement</span><span class="dl-p">Verdict</span></button>
+      <button class="dl" data-panel="ev-audit"><span class="dl-l">The audit verdict</span><span class="dl-p">Verdict</span></button>
+    </div>
+  </template>
 
 </div>
+
+<script>
+(function () {
+  var b = document.getElementById('themeToggle');
+  if (!b) return;
+  b.addEventListener('click', function () {
+    var r = document.documentElement, cur = r.getAttribute('data-theme');
+    if (!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    r.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+<script>
+/* detail layer — keep verbatim; it is structure, not content */
+(function () {
+  var tpl = {}, hosts = [].slice.call(document.querySelectorAll('[data-panel]'));
+  [].forEach.call(document.querySelectorAll('template[data-panel-content]'), function (t) {
+    tpl[t.getAttribute('data-panel-content')] = t;
+  });
+  if (!hosts.length) return;
+  var dive = document.getElementById('dive'), scrim = document.getElementById('scrim'),
+      kindEl = document.getElementById('ddKind'), titleEl = document.getElementById('ddTitle'),
+      metaEl = document.getElementById('ddMeta'), bodyEl = document.getElementById('ddBody'),
+      srcEl = document.getElementById('ddSrc'), prevB = document.getElementById('ddPrev'),
+      nextB = document.getElementById('ddNext'), backB = document.getElementById('ddBack'),
+      last = null, cur = null, stack = [];
+
+  hosts.forEach(function (h) {
+    if (!tpl[h.getAttribute('data-panel')]) return;
+    h.setAttribute('tabindex', '0');
+    h.setAttribute('role', 'button');
+    h.addEventListener('click', function (e) {
+      if (e.target.closest('a')) return;
+      open(h.getAttribute('data-panel'), h);
+    });
+    h.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(h.getAttribute('data-panel'), h); }
+    });
+  });
+
+  function fam(id) { return /^h\d+$/.test(id) ? 'h' : id.split('-')[0]; }
+  function siblings(id) {
+    return hosts.filter(function (h) { return fam(h.getAttribute('data-panel')) === fam(id); })
+                .map(function (h) { return h.getAttribute('data-panel'); });
+  }
+
+  function open(id, origin, viaBack) {
+    var t = tpl[id];
+    if (!t) return;
+    if (origin) { last = origin; stack = []; }
+    else if (!viaBack && cur && cur !== id) stack.push(cur);
+    cur = id;
+    if (stack.length) {
+      var prev = tpl[stack[stack.length - 1]];
+      backB.textContent = '◀ ' + (prev ? prev.getAttribute('data-title') : 'back');
+      backB.hidden = false;
+    } else { backB.hidden = true; }
+    kindEl.textContent = t.getAttribute('data-kind');
+    titleEl.textContent = t.getAttribute('data-title');
+    metaEl.textContent = t.getAttribute('data-meta');
+    srcEl.innerHTML = '<b>Source</b> ' + t.getAttribute('data-src') + ' — the file on disk wins.';
+    bodyEl.innerHTML = '';
+    bodyEl.appendChild(t.content.cloneNode(true));
+    bodyEl.scrollTop = 0;
+    var sib = siblings(id), n = sib.indexOf(id);
+    prevB.disabled = n <= 0;
+    nextB.disabled = n < 0 || n >= sib.length - 1;
+    prevB.onclick = function () { stack = []; open(sib[n - 1], null, true); };
+    nextB.onclick = function () { stack = []; open(sib[n + 1], null, true); };
+    dive.classList.add('on');
+    scrim.classList.add('on');
+    dive.setAttribute('aria-hidden', 'false');
+    dive.focus();
+  }
+
+  function close() {
+    dive.classList.remove('on');
+    scrim.classList.remove('on');
+    dive.setAttribute('aria-hidden', 'true');
+    cur = null; stack = []; backB.hidden = true;
+    if (last) last.focus();
+  }
+
+  bodyEl.addEventListener('click', function (e) {
+    var x = e.target.closest('[data-panel]');
+    if (x) { e.preventDefault(); open(x.getAttribute('data-panel')); return; }
+    var p = e.target.closest('[data-pane]');
+    if (p) {
+      e.preventDefault();
+      var d = document.getElementById(p.getAttribute('data-pane'));
+      close();
+      if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      return;
+    }
+    var s = e.target.closest('[data-sec]');
+    if (s) {
+      e.preventDefault();
+      var sec = document.getElementById(s.getAttribute('data-sec'));
+      close();
+      if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+  backB.addEventListener('click', function () { if (stack.length) open(stack.pop(), null, true); });
+  document.getElementById('ddClose').addEventListener('click', close);
+  scrim.addEventListener('click', close);
+  document.addEventListener('keydown', function (e) {
+    if (!cur) return;
+    if (e.key === 'Escape') close();
+    if (e.key === 'Backspace' && stack.length) { e.preventDefault(); backB.click(); }
+    if (e.key === 'ArrowLeft' && !prevB.disabled) prevB.onclick();
+    if (e.key === 'ArrowRight' && !nextB.disabled) nextB.onclick();
+  });
+})();
+</script>
 </body>
 </html>
