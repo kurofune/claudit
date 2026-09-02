@@ -413,7 +413,7 @@ svg [data-panel]:hover { opacity: .75; }
     <span>claudit</span><span class="sep">/</span>
     <span>Go CLI</span><span class="sep">/</span>
     <span>MIT</span><span class="sep">/</span>
-    <span data-sr="eyebrow.commits">277 commits</span>
+    <span data-sr="eyebrow.commits">279 commits</span>
   </div>
   <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
   <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
@@ -424,16 +424,16 @@ svg [data-panel]:hover { opacity: .75; }
       <ul>
         <li>Pricing must track Anthropic's published rates.</li>
         <li>The parser must track Claude Code's JSONL schema.</li>
-        <li>One pricing fix is landed but unreleased. That is the live call.</li>
+        <li>v1.8.1 shipped the pricing fix. No checkpoint is scheduled.</li>
       </ul>
     </div>
   </div>
 
   <div class="status-strip">
     <div class="status-cell"><span class="k">Mode</span><span class="v">maintenance</span></div>
-    <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>09-01 pricing</span></div>
-    <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>6 calls</span></div>
-    <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">cut the release</span></div>
+    <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>v1.8.1</span></div>
+    <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>5 calls</span></div>
+    <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">none scheduled</span></div>
     <div class="status-cell"><span class="k">Updated</span><span class="v" data-sr="updated">2026-09-01</span></div>
   </div>
 </header>
@@ -449,8 +449,8 @@ svg [data-panel]:hover { opacity: .75; }
       <div class="sub" data-sr="v.tests.sub">478 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
     <div class="vital"><div class="n" data-sr="v.rulings.n">11</div><div class="l">Standing rulings</div>
       <div class="sub" data-sr="v.rulings.sub">3 questions still open</div></div>
-    <div class="vital"><div class="n" data-sr="v.releases.n">13</div><div class="l">Releases shipped</div>
-      <div class="sub">v1.8.0 on 2026-07-26. The pricing fix is landed but unreleased.</div></div>
+    <div class="vital"><div class="n" data-sr="v.releases.n">14</div><div class="l">Releases shipped</div>
+      <div class="sub">v1.8.1 on 2026-09-01. A patch carrying price-table corrections only.</div></div>
     <div class="vital"><div class="n zero">0</div><div class="l">Open issues</div>
       <div class="sub">GitHub Issues is empty. No successor initiative is proposed.</div></div>
     <div class="vital"><div class="n zero" data-sr="v.rateperiods.n">0</div><div class="l">Dated rate periods</div>
@@ -461,15 +461,16 @@ svg [data-panel]:hover { opacity: .75; }
 <!-- ══ 02 your calls ══ -->
 <section id="open">
   <div class="sec-head"><span class="sec-num">02</span><h2>Your calls</h2>
-    <span class="sec-note">6 calls · the complete set, nothing folded away</span></div>
+    <span class="sec-note">5 calls · the complete set, nothing folded away</span></div>
   <div class="cards">
 
-    <article class="card lead" data-panel="card-release">
+    <article class="card lead" data-panel="card-successor">
       <span class="chip decide">decide</span>
-      <h3>Cut the release that carries the 2026-09-01 pricing fix.</h3>
-      <p>Anthropic cancelled the Sonnet 5 increase to $3 / $15 and made the introductory $2 / $10 standard. v1.8.0 shipped that increase pre-encoded as a dated rate period. Every installed claudit therefore over-reports Sonnet 5 spend by 50% from 2026-09-01. The fix is on <code>main</code> and unreleased, so the wrong number is still the shipped number.</p>
+      <h3>Pick a successor initiative, or rule that there is none.</h3>
+      <p>Both roadmaps are fully shipped. The 2026-07 principal-engineer audit is fully executed. GitHub Issues is empty. v1.8.1 closed the last dated checkpoint, so the repo now has no next target at all.</p>
+      <p>This call gates the other four. The three parked follow-ups only get scheduled inside an initiative. Unpicked is a real state, not a gap in this page.</p>
       <div class="foot">
-        <span class="closes"><b>Closes when</b> a tag ships the refreshed price table.</span>
+        <span class="closes"><b>Closes when</b> an initiative is written down, or maintenance-only is ruled explicitly.</span>
         <span class="src">→ <code>CURRENT.md</code></span>
       </div>
     </article>
@@ -481,16 +482,6 @@ svg [data-panel]:hover { opacity: .75; }
       <div class="foot">
         <span class="closes"><b>Closes when</b> the owner rules: read the field, or leave it to a per-user overlay.</span>
         <span class="src">→ <code>DECISIONS.md</code></span>
-      </div>
-    </article>
-
-    <article class="card" data-panel="card-successor">
-      <span class="chip decide">decide</span>
-      <h3>Pick a successor initiative, or rule that there is none.</h3>
-      <p>Both roadmaps are fully shipped. The 2026-07 principal-engineer audit is fully executed. GitHub Issues is empty. Nothing has been proposed since, so the repo has no next target. Unpicked is a real state, not a gap in this page.</p>
-      <div class="foot">
-        <span class="closes"><b>Closes when</b> an initiative is written down, or maintenance-only is ruled explicitly.</span>
-        <span class="src">→ <code>CURRENT.md</code></span>
       </div>
     </article>
 
@@ -700,11 +691,19 @@ svg [data-panel]:hover { opacity: .75; }
   <div class="tl" data-sr="history">
 <!-- sr:history-top -->
 <div class="tl-day hot">
+      <div class="tl-date">2026-09-01 <em>v1.8.1 — the corrected price table ships</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0901r"><span class="ev">v1.8.1</span><span>A patch release. Price-table corrections only, no new flag or output shape.</span></div>
+        <div class="tl-item"><span class="ev">v1.8.1</span><span>Users on v1.8.0 or earlier over-report Sonnet 5 spend by 50% until they upgrade.</span></div>
+        <div class="tl-item"><span class="ev">state</span><span>The checkpoint closed. No successor initiative is picked.</span></div>
+      </div>
+    </div>
+<div class="tl-day">
       <div class="tl-date">2026-09-01 <em>Pricing refreshed against the live page</em></div>
       <div class="tl-items">
         <div class="tl-item" data-panel="h-0901"><span class="ev">pricing</span><span>Fable 5.1 and Mythos 5.1 added. Cache hits price at 0.025x input, the first entry to break the 0.1x ratio.</span></div>
         <div class="tl-item"><span class="ev">pricing</span><span>Sonnet 5's dated rate period removed. Anthropic cancelled the 2026-09-01 increase.</span></div>
-        <div class="tl-item"><span class="ev">state</span><span>CURRENT.md and DECISIONS.md updated. The release is now the next checkpoint.</span></div>
+        <div class="tl-item"><span class="ev">state</span><span>CURRENT.md and DECISIONS.md updated in the same pass.</span></div>
       </div>
     </div>
 <div class="tl-day">
@@ -713,6 +712,8 @@ svg [data-panel]:hover { opacity: .75; }
         <div class="tl-item"><span class="ev">docs</span><span>The README tagline was aligned with the session-auditor framing.</span></div>
       </div>
     </div>
+<details class="older">
+      <summary>20 more rows · 2026-05-16 → 2026-08-16</summary>
 <div class="tl-day">
       <div class="tl-date">2026-08-16 <em>Project State Protocol adopted</em></div>
       <div class="tl-items">
@@ -720,8 +721,6 @@ svg [data-panel]:hover { opacity: .75; }
         <div class="tl-item"><span class="ev">state</span><span>The first SITUATION_ROOM.html front door was generated.</span></div>
       </div>
     </div>
-<details class="older">
-      <summary>18 more rows · 2026-05-16 → 2026-07-28</summary>
 <div class="tl-day">
       <div class="tl-date">2026-07-28 <em>Agent workflow wired</em></div>
       <div class="tl-items">
@@ -819,19 +818,19 @@ svg [data-panel]:hover { opacity: .75; }
     the cleanup target.
   </p>
   <details class="srcfile" id="src-current">
-    <summary><span class="sf-name">CURRENT.md</span><span class="sf-note">Live state — outranks every other doc on "what are we doing now"</span><span class="sf-lines" data-sr="pane.current.lines">29 lines</span></summary>
+    <summary><span class="sf-name">CURRENT.md</span><span class="sf-note">Live state — outranks every other doc on "what are we doing now"</span><span class="sf-lines" data-sr="pane.current.lines">30 lines</span></summary>
     <div class="sf-body" data-sr="pane.current">
 <h3>CURRENT</h3>
 <p><strong>Mode:</strong> Steady-state maintenance. No active initiative — both roadmaps (<code>docs/agents-redesign.md</code>, <code>docs/agents-audit-roadmap.md</code>) are fully shipped.</p>
 <p><strong>Goal:</strong> Keep claudit correct against upstream reality: pricing current with Anthropic's published rates, the parser current with Claude Code's JSONL schema. Ship fixes and small features as they earn their place.</p>
-<p><strong>Last change:</strong> 2026-09-01 pricing refresh (unreleased) — Fable 5.1 / Mythos 5.1 rate cards added (cache hits at 0.025x input, not 0.1x); Sonnet 5's 2026-09-01 increase was cancelled upstream, so its dated rate period is removed and it is a flat $2 / $10. Before that: v1.8.0 (2026-07-26) date-effective pricing, Opus 5.</p>
+<p><strong>Last change:</strong> v1.8.1 (2026-09-01) — pricing refresh: Fable 5.1 / Mythos 5.1 rate cards added (cache hits at 0.025x input, not 0.1x); Sonnet 5's 2026-09-01 increase was cancelled upstream, so its dated rate period is removed and it is a flat $2 / $10. Before that: v1.8.0 (2026-07-26) date-effective pricing, Opus 5.</p>
 <p><strong>Assumptions:</strong></p>
 <ul>
-<li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. An un-upgraded claudit over-reports Sonnet 5 spend from 2026-09-01 by 50%, so this refresh wants a release.</li>
+<li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. Users on v1.8.0 or earlier over-report Sonnet 5 spend by 50% from 2026-09-01 until they upgrade.</li>
 <li>Fast-mode turns (Opus 5 / 4.8 <code>speed</code> field) price at the standard rate — a known, documented gap (README "Status and limitations").</li>
 </ul>
 <p><strong>Open questions:</strong> see DECISIONS.md → Open questions.</p>
-<p><strong>Next checkpoint:</strong> Cut a release carrying the 2026-09-01 pricing refresh.</p>
+<p><strong>Next checkpoint:</strong> None scheduled. Next trigger is upstream: new Anthropic rates, or a Claude Code JSONL schema change.</p>
 <p><strong>Stop conditions:</strong></p>
 <ul>
 <li>Claude Code changes the JSONL schema → parser catch-up becomes the priority.</li>
@@ -928,17 +927,17 @@ svg [data-panel]:hover { opacity: .75; }
 <div id="dossier" hidden>
 <!-- sr:panels-top -->
 
-  <template data-panel-content="card-release" data-kind="Your call · lead"
-            data-title="Cut the release carrying the pricing fix" data-meta="2026-09-01 · decide · the live call"
-            data-src="CURRENT.md → Next checkpoint">
-    <p>This is the one call with a clock on it. v1.8.0 shipped date-effective pricing and used it immediately: Sonnet 5 carried a dated period ending 2026-08-31, after which the rate rose to $3 / $15. Anthropic then cancelled that increase and made the introductory $2 / $10 the standard rate.</p>
-    <p>The bundled table on <code>main</code> is now correct — flat $2 / $10, no rate history. Every copy anyone installed is not. From 2026-09-01 onward an un-upgraded claudit prices Sonnet 5 turns 50% high, silently, with no warning to fire: the model is priced, just priced wrong. Unpriced-model warnings do not catch a wrong rate.</p>
-    <p>The fix is committed and unreleased, so the wrong number is still the shipped number. See <button class="xref" data-panel="ruling-dateeffective">the date-effective ruling</button> for why the mechanism stays even though nothing uses it.</p>
+  <template data-panel-content="h-0901r" data-kind="Release"
+            data-title="v1.8.1 — the corrected price table ships" data-meta="2026-09-01 · patch · latest release"
+            data-src="CHANGELOG.md v1.8.1 · CURRENT.md">
+    <p>v1.8.1 is a patch. It carries the 2026-09-01 price-table corrections and nothing else — no new capability, no new flag, no change to any output shape.</p>
+    <p>The release matters because the error it fixes is silent. v1.8.0 pre-encoded a Sonnet 5 rate increase that Anthropic later cancelled. An installed v1.8.0 therefore prices Sonnet 5 turns 50% high from 2026-09-01, and no warning fires: the model is priced, just priced wrong. Unpriced-model warnings do not catch a wrong rate. Only an upgrade fixes it.</p>
+    <p>The tag also closed the last dated checkpoint on the repo. See <button class="xref" data-panel="card-successor">the successor call</button> — nothing is scheduled after this.</p>
     <div class="dd-links"><h4>Go read the source</h4>
-      <a class="dl" href="CURRENT.md" target="_blank"><span class="dl-l">Live state: the checkpoint and the assumption behind it</span><span class="dl-p">CURRENT.md</span></a>
-      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The bundled price table as it now stands</span><span class="dl-p">internal/pricing/default.yaml</span></a>
-      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section spelling out the 50% error</span><span class="dl-p">CHANGELOG.md</span></a>
-      <button class="dl" data-pane="src-decisions"><span class="dl-l">The 2026-09-01 log row, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.8.1 entry</span><span class="dl-p">CHANGELOG.md</span></a>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The shipped price table</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <button class="dl" data-pane="src-current"><span class="dl-l">Live state after the release, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+      <button class="dl" data-panel="h-0901"><span class="dl-l">The refresh this release carries</span><span class="dl-p">History</span></button>
     </div>
   </template>
 
@@ -1040,7 +1039,7 @@ svg [data-panel]:hover { opacity: .75; }
     <div class="dd-links"><h4>Go read the source</h4>
       <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The table, its header rules, and the known gap</span><span class="dl-p">internal/pricing/default.yaml</span></a>
       <button class="dl" data-panel="ruling-dateeffective"><span class="dl-l">The date-effective ruling</span><span class="dl-p">Ruling</span></button>
-      <button class="dl" data-panel="card-release"><span class="dl-l">Why this must ship</span><span class="dl-p">Your call</span></button>
+      <button class="dl" data-panel="h-0901r"><span class="dl-l">The release that shipped this table</span><span class="dl-p">History</span></button>
     </div>
   </template>
 
@@ -1135,15 +1134,15 @@ svg [data-panel]:hover { opacity: .75; }
   </template>
 
   <template data-panel-content="ev-pricing" data-kind="Verdict"
-            data-title="Sonnet 5 cliff cancelled — corrected on main" data-meta="2026-09-01 · shipped copies over-report by 50%"
+            data-title="Sonnet 5 cliff cancelled — corrected in v1.8.1" data-meta="2026-09-01 · fixed on upgrade to v1.8.1"
             data-src="DECISIONS.md log · 2026-09-01">
     <p>v1.8.0's motivating case was a real dated rate change: Sonnet 5's introductory $2 / $10 was to expire on 2026-08-31 and rise to $3 / $15. claudit encoded that ahead of time as a dated period so no upgrade would be needed when the cliff passed.</p>
     <p>Anthropic cancelled the increase and made the introductory rate standard. The pre-encoding then became the error it was designed to prevent: from 2026-09-01, an un-upgraded claudit prices Sonnet 5 turns 50% high.</p>
     <p>The same refresh added Fable 5.1 and Mythos 5.1, which had been landing in <code>unknown_models</code> at $0. They are the first entries whose cache hits break the 0.1x ratio, pricing at 0.025x input. On a cache-heavy agent session that difference is most of the bill.</p>
     <div class="dd-links"><h4>Go read the source</h4>
       <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The dated log row with its evidence link</span><span class="dl-p">DECISIONS.md</span></a>
-      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section</span><span class="dl-p">CHANGELOG.md</span></a>
-      <button class="dl" data-panel="card-release"><span class="dl-l">Why this needs a release</span><span class="dl-p">Your call</span></button>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.8.1 entry</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="h-0901r"><span class="dl-l">The release that carried the fix</span><span class="dl-p">History</span></button>
     </div>
   </template>
 
@@ -1239,15 +1238,15 @@ svg [data-panel]:hover { opacity: .75; }
   </template>
 
   <template data-panel-content="h-0901" data-kind="Decision log"
-            data-title="2026-09-01 — pricing refreshed against the live page" data-meta="unreleased · the fix is on main"
-            data-src="DECISIONS.md log · CHANGELOG.md Unreleased">
+            data-title="2026-09-01 — pricing refreshed against the live page" data-meta="shipped in v1.8.1"
+            data-src="DECISIONS.md log · CHANGELOG.md v1.8.1">
     <p>Two changes landed together. Fable 5.1 and Mythos 5.1, plus their <code>[1m]</code> variants, were absent from the bundled table and were therefore contributing nothing to reported spend. They take the Fable 5 card at $10 / $50, but their cache hits price at $0.25 per MTok — a 0.025x multiplier off input, where every other entry uses 0.1x.</p>
     <p>Second, Sonnet 5's dated rate period was removed. Anthropic cancelled the 2026-09-01 increase and made the introductory $2 / $10 standard, so the entry is now flat with no rate history.</p>
-    <p>Date-effective pricing itself is unchanged and still exercised by tests. The state files were updated in the same pass, which is what made the release the next checkpoint.</p>
+    <p>Date-effective pricing itself is unchanged and still exercised by tests. The state files were updated in the same pass. v1.8.1 shipped the corrected table the same day.</p>
     <div class="dd-links"><h4>Go read the source</h4>
       <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The dated log row</span><span class="dl-p">DECISIONS.md</span></a>
-      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The Unreleased section</span><span class="dl-p">CHANGELOG.md</span></a>
-      <button class="dl" data-panel="card-release"><span class="dl-l">The call this created</span><span class="dl-p">Your call</span></button>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.8.1 entry</span><span class="dl-p">CHANGELOG.md</span></a>
+      <button class="dl" data-panel="h-0901r"><span class="dl-l">The release that carried it out</span><span class="dl-p">History</span></button>
     </div>
   </template>
 
@@ -1265,7 +1264,7 @@ svg [data-panel]:hover { opacity: .75; }
   </template>
 
   <template data-panel-content="h-0726" data-kind="Release"
-            data-title="v1.8.0 — the price table gains a time dimension" data-meta="2026-07-26 · latest release"
+            data-title="v1.8.0 — the price table gains a time dimension" data-meta="2026-07-26 · superseded by v1.8.1"
             data-src="CHANGELOG.md v1.8.0">
     <p>v1.8.0 closed a silent-error class: until then one number in the price table had to serve both historical and future turns, so a rate change made one of them wrong. Dated <code>rates:</code> periods let each turn price at what it was actually billed at.</p>
     <p>It also added Claude Opus 5, which had been missing and therefore free, and re-verified every other bundled rate against the live page. Unpriced-model warnings gained turn and token counts, because three unpriced turns and thirty thousand are different problems.</p>
