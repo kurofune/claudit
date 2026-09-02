@@ -2,9 +2,11 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.8.1] — 2026-09-01
 
 Pricing refresh against the live pricing page on 2026-09-01: **Claude Fable 5.1** and **Claude Mythos 5.1** are added, and **Claude Sonnet 5**'s scheduled price increase — which this project encoded ahead of time — was cancelled, so the table drops it.
+
+**Upgrade if you run Sonnet 5.** v1.8.0 correctly encoded a rate increase that Anthropic then called off, so from 2026-09-01 an un-upgraded binary reports Sonnet 5 turns at $3 / $15 instead of the $2 / $10 actually billed. Nothing else in the tool changed.
 
 ### Added
 
@@ -299,7 +301,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/kurofune/claudit/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/kurofune/claudit/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/kurofune/claudit/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/kurofune/claudit/compare/v1.5.0...v1.6.0
