@@ -1,0 +1,628 @@
+formula = "djinn-iter"
+description = "Djinn default iter workflow — claim, freshness gate, AC-quality gate, implement, ONE single-lens review loop, verify loop, full-tree regression loop, commit + push"
+version = 1
+type = "workflow"
+
+# Djinn-provided DEFAULT iter formula. The binary falls back to this
+# embedded copy when the consumer has no local `.djinn/iter.formula.toml`; a
+# consumer that ships its own at the configured formula_path overrides it
+# (consumer-local override -> embedded default).
+#
+# The harness invokes the formula dispatcher (formula.Runner) per
+# check-managed step. Each *-loop step uses the in-process check-function
+# dispatch (mode=go) — the check function reads the latest review/verify
+# output via state.ReadLatestStepOutput, parses the triage agent's verdict
+# (JSON sidecar or report.json), and returns pass / spawn-next. The
+# regression-loop is the one exception: it has no procedure body to parse,
+# so its check RUNS the full-tree test + lint itself (see its header below).
+#
+#   claim → freshness-loop → ac-quality-loop → implement
+#         → review-light-loop → verify-loop → regression-loop → commit-push
+#
+# Cost: 5 LLM steps / 5 agents on the happy path (freshness-triage,
+# ac-quality-review, implement, review-light, verify). The regression-loop
+# adds NO agent on a green tree — its fix child fires only on a broken one.
+#
+# --- Why this shape (djinn-8a2mw) ---
+#
+# This formula was retiered from a heavier ancestor, now preserved verbatim
+# as core/iter-heavy.formula.toml (`formula:heavy`). Two cuts and one
+# retained gate define the difference:
+#
+#   1. ONE single-lens review (review-light-loop) replaces the ancestor's
+#      TWO 5-panel orchestrations (review-impl-loop + review-tests-loop, ~12
+#      review agents). review-light dispatches ONE reviewer that reviews
+#      implementation AND tests in a single pass and emits the SAME fenced
+#      ```json``` triage sidecar (verdict SHIP / SHIP-WITH-FIXES / REWORK)
+#      the review-loop check already parses — so the loop check, the
+#      fix-step filter, the citation ground-truth gate, and the file_nits
+#      dispatcher are all reused byte-for-byte. The evidence for the cut:
+#      marginal review capacity stops buying finding quality on ordinary
+#      diffs (the pre-pege follow-up backlog of ~277 P3 + 92
+#      review-follow-ups was dominated by test-micro-NITs the extra panels
+#      minted).
+#
+#   2. NO internal done-gate (impl-loop). The ancestor promoted
+#      /verify-acceptance ahead of its review loops so review started from
+#      an AC-satisfying tree — 1 agent guarding ~12. Against a 1-agent
+#      review that is close to a wash, and it double-pays for the
+#      verify-acceptance procedure on every clean bead. The terminal
+#      verify-loop below is the single AC backstop.
+#
+#   3. The freshness-loop IS retained, unlike in iter-light. This formula is
+#      what the autonomous drain runs against whatever `bd ready` surfaces,
+#      including old beads whose work already landed or whose premise was
+#      redesigned away — the stale-bead class the gate catches is real here.
+#      iter-light drops it because its beads are operator-selected.
+#
+# For a large diff landing on main, a security-sensitive change, or any bead
+# whose blast radius justifies two independent review panels, route through
+# core/iter-heavy.formula.toml (`formula:heavy`). For a small
+# operator-selected chore, core/iter-light.formula.toml (`formula:light`)
+# drops the freshness gate and runs the AC-quality and verify gates
+# single-shot.
+#
+# --- Loop exhaustion policy ---
+#
+# Per-loop exhaustion behavior is selected by `on_exhausted`. EVERY loop in
+# this file declares it explicitly — the runtime default exists, but a loop
+# that leans on it leaves its terminal disposition unreadable from the file
+# (guarded by TestEmbeddedFormulas_EveryLoopDeclaresOnExhausted, core/).
+#   soft_fail        — halt; working tree unchanged; bead moved to bd
+#                      `deferred` with the needs-operator label and a reason
+#                      naming the loop and its last verdict, so the next drain
+#                      and the operator's failure queue can both see it.
+#   leave_and_reopen — halt; iteration commits retained; bead reopened (open).
+#   hard_reset       — git reset --hard <pre_iter_sha>; bead reopened.
+# The freshness, AC-quality and review loops select soft_fail: nothing they
+# reject is fixable by another unattended pass, so the work is preserved and
+# the bead is parked for a human.
+# The verify-loop selects leave_and_reopen so a verify-failed iter surfaces
+# the failing commits for inspection rather than discarding them, then
+# reopens the bead for re-claim. The regression-loop selects hard_reset —
+# the disposition the commit-push regression gate has always applied to a
+# broken tree, now reached only after the loop's fix child has had a turn.
+#
+# The Go-test gates run `go test` from the directory named by engine.json
+# `djinn.go_module_root` (default "."), NOT a hardcoded module subdir — a
+# consumer whose Go module lives in a subdirectory sets that field and this
+# formula needs no edit.
+#
+# --- Effort convention (djinn-7j7eh) ---
+#
+# EVERY single-agent step in this file pins `effort = "high"` explicitly —
+# the gate steps, implement, review-light, and the fix/verify children alike.
+# Before this pin the fix/verify children declared no effort at all and fell
+# through to the adapter default (claudecode.Profile.DefaultEffort), which was
+# then "xhigh": in a repo pinning djinn.author_effort those steps matched their
+# siblings, but in a consumer repo with no config they silently ran hotter than
+# every step around them. Pinning the whole file removes that asymmetry and
+# makes the TOML self-describing — what you read is what runs, with no
+# config lookup needed to know a step's effort.
+#
+# The pinned value is in lockstep with this repo's .djinn/config.json
+# djinn.author_effort, asserted by
+# TestShippedFormulaEfforts_EveryAgentStepPinsAuthorEffort
+# (cmd/djinn/cmd_formula_describe_test.go). That guard enumerates the agent
+# steps from the parsed graph rather than a hand-maintained id list, so a new
+# step added here without an effort pin fails it. Never bump one side alone.
+
+[vars.bead_id]
+description = "The bead to work on"
+required = true
+
+[[steps]]
+id = "claim"
+title = "Claim {{bead_id}}"
+mode = "go"
+function = "djinn.bead_claim"
+description = "bd update {{bead_id}} --claim --status=in_progress, dispatched in-process via the registered djinn.bead_claim handler (session/run_formula.go)."
+
+# --- Just-in-time freshness/triage gate ---
+#
+# Decide whether a claimed bead's premise is still real BEFORE any
+# implementation iteration is spent. An auto-drain grabs whatever
+# `bd ready` surfaces, including old beads whose work already landed or
+# whose premise was redesigned away; without this gate the worker burns a
+# full iteration discovering the bead is dead — or "completes" a no-op.
+#
+# Sits AFTER claim, BEFORE ac-quality (sibling to it). Putting it first —
+# claim → freshness → ac-quality → implement — means a stale bead
+# short-circuits before any LLM AC-quality pass is spent: there is no
+# point tightening the acceptance_criteria of a bead we are about to close
+# as already-done or obsolete.
+#
+# The check function (djinn.check.freshness_approved) runs a DETERMINISTIC
+# pre-probe FIRST (no LLM): re-check the bead's claimed deliverable
+# against current HEAD. If already satisfied → close the bead for free
+# with verdict=already-done, no LLM call. Only when the probe is
+# inconclusive does one freshness-triage LLM pass judge premise validity:
+#
+#   verdict=fresh         → exit 0, loop exits pass, ac-quality runs next
+#   verdict=already-done  → exit 3, close-and-skip (bead correctly done)
+#   verdict=obsolete      → exit 3, close-and-skip (premise no longer real)
+#   other / parse fail    → exit 2, loop iterates if budget remains
+#
+# The close-and-skip verdicts reuse the ac-quality exit-3 halt plumbing
+# via a freshness_stale side-channel halt the session layer reads back to
+# `bd close` the work bead with the recorded reason and skip implement — a
+# SUCCESSFUL terminal disposition, distinct from the operator-required
+# DEFER and from rollback.
+#
+# Budget rationale: max_attempts=2 — one read, one re-read after a
+# fix-freshness no-op. A bead whose freshness verdict cannot be parsed in
+# two passes is a prompt-contract fault, not "needs more iteration."
+
+[[steps]]
+id = "freshness-loop"
+title = "Freshness/triage gate — is this bead's premise still real?"
+needs = ["claim"]
+description = """
+Loop body: run the freshness-triage procedure against the worker's worktree at HEAD.
+The check function runs a deterministic pre-probe first (no LLM); an
+already-satisfied deliverable closes the bead for free. Otherwise the LLM
+pass emits fresh (proceed to implement) / already-done / obsolete (close
+and skip implement). Runs after claim and before ac-quality so a stale
+bead is closed before any implementation OR AC-quality cost is paid.
+"""
+
+  [steps.check]
+  max_attempts = 2
+  on_exhausted = "soft_fail"
+
+    [steps.check.check]
+    mode = "go"
+    function = "djinn.check.freshness_approved"
+    args = { freshness_step = "freshness-triage" }
+    timeout = "10m"
+
+  [[steps.children]]
+  id = "freshness-triage"
+  title = "Run the freshness-triage procedure"
+  prompt = "freshness-triage"
+  # Lean-model pin (2026-08-09): Sonnet. Freshness is an evidence-vs-HEAD
+  # comparison, and the deterministic Go pre-probe in the check function
+  # already short-circuits the clear-cut cases before this step's LLM pass
+  # runs. Effort stays in lockstep with .djinn/config.json author_effort.
+  model = "sonnet"
+  effort = "high"
+  adapter = "claude-code"
+  description = "Single-pass premise-validity judgement of the claimed bead against the worktree at HEAD. Skill emits a fenced ```json``` sidecar with verdict (fresh/already-done/obsolete) and a reason."
+
+  [[steps.children]]
+  id = "fix-freshness"
+  title = "No-op fix step (freshness has no agent-side remediation)"
+  needs = ["freshness-triage"]
+  prompt = "noop"
+  effort = "high"
+  description = """
+Always a no-op, on every iteration. Freshness has no fix action the agent
+can take — a bead is either fresh (proceed) or stale (closed by the check's
+close-and-skip disposition). This child exists only to satisfy the loop
+body shape; an unparseable verdict that forces iter 2 simply re-runs
+freshness-triage.
+"""
+
+# --- Pre-implementation AC-quality gate ---
+#
+# Refuse to start implementation against a bead whose acceptance_criteria
+# would admit a skin-deep, embarrassing minimum-output implementation.
+# The ac-quality-review procedure probes each criterion with the
+# Minimum-Output Simulation ("what's the cheapest impl that literally
+# satisfies this line? Is it embarrassing?") and emits a CONCRETE or
+# UNDERSPEC verdict via a fenced ```json``` sidecar. The check function
+# (djinn.check.ac_quality_approved) reads the sidecar:
+#
+#   verdict=CONCRETE   → exit 0, loop exits pass, implement runs next
+#   verdict=UNDERSPEC  → exit 1, loop spawns fix-ac-quality (tightens
+#                        the bead's acceptance_criteria via bd update)
+#                        and re-runs the review on the next iter
+#   other / parse fail → exit 2, loop iterates if budget remains
+#
+# Failure mode on exhaustion: halt-and-escalate. There is no terminal-
+# iter rescue path (UNDERSPEC at iter max means the criteria are still
+# vague, not "we have cosmetic polish to defer" — proceeding to
+# implement against vague criteria is the failure mode this gate exists
+# to prevent). The agent's two paths are tighten-the-AC (the loop's
+# fix step's job) or escalate (operator triage of a fundamentally
+# under-spec'd bead).
+#
+# Budget rationale: max_attempts=2 — one read, one tightened re-read. This
+# is the budget that distinguishes the default from iter-light, which runs
+# the same gate at max_attempts=1: under 1 attempt the fix child still
+# tightens the bead, but the tightening is never re-reviewed in-run, so a
+# first-pass UNDERSPEC always halts. Acceptable for an operator-vetted
+# light bead; wasteful for an unattended default. A bead that can't reach
+# CONCRETE in two passes is structurally under-spec'd, not "needs more
+# iteration."
+
+[[steps]]
+id = "ac-quality-loop"
+title = "AC-quality review until concrete"
+needs = ["freshness-loop"]
+description = """
+Loop body: run ac-quality-review, then tighten the bead's
+acceptance_criteria if the review verdict is UNDERSPEC. Catches
+under-specified criteria BEFORE implementation begins, so the
+downstream review and verify loops don't pay the cost of an
+implementation written against vague intent.
+
+Failure mode on exhaustion (terminal-iter UNDERSPEC): halt-and-escalate.
+Either tighten the AC (the fix-ac-quality body child does this via
+bd update) or escalate — the gate does NOT silently skip. A bead the
+agent cannot tighten in two passes goes to the operator for triage.
+"""
+
+  [steps.check]
+  max_attempts = 2
+  on_exhausted = "soft_fail"
+
+    [steps.check.check]
+    mode = "go"
+    function = "djinn.check.ac_quality_approved"
+    args = { ac_quality_step = "ac-quality-review" }
+    timeout = "10m"
+
+  [[steps.children]]
+  id = "ac-quality-review"
+  title = "Run the ac-quality-review procedure"
+  prompt = "ac-quality-review"
+  # Lean-model pin (2026-08-09): Fable, like review-light — this gate's
+  # verdict decides whether implementation may start at all, and its input
+  # (the bead's fields alone, no diff) is small enough that the strongest
+  # tier costs almost nothing here. Effort stays in lockstep with
+  # .djinn/config.json author_effort.
+  model = "fable"
+  effort = "high"
+  adapter = "claude-code"
+  description = "Single-lens review of the bead's acceptance_criteria. Skill emits a fenced ```json``` sidecar with verdict (CONCRETE/UNDERSPEC) and per-criterion findings."
+
+  [[steps.children]]
+  id = "fix-ac-quality"
+  title = "Tighten the bead's acceptance_criteria"
+  needs = ["ac-quality-review"]
+  prompt = "fix-ac-quality"
+  # Lean-model pin (2026-08-09): Sonnet — this child applies the review's
+  # given rewrite_hints via bd update; the Fable re-review above re-scores
+  # the result, so the intelligence sits in the gate, not the rewrite.
+  model = "sonnet"
+  effort = "high"
+  adapter = "claude-code"
+  description = """
+Verdict-gated, NOT iter-gated: body children run BEFORE the loop check, so
+on an UNDERSPEC pass this child fires in the SAME iteration (skipped only
+when the verdict is CONCRETE — the buildACQualityFixPrompt short-circuit,
+run_formula.go). It reads the ac-quality-review findings, applies each
+`rewrite_hint`, and updates the bead via
+`bd update {{bead_id}} --acceptance="..."`. With max_attempts=2 the next
+iter's ac-quality-review re-scores the tightened criteria; the loop exits
+when verdict=CONCRETE.
+"""
+
+[[steps]]
+id = "implement"
+title = "Initial implementation of {{bead_id}}"
+needs = ["ac-quality-loop"]
+prompt = "implement"
+# Idle window for THIS step, overriding --agent-idle-timeout (djinn-np4m4.8).
+# implement is the longest, quietest step in the chain — a single tool call can
+# be a full-tree test run — so it gets a wider silence budget than the review
+# and gate steps, which the flag default (15m) sizes for. The wall-clock
+# ceiling (--agent-timeout) is unchanged: this widens what counts as hung, not
+# how long the step may run.
+idle_timeout = "20m"
+# Per-step agent knobs (djinn-zs9su.3), kept declared to demonstrate the knob
+# wiring end-to-end (load-validated, described, resolved per step). Effort
+# matches this repo's .djinn/config.json author_effort ("high") so implement
+# runs at the same effort as the knob-less steps; the lockstep is asserted by
+# TestProductionKnobEfforts_LockstepWithAuthorEffort. Consumers without an
+# author_effort config fall back to the claudecode profile default "xhigh"
+# (internal/djinn/runtime/claudecode/knobprofile.go), so for them this pinned
+# step runs COOLER than their knob-less steps — a trade-off accepted in
+# djinn-zrzl1. Change these to run implement on a different
+# model/effort/adapter.
+model = "opus[1m]"
+effort = "high"
+adapter = "claude-code"
+description = "First-pass implementation. The review-light-loop and the terminal verify-loop are the backstops — this formula runs no internal done-gate (see the header's cut #2)."
+
+# --- Single-lens review loop ---
+#
+# ONE reviewer agent reviews the implementation AND tests in a single pass
+# and emits the same fenced ```json``` triage sidecar the review-loop check
+# parses (djinn.check.review_approved). The check, its BLOCKER-count gate,
+# its citation ground-truth gate (diff_base_step below), the fix-step
+# filter, and the file_nits dispatcher are all reused unchanged from the
+# heavy formula's review loops — only the body child differs (review-light
+# dispatches one reviewer, not a 5-panel orchestration).
+#
+# Budget rationale: max_attempts=3, matching iter-light. This is the ONE
+# loop whose budget does NOT drop to 1 in the light tier, because
+# SHIP-WITH-FIXES is the COMMON review verdict — a 1-attempt review loop
+# would spend fix-light and then soft_fail-halt on nearly every run. Two
+# attempts buy the fix-then-re-review cycle that actually closes findings.
+#
+# The THIRD attempt is what the forced adversarial re-review costs
+# (djinn-itudg). Because diff_base_step is set below, the zero-findings-SHIP
+# spot-check (internal/djinn/formula/checks/adversarial.go) is ARMED on this
+# loop: any iteration that emits SHIP with zero promoted findings on a diff
+# past the 40-changed-line threshold returns exit 1 and demands one
+# adversarial re-review before the loop may pass. That gate has no
+# MaxAttempts awareness, and it fires BEFORE the terminal-iter rescue — so at
+# max_attempts=2 the loop's most common SUCCESSFUL shape halted:
+#
+#   iter 1  SHIP-WITH-FIXES  → fix-light applies the findings
+#   iter 2  SHIP, 0 findings → spot-check forces a re-review… on the terminal
+#                              attempt → exhaustion → soft_fail halt
+#
+# A clean review after a clean fix is exactly what the loop exists to produce,
+# and it is not an operator-triage event. The third attempt is where that
+# forced re-review runs. Note the budget is a CEILING, not a spend: a
+# first-iter SHIP on a trivial diff still exits at one attempt, so the extra
+# attempt is only paid on runs that would otherwise have halted — the
+# happy-path step count in this file's header is unchanged.
+#
+# on_exhausted=soft_fail preserves the work tree and halts for operator
+# triage.
+
+[[steps]]
+id = "review-light-loop"
+title = "Single-lens review until approved"
+needs = ["implement"]
+description = """
+Loop body: run the review-light single-reviewer pass, then implement its
+BLOCKER + IMPORTANT findings. Exits when the reviewer emits Verdict: SHIP.
+Exhausts at max_attempts with on_exhausted=soft_fail (work tree preserved;
+harness escalates).
+"""
+
+  [steps.check]
+  max_attempts = 3
+  on_exhausted = "soft_fail"
+  # Money bound, alongside the turn bound above (djinn-np4m4.4). The loop
+  # stops after the current check once its cumulative agent cost exceeds
+  # 2.0 x the implement step's cost for this bead and outer iter: a review
+  # pass that costs twice what writing the code cost has stopped being
+  # review and started being a second implementation. On djinn-iang4.3 the
+  # review loop spent $12.72 against a $6.33 implement step; at 2.0 it
+  # would have stopped one iteration earlier. A SHIP-WITH-FIXES on the
+  # stopping iteration still takes the graceful-exhaustion rescue, so the
+  # residual findings are filed rather than stranded. Every firing appends
+  # a loop_exhausted event and counts toward the cap-fired SLO.
+  spend_ceiling_ratio = 2.0
+
+    [steps.check.check]
+    mode = "go"
+    function = "djinn.check.review_approved"
+    # diff_base_step turns on mechanical citation validation (djinn-o8x5.1):
+    # every promoted fix finding must cite a file:line that resolves to
+    # `git diff <ac-quality-loop-sha>..HEAD` — the diff the reviewer judged.
+    # ac-quality-loop is the last step before implement and commits no git
+    # state, so its captured SHA is the pre-implementation baseline; the
+    # diff base..HEAD is exactly the code this bead produced. A citation
+    # that references nothing rejects via the loop's retry exit.
+    args = { review_step = "review-light", fix_threshold = "important", diff_base_step = "ac-quality-loop" }
+    timeout = "15m"
+
+  [[steps.children]]
+  id = "fix-light"
+  title = "Apply review-light feedback (severity ≥ {{fix_threshold}})"
+  prompt = "fix-light"
+  effort = "high"
+  description = """
+Runs FIRST in the loop body and acts on the PRIOR iteration's review-light
+output — the loop judges before it fixes (djinn-np4m4.3), so the
+iteration ends with the review the check reads. buildLoopFixPrompt
+(run_formula.go) reads `<loop>.iter-(N-1)/review-light`; it renders nothing
+on iteration 1 (no prior review), on a prior SHIP (the priorStepApproved
+short-circuit), and when the prior iteration's citation gate rejected
+that review — in each case no agent is spawned. It acts on findings at
+severity ≥ fix_threshold (set in steps.check.check.args above; default
+"important" → BLOCKER + IMPORTANT). Always skip COUNTER-tagged actions
+(do-not-act). Never act on INVENTED. The same arg drives both the loop's
+iterate-vs-pass decision (review_approved.go) and this fix step's filter
+(buildLoopFixPrompt → BuildFixPrompt) — flip it in one place to flip both.
+"""
+
+  [[steps.children]]
+  id = "review-light"
+  title = "Run single-lens review"
+  needs = ["fix-light"]
+  prompt = "review-light"
+  # Per-step agent knobs. Model is DELIBERATELY Fable — UNLIKE the heavy
+  # formula's review shells (djinn-21984), which are thin dispatchers whose
+  # intelligence binds via agent frontmatter, review-light IS the single
+  # reviewer: no panel behind it, so the model here is the review
+  # intelligence itself. It is the only review pass this formula gets — run
+  # it on the strongest model. Effort stays in lockstep with
+  # .djinn/config.json author_effort ("high").
+  model = "fable"
+  effort = "high"
+  adapter = "claude-code"
+  description = "ONE reviewer agent reviews implementation + tests in a single pass and emits a structured triage sidecar + verdict (SHIP / SHIP-WITH-FIXES / REWORK)."
+
+  [[steps.children]]
+  id = "file-nits-light"
+  mode = "file_nits"
+  needs = ["review-light"]
+  description = """
+Per-iter file_nits dispatch: reads review-light's promoted_findings, files
+kind=fix entries as follow-up NIT beads via the FileNitFollowUps filer, and
+appends kind=counter entries to the parent bead as "COUNTER: <file:line>
+<action>" notes. Dedup is structural (same file:line + same parent → skip).
+Mode=file_nits is a mechanical dispatch, NOT an LLM agent — it does not
+count against the happy-path LLM-step budget.
+"""
+    [steps.children.file_nits]
+    from = "review-light"
+
+# Additional review loops can be inserted here (security, design, docs, etc.)
+# by adding more *-loop steps with the same shape. Composition is the formula's
+# job; no harness change required.
+
+# --- Terminal verify-loop: the single acceptance backstop ---
+#
+# Budget rationale: max_attempts=2 — one verify, one re-verify after
+# fix-verify addresses unmet criteria. iter-light runs this same gate at
+# max_attempts=1, where the fix child still fires but its work is never
+# re-verified in-run, so a first-pass REQUEST CHANGES always reopens the
+# bead. Two attempts let the default recover from the common case without
+# an operator round-trip. The heavy formula runs 3 because by the time its
+# terminal verify runs the code has already survived two review panels, so
+# a failure there signals a deeper mismatch worth more budget.
+#
+# Exhaust → leave_and_reopen: the iteration's commits — including any the
+# fix child made — are retained on disk so the operator can inspect the
+# failing diff, and the bead reopens for re-claim.
+
+[[steps]]
+id = "verify-loop"
+title = "Verify acceptance until approved"
+needs = ["review-light-loop"]
+description = """
+Loop body: run verify-acceptance, then fix unmet acceptance criteria.
+This is the ONLY acceptance gate in the formula — there is no internal
+done-gate ahead of the review loop (see the header's cut #2), so a
+mismatch between the implementation and the bead's acceptance_criteria
+surfaces here or not at all.
+"""
+
+  [steps.check]
+  max_attempts = 2
+  on_exhausted = "leave_and_reopen"
+
+    [steps.check.check]
+    mode = "go"
+    function = "djinn.check.verify_approved"
+    args = { verify_step = "verify" }
+    timeout = "15m"
+
+  [[steps.children]]
+  id = "verify"
+  title = "Run the verify-acceptance procedure"
+  prompt = "verify"
+  effort = "high"
+
+  [[steps.children]]
+  id = "fix-verify"
+  title = "Apply verify-acceptance feedback (unmet criteria)"
+  needs = ["verify"]
+  prompt = "fix-verify"
+  effort = "high"
+  description = """
+Verdict-gated, NOT iter-gated: fires in the same iteration whenever the
+verify verdict is non-approving (skipped on APPROVE via the
+priorStepApproved short-circuit). With max_attempts=2 its fixes ARE
+re-verified by the next iteration's verify pass.
+"""
+
+# --- Full-tree regression + lint loop: the last fixable failure ---
+#
+# The regression gate (internal/djinn/gate/regression.go — the module's
+# `go test -short ./...` composed with the configured djinn.lint_argv) has
+# always run inside the commit-push handler, and its ONLY disposition was
+# s.rollback: git reset --hard, git clean, bead reopened, no agent ever told
+# what broke. On 2026-09-04 that cost bead djinn-iang4.3 a 31-minute, $20
+# iteration over two unchecked f.Close() errcheck findings in a test file.
+# Every other gate in this formula is a loop with a paired fix step;
+# regression was the one gate that could only reject.
+#
+# The general rule this step lands: a gate that can fail on something an
+# agent can fix must be a loop with a fix step. Rollback is the EXHAUSTION
+# disposition, not the first response.
+#
+# Shape note — this loop is not shaped like its siblings, and the difference
+# is load-bearing. The review/verify/ac-quality loops run a PROCEDURE body
+# child that emits a verdict sidecar, and their check parses it. Here the
+# run IS the check: djinn.check.regression_clean calls the harness's
+# RegressionRun seam, which drives the SAME gate.RegressionGate the
+# commit-push handler drives (one runner, one lint argv, one timeout — the
+# loop and the safety net cannot disagree about what "clean" means). So the
+# loop has exactly ONE body child, the fix agent, and the check's failure
+# text reaches it through the per-iter `regression-run` artifact the harness
+# files. There is no second `go test` invocation and no duplicated argv.
+#
+#   iter 1  fix-regression skipped (no failure recorded yet)
+#           → check runs the tree → broken → files the failure → iter 2
+#   iter 2  fix-regression reads iter 1's failure text verbatim and fixes it
+#           → check re-runs the tree → clean → loop passes → commit-push
+#
+# A GREEN tree therefore costs one full-tree run and ZERO agents: the fix
+# child renders an empty prompt (no failure artifact to read) and
+# StepBodyImplementer skips it.
+#
+# Budget rationale: max_attempts=2 — one detect, one fix-and-recheck. At 1
+# the fix child's work would never be re-checked, so every failure would
+# still roll back and the loop would buy nothing. Past 2 the harness would
+# be paying repeated full-tree runs for an agent that could not fix a
+# mechanical break in one pass — at that point the failure is not the
+# mechanical class this loop exists for.
+#
+# Exhaust → hard_reset: exactly the disposition the commit-push gate has
+# always taken (git reset --hard <pre_iter_sha> + bead reopened), under the
+# gate label "regression" rather than a loop-specific one, so an exhausted
+# loop and a commit-push rejection stay one queryable forensic series
+# (internal/djinn/session/run_formula.go, regressionLoopID).
+#
+# The commit-push handler's own regression gate is UNCHANGED and still runs
+# as the final safety net: it is what catches a tree broken by whatever the
+# fix child itself committed after this loop passed.
+
+[[steps]]
+id = "regression-loop"
+title = "Full-tree tests + lint until clean"
+needs = ["verify-loop"]
+description = """
+Loop body: the check runs the module's full-tree `go test -short ./...`
+plus the configured lint command; when it fails, the fix child gets the
+gate's output verbatim on the next iteration and repairs the tree. Exits
+as soon as the tree is clean — on a green tree, in one iteration with no
+agent spawned. Exhausts to the same rollback the commit-push gate has
+always applied to a broken tree.
+"""
+
+  [steps.check]
+  max_attempts = 2
+  on_exhausted = "hard_reset"
+
+    [steps.check.check]
+    mode = "go"
+    function = "djinn.check.regression_clean"
+    # Generous relative to the <30 s the -short tree budgets (repo
+    # AGENTS.md) and to the lint run beside it: the ceiling that actually
+    # bites is regressionTimeoutDefault (10m), which the session applies
+    # inside the gate call itself. This one bounds the whole check dispatch.
+    timeout = "15m"
+
+  [[steps.children]]
+  id = "fix-regression"
+  title = "Fix the failing full-tree tests / lint findings"
+  prompt = "fix-regression"
+  # No model pin: this child inherits .djinn/config.json author_model, like
+  # verify / fix-verify / fix-light. Effort is pinned per this file's
+  # convention (see the header's "Effort convention") so no step silently
+  # runs on the adapter default.
+  effort = "high"
+  description = """
+Artifact-gated, NOT iter-gated: the builder reads the PRIOR iteration's
+recorded gate output (buildRegressionFixPrompt, run_formula.go) and renders
+"" when there is none — iter 1, and every green tree — so the empty-prompt
+guard skips the invocation entirely. It fixes the named test failures and
+lint findings; weakening or deleting a failing test, or silencing a lint
+rule, is explicitly forbidden by the prompt.
+"""
+
+[[steps]]
+id = "commit-push"
+title = "Commit and push {{bead_id}}"
+needs = ["regression-loop"]
+mode = "go"
+function = "djinn.commit_push"
+description = """
+git push + bd close + bd dolt push, dispatched in-process via the
+registered djinn.commit_push handler (session/run_formula.go). The
+handler wraps the commitClose body so the close artifacts — push
+retries, bd close idempotency, dolt replication — are preserved.
+A push transport failure halts the session WITHOUT rollback (the
+agent's commit is on disk).
+"""

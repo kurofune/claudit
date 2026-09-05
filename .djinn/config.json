@@ -1,0 +1,10 @@
+{
+  "_comment": "go_module_root is \".\" for root-module repos; subdir-module repos (e.g. an engine/ subdir) set it to their module subdirectory. dirty_prefixes lists this repo's top-level source dirs — EDIT it to match your layout so the pre-iteration dirty baseline is scoped to your source (an omitted or empty list watches everything).",
+  "djinn": {
+    "dirty_prefixes": [
+      "cmd",
+      "internal"
+    ],
+    "go_module_root": "."
+  }
+}
