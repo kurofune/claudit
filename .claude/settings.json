@@ -1,7 +1,16 @@
 {
   "enabledPlugins": {
+    "djinn@djinn": true,
     "gopls-lsp@claude-plugins-official": true,
     "impeccable@impeccable": true
+  },
+  "extraKnownMarketplaces": {
+    "djinn": {
+      "source": {
+        "repo": "kurofune/djinn",
+        "source": "github"
+      }
+    }
   },
   "hooks": {
     "PostToolUse": [

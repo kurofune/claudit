@@ -1,7 +1,8 @@
 {
   "database": "dolt",
   "backend": "dolt",
-  "dolt_mode": "embedded",
+  "dolt_mode": "server",
+  "dolt_server_port": 3312,
   "dolt_database": "claudit",
   "project_id": "34158327-981b-415e-b5dc-055490d104b6"
 }

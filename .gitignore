@@ -29,3 +29,8 @@ todo.md
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Djinn (added by djinn init)
+.djinn/state/
+.djinn/session-id
+go.work
