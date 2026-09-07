@@ -25,9 +25,9 @@ type = "workflow"
 #
 # --- Why this shape (djinn-8a2mw) ---
 #
-# This formula was retiered from a heavier ancestor, now preserved verbatim
-# as core/iter-heavy.formula.toml (`formula:heavy`). Two cuts and one
-# retained gate define the difference:
+# This formula was retiered from a heavier ancestor (the two-5-panel chain,
+# deleted by djinn-y8thy; the /5-panel-review-* skills survive for
+# interactive use). Two cuts and one retained gate define the difference:
 #
 #   1. ONE single-lens review (review-light-loop) replaces the ancestor's
 #      TWO 5-panel orchestrations (review-impl-loop + review-tests-loop, ~12
@@ -49,18 +49,36 @@ type = "workflow"
 #      verify-acceptance procedure on every clean bead. The terminal
 #      verify-loop below is the single AC backstop.
 #
-#   3. The freshness-loop IS retained, unlike in iter-light. This formula is
-#      what the autonomous drain runs against whatever `bd ready` surfaces,
-#      including old beads whose work already landed or whose premise was
-#      redesigned away — the stale-bead class the gate catches is real here.
-#      iter-light drops it because its beads are operator-selected.
+#   3. The freshness-loop IS retained. This formula is what the autonomous
+#      drain runs against whatever `bd ready` surfaces, including old beads
+#      whose work already landed or whose premise was redesigned away — the
+#      stale-bead class the gate catches is real here.
 #
-# For a large diff landing on main, a security-sensitive change, or any bead
-# whose blast radius justifies two independent review panels, route through
-# core/iter-heavy.formula.toml (`formula:heavy`). For a small
-# operator-selected chore, core/iter-light.formula.toml (`formula:light`)
-# drops the freshness gate and runs the AC-quality and verify gates
-# single-shot.
+# --- The four formulas (djinn-y8thy rulings D5-D12; djinn-2d7xt) ---
+#
+# core/ carries FOUR formula files and no more:
+#
+#   iter.formula.toml                 the default — THIS file.
+#                                     Astra builds, Fable judges, Opus fixes.
+#   iter-claude.formula.toml          `formula:claude` — all-Claude fallback.
+#                                     Opus builds, Fable judges, Opus fixes.
+#   iter-codex.formula.toml           `formula:codex` — all-codex variant.
+#                                     Astra builds and fixes, Astra high judges.
+#   iter-mixed-no-fable.formula.toml  `formula:mixed-no-fable` — the Fable-out
+#                                     mixed layout. Opus builds and fixes,
+#                                     Astra high judges.
+#
+# djinn-2d7xt superseded this ruling's fixed layout count with the
+# Fable-separate-bucket evidence: an exhausted Fable window leaves the Opus
+# bucket spendable, so a fourth layout that spends Opus and Astra (and no
+# Fable) is worth its file.
+#
+# The variants are OVERRIDE files (D7): `extends = ["iter"]` plus
+# `[[compose.override]]` directives that patch a named step's
+# adapter/model/effort. They restate nothing, so they cannot drift from this
+# file — the retier deleted the copy-drift guard along with the copies.
+# The five pre-retier variants are gone; the /5-panel-review-* skills survive
+# for interactive use.
 #
 # --- Loop exhaustion policy ---
 #
@@ -88,25 +106,52 @@ type = "workflow"
 # consumer whose Go module lives in a subdirectory sets that field and this
 # formula needs no edit.
 #
-# --- Effort convention (djinn-7j7eh) ---
+# --- Model / effort convention (djinn-y8thy) ---
 #
-# EVERY single-agent step in this file pins `effort = "high"` explicitly —
-# the gate steps, implement, review-light, and the fix/verify children alike.
-# Before this pin the fix/verify children declared no effort at all and fell
-# through to the adapter default (claudecode.Profile.DefaultEffort), which was
-# then "xhigh": in a repo pinning djinn.author_effort those steps matched their
-# siblings, but in a consumer repo with no config they silently ran hotter than
-# every step around them. Pinning the whole file removes that asymmetry and
-# makes the TOML self-describing — what you read is what runs, with no
-# config lookup needed to know a step's effort.
+# EVERY single-agent step in this file pins its `effort` explicitly — the gate
+# steps, implement, review-light, and the fix/verify children alike. That is the
+# claim the guard enforces: TestShippedFormulaEfforts_EveryAgentStepPinsAnEffort
+# (cmd/djinn/cmd_formula_describe_test.go) enumerates every single-agent step
+# across all three shipped formulas and fails on a missing effort.
 #
-# The pinned value is in lockstep with this repo's .djinn/config.json
-# djinn.author_effort, asserted by
-# TestShippedFormulaEfforts_EveryAgentStepPinsAuthorEffort
-# (cmd/djinn/cmd_formula_describe_test.go). That guard enumerates the agent
-# steps from the parsed graph rather than a hand-maintained id list, so a new
-# step added here without an effort pin fails it. Never bump one side alone.
-
+# Adapter and model are pinned on every single-agent step BUT `fix-freshness`
+# — a `prompt = "noop"` child with no agent-side remediation, which pins
+# effort only and takes the adapter/model default. Read a step's adapter+model
+# off the step everywhere else; only fix-freshness needs a default lookup, and
+# a no-op step's tier does not matter.
+#
+# A step on the codex adapter carries NO `model =` line: the codex model is
+# pinned ONCE, at the adapter (internal/djinn/runtime/codex/knobprofile.go
+# `defaultModel` = "gpt-6-astra"), and formula files never repeat that id. A
+# codex step that wants a NON-default codex model (gpt-5.6-luna) names it —
+# iter-codex does, this file does not.
+#
+# The tiering (rulings D10-D12, Nate 2026-09-05; evidence: arXiv 2607.21656
+# cross-model review, the Artificial Analysis Sept-2026 indexes, and the
+# per-step cost split measured off summoner events.jsonl — implement 41%,
+# review-light 36%, fix-light 10%, ac-quality 7%, verify 6%):
+#
+#   OpenAI builds, Claude judges. `implement` runs on codex/gpt-6-astra at
+#   effort medium — the largest single cost line, moved off Claude quota
+#   entirely. Every judging step (ac-quality-review, review-light, verify)
+#   stays on Claude, and the judge is always stronger than the builder, by
+#   family or by one effort notch. The CORRECTING fixers (fix-light,
+#   fix-regression) are Opus: they edit code the judge just condemned, so they
+#   need the judge's tier, not the builder's. fix-verify is the carve-out
+#   (2026-09-06) — it authors criteria the judge found MISSING rather than
+#   correcting what it condemned, so it carries implement's knobs exactly, in
+#   this file and in every variant.
+#
+# The effort rule: every step at its vendor's default "high", EXCEPT Astra as
+# builder/fixer at medium. Nothing runs at xhigh, max or ultra in this file;
+# iter-codex pins Luna at max on its two cheap gate steps and nowhere else.
+# No step runs hotter than that without a proof showing a miss.
+#
+# The per-step efforts are asserted verbatim against the ruling's end-state
+# table by TestEmbeddedFormulas_KnobsMatchRetierTable
+# (core/variant_formula_knobs_test.go), which reads all four formulas out of
+# the embed FS. Never change a knob here without changing that table.
+#
 [vars.bead_id]
 description = "The bead to work on"
 required = true
@@ -180,7 +225,7 @@ bead is closed before any implementation OR AC-quality cost is paid.
   id = "freshness-triage"
   title = "Run the freshness-triage procedure"
   prompt = "freshness-triage"
-  # Lean-model pin (2026-08-09): Sonnet. Freshness is an evidence-vs-HEAD
+  # Sonnet, re-ratified by the retier (djinn-y8thy). Freshness is an evidence-vs-HEAD
   # comparison, and the deterministic Go pre-probe in the check function
   # already short-circuits the clear-cut cases before this step's LLM pass
   # runs. Effort stays in lockstep with .djinn/config.json author_effort.
@@ -227,12 +272,10 @@ freshness-triage.
 # fix step's job) or escalate (operator triage of a fundamentally
 # under-spec'd bead).
 #
-# Budget rationale: max_attempts=2 — one read, one tightened re-read. This
-# is the budget that distinguishes the default from iter-light, which runs
-# the same gate at max_attempts=1: under 1 attempt the fix child still
-# tightens the bead, but the tightening is never re-reviewed in-run, so a
-# first-pass UNDERSPEC always halts. Acceptable for an operator-vetted
-# light bead; wasteful for an unattended default. A bead that can't reach
+# Budget rationale: max_attempts=2 — one read, one tightened re-read. Under
+# 1 attempt the fix child would still tighten the bead, but the tightening
+# would never be re-reviewed in-run, so a first-pass UNDERSPEC would always
+# halt — wasteful for an unattended default. A bead that can't reach
 # CONCRETE in two passes is structurally under-spec'd, not "needs more
 # iteration."
 
@@ -267,12 +310,13 @@ agent cannot tighten in two passes goes to the operator for triage.
   id = "ac-quality-review"
   title = "Run the ac-quality-review procedure"
   prompt = "ac-quality-review"
-  # Lean-model pin (2026-08-09): Fable, like review-light — this gate's
-  # verdict decides whether implementation may start at all, and its input
-  # (the bead's fields alone, no diff) is small enough that the strongest
-  # tier costs almost nothing here. Effort stays in lockstep with
-  # .djinn/config.json author_effort.
-  model = "fable"
+  # Opus, not Fable (djinn-y8thy): this gate's verdict decides whether
+  # implementation may start at all, and its input (the bead's fields alone,
+  # no diff) is small enough that a strong tier costs almost nothing here —
+  # ac-quality is ~7% of the per-step spend. Fable is reserved for the two
+  # steps that read a diff (review-light, verify), where the operator's Fable
+  # quota buys the most judgment per token.
+  model = "opus[1m]"
   effort = "high"
   adapter = "claude-code"
   description = "Single-lens review of the bead's acceptance_criteria. Skill emits a fenced ```json``` sidecar with verdict (CONCRETE/UNDERSPEC) and per-criterion findings."
@@ -282,9 +326,11 @@ agent cannot tighten in two passes goes to the operator for triage.
   title = "Tighten the bead's acceptance_criteria"
   needs = ["ac-quality-review"]
   prompt = "fix-ac-quality"
-  # Lean-model pin (2026-08-09): Sonnet — this child applies the review's
-  # given rewrite_hints via bd update; the Fable re-review above re-scores
-  # the result, so the intelligence sits in the gate, not the rewrite.
+  # Sonnet, re-ratified by the retier (djinn-y8thy) — this child applies the
+  # review's given rewrite_hints via bd update; the Opus re-review above
+  # (ac-quality-review, opus[1m]) re-scores the result, so the intelligence
+  # sits in the gate, not the rewrite. This is the one place a fixer stays
+  # leaner than its judge: it edits bead text, not code the judge condemned.
   model = "sonnet"
   effort = "high"
   adapter = "claude-code"
@@ -311,19 +357,15 @@ prompt = "implement"
 # ceiling (--agent-timeout) is unchanged: this widens what counts as hung, not
 # how long the step may run.
 idle_timeout = "20m"
-# Per-step agent knobs (djinn-zs9su.3), kept declared to demonstrate the knob
-# wiring end-to-end (load-validated, described, resolved per step). Effort
-# matches this repo's .djinn/config.json author_effort ("high") so implement
-# runs at the same effort as the knob-less steps; the lockstep is asserted by
-# TestProductionKnobEfforts_LockstepWithAuthorEffort. Consumers without an
-# author_effort config fall back to the claudecode profile default "xhigh"
-# (internal/djinn/runtime/claudecode/knobprofile.go), so for them this pinned
-# step runs COOLER than their knob-less steps — a trade-off accepted in
-# djinn-zrzl1. Change these to run implement on a different
-# model/effort/adapter.
-model = "opus[1m]"
-effort = "high"
-adapter = "claude-code"
+# Per-step agent knobs (djinn-zs9su.3). implement is the ONE cross-provider
+# step in the default chain (djinn-y8thy D10: OpenAI builds, Claude judges) —
+# the largest cost line in the chain (41% of per-step spend, measured off
+# summoner events.jsonl) moved off Claude quota entirely.
+# NO model line, by rule: the codex model is pinned once at the adapter
+# (knobprofile.go defaultModel = "gpt-6-astra"). effort "medium" is Astra's
+# builder notch — the judge downstream is always stronger (djinn-y8thy D10).
+adapter = "codex"
+effort = "medium"
 description = "First-pass implementation. The review-light-loop and the terminal verify-loop are the backstops — this formula runs no internal done-gate (see the header's cut #2)."
 
 # --- Single-lens review loop ---
@@ -333,14 +375,14 @@ description = "First-pass implementation. The review-light-loop and the terminal
 # parses (djinn.check.review_approved). The check, its BLOCKER-count gate,
 # its citation ground-truth gate (diff_base_step below), the fix-step
 # filter, and the file_nits dispatcher are all reused unchanged from the
-# heavy formula's review loops — only the body child differs (review-light
-# dispatches one reviewer, not a 5-panel orchestration).
+# retired heavy chain's review loops — only the body child differs
+# (review-light dispatches one reviewer, not a 5-panel orchestration).
 #
-# Budget rationale: max_attempts=3, matching iter-light. This is the ONE
-# loop whose budget does NOT drop to 1 in the light tier, because
-# SHIP-WITH-FIXES is the COMMON review verdict — a 1-attempt review loop
-# would spend fix-light and then soft_fail-halt on nearly every run. Two
-# attempts buy the fix-then-re-review cycle that actually closes findings.
+# Budget rationale: max_attempts=3. This is the loop with the widest budget
+# in the file, because SHIP-WITH-FIXES is the COMMON review verdict — a
+# 1-attempt review loop would spend fix-light and then soft_fail-halt on
+# nearly every run. The extra attempts buy the fix-then-re-review cycle that
+# actually closes findings.
 #
 # The THIRD attempt is what the forced adversarial re-review costs
 # (djinn-itudg). Because diff_base_step is set below, the zero-findings-SHIP
@@ -408,7 +450,9 @@ harness escalates).
   id = "fix-light"
   title = "Apply review-light feedback (severity ≥ {{fix_threshold}})"
   prompt = "fix-light"
+  model = "opus[1m]"
   effort = "high"
+  adapter = "claude-code"
   description = """
 Runs FIRST in the loop body and acts on the PRIOR iteration's review-light
 output — the loop judges before it fixes (djinn-np4m4.3), so the
@@ -429,13 +473,11 @@ iterate-vs-pass decision (review_approved.go) and this fix step's filter
   title = "Run single-lens review"
   needs = ["fix-light"]
   prompt = "review-light"
-  # Per-step agent knobs. Model is DELIBERATELY Fable — UNLIKE the heavy
-  # formula's review shells (djinn-21984), which are thin dispatchers whose
-  # intelligence binds via agent frontmatter, review-light IS the single
-  # reviewer: no panel behind it, so the model here is the review
-  # intelligence itself. It is the only review pass this formula gets — run
-  # it on the strongest model. Effort stays in lockstep with
-  # .djinn/config.json author_effort ("high").
+  # Per-step agent knobs. Model is DELIBERATELY Fable: review-light IS the
+  # single reviewer — no panel behind it — so the model here is the review
+  # intelligence itself. It is the only code review this formula gets, and it
+  # judges a build that ran on Astra at medium, so it must be the stronger
+  # side of that pair (djinn-y8thy D10).
   model = "fable"
   effort = "high"
   adapter = "claude-code"
@@ -463,11 +505,11 @@ count against the happy-path LLM-step budget.
 # --- Terminal verify-loop: the single acceptance backstop ---
 #
 # Budget rationale: max_attempts=2 — one verify, one re-verify after
-# fix-verify addresses unmet criteria. iter-light runs this same gate at
-# max_attempts=1, where the fix child still fires but its work is never
-# re-verified in-run, so a first-pass REQUEST CHANGES always reopens the
-# bead. Two attempts let the default recover from the common case without
-# an operator round-trip. The heavy formula runs 3 because by the time its
+# fix-verify addresses unmet criteria. Under 1 attempt the fix child would
+# still fire but its work would never be re-verified in-run, so a first-pass
+# REQUEST CHANGES would always reopen the bead. Two attempts let the default
+# recover from the common case without an operator round-trip. The retired
+# heavy chain ran 3 because by the time its
 # terminal verify runs the code has already survived two review panels, so
 # a failure there signals a deeper mismatch worth more budget.
 #
@@ -501,14 +543,29 @@ surfaces here or not at all.
   id = "verify"
   title = "Run the verify-acceptance procedure"
   prompt = "verify"
+  model = "fable"
   effort = "high"
+  adapter = "claude-code"
 
   [[steps.children]]
   id = "fix-verify"
   title = "Apply verify-acceptance feedback (unmet criteria)"
   needs = ["verify"]
   prompt = "fix-verify"
-  effort = "high"
+  # Pinned to `implement`'s knobs, NOT the judge's tier the other fixers use
+  # (operator ruling 2026-09-06). This is the one fixer that AUTHORS: its input
+  # is the verify report's unmet acceptance criteria — code that was never
+  # written — so it is doing implement's job at a smaller scope, while
+  # fix-light and fix-regression correct code a judge condemned. The two are
+  # held equal across every formula by
+  # TestEmbeddedFormulas_FixVerifyMatchesImplement, so a future re-tier of
+  # implement cannot leave this behind — including the UNSET model, which is
+  # not an omission: the codex model id is pinned once at the adapter
+  # (knobprofile.go defaultModel) and formula files never repeat it, so naming
+  # it here would make this step differ from implement in the one field the
+  # equality test reads literally.
+  effort = "medium"
+  adapter = "codex"
   description = """
 Verdict-gated, NOT iter-gated: fires in the same iteration whenever the
 verify verdict is non-approving (skipped on APPROVE via the
@@ -598,11 +655,11 @@ always applied to a broken tree.
   id = "fix-regression"
   title = "Fix the failing full-tree tests / lint findings"
   prompt = "fix-regression"
-  # No model pin: this child inherits .djinn/config.json author_model, like
-  # verify / fix-verify / fix-light. Effort is pinned per this file's
-  # convention (see the header's "Effort convention") so no step silently
-  # runs on the adapter default.
+  # Opus, like every other fixer in this file: a fixer edits code a judge
+  # condemned, so it runs at the judge's tier, not the builder's.
+  model = "opus[1m]"
   effort = "high"
+  adapter = "claude-code"
   description = """
 Artifact-gated, NOT iter-gated: the builder reads the PRIOR iteration's
 recorded gate output (buildRegressionFixPrompt, run_formula.go) and renders
