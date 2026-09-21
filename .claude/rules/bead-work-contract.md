@@ -110,71 +110,94 @@ The configured **priority floor** (default **P2**, operator ruling D1, 2026-09-0
 
 ## 6. Record the evidence on the bead
 
-Before declaring complete you MUST record the per-criterion evidence **as a comment on the bead** — typed YAML with one `criteria` entry per acceptance criterion, attached with `bd comments add <bead_id> -f <tmpfile>`. The comment is the mechanical audit trail that converts self-reported completion into a checkable claim, and it lives where it outlives the run: a file under `.djinn/` died with the worktree and took the record with it (djinn-mr56i, superseding ruling Q3's local-and-untracked file, djinn-nc4i4.4). `bd comments` is append-only, so one comment per iteration accumulates rather than clobbering — never use `bd update --notes` for this. In formula mode you do NOT record it: the harness's `commit-push` step synthesizes the comment from the verify report.
+Before declaring complete you MUST record the per-criterion evidence **as a comment on the bead** — typed JSON with one `criteria` entry per acceptance criterion, attached with `bd comments add <bead_id> -f <tmpfile>`. The comment is the mechanical audit trail that converts self-reported completion into a checkable claim, and it lives where it outlives the run: a file under `.djinn/` died with the worktree and took the record with it (djinn-mr56i, superseding ruling Q3's local-and-untracked file, djinn-nc4i4.4). `bd comments` is append-only, so one comment per iteration accumulates rather than clobbering — never use `bd update --notes` for this. In formula mode you do NOT record it: the harness's `commit-push` step synthesizes the comment from the verify report.
 
 **You MUST:**
 
-- [ ] Write the YAML to a temp file and attach it with `bd comments add <bead_id> -f <tmpfile>`. Do NOT print YAML to stdout, do NOT wrap it in a markdown fence — the audit reads the bead's comment thread, not your transcript.
+- [ ] Write the JSON to a temp file and attach it with `bd comments add <bead_id> -f <tmpfile>`. Do NOT print JSON to stdout, do NOT wrap it in a markdown fence — the audit reads the bead's comment thread, not your transcript.
 - [ ] The `bead` field and the bead you comment on MUST both equal the bead you claimed in §1.
 - [ ] One `criteria` entry per `acceptance_criteria` segment. Entry count MUST equal segment count.
 - [ ] Each criterion's `status` MUST be exactly `pass`, `partial`, or `fail` (lowercase).
-- [ ] Open the comment body with the provenance header line, verbatim in this format, before the YAML document:
+- [ ] Set `schema` to `"djinn-evidence"`, `run` to this attempt's identity (the harness session id in autonomous mode; a stable session label in interactive mode), and `iter` to the integer iteration number. These top-level fields replace the provenance header.
 
-  ```
-  # djinn evidence — run <run-id> · iter <n>
-  ```
-
-  It is a YAML comment, so the body still decodes unmodified. `<run-id>` is this attempt's identity (the harness session id in autonomous mode; any stable label naming this session in interactive mode) and `<n>` is the iteration number. This header is what makes a comment findable as evidence and tells one attempt's record from another's: comments are append-only and survive retries and reopened beads, so a reader selects the record whose header names the CURRENT run and iteration, and treats every older one as history. A comment without this header is not an evidence record and readers skip it.
+Readers recognize JSON comments by `schema: "djinn-evidence"`; legacy YAML comments with the `# djinn evidence — run <run-id> · iter <n>` header remain readable. Code selects the newest evidence comment in comment order. When verifying a particular attempt, match its `run` and `iter` and treat other attempts as history.
 
 **Required schema:**
 
-```yaml
-bead: phoenix-abcd
-title: Customer detail dossier
-description: |
-  Optional top-level prose. Use for scope notes (e.g., "§4 browser verification
-  does not apply"), immutability caveats, or cross-refs. Omit when not needed.
-criteria:
-  - text: Activity shown as chronological timeline
-    status: pass                    # pass | partial | fail
-    non_code: false                 # when true, `reason` is required
-    implementation:                 # entries may be path:line OR prose; ArtifactsGate filters by path-shape regex
-      - web/src/lib/components/CustomerDossier.svelte:42
-    verification: playwright-cli click 'Customer 87'
-    evidence:
-      snapshots:
-        - .playwright-cli/page-2026-04-19T00-00-00Z.yml
-      observations:
-        - "12 events rendered, latest at top"
-    follow_up: []                   # optional list of follow-up bead IDs
-  - text: All active tags shown as styled badges
-    status: pass
-    non_code: false
-    implementation:
-      - web/src/lib/components/TagBadge.svelte:1
-    verification: playwright-cli eval '.tag-badge'
-    evidence:
-      observations:
-        - "3 badges visible: VIP, Refund, NPS-10"
-  - text: Integration tests cover the happy path
-    status: partial
-    non_code: false
-    implementation:
-      - web/src/lib/components/CustomerDossier.test.ts:14
-    verification: npx vitest run src/lib/components/CustomerDossier.test.ts
-    evidence:
-      observations:
-        - "6 of 8 cases covered; edge-case snapshot pending"
-    follow_up:
-      - phoenix-xyz1                # partial rows MUST name a follow-up bead
-  - text: Backend feature — no UI affordances to inventory
-    status: pass
-    non_code: true
-    reason: "Pure data-layer change; no hover/click/keyboard interactions exist"
-    verification: "N/A — non-code criterion"
+```json
+{
+  "schema": "djinn-evidence",
+  "run": "session-example",
+  "iter": 1,
+  "bead": "phoenix-abcd",
+  "title": "Customer detail dossier",
+  "description": "Optional top-level prose. Use for scope notes (e.g., \"§4 browser verification\ndoes not apply\"), immutability caveats, or cross-refs. Omit when not needed.\n",
+  "criteria": [
+    {
+      "text": "Activity shown as chronological timeline",
+      "status": "pass",
+      "non_code": false,
+      "implementation": [
+        "web/src/lib/components/CustomerDossier.svelte:42"
+      ],
+      "verification": "playwright-cli click 'Customer 87'",
+      "evidence": {
+        "snapshots": [
+          ".playwright-cli/page-2026-04-19T00-00-00Z.yml"
+        ],
+        "observations": [
+          "12 events rendered, latest at top"
+        ]
+      },
+      "follow_up": []
+    },
+    {
+      "text": "All active tags shown as styled badges",
+      "status": "pass",
+      "non_code": false,
+      "implementation": [
+        "web/src/lib/components/TagBadge.svelte:1"
+      ],
+      "verification": "playwright-cli eval '.tag-badge'",
+      "evidence": {
+        "observations": [
+          "3 badges visible: VIP, Refund, NPS-10"
+        ]
+      }
+    },
+    {
+      "text": "Integration tests cover the happy path",
+      "status": "partial",
+      "non_code": false,
+      "implementation": [
+        "web/src/lib/components/CustomerDossier.test.ts:14"
+      ],
+      "verification": "npx vitest run src/lib/components/CustomerDossier.test.ts",
+      "evidence": {
+        "observations": [
+          "6 of 8 cases covered; edge-case snapshot pending"
+        ]
+      },
+      "follow_up": [
+        "phoenix-xyz1"
+      ]
+    },
+    {
+      "text": "Backend feature — no UI affordances to inventory",
+      "status": "pass",
+      "non_code": true,
+      "reason": "Pure data-layer change; no hover/click/keyboard interactions exist",
+      "verification": "N/A — non-code criterion"
+    }
+  ]
+}
 ```
 
 **Field reference:**
+
+- **`schema`** *(top-level, required)*: exactly `"djinn-evidence"`.
+- **`run`** *(top-level, required, string)*: this attempt's session identity.
+- **`iter`** *(top-level, required, integer)*: this attempt's iteration number.
 
 - **`bead`** *(top-level, required)*: the bead id you claimed in §1.
 - **`title`** *(top-level, required)*: the bead's title.
