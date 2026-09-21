@@ -1,45 +1,85 @@
-# Issue tracker: GitHub
+# Issue tracker: bd (beads)
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and PRDs for this repo live in the local bd (beads) database. Use the
+`bd` CLI for all operations. Verified against bd 1.1.2.
 
 ## Conventions
 
-- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
-- **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
-- **Comment on an issue**: `gh issue comment <number> --body "..."`
-- **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
-- **Close**: `gh issue close <number> --comment "..."`
-
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
-
-## Pull requests as a triage surface
-
-**PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
-
-When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
-
-- **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
-- **List external PRs for triage**: `gh pr list --state open --json number,title,body,labels,author,authorAssociation,comments` then keep only `authorAssociation` of `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, or `NONE` (drop `OWNER`/`MEMBER`/`COLLABORATOR`).
-- **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
-
-GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+- **Work tickets** are type `task`, `feature`, or `bug`. Non-work types:
+  `epic` (containers/maps), `decision` (ADR-shaped questions), `spike`
+  (timeboxed investigations).
+- **Acceptance criteria go in the structured field, always**:
+  `bd create ... --acceptance "..."` (or `bd update <id> --acceptance`).
+  Body-only markdown checkboxes are INVISIBLE to djinn's gates, which read the
+  `acceptance_criteria` JSON field. Never publish a work ticket whose ACs live
+  only in the body.
+- **Create**: `bd create --type <type> --title "..." --body "..." --acceptance "..."`.
+  Use a heredoc for multi-line bodies.
+- **Read**: `bd show <id> --json`; comments via `bd comments <id>`.
+- **List**: `bd list` with `--label` / `--type` / `--status` filters;
+  `bd children <id> --pretty` for a parent's children.
+- **Comment**: `bd comment <id> "..."`.
+- **Labels**: `--labels` on create; `bd label add/remove <id> <label>`.
+- **Dependencies**: `bd dep add <ticket> --blocked-by <blocker>`.
+- **Close**: `bd close <id> --reason "..."`.
+- **Triage vocabulary** is plain bd labels: `needs-triage`, `needs-info`,
+  `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **AI-triage disclaimer comments** belong only on public trackers. A private
+  bd DB has one audience — the dev — so skip the disclaimer boilerplate.
 
 ## When a skill says "publish to the issue tracker"
 
-Create a GitHub issue.
+Create beads with `bd create`, acceptance criteria in `--acceptance`.
+
+- **Where the repo mandates a bead-authoring path** (e.g. `/create-bead` in
+  djinn-governed repos), use it instead of raw `bd create` — raw creation
+  bypasses the repo's AC-quality gate. The `--acceptance` semantics are
+  unchanged: ACs still land in the structured field.
+- Publish in dependency order (blockers first), then wire edges in a second
+  pass: `bd dep add <ticket> --blocked-by <blocker>`.
+- A spec from `/to-spec` is **one bead**.
+- Tickets from `/to-tickets` are **one bead each**, parented to the spec bead
+  via `bd update <ticket> --parent <spec>`.
 
 ## When a skill says "fetch the relevant ticket"
 
-Run `gh issue view <number> --comments`.
+Run `bd show <id> --json`, plus `bd comments <id>` for the discussion.
 
 ## Wayfinding operations
 
-Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+Used by `/wayfinder`. The **map** is a single bead with **child** beads as
+tickets.
 
-- **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
-- **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
-- **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
-- **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
-- **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
-- **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+- **Map**: an `epic` bead labelled `wayfinder:map`, holding the
+  Destination / Notes / Decisions-so-far / Fog body.
+  `bd create --type epic --labels wayfinder:map ...`
+- **Child ticket**: a bead parented to the map (`bd update <id> --parent
+  <map>`; list with `bd children <map> --pretty`). Labels: `wayfinder:<type>`
+  (`research`/`prototype`/`grilling`/`task`).
+- **Ticket-type mapping**: grilling and prototype tickets are bd type
+  `decision`; research tickets are bd type `spike`; task tickets are `task`.
+  HITL task tickets are created **pre-assigned** to the driving dev — an
+  assigned bead stays off `bd ready`, so no agent drains it.
+- **Blocking**: bd's native dependencies —
+  `bd dep add <ticket> --blocked-by <blocker>`. A ticket is unblocked when
+  every blocker is closed.
+- **Frontier query**: `bd ready` (open + unblocked, drops claimed) **minus
+  epics** — `bd ready` lists epics, so filter `"issue_type": "epic"` out of
+  `bd ready --json` before picking. First in map order wins.
+- **Claim**: `bd update <id> --claim` — atomic; the session's first write.
+- **Resolve**: post the answer as a comment (`bd comment <id> "<answer>"`),
+  then `bd close <id> --reason "<gist>"`, then append a context pointer to the
+  map's Decisions-so-far.
+
+## Deference and implementation
+
+Where a repo carries its own bead-work contract (djinn-governed repos), **that
+contract outranks this doc** — this doc covers publish/fetch/wayfinding
+mechanics only.
+
+Implementing a bead:
+
+- **djinn-governed repos**: `/wish <bead-id>` — never a manual build.
+- **Non-djinn repos**: the manual spine — `tdd-canon` at the agreed seams →
+  typecheck regularly, run the full suite once → review → commit per the
+  repo's convention.
