@@ -8,7 +8,7 @@ a contradicting doc is a cleanup target. Supersede, don't delete.
 | Decision | Why | Evidence |
 |---|---|---|
 | claudit is a **session auditor**, not a spend report | The vision is auditing what agents *did* (errors, retries, blast radius), with cost one dimension among many | v1.6.0 reframe; `docs/agents-audit-roadmap.md` preamble |
-| TDD (Kent Beck red-green-refactor) for all backend and frontend-logic code; browser verification for UI | Written knowing it would sometimes feel slow; no implicit override | `.claude/rules/testing.md` |
+| TDD (Kent Beck red-green-refactor) for all backend and frontend-logic code; browser verification for UI | Written knowing it would sometimes feel slow; no implicit override | `~/.agents/AGENTS.md` § Testing Policy (repo stub removed 2026-09-20) |
 | The Agents view is **serve-only** — no static-report parity | Live data, on-demand I/O fetches, and payload size don't fit a one-shot file | `docs/agents-audit-roadmap.md` conventions; README "Status and limitations" |
 | Per-view **local filters**; the global filter bar is removed | The global bar had no wiring and falsely advertised filtering everything | v1.6.0 changelog; `docs/filter-migration-plan.md` |
 | Spend **dedups by `message.id`** via a deterministic `ReplaySet`; every drill-down must reconcile to the headline | Resumed/forked sessions replay turns into new files; per-file counting inflated totals (−53M tokens / −291 turns on the real corpus) | v1.7.0 changelog |
