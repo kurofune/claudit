@@ -28,9 +28,9 @@
 #
 # Known gap (needs code, not just a rate edit — see README):
 #   * Fast mode (Opus 5.5, $8 / $40; Opus 5 / Opus 4.8, $10 / $50) is a
-#     per-turn rate, not a per-model one. Transcripts carry the "speed" field that would select
-#     it, but claudit keys pricing on model id alone, so fast-mode turns
-#     price at the standard rate.
+#     per-turn rate, not a per-model one. Transcripts carry the "speed"
+#     field that would select it, but claudit keys pricing on model id
+#     alone, so fast-mode turns price at the standard rate.
 
 models:
   # ── Fable 5.1 / Mythos 5.1 — $10 / $50 base, 0.025x cache reads ──
