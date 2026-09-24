@@ -22,9 +22,8 @@ a contradicting doc is a cleanup target. Supersede, don't delete.
 ## Open questions (NOT settled)
 
 - **Fast-mode pricing.** Opus 5.5 fast mode bills $8/$40 and Opus 5 / 4.8
-  bill $10/$50, per-turn via the
-  transcript's `speed` field, which claudit doesn't read; fast turns price at
-  standard rates. Worth reading the field, or leave to per-user overlay?
+  bill $10/$50, per-turn via the transcript's `speed` field, which claudit
+  doesn't read; fast turns price at standard rates. Worth reading the field, or leave to per-user overlay?
 - **Deferred Phase-2 follow-ups** (drafted in the roadmap, never scheduled):
   query-DSL filter form; intersecting the trace filter with the playhead window.
 - **Annotations phase** — explicitly deferred in `docs/agents-audit-roadmap.md`.
