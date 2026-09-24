@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Fast-mode turns now price at the fast rate.** claudit reads `message.usage.speed` from each assistant turn; when it is `"fast"`, the turn prices from the model's new optional `fast:` rate block, with that model's own cache ratios applied on top. Bundled fast rates: Opus 5.5 at $8 / $40 (cache hits $0.40), Opus 5 and Opus 4.8 at $10 / $50. Earlier releases priced fast turns at the standard rate, so **reported spend for fast-mode sessions roughly doubles after upgrading**; that is the correction, not a regression. A fast turn on a model with no `fast:` block still prices at the standard rate. A `prices.yaml` overlay that replaces a model without a `fast:` block drops that model's bundled fast rate, consistent with per-model replacement.
+
 ## [1.8.2] — 2026-09-23
 
 Pricing refresh against the live pricing page on 2026-09-23: **Claude Opus 5.5** is added. Every other rate on the page, Fable 5.1 included, was re-checked and is unchanged.
