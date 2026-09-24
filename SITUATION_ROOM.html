@@ -401,7 +401,7 @@ svg [data-panel]:hover { opacity: .75; }
   </ol>
   <button id="themeToggle" type="button">Theme</button>
   <div class="rail-foot">
-    Generated<br><span data-sr="gen-date.rail">2026-09-01</span><br>
+    Generated<br><span data-sr="gen-date.rail">2026-09-23</span><br>
     <span style="color:var(--done)">●</span> in sync
   </div>
 </nav>
@@ -413,7 +413,7 @@ svg [data-panel]:hover { opacity: .75; }
     <span>claudit</span><span class="sep">/</span>
     <span>Go CLI</span><span class="sep">/</span>
     <span>MIT</span><span class="sep">/</span>
-    <span data-sr="eyebrow.commits">279 commits</span>
+    <span data-sr="eyebrow.commits">292 commits</span>
   </div>
   <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
   <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
@@ -434,7 +434,7 @@ svg [data-panel]:hover { opacity: .75; }
     <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>v1.8.1</span></div>
     <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>5 calls</span></div>
     <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">none scheduled</span></div>
-    <div class="status-cell"><span class="k">Updated</span><span class="v" data-sr="updated">2026-09-01</span></div>
+    <div class="status-cell"><span class="k">Updated</span><span class="v" data-sr="updated">2026-09-23</span></div>
   </div>
 </header>
 
@@ -443,10 +443,10 @@ svg [data-panel]:hover { opacity: .75; }
   <div class="sec-head"><span class="sec-num">01</span><h2>Vitals</h2>
     <span class="sec-note">counted from the repo at generation time</span></div>
   <div class="vitals">
-    <div class="vital"><div class="n" data-sr="v.models.n">32</div><div class="l">Priced model ids</div>
+    <div class="vital"><div class="n" data-sr="v.models.n">34</div><div class="l">Priced model ids</div>
       <div class="sub">Re-verified against the live pricing page on 2026-09-01.</div></div>
-    <div class="vital"><div class="n" data-sr="v.tests.n">923</div><div class="l">Tests</div>
-      <div class="sub" data-sr="v.tests.sub">478 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
+    <div class="vital"><div class="n" data-sr="v.tests.n">924</div><div class="l">Tests</div>
+      <div class="sub" data-sr="v.tests.sub">479 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
     <div class="vital"><div class="n" data-sr="v.rulings.n">11</div><div class="l">Standing rulings</div>
       <div class="sub" data-sr="v.rulings.sub">3 questions still open</div></div>
     <div class="vital"><div class="n" data-sr="v.releases.n">14</div><div class="l">Releases shipped</div>
@@ -823,11 +823,11 @@ svg [data-panel]:hover { opacity: .75; }
 <h3>CURRENT</h3>
 <p><strong>Mode:</strong> Steady-state maintenance. No active initiative — both roadmaps (<code>docs/agents-redesign.md</code>, <code>docs/agents-audit-roadmap.md</code>) are fully shipped.</p>
 <p><strong>Goal:</strong> Keep claudit correct against upstream reality: pricing current with Anthropic's published rates, the parser current with Claude Code's JSONL schema. Ship fixes and small features as they earn their place.</p>
-<p><strong>Last change:</strong> v1.8.1 (2026-09-01) — pricing refresh: Fable 5.1 / Mythos 5.1 rate cards added (cache hits at 0.025x input, not 0.1x); Sonnet 5's 2026-09-01 increase was cancelled upstream, so its dated rate period is removed and it is a flat $2 / $10. Before that: v1.8.0 (2026-07-26) date-effective pricing, Opus 5.</p>
+<p><strong>Last change:</strong> v1.8.2 (2026-09-23) — Opus 5.5 rate card added ($4 / $20, cache hits at 0.05x input, not 0.1x). Before that: v1.8.1 (2026-09-01) Fable 5.1 / Mythos 5.1 added, Sonnet 5's cancelled increase removed; v1.8.0 date-effective pricing, Opus 5.</p>
 <p><strong>Assumptions:</strong></p>
 <ul>
 <li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. Users on v1.8.0 or earlier over-report Sonnet 5 spend by 50% from 2026-09-01 until they upgrade.</li>
-<li>Fast-mode turns (Opus 5 / 4.8 <code>speed</code> field) price at the standard rate — a known, documented gap (README "Status and limitations").</li>
+<li>Fast-mode turns (Opus 5.5 / 5 / 4.8 <code>speed</code> field) price at the standard rate — a known, documented gap (README "Status and limitations").</li>
 </ul>
 <p><strong>Open questions:</strong> see DECISIONS.md → Open questions.</p>
 <p><strong>Next checkpoint:</strong> None scheduled. Next trigger is upstream: new Anthropic rates, or a Claude Code JSONL schema change.</p>
@@ -844,7 +844,7 @@ svg [data-panel]:hover { opacity: .75; }
 <h3>DECISIONS</h3>
 <p>Settled choices and why. On settled questions this file beats every other doc; a contradicting doc is a cleanup target. Supersede, don't delete.</p>
 <h4>Decided</h4>
-<div class="tw"><table><thead><tr><th>Decision</th><th>Why</th><th>Evidence</th></tr></thead><tbody><tr><td>claudit is a <strong>session auditor</strong>, not a spend report</td><td>The vision is auditing what agents <em>did</em> (errors, retries, blast radius), with cost one dimension among many</td><td>v1.6.0 reframe; <code>docs/agents-audit-roadmap.md</code> preamble</td></tr><tr><td>TDD (Kent Beck red-green-refactor) for all backend and frontend-logic code; browser verification for UI</td><td>Written knowing it would sometimes feel slow; no implicit override</td><td><code>.claude/rules/testing.md</code></td></tr><tr><td>The Agents view is <strong>serve-only</strong> — no static-report parity</td><td>Live data, on-demand I/O fetches, and payload size don't fit a one-shot file</td><td><code>docs/agents-audit-roadmap.md</code> conventions; README "Status and limitations"</td></tr><tr><td>Per-view <strong>local filters</strong>; the global filter bar is removed</td><td>The global bar had no wiring and falsely advertised filtering everything</td><td>v1.6.0 changelog; <code>docs/filter-migration-plan.md</code></td></tr><tr><td>Spend <strong>dedups by <code>message.id</code></strong> via a deterministic <code>ReplaySet</code>; every drill-down must reconcile to the headline</td><td>Resumed/forked sessions replay turns into new files; per-file counting inflated totals (−53M tokens / −291 turns on the real corpus)</td><td>v1.7.0 changelog</td></tr><tr><td><strong>Date-effective pricing</strong>: each turn priced at the rate in effect when it ran (<code>rates:</code> periods, inclusive UTC <code>until</code>)</td><td>One flat number cannot serve both historical and future turns across a rate change</td><td>v1.8.0 changelog; the motivating case (Sonnet 5 cliff) was later cancelled — see log 2026-09-01</td></tr><tr><td>Pricing loader is <strong>overlay-style</strong>: bundled defaults always load; <code>~/.config/claudit/prices.yaml</code> overlays per-model, replacing an entry entirely</td><td>The old copy-on-first-run pinned users to their first install's prices forever</td><td>v1.4.3 changelog</td></tr><tr><td>Date filters resolve in <strong>local time</strong> at midnight</td><td>UTC boundaries shifted windows for non-UTC users and left serve internally inconsistent</td><td>v1.4.0 changelog</td></tr><tr><td><strong>Desktop-only</strong> — no responsive/mobile pass</td><td>Dogfooding tool for a desktop workflow</td><td>Owner ruling (memory: no-mobile-pass)</td></tr><tr><td>Issue tracker is <strong>GitHub Issues</strong> via <code>gh</code>; five-role triage labels</td><td>Wired 2026-08-15</td><td><code>docs/agents/issue-tracker.md</code>; commit 131618a</td></tr><tr><td><strong>Rejected</strong> (2026-07-03 audit — do not re-propose): Sankey diagram, cost treemap/icicle, config file, incremental/streaming aggregation, framework/bundler migration, multi-session stacked Gantt</td><td>Each evaluated against the trace-audit vision and rejected (e.g. Sankey answers a flow question, not a trace question)</td><td>2026-07 principal-engineer audit (memory: audit-2026-07-rejected-ideas)</td></tr></tbody></table></div>
+<div class="tw"><table><thead><tr><th>Decision</th><th>Why</th><th>Evidence</th></tr></thead><tbody><tr><td>claudit is a <strong>session auditor</strong>, not a spend report</td><td>The vision is auditing what agents <em>did</em> (errors, retries, blast radius), with cost one dimension among many</td><td>v1.6.0 reframe; <code>docs/agents-audit-roadmap.md</code> preamble</td></tr><tr><td>TDD (Kent Beck red-green-refactor) for all backend and frontend-logic code; browser verification for UI</td><td>Written knowing it would sometimes feel slow; no implicit override</td><td><code>~/.agents/AGENTS.md</code> § Testing Policy (repo stub removed 2026-09-20)</td></tr><tr><td>The Agents view is <strong>serve-only</strong> — no static-report parity</td><td>Live data, on-demand I/O fetches, and payload size don't fit a one-shot file</td><td><code>docs/agents-audit-roadmap.md</code> conventions; README "Status and limitations"</td></tr><tr><td>Per-view <strong>local filters</strong>; the global filter bar is removed</td><td>The global bar had no wiring and falsely advertised filtering everything</td><td>v1.6.0 changelog; <code>docs/filter-migration-plan.md</code></td></tr><tr><td>Spend <strong>dedups by <code>message.id</code></strong> via a deterministic <code>ReplaySet</code>; every drill-down must reconcile to the headline</td><td>Resumed/forked sessions replay turns into new files; per-file counting inflated totals (−53M tokens / −291 turns on the real corpus)</td><td>v1.7.0 changelog</td></tr><tr><td><strong>Date-effective pricing</strong>: each turn priced at the rate in effect when it ran (<code>rates:</code> periods, inclusive UTC <code>until</code>)</td><td>One flat number cannot serve both historical and future turns across a rate change</td><td>v1.8.0 changelog; the motivating case (Sonnet 5 cliff) was later cancelled — see log 2026-09-01</td></tr><tr><td>Pricing loader is <strong>overlay-style</strong>: bundled defaults always load; <code>~/.config/claudit/prices.yaml</code> overlays per-model, replacing an entry entirely</td><td>The old copy-on-first-run pinned users to their first install's prices forever</td><td>v1.4.3 changelog</td></tr><tr><td>Date filters resolve in <strong>local time</strong> at midnight</td><td>UTC boundaries shifted windows for non-UTC users and left serve internally inconsistent</td><td>v1.4.0 changelog</td></tr><tr><td><strong>Desktop-only</strong> — no responsive/mobile pass</td><td>Dogfooding tool for a desktop workflow</td><td>Owner ruling (memory: no-mobile-pass)</td></tr><tr><td>Issue tracker is <strong>GitHub Issues</strong> via <code>gh</code>; five-role triage labels</td><td>Wired 2026-08-15</td><td><code>docs/agents/issue-tracker.md</code>; commit 131618a</td></tr><tr><td><strong>Rejected</strong> (2026-07-03 audit — do not re-propose): Sankey diagram, cost treemap/icicle, config file, incremental/streaming aggregation, framework/bundler migration, multi-session stacked Gantt</td><td>Each evaluated against the trace-audit vision and rejected (e.g. Sankey answers a flow question, not a trace question)</td><td>2026-07 principal-engineer audit (memory: audit-2026-07-rejected-ideas)</td></tr></tbody></table></div>
 <h4>Open questions (NOT settled)</h4>
 <ul>
 <li><strong>Fast-mode pricing.</strong> Opus 5 / 4.8 fast mode bills $10/$50 per-turn via the transcript's <code>speed</code> field, which claudit doesn't read; fast turns price at standard rates. Worth reading the field, or leave to per-user overlay?</li>
@@ -865,7 +865,7 @@ svg [data-panel]:hover { opacity: .75; }
 <li><code>CURRENT.md</code> — live state (mode, goal, checkpoints)</li>
 <li><code>DECISIONS.md</code> — settled choices + open questions</li>
 <li><code>SITUATION_ROOM.html</code> — generated director brief (via the <code>situation-room</code> skill; never hand-edit)</li>
-<li><code>AGENTS.md</code> / <code>CLAUDE.md</code> — how to work here; <code>.claude/rules/testing.md</code> — TDD policy</li>
+<li><code>AGENTS.md</code> / <code>CLAUDE.md</code> — how to work here; TDD policy is user-global (<code>~/.agents/AGENTS.md</code>)</li>
 </ul>
 <h4>Code</h4>
 <ul>
@@ -898,7 +898,7 @@ svg [data-panel]:hover { opacity: .75; }
   <strong>Sources</strong> — CURRENT.md, DECISIONS.md, CONTEXT_MAP.md, CHANGELOG.md, docs/agents-audit-roadmap.md, docs/agents-redesign.md, internal/pricing/default.yaml, git log.<br>
   <strong>Authority</strong> — this page holds none. Where it and a source disagree, the source wins and this page is the cleanup target.<br>
   <strong>Regeneration</strong> — rewritten at session close when a phase moves, a verdict lands, or a ruling changes.<br>
-  Generated <span data-sr="gen-date.foot">2026-09-01</span> · <code>skills/situation-room</code>
+  Generated <span data-sr="gen-date.foot">2026-09-23</span> · <code>skills/situation-room</code>
 </footer>
 
 </main>
