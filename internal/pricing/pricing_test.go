@@ -89,6 +89,31 @@ func TestDefault_Fable51AndMythos51(t *testing.T) {
 	}
 }
 
+func TestDefault_Opus55(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Opus 5.5 undercuts Opus 5 at $4 input / $20 output, with standard
+	// write ratios but cache hits at 0.05x input ($0.20), not 0.1x.
+	for _, m := range []string{
+		"claude-opus-5-5",
+		"claude-opus-5-5[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 4.00 || p.Output != 20.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
+		}
+		if p.CacheRead != 0.20 || p.CacheWrite5m != 5.00 || p.CacheWrite1h != 8.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
+		}
+	}
+}
+
 func TestDefault_Opus5(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
@@ -126,6 +151,7 @@ func TestDefault_OneMillionContextVariantsMatchBase(t *testing.T) {
 		"claude-mythos-5-1",
 		"claude-fable-5",
 		"claude-mythos-5",
+		"claude-opus-5-5",
 		"claude-opus-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",

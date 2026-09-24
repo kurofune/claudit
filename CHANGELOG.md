@@ -2,6 +2,16 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] — 2026-09-23
+
+Pricing refresh against the live pricing page on 2026-09-23: **Claude Opus 5.5** is added. Every other rate on the page, Fable 5.1 included, was re-checked and is unchanged.
+
+**Upgrade if you run Opus 5.5.** v1.8.1 and earlier have no entry for it, so every Opus 5.5 turn lands in `unknown_models` and adds **$0** to reported spend.
+
+### Added
+
+- **Pricing: Claude Opus 5.5.** `claude-opus-5-5` and `claude-opus-5-5[1m]` are added at $4 input / $20 output, with 5m/1h cache writes of $5 / $8 and **cache hits at $0.20/MTok**. That hit rate is 0.05x input, not the standard 0.1x.
+
 ## [1.8.1] — 2026-09-01
 
 Pricing refresh against the live pricing page on 2026-09-01: **Claude Fable 5.1** and **Claude Mythos 5.1** are added, and **Claude Sonnet 5**'s scheduled price increase — which this project encoded ahead of time — was cancelled, so the table drops it.
