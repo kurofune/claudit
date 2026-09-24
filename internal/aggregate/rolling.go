@@ -53,7 +53,7 @@ func RollingTotals(turns []parse.Turn, prices *pricing.Table, now time.Time) (ho
 		cost, _ := prices.CostAt(t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-			t.Usage.CacheReadTokens)
+			t.Usage.CacheReadTokens, t.Usage.Speed)
 		if cost == 0 {
 			continue
 		}

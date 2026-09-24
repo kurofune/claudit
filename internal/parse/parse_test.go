@@ -863,3 +863,39 @@ func TestParseFile_StreamingNotInMemory(t *testing.T) {
 		t.Errorf("turns=%d mal=%d", len(res.Turns), res.Malformed)
 	}
 }
+
+func TestParseLine_UsageSpeed(t *testing.T) {
+	for _, tc := range []struct{ usage, want string }{
+		{`{"speed":"fast","input_tokens":1}`, "fast"},
+		{`{"input_tokens":1}`, ""},
+	} {
+		turn, _, kind := ParseLine([]byte(`{"type":"assistant","message":{"usage":`+tc.usage+`}}`), "synthetic")
+		if kind != LineAssistant || turn.Usage.Speed != tc.want {
+			t.Errorf("kind=%v speed=%q, want assistant speed=%q", kind, turn.Usage.Speed, tc.want)
+		}
+	}
+}
+
+func TestCoalescer_PreservesUsageSpeed(t *testing.T) {
+	for _, speeds := range [][]string{{"fast", ""}, {"", "fast"}, {"fast", "fast"}} {
+		var lines []string
+		var c Coalescer
+		for _, speed := range speeds {
+			line := `{"type":"assistant","message":{"id":"msg_fast","usage":{"speed":"` + speed + `","input_tokens":1}}}`
+			lines = append(lines, line)
+			turn, _, _ := ParseLine([]byte(line), "synthetic")
+			c.Push(turn)
+		}
+		streamed, ok := c.Flush()
+		if !ok || streamed.Usage.Speed != "fast" {
+			t.Errorf("stream %v: speed=%q, want fast", speeds, streamed.Usage.Speed)
+		}
+		res, err := ParseFile(strings.NewReader(strings.Join(lines, "\n")), "synthetic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Turns) != 1 || res.Turns[0].Usage.Speed != "fast" {
+			t.Errorf("batch %v: turns=%+v", speeds, res.Turns)
+		}
+	}
+}

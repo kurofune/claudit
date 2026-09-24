@@ -538,3 +538,23 @@ func findSkill(s []SkillBucket, key string) *SkillBucket {
 	}
 	return nil
 }
+
+func TestAggregate_FastTurnFromJSONL(t *testing.T) {
+	fixture := `{"type":"assistant","sessionId":"fast-session","timestamp":"2026-09-24T12:00:00Z","message":{"id":"fast-turn","model":"claude-opus-5-5","usage":{"speed":"fast","input_tokens":1000000,"output_tokens":1000000}}}`
+	res, err := parse.ParseFile(strings.NewReader(fixture), "synthetic.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 {
+		t.Fatalf("turns=%d, want 1", len(res.Turns))
+	}
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agg := New(prices)
+	agg.Add(res.Turns[0])
+	if got := agg.Totals().CostUSD; got != 48 {
+		t.Errorf("total=$%v, want $48", got)
+	}
+}

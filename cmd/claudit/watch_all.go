@@ -246,7 +246,7 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 	cost, _ := h.prices.CostAt(t.Model, t.Timestamp,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-		t.Usage.CacheReadTokens)
+		t.Usage.CacheReadTokens, t.Usage.Speed)
 	s := h.state.session(te.path, t.SessionID, t.CWD)
 	prevTurnCost := s.lastSeenCost()
 	s.totalCost += cost

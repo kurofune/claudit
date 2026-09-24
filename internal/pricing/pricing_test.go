@@ -303,12 +303,12 @@ func TestCostAt_Sonnet5FlatAcrossTheCancelledCliff(t *testing.T) {
 	// 1M input + 1M output at $2 / $10 = $12, on both sides of the
 	// 2026-09-01 date the increase to $3 / $15 was once scheduled for.
 	for _, ts := range []string{"2026-07-26T00:00:00Z", "2026-09-01T00:00:00Z"} {
-		cost, known := tab.CostAt("claude-sonnet-5", mustTime(t, ts), 1_000_000, 1_000_000, 0, 0, 0)
+		cost, known := tab.CostAt("claude-sonnet-5", mustTime(t, ts), 1_000_000, 1_000_000, 0, 0, 0, "")
 		if !known || math.Abs(cost-12.0) > 0.001 {
 			t.Errorf("sonnet-5 at %s: cost=%v known=%v, want 12", ts, cost, known)
 		}
 		// 10M cache reads at $0.20/MTok = $2.
-		cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, ts), 0, 0, 0, 0, 10_000_000)
+		cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, ts), 0, 0, 0, 0, 10_000_000, "")
 		if math.Abs(cost-2.0) > 0.001 {
 			t.Errorf("sonnet-5 cache read at %s: %v, want 2", ts, cost)
 		}
@@ -317,7 +317,7 @@ func TestCostAt_Sonnet5FlatAcrossTheCancelledCliff(t *testing.T) {
 
 func TestCostAt_UnknownModel(t *testing.T) {
 	tab, _ := LoadDefault()
-	cost, known := tab.CostAt("not-a-real-model", mustTime(t, "2026-07-26T00:00:00Z"), 1_000_000, 0, 0, 0, 0)
+	cost, known := tab.CostAt("not-a-real-model", mustTime(t, "2026-07-26T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if known || cost != 0 {
 		t.Errorf("expected unknown/0, got cost=%v known=%v", cost, known)
 	}
@@ -329,7 +329,7 @@ func TestCost_MatchesCostAtCurrentRate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := tab.CostAt("claude-sonnet-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0)
+	want, _ := tab.CostAt("claude-sonnet-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
 	got, known := tab.Cost("claude-sonnet-5", 1_000_000, 1_000_000, 0, 0, 0)
 	if !known || math.Abs(got-want) > 0.000001 {
 		t.Errorf("Cost=%v, CostAt(zero)=%v", got, want)
@@ -414,11 +414,11 @@ func TestLoad_UserFileWithRateHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cost, known := tab.CostAt("my-private-model", mustTime(t, "2026-03-15T00:00:00Z"), 1_000_000, 0, 0, 0, 0)
+	cost, known := tab.CostAt("my-private-model", mustTime(t, "2026-03-15T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if !known || math.Abs(cost-10.0) > 0.001 {
 		t.Errorf("in-period: cost=%v known=%v, want 10", cost, known)
 	}
-	cost, _ = tab.CostAt("my-private-model", mustTime(t, "2026-04-01T00:00:00Z"), 1_000_000, 0, 0, 0, 0)
+	cost, _ = tab.CostAt("my-private-model", mustTime(t, "2026-04-01T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if math.Abs(cost-20.0) > 0.001 {
 		t.Errorf("post-period: cost=%v, want 20", cost)
 	}
@@ -589,5 +589,113 @@ func TestLoad_MissingFile_ReturnsBundledDefaults(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("expected path to not exist, stat err = %v", err)
+	}
+}
+
+func TestCostAt_FastRate(t *testing.T) {
+	tab := &Table{Models: map[string]ModelPrice{
+		"claude-opus-5-5": {Rate: Rate{Input: 4, Output: 20}, Fast: &Rate{Input: 8, Output: 40}},
+	}}
+	cost, known := tab.CostAt("claude-opus-5-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
+	if !known || cost != 48 {
+		t.Fatalf("cost=%v known=%v, want $48 known", cost, known)
+	}
+}
+
+func TestCostAt_SpeedFallbacksAndHistory(t *testing.T) {
+	past := mustTime(t, "2026-01-01T00:00:00Z")
+	standard := ModelPrice{Rate: Rate{Input: 4, Output: 20}, Rates: []RatePeriod{{Until: past, Rate: Rate{Input: 2, Output: 10}}}}
+	fast := standard
+	fast.Fast = &Rate{Input: 8, Output: 40}
+	tab := &Table{Models: map[string]ModelPrice{"with-fast": fast, "without-fast": standard}}
+	for _, tc := range []struct {
+		model, speed string
+		ts           time.Time
+		want         float64
+	}{
+		{"with-fast", "standard", time.Time{}, 24},
+		{"with-fast", "", time.Time{}, 24},
+		{"with-fast", "turbo", time.Time{}, 24},
+		{"with-fast", "FAST", time.Time{}, 24},
+		{"without-fast", "fast", time.Time{}, 24},
+		{"without-fast", "fast", past, 12},
+		{"with-fast", "standard", past, 12},
+		{"with-fast", "", past, 12},
+		{"with-fast", "turbo", past, 12},
+		{"with-fast", "fast", past, 48},
+	} {
+		cost, known := tab.CostAt(tc.model, tc.ts, 1_000_000, 1_000_000, 0, 0, 0, tc.speed)
+		if !known || cost != tc.want {
+			t.Errorf("%+v: cost=%v known=%v", tc, cost, known)
+		}
+	}
+}
+
+func TestDefault_FastRates(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		model string
+		want  Rate
+	}{
+		{"claude-opus-5-5", Rate{Input: 8, Output: 40, CacheRead: .4, CacheWrite5m: 10, CacheWrite1h: 16}},
+		{"claude-opus-5", Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 20}},
+		{"claude-opus-4-8", Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 20}},
+	} {
+		for _, suffix := range []string{"", "[1m]"} {
+			model := tc.model + suffix
+			p := tab.Models[model]
+			if p.Fast == nil || *p.Fast != tc.want {
+				t.Errorf("%s fast=%+v, want %+v", model, p.Fast, tc.want)
+			}
+			for i, want := range []float64{tc.want.Input, tc.want.Output, tc.want.CacheWrite5m, tc.want.CacheWrite1h, tc.want.CacheRead} {
+				var tokens [5]int
+				tokens[i] = 1_000_000
+				got, known := tab.CostAt(model, time.Time{}, tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], "fast")
+				if !known || got != want {
+					t.Errorf("%s token field %d: cost=%v known=%v, want %v", model, i, got, known, want)
+				}
+			}
+		}
+	}
+}
+
+func TestLoad_FastOverlayReplacesModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prices.yaml")
+	if err := os.WriteFile(path, []byte(`models:
+  claude-opus-5-5:
+    input_per_mtok: 3
+    output_per_mtok: 15
+    fast:
+      input_per_mtok: 6
+      output_per_mtok: 30
+      cache_read_per_mtok: 0.3
+      cache_write_5m_per_mtok: 7.5
+      cache_write_1h_per_mtok: 12
+  claude-opus-5:
+    input_per_mtok: 1
+    output_per_mtok: 2
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		model, speed string
+		want         float64
+	}{
+		{"claude-opus-5-5", "fast", 55.8},
+		{"claude-opus-5-5", "standard", 18},
+		{"claude-opus-5", "fast", 3},
+		{"claude-opus-4-8", "fast", 93.5},
+	} {
+		cost, known := tab.CostAt(tc.model, time.Time{}, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, tc.speed)
+		if !known || math.Abs(cost-tc.want) > 1e-9 {
+			t.Errorf("%+v: cost=%v known=%v", tc, cost, known)
+		}
 	}
 }

@@ -42,7 +42,8 @@ type RatePeriod struct {
 
 // ModelPrice is a model's current rate plus, optionally, the rates that
 // applied before it. The rate fields sit at the top level so the original
-// flat form keeps parsing unchanged; `rates` is purely additive.
+// flat form keeps parsing unchanged. Rates holds standard-rate history;
+// Fast is an optional current fast-mode rate, with no rate history.
 //
 // Periods may be listed in any order — the lookup picks the narrowest one
 // covering the timestamp, so neither oldest-first nor newest-first is
@@ -50,6 +51,7 @@ type RatePeriod struct {
 type ModelPrice struct {
 	Rate  `yaml:",inline"`
 	Rates []RatePeriod `yaml:"rates"`
+	Fast  *Rate        `yaml:"fast"`
 }
 
 // RateAt returns the rate in effect for ts. It picks the period with the
@@ -87,13 +89,18 @@ type Table struct {
 
 // CostAt returns total USD for the given token counts, priced at the rate in
 // effect for ts. Unknown models return cost=0 and known=false so the caller
-// can warn. A zero ts prices at the model's current rate — see RateAt.
-func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cacheCreate1h, cacheRead int) (cost float64, known bool) {
+// can warn. Only speed "fast" selects the optional Fast rate; every other
+// speed, or a missing Fast rate, uses standard date-effective pricing.
+// A zero ts prices at the model's current rate — see RateAt.
+func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cacheCreate1h, cacheRead int, speed string) (cost float64, known bool) {
 	p, ok := t.Models[model]
 	if !ok {
 		return 0, false
 	}
 	r := p.RateAt(ts)
+	if speed == "fast" && p.Fast != nil {
+		r = *p.Fast
+	}
 	const m = 1_000_000.0
 	cost = float64(in)*r.Input/m +
 		float64(out)*r.Output/m +
@@ -103,11 +110,11 @@ func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cache
 	return cost, true
 }
 
-// Cost prices token counts at each model's current rate. It is CostAt with a
+// Cost prices token counts at each model's current standard rate. It is CostAt with a
 // zero timestamp; prefer CostAt when a turn timestamp is in hand, so that
 // historical turns price at the rate that was actually in effect.
 func (t *Table) Cost(model string, in, out, cacheCreate5m, cacheCreate1h, cacheRead int) (cost float64, known bool) {
-	return t.CostAt(model, time.Time{}, in, out, cacheCreate5m, cacheCreate1h, cacheRead)
+	return t.CostAt(model, time.Time{}, in, out, cacheCreate5m, cacheCreate1h, cacheRead, "")
 }
 
 // DefaultPath is ~/.config/claudit/prices.yaml.

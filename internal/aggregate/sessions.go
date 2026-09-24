@@ -264,7 +264,7 @@ func buildSessionTimelines(
 		cost, _ := prices.CostAt(t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-			t.Usage.CacheReadTokens)
+			t.Usage.CacheReadTokens, t.Usage.Speed)
 
 		s, ok := sessions[t.SessionID]
 		if !ok {

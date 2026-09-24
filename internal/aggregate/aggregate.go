@@ -323,7 +323,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	cost, known := a.prices.CostAt(t.Model, t.Timestamp,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-		t.Usage.CacheReadTokens)
+		t.Usage.CacheReadTokens, t.Usage.Speed)
 	// Skip pricing warnings for synthetic / zero-token markers — Claude Code
 	// emits "<synthetic>" turns for internal events (compaction, prompt
 	// suggestions) that legitimately cost nothing.

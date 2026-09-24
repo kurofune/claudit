@@ -234,7 +234,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		cost, _ := prices.CostAt(t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-			t.Usage.CacheReadTokens)
+			t.Usage.CacheReadTokens, t.Usage.Speed)
 		n.cost += cost
 		addUsage(&n.tokens, t.Usage)
 		thinking, text := t.Thinking, t.Text

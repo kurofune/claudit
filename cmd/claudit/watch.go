@@ -254,7 +254,7 @@ func (s *watchState) onEvent(e watch.Event) {
 		cost, _ := s.prices.CostAt(t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-			t.Usage.CacheReadTokens)
+			t.Usage.CacheReadTokens, t.Usage.Speed)
 		s.totalCost += cost
 		s.turns++
 		s.tokens.addUsage(t.Usage)

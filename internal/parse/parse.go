@@ -18,6 +18,7 @@ import (
 // We always take the outer fields; we do NOT also sum `iterations` —
 // the outer fields are the rolled-up totals (see brief).
 type Usage struct {
+	Speed               string
 	InputTokens         int
 	OutputTokens        int
 	CacheCreate5mTokens int
@@ -180,6 +181,7 @@ type rawMessage struct {
 }
 
 type rawUsage struct {
+	Speed        string         `json:"speed"`
 	Input        int            `json:"input_tokens"`
 	Output       int            `json:"output_tokens"`
 	CacheCreate  int            `json:"cache_creation_input_tokens"`
@@ -421,6 +423,9 @@ func mergeTurn(a, b Turn) Turn {
 	a.Thinking = truncateRunes(joinBlocks(a.Thinking, b.Thinking), turnTextMaxChars)
 	a.Text = truncateRunes(joinBlocks(a.Text, b.Text), turnTextMaxChars)
 	a.ToolUses = append(a.ToolUses, b.ToolUses...)
+	if a.Usage.Speed == "" {
+		a.Usage.Speed = b.Usage.Speed
+	}
 	a.Usage.InputTokens = maxInt(a.Usage.InputTokens, b.Usage.InputTokens)
 	a.Usage.OutputTokens = maxInt(a.Usage.OutputTokens, b.Usage.OutputTokens)
 	a.Usage.CacheCreate5mTokens = maxInt(a.Usage.CacheCreate5mTokens, b.Usage.CacheCreate5mTokens)
@@ -502,6 +507,7 @@ func (c *Coalescer) Flush() (Turn, bool) {
 
 func convertUsage(u *rawUsage) Usage {
 	out := Usage{
+		Speed:           u.Speed,
 		InputTokens:     u.Input,
 		OutputTokens:    u.Output,
 		CacheReadTokens: u.CacheRead,
