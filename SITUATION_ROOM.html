@@ -413,7 +413,7 @@ svg [data-panel]:hover { opacity: .75; }
     <span>claudit</span><span class="sep">/</span>
     <span>Go CLI</span><span class="sep">/</span>
     <span>MIT</span><span class="sep">/</span>
-    <span data-sr="eyebrow.commits">303 commits</span>
+    <span data-sr="eyebrow.commits">305 commits</span>
   </div>
   <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
   <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
@@ -450,7 +450,7 @@ svg [data-panel]:hover { opacity: .75; }
       <div class="sub" data-sr="v.tests.sub">486 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
     <div class="vital"><div class="n" data-sr="v.rulings.n">12</div><div class="l">Standing rulings</div>
       <div class="sub" data-sr="v.rulings.sub">2 questions still open</div></div>
-    <div class="vital"><div class="n" data-sr="v.releases.n">15</div><div class="l">Releases shipped</div>
+    <div class="vital"><div class="n" data-sr="v.releases.n">16</div><div class="l">Releases shipped</div>
       <div class="sub">v1.8.2 on 2026-09-23. A patch that adds the Opus 5.5 rate card.</div></div>
     <div class="vital"><div class="n zero">0</div><div class="l">Open issues</div>
       <div class="sub">GitHub Issues is empty. No successor initiative is proposed.</div></div>
@@ -832,7 +832,7 @@ svg [data-panel]:hover { opacity: .75; }
 <h3>CURRENT</h3>
 <p><strong>Mode:</strong> Steady-state maintenance. No active initiative — both roadmaps (<code>docs/agents-redesign.md</code>, <code>docs/agents-audit-roadmap.md</code>) are fully shipped.</p>
 <p><strong>Goal:</strong> Keep claudit correct against upstream reality: pricing current with Anthropic's published rates, the parser current with Claude Code's JSONL schema. Ship fixes and small features as they earn their place.</p>
-<p><strong>Last change:</strong> 2026-09-24 — fast-mode turns use <code>message.usage.speed</code> to select bundled or overlay fast rates, including cache rates. Standard-rate history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.</p>
+<p><strong>Last change:</strong> v1.9.0 (2026-09-24) — fast-mode turns use <code>message.usage.speed</code> to select bundled or overlay fast rates, including cache rates. Standard-rate history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.</p>
 <p><strong>Assumptions:</strong></p>
 <ul>
 <li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. Users on v1.8.0 or earlier over-report Sonnet 5 spend by 50% from 2026-09-01 until they upgrade.</li>
