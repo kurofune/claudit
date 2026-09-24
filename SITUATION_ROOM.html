@@ -401,7 +401,7 @@ svg [data-panel]:hover { opacity: .75; }
   </ol>
   <button id="themeToggle" type="button">Theme</button>
   <div class="rail-foot">
-    Generated<br><span data-sr="gen-date.rail">2026-09-23</span><br>
+    Generated<br><span data-sr="gen-date.rail">2026-09-24</span><br>
     <span style="color:var(--done)">●</span> in sync
   </div>
 </nav>
@@ -413,7 +413,7 @@ svg [data-panel]:hover { opacity: .75; }
     <span>claudit</span><span class="sep">/</span>
     <span>Go CLI</span><span class="sep">/</span>
     <span>MIT</span><span class="sep">/</span>
-    <span data-sr="eyebrow.commits">294 commits</span>
+    <span data-sr="eyebrow.commits">295 commits</span>
   </div>
   <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
   <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
@@ -424,17 +424,18 @@ svg [data-panel]:hover { opacity: .75; }
       <ul>
         <li>Pricing must track Anthropic's published rates.</li>
         <li>The parser must track Claude Code's JSONL schema.</li>
-        <li>v1.8.1 shipped the pricing fix. No checkpoint is scheduled.</li>
+        <li>v1.8.2 added the Opus 5.5 rate card. No checkpoint is scheduled.</li>
       </ul>
     </div>
   </div>
 
   <div class="status-strip">
     <div class="status-cell"><span class="k">Mode</span><span class="v">maintenance</span></div>
-    <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>v1.8.1</span></div>
+    <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>v1.8.2</span></div>
     <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>5 calls</span></div>
     <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">none scheduled</span></div>
-    <div class="status-cell"><span class="k">Updated</span><span class="v" data-sr="updated">2026-09-23</span></div>
+    <div class="status-cell"><span class="k">Sources</span><span class="v" data-sr="updated">2026-09-24</span></div>
+    <div class="status-cell"><span class="k">Narrative</span><span class="v" data-sr="narrative-date">2026-09-24</span></div>
   </div>
 </header>
 
@@ -444,13 +445,13 @@ svg [data-panel]:hover { opacity: .75; }
     <span class="sec-note">counted from the repo at generation time</span></div>
   <div class="vitals">
     <div class="vital"><div class="n" data-sr="v.models.n">34</div><div class="l">Priced model ids</div>
-      <div class="sub">Re-verified against the live pricing page on 2026-09-01.</div></div>
+      <div class="sub">Re-verified against the live pricing page on 2026-09-23.</div></div>
     <div class="vital"><div class="n" data-sr="v.tests.n">924</div><div class="l">Tests</div>
       <div class="sub" data-sr="v.tests.sub">479 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
     <div class="vital"><div class="n" data-sr="v.rulings.n">11</div><div class="l">Standing rulings</div>
       <div class="sub" data-sr="v.rulings.sub">3 questions still open</div></div>
     <div class="vital"><div class="n" data-sr="v.releases.n">15</div><div class="l">Releases shipped</div>
-      <div class="sub">v1.8.1 on 2026-09-01. A patch carrying price-table corrections only.</div></div>
+      <div class="sub">v1.8.2 on 2026-09-23. A patch that adds the Opus 5.5 rate card.</div></div>
     <div class="vital"><div class="n zero">0</div><div class="l">Open issues</div>
       <div class="sub">GitHub Issues is empty. No successor initiative is proposed.</div></div>
     <div class="vital"><div class="n zero" data-sr="v.rateperiods.n">0</div><div class="l">Dated rate periods</div>
@@ -467,7 +468,7 @@ svg [data-panel]:hover { opacity: .75; }
     <article class="card lead" data-panel="card-successor">
       <span class="chip decide">decide</span>
       <h3>Pick a successor initiative, or rule that there is none.</h3>
-      <p>Both roadmaps are fully shipped. The 2026-07 principal-engineer audit is fully executed. GitHub Issues is empty. v1.8.1 closed the last dated checkpoint, so the repo now has no next target at all.</p>
+      <p>Both roadmaps are fully shipped. The 2026-07 principal-engineer audit is fully executed. GitHub Issues is empty. No dated checkpoint remains, so the repo has no next target at all.</p>
       <p>This call gates the other four. The three parked follow-ups only get scheduled inside an initiative. Unpicked is a real state, not a gap in this page.</p>
       <div class="foot">
         <span class="closes"><b>Closes when</b> an initiative is written down, or maintenance-only is ruled explicitly.</span>
@@ -478,7 +479,7 @@ svg [data-panel]:hover { opacity: .75; }
     <article class="card" data-panel="card-fastmode">
       <span class="chip decide">decide</span>
       <h3>Should claudit read the fast-mode <code>speed</code> field?</h3>
-      <p>Opus 5 and Opus 4.8 fast mode bills $10 / $50 per turn. The transcript carries a <code>speed</code> field that selects it. claudit keys pricing on model id alone, so fast turns price at the standard rate and under-report. The gap is documented, not ruled on.</p>
+      <p>Fast mode bills a higher per-turn rate: $8 / $40 on Opus 5.5, $10 / $50 on Opus 5 and 4.8. The transcript carries a <code>speed</code> field that selects it. claudit keys pricing on model id alone, so fast turns price at the standard rate and under-report. The gap is documented, not ruled on.</p>
       <div class="foot">
         <span class="closes"><b>Closes when</b> the owner rules: read the field, or leave it to a per-user overlay.</span>
         <span class="src">→ <code>DECISIONS.md</code></span>
@@ -691,6 +692,14 @@ svg [data-panel]:hover { opacity: .75; }
   <div class="tl" data-sr="history">
 <!-- sr:history-top -->
 <div class="tl-day hot">
+      <div class="tl-date">2026-09-23 <em>v1.8.2 — Opus 5.5 gets a price</em></div>
+      <div class="tl-items">
+        <div class="tl-item" data-panel="h-0923r"><span class="ev">v1.8.2</span><span>Opus 5.5 added at $4 / $20. Cache hits price at 0.05x input.</span></div>
+        <div class="tl-item"><span class="ev">v1.8.2</span><span>Before this release, every Opus 5.5 turn priced at $0.</span></div>
+        <div class="tl-item"><span class="ev">pricing</span><span>Every other rate on the live page was re-checked. None changed.</span></div>
+      </div>
+    </div>
+<div class="tl-day hot">
       <div class="tl-date">2026-09-01 <em>v1.8.1 — the corrected price table ships</em></div>
       <div class="tl-items">
         <div class="tl-item" data-panel="h-0901r"><span class="ev">v1.8.1</span><span>A patch release. Price-table corrections only, no new flag or output shape.</span></div>
@@ -706,14 +715,14 @@ svg [data-panel]:hover { opacity: .75; }
         <div class="tl-item"><span class="ev">state</span><span>CURRENT.md and DECISIONS.md updated in the same pass.</span></div>
       </div>
     </div>
+<details class="older">
+      <summary>21 more rows · 2026-05-16 → 2026-08-27</summary>
 <div class="tl-day">
       <div class="tl-date">2026-08-27 <em>Framing cleanup</em></div>
       <div class="tl-items">
         <div class="tl-item"><span class="ev">docs</span><span>The README tagline was aligned with the session-auditor framing.</span></div>
       </div>
     </div>
-<details class="older">
-      <summary>20 more rows · 2026-05-16 → 2026-08-16</summary>
 <div class="tl-day">
       <div class="tl-date">2026-08-16 <em>Project State Protocol adopted</em></div>
       <div class="tl-items">
@@ -898,7 +907,7 @@ svg [data-panel]:hover { opacity: .75; }
   <strong>Sources</strong> — CURRENT.md, DECISIONS.md, CONTEXT_MAP.md, CHANGELOG.md, docs/agents-audit-roadmap.md, docs/agents-redesign.md, internal/pricing/default.yaml, git log.<br>
   <strong>Authority</strong> — this page holds none. Where it and a source disagree, the source wins and this page is the cleanup target.<br>
   <strong>Regeneration</strong> — rewritten at session close when a phase moves, a verdict lands, or a ruling changes.<br>
-  Generated <span data-sr="gen-date.foot">2026-09-23</span> · <code>skills/situation-room</code>
+  Generated <span data-sr="gen-date.foot">2026-09-24</span> · <code>skills/situation-room</code>
 </footer>
 
 </main>
@@ -927,8 +936,23 @@ svg [data-panel]:hover { opacity: .75; }
 <div id="dossier" hidden>
 <!-- sr:panels-top -->
 
+  <template data-panel-content="h-0923r" data-kind="Release"
+            data-title="v1.8.2 — Opus 5.5 gets a price" data-meta="2026-09-23 · patch · latest release"
+            data-src="CHANGELOG.md v1.8.2 · CURRENT.md">
+    <p>v1.8.2 is a patch. It adds one rate card: <code>claude-opus-5-5</code> and its <code>[1m]</code> variant. No flag or output shape changed.</p>
+    <p>The error it fixes was visible, not silent. v1.8.1 had no Opus 5.5 entry, so every Opus 5.5 turn landed in <code>unknown_models</code> at $0. The unpriced-model warning fired, but total spend read low.</p>
+    <p>The card is $4 input and $20 output. Cache writes are $5 (5m) and $8 (1h). Cache hits are $0.20, which is 0.05x input. Fable 5.1 and Mythos 5.1 also break the usual 0.1x ratio.</p>
+    <p>Fast mode on Opus 5.5 bills $8 / $40. claudit still prices it at the standard rate. See <button class="xref" data-panel="card-fastmode">the fast-mode call</button>.</p>
+    <div class="dd-links"><h4>Go read the source</h4>
+      <a class="dl" href="CHANGELOG.md" target="_blank"><span class="dl-l">The v1.8.2 entry</span><span class="dl-p">CHANGELOG.md</span></a>
+      <a class="dl" href="internal/pricing/default.yaml" target="_blank"><span class="dl-l">The shipped price table</span><span class="dl-p">internal/pricing/default.yaml</span></a>
+      <button class="dl" data-pane="src-current"><span class="dl-l">Live state after the release, inline</span><span class="dl-p">inlined in full · section 08</span></button>
+      <button class="dl" data-panel="h-0901r"><span class="dl-l">The release before it</span><span class="dl-p">History</span></button>
+    </div>
+  </template>
+
   <template data-panel-content="h-0901r" data-kind="Release"
-            data-title="v1.8.1 — the corrected price table ships" data-meta="2026-09-01 · patch · latest release"
+            data-title="v1.8.1 — the corrected price table ships" data-meta="2026-09-01 · patch · superseded by v1.8.2"
             data-src="CHANGELOG.md v1.8.1 · CURRENT.md">
     <p>v1.8.1 is a patch. It carries the 2026-09-01 price-table corrections and nothing else — no new capability, no new flag, no change to any output shape.</p>
     <p>The release matters because the error it fixes is silent. v1.8.0 pre-encoded a Sonnet 5 rate increase that Anthropic later cancelled. An installed v1.8.0 therefore prices Sonnet 5 turns 50% high from 2026-09-01, and no warning fires: the model is priced, just priced wrong. Unpriced-model warnings do not catch a wrong rate. Only an upgrade fixes it.</p>
@@ -944,7 +968,7 @@ svg [data-panel]:hover { opacity: .75; }
   <template data-panel-content="card-fastmode" data-kind="Your call"
             data-title="Should claudit read the fast-mode speed field?" data-meta="open · decide · no ruling exists"
             data-src="DECISIONS.md → Open questions">
-    <p>Fast mode is the one rate in Anthropic's table that is not a property of the model. Opus 5 and Opus 4.8 bill $10 / $50 when a turn runs fast, against $5 / $25 standard. The selector is a <code>speed</code> field on the transcript line, not part of the model id.</p>
+    <p>Fast mode is the one rate in Anthropic's table that is not a property of the model. Opus 5.5 bills $8 / $40 when a turn runs fast, against $4 / $20 standard. Opus 5 and Opus 4.8 bill $10 / $50 fast, against $5 / $25. The selector is a <code>speed</code> field on the transcript line, not part of the model id.</p>
     <p>claudit keys its whole pricing path on model id alone, so a fast turn prices at the standard rate and the total reads low. The gap is written into the price table's header comment and into the README's limitations, so it is disclosed rather than hidden.</p>
     <p>Two honest answers exist. Read the field and price per turn, which means threading a second key through the pricing path. Or declare it out of scope and let a user who runs fast mode override the model entry through <code>~/.config/claudit/prices.yaml</code>. Neither has been ruled.</p>
     <div class="dd-links"><h4>Go read the source</h4>
@@ -1161,12 +1185,13 @@ svg [data-panel]:hover { opacity: .75; }
 
   <template data-panel-content="ruling-tdd" data-kind="Ruling"
             data-title="TDD for backend and frontend logic; browser verification for UI" data-meta="2026-07-28 · ruled · no implicit override"
-            data-src=".claude/rules/testing.md">
+            data-src="DECISIONS.md · ~/.agents/AGENTS.md § Testing Policy">
     <p>All backend code and all frontend logic — stores, utilities, data transforms, complex reactive state — must use Kent Beck's red-green-refactor. UI work is exempt from TDD and verified in the browser instead, with interaction and edge-case tests written after visual confirmation.</p>
     <p>The rule carries an explicit no-implicit-override clause. Urgency, deadlines, "just build it" and "from scratch" are not permission to skip it. Only the owner saying "skip TDD" overrides it.</p>
     <p>This is what makes the <code>*-logic.js</code> / <code>view-*.js</code> split load-bearing rather than stylistic: the pure half is where the test suite lives.</p>
+    <p>The full policy lives in the owner's user-global <code>~/.agents/AGENTS.md</code>. The repo stub was removed on 2026-09-20; <code>AGENTS.md</code> points at it.</p>
     <div class="dd-links"><h4>Go read the source</h4>
-      <a class="dl" href=".claude/rules/testing.md" target="_blank"><span class="dl-l">The full policy, including the carve-outs</span><span class="dl-p">.claude/rules/testing.md</span></a>
+      <a class="dl" href="DECISIONS.md" target="_blank"><span class="dl-l">The ruling as recorded</span><span class="dl-p">DECISIONS.md</span></a>
       <a class="dl" href="AGENTS.md" target="_blank"><span class="dl-l">How agents are told to work here</span><span class="dl-p">AGENTS.md</span></a>
       <button class="dl" data-panel="alt-serve"><span class="dl-l">Where the split shows up in the code</span><span class="dl-p">Mechanism</span></button>
     </div>
