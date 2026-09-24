@@ -2,7 +2,9 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.9.0] — 2026-09-24
+
+Fast-mode turns are now priced at the fast rate. **Upgrade if you use fast mode:** earlier releases report those turns at half their real cost.
 
 ### Changed
 
@@ -317,7 +319,9 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/kurofune/claudit/compare/v1.8.2...v1.9.0
+[1.8.2]: https://github.com/kurofune/claudit/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/kurofune/claudit/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/kurofune/claudit/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/kurofune/claudit/compare/v1.6.0...v1.7.0

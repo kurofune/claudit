@@ -7,7 +7,7 @@
 Anthropic's published rates, the parser current with Claude Code's JSONL schema.
 Ship fixes and small features as they earn their place.
 
-**Last change:** 2026-09-24 — fast-mode turns use `message.usage.speed` to
+**Last change:** v1.9.0 (2026-09-24) — fast-mode turns use `message.usage.speed` to
 select bundled or overlay fast rates, including cache rates. Standard-rate
 history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.
 
