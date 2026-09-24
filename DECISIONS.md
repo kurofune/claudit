@@ -21,7 +21,8 @@ a contradicting doc is a cleanup target. Supersede, don't delete.
 
 ## Open questions (NOT settled)
 
-- **Fast-mode pricing.** Opus 5 / 4.8 fast mode bills $10/$50 per-turn via the
+- **Fast-mode pricing.** Opus 5.5 fast mode bills $8/$40 and Opus 5 / 4.8
+  bill $10/$50, per-turn via the
   transcript's `speed` field, which claudit doesn't read; fast turns price at
   standard rates. Worth reading the field, or leave to per-user overlay?
 - **Deferred Phase-2 follow-ups** (drafted in the roadmap, never scheduled):
@@ -34,3 +35,4 @@ a contradicting doc is a cleanup target. Supersede, don't delete.
 |---|---|
 | 2026-08-16 | File scaffolded (Project State Protocol adopted). Rows above reconstructed from CHANGELOG.md, docs/, and session memory — each row links its primary source. |
 | 2026-09-01 | Pricing refreshed against the live page. Added Fable 5.1 / Mythos 5.1 (+`[1m]`) at $10 / $50 with **cache hits at $0.25/MTok** — a 0.025x multiplier, the first model card that breaks the 0.1x cache-read ratio. Removed Sonnet 5's dated rate period: Anthropic cancelled the 2026-09-01 increase to $3 / $15 and made the introductory $2 / $10 standard, so an un-upgraded claudit over-reports Sonnet 5 spend by 50% from that date. Date-effective pricing stays — no bundled model needs it today. Evidence: https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-09-01); `internal/pricing/default.yaml`. |
+| 2026-09-23 | v1.8.2: added Opus 5.5 (+`[1m]`) at $4 / $20, writes $5 / $8, **cache hits $0.20/MTok** — 0.05x input, the second card off the 0.1x ratio. Before this every Opus 5.5 turn priced at $0 (exact-id lookup, `internal/pricing/pricing.go:92`). All other rates re-checked, unchanged. Evidence: https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-09-23); `internal/pricing/default.yaml`; claudit-dkv. |
