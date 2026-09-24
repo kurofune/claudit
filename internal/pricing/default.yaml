@@ -2,8 +2,9 @@
 #
 # Every rate below was re-verified against
 # https://platform.claude.com/docs/en/about-claude/pricing on 2026-09-01
-# (Fable 5.1 / Mythos 5.1 added then); Opus 5.5 added 2026-09-23. Entries are tagged with the date they
-# were last checked — refresh those tags if you re-check the page.
+# (Fable 5.1 / Mythos 5.1 added then); Opus 5.5 added 2026-09-23. Entries
+# are tagged with the date they were last checked — refresh those tags if you
+# re-check the page.
 #
 # Cache pricing follows Anthropic's standard ratios off the input rate:
 #   cache_read     = input * 0.10
@@ -26,8 +27,8 @@
 # order; a turn with no usable timestamp prices at the current rate.
 #
 # Known gap (needs code, not just a rate edit — see README):
-#   * Fast mode (Opus 5.5, $8 / $40; Opus 5 / Opus 4.8, $10 / $50) is a per-turn rate, not a
-#     per-model one. Transcripts carry the "speed" field that would select
+#   * Fast mode (Opus 5.5, $8 / $40; Opus 5 / Opus 4.8, $10 / $50) is a
+#     per-turn rate, not a per-model one. Transcripts carry the "speed" field that would select
 #     it, but claudit keys pricing on model id alone, so fast-mode turns
 #     price at the standard rate.
 
