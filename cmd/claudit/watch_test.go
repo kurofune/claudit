@@ -47,7 +47,7 @@ func fakeAssistantTurn(t *testing.T, costUSD float64) watch.Event {
 func TestSpike_NoFlagBelowMinSamples(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{}) // non-TTY
-	s := newWatchState(testPrices(t), 0, 5.0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 5.0, r, nil)
 	// Feed spikeWindow/2 - 1 cheap turns, then a huge spike. Detector
 	// requires at least spikeWindow/2 prior samples — so no flag yet.
 	for i := 0; i < spikeWindow/2-1; i++ {
@@ -63,7 +63,7 @@ func TestSpike_NoFlagBelowMinSamples(t *testing.T) {
 func TestSpike_FlagsAfterWarmup(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 5.0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 5.0, r, nil)
 	for i := 0; i < spikeWindow; i++ {
 		s.onEvent(fakeAssistantTurn(t, 0.01))
 	}
@@ -77,7 +77,7 @@ func TestSpike_FlagsAfterWarmup(t *testing.T) {
 func TestSpike_NoFlagWhenBelowThreshold(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 5.0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 5.0, r, nil)
 	for i := 0; i < spikeWindow; i++ {
 		s.onEvent(fakeAssistantTurn(t, 0.01))
 	}
@@ -91,7 +91,7 @@ func TestSpike_NoFlagWhenBelowThreshold(t *testing.T) {
 func TestSpike_DisabledByZeroThreshold(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 0, r, nil)
 	for i := 0; i < spikeWindow; i++ {
 		s.onEvent(fakeAssistantTurn(t, 0.01))
 	}
@@ -105,7 +105,7 @@ func TestSpike_DisabledByZeroThreshold(t *testing.T) {
 func TestBudget_AlertsOnceOnCross(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0.05, 0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0.05, 0, r, nil)
 	s.onEvent(fakeAssistantTurn(t, 0.02))
 	s.onEvent(fakeAssistantTurn(t, 0.02))
 	if strings.Contains(buf.String(), "BUDGET") {
@@ -128,7 +128,7 @@ func TestMultiHub_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
 	// same generation into a second file (same message.id + usage, fresh
 	// uuid). combinedCost must count it once, not once per file.
 	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
-	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+	h := newMultiHub(testPrices(t), 0, 0, r, nil)
 
 	mk := func(path, msgID string) taggedEvent {
 		return taggedEvent{path: path, ev: watch.Event{
@@ -159,7 +159,7 @@ func TestMultiHub_DedupsDuplicateMessageIDAcrossFiles(t *testing.T) {
 func TestSpike_SuppressedDuringHistoryReplay(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 5.0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 5.0, r, nil)
 	// Warm the ring with cheap historical events (Live=false).
 	for i := 0; i < spikeWindow; i++ {
 		e := fakeAssistantTurn(t, 0.01)
@@ -178,7 +178,7 @@ func TestSpike_SuppressedDuringHistoryReplay(t *testing.T) {
 func TestSpike_SuppressesConsecutiveDuplicateCost(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 5.0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 5.0, r, nil)
 	for i := 0; i < spikeWindow; i++ {
 		s.onEvent(fakeAssistantTurn(t, 0.01))
 	}
@@ -200,7 +200,7 @@ func TestSpike_SuppressesConsecutiveDuplicateCost(t *testing.T) {
 func TestBudget_SuppressedDuringReplay(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0.05, 0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0.05, 0, r, nil)
 	for i := 0; i < 10; i++ {
 		e := fakeAssistantTurn(t, 0.02)
 		e.Live = false
@@ -232,7 +232,7 @@ func rollingSnap(t *testing.T, gen int64, now time.Time, costs ...float64) *corp
 func TestRollingTotals_FirstCallMatchesAggregate(t *testing.T) {
 	prices := testPrices(t)
 	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
-	s := newWatchState(prices, 0, 0, nil, r, nil)
+	s := newWatchState(prices, 0, 0, r, nil)
 
 	now := time.Now()
 	snap := rollingSnap(t, 1, now, 0.10, 0.05)
@@ -248,7 +248,7 @@ func TestRollingTotals_FirstCallMatchesAggregate(t *testing.T) {
 func TestRollingTotals_CachedWithinSameGenerationAndMinute(t *testing.T) {
 	prices := testPrices(t)
 	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
-	s := newWatchState(prices, 0, 0, nil, r, nil)
+	s := newWatchState(prices, 0, 0, r, nil)
 
 	// Fix now to mid-minute so both calls share the same minute stamp.
 	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
@@ -272,7 +272,7 @@ func TestRollingTotals_CachedWithinSameGenerationAndMinute(t *testing.T) {
 func TestRollingTotals_RecomputesOnGenerationBump(t *testing.T) {
 	prices := testPrices(t)
 	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
-	s := newWatchState(prices, 0, 0, nil, r, nil)
+	s := newWatchState(prices, 0, 0, r, nil)
 
 	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
 	hour1, _, _, _ := s.rollingTotals(rollingSnap(t, 1, now, 0.10), now)
@@ -292,7 +292,7 @@ func TestRollingTotals_RecomputesOnGenerationBump(t *testing.T) {
 func TestRollingTotals_RecomputesOnMinuteRollover(t *testing.T) {
 	prices := testPrices(t)
 	r := newStreamPainter(&bytes.Buffer{}, term.Style{})
-	s := newWatchState(prices, 0, 0, nil, r, nil)
+	s := newWatchState(prices, 0, 0, r, nil)
 
 	now := time.Now().Truncate(time.Minute).Add(30 * time.Second)
 	// One turn 59m45s old: inside the trailing hour at `now`, aged out
@@ -321,7 +321,7 @@ func TestRollingTotals_RecomputesOnMinuteRollover(t *testing.T) {
 func TestRender_NilCacheHasNoRollingPanel(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 0, nil, r, nil) // no corpus cache
+	s := newWatchState(testPrices(t), 0, 0, r, nil) // no corpus cache
 	s.onEvent(fakeAssistantTurn(t, 0.01))
 	got := buf.String()
 	if strings.Contains(got, "hour") || strings.Contains(got, "month") {
@@ -335,7 +335,7 @@ func TestRender_NilCacheHasNoRollingPanel(t *testing.T) {
 func TestSummary_IncludesMaxTurnRatio(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	s := newWatchState(testPrices(t), 0, 0, nil, r, nil)
+	s := newWatchState(testPrices(t), 0, 0, r, nil)
 	for i := 0; i < 5; i++ {
 		s.onEvent(fakeAssistantTurn(t, 0.01))
 	}

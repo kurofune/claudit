@@ -15,7 +15,6 @@ import (
 
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/notify"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
@@ -35,7 +34,6 @@ func runWatch(args []string) error {
 	intervalMS := fs.Int("interval-ms", 1500, "polling interval in milliseconds")
 	budget := fs.Float64("budget", 0, "alert when running cost crosses this many USD (0 disables)")
 	spikeThresh := fs.Float64("spike-threshold", 5.0, "flag a turn when its cost is >= N x the rolling median of the prior 20 turns (0 disables)")
-	notifyOn := fs.Bool("notify", false, "send a desktop notification on budget cross and turn-cost spikes")
 	all := fs.Bool("all", false, "tail every recently-modified session under --root, grouped by project")
 	rolling := fs.Bool("rolling", true, "scan --root at startup and show today/week/month running totals at the top of the UI")
 	// Deprecated: the rolling panel now reads the full corpus (the same
@@ -83,7 +81,7 @@ func runWatch(args []string) error {
 		if fs.NArg() > 0 {
 			return fmt.Errorf("--all does not take a session-id argument")
 		}
-		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *notifyOn, *rolling)
+		return runWatchAll(ctx, *root, prices, *intervalMS, *budget, *spikeThresh, *rolling)
 	}
 
 	var path string
@@ -108,10 +106,6 @@ func runWatch(args []string) error {
 	}
 
 	p := newPainter(os.Stdout)
-	var notifier notify.Notifier
-	if *notifyOn {
-		notifier = notify.Default()
-	}
 	var cache *corpus.Cache
 	if *rolling {
 		cache = corpus.New(*root)
@@ -127,7 +121,7 @@ func runWatch(args []string) error {
 		}
 	}
 
-	st := newWatchState(prices, *budget, *spikeThresh, notifier, p, cache)
+	st := newWatchState(prices, *budget, *spikeThresh, p, cache)
 	defer st.shutdown(os.Stderr)
 
 	// Repaint on a steady tick so the rolling panel reflects corpus
@@ -164,7 +158,6 @@ type watchState struct {
 	prices      *pricing.Table
 	budget      float64
 	spikeThresh float64
-	notifier    notify.Notifier
 	painter     painter
 	// cache is the shared corpus loader backing the rolling panel; nil
 	// when rolling totals are disabled. The same data layer serve and
@@ -232,12 +225,11 @@ func (t tokensSum) hitRatio() float64 {
 	return float64(t.cr) / float64(denom)
 }
 
-func newWatchState(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, cache *corpus.Cache) *watchState {
+func newWatchState(prices *pricing.Table, budget, spikeThresh float64, p painter, cache *corpus.Cache) *watchState {
 	return &watchState{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
-		notifier:    notifier,
 		painter:     p,
 		cache:       cache,
 		started:     time.Now(),
@@ -303,8 +295,6 @@ func (s *watchState) checkBudget() {
 	if s.totalCost >= s.budget {
 		s.painter.Alert(styleBudgetSingle(s.painter.Style(), s.totalCost, s.budget))
 		s.budgetAlerted = true
-		s.notifyAsync("claudit: budget crossed",
-			fmt.Sprintf("Running cost $%.2f crossed budget $%.2f", s.totalCost, s.budget))
 	}
 }
 
@@ -336,20 +326,6 @@ func (s *watchState) checkSpike(cost float64) {
 		tools = "no-tool"
 	}
 	s.painter.Alert(styleSpikeSingle(s.painter.Style(), s.turns, cost, ratio, s.tcCount, med, tools))
-	s.notifyAsync("claudit: cost spike",
-		fmt.Sprintf("Turn %d cost $%.4f (%.1fx median)", s.turns, cost, ratio))
-}
-
-// notifyAsync fires a desktop notification on a fresh goroutine so a
-// slow or hung backend (osascript / notify-send shells out and waits
-// for the subprocess) cannot stall the polling goroutine — which
-// would otherwise miss ctx cancellation and wedge shutdown.
-func (s *watchState) notifyAsync(title, body string) {
-	if s.notifier == nil {
-		return
-	}
-	n := s.notifier
-	go func() { _ = n.Send(title, body) }()
 }
 
 func (s *watchState) snapshotTurnCosts() []float64 {

@@ -19,7 +19,7 @@ Pointers only — what exists and where.
 - `internal/pricing/` — bundled `default.yaml` + overlay loader, date-effective rates
 - `internal/render/` — report/diff HTML, tokens.css, static SPA bundling
 - `internal/serve/` — web daemon: API, ETag/render cache, SSE `/events`
-- `internal/watch/`, `internal/notify/`, `internal/stat/` — live TUI, desktop notify, stats
+- `internal/watch/`, `internal/stat/` — live TUI, stats
 - `web/` — the SPA: `view-*.js` (DOM) + `*-logic.js` (pure, TDD'd), 16 theme CSS files
 - `jstest/` — Node-runner JS unit tests; `web_embed.go` — embeds `web/` into the binary
 

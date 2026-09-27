@@ -26,7 +26,7 @@ import (
 // already on disk before catching up to EOF; those events have
 // Live=false. Lines that arrive after the initial drain have Live=true.
 // Callers that want to alert only on real-time activity (spike
-// detection, budget crosses, desktop notifications) should gate on this.
+// detection, budget crosses) should gate on this.
 type Event struct {
 	Kind parse.LineKind
 	Turn parse.Turn

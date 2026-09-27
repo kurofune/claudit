@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -12,35 +11,10 @@ import (
 	"github.com/kurofune/claudit/internal/watch/term"
 )
 
-// blockingNotifier models the real-world hazard of osascript /
-// notify-send hanging: Send doesn't return until release is closed.
-// The notify.Notifier doc promises Send is non-blocking, but the exec
-// implementations can stall — the hub must tolerate that on shutdown.
-type blockingNotifier struct {
-	release chan struct{}
-	started chan struct{} // buffered(1), signals first Send entry
-}
-
-func newBlockingNotifier() *blockingNotifier {
-	return &blockingNotifier{
-		release: make(chan struct{}),
-		started: make(chan struct{}, 1),
-	}
-}
-
-func (b *blockingNotifier) Send(string, string) error {
-	select {
-	case b.started <- struct{}{}:
-	default:
-	}
-	<-b.release
-	return nil
-}
-
 func TestMultiHub_HandleEvent_GroupsByProject(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+	h := newMultiHub(testPrices(t), 0, 0, r, nil)
 
 	// Two sessions under "claudit", one under "other-repo".
 	feed := func(path, cwd string, costUSD float64) {
@@ -74,7 +48,7 @@ func TestMultiHub_HandleEvent_GroupsByProject(t *testing.T) {
 func TestMultiHub_BudgetCross_AcrossSessions(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	h := newMultiHub(testPrices(t), 0.05, 0, nil, r, nil)
+	h := newMultiHub(testPrices(t), 0.05, 0, r, nil)
 
 	feed := func(path string, costUSD float64) {
 		ev := fakeAssistantTurn(t, costUSD)
@@ -95,7 +69,7 @@ func TestMultiHub_BudgetCross_AcrossSessions(t *testing.T) {
 func TestMultiHub_IgnoresNonAssistantEvents(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+	h := newMultiHub(testPrices(t), 0, 0, r, nil)
 
 	h.handleEvent(taggedEvent{
 		path: "/sess/x.jsonl",
@@ -140,7 +114,7 @@ func TestMultiState_IdleSessionsHiddenWhenOthersActive(t *testing.T) {
 func TestMultiHub_LiveHeader_ExcludesIdleSessions(t *testing.T) {
 	var buf bytes.Buffer
 	r := newStreamPainter(&buf, term.Style{})
-	h := newMultiHub(testPrices(t), 0, 0, nil, r, nil)
+	h := newMultiHub(testPrices(t), 0, 0, r, nil)
 
 	// Active session: $0.05, just now.
 	active := h.state.session("/sess/active.jsonl", "sa", "/p/active")
@@ -167,42 +141,6 @@ func TestMultiHub_LiveHeader_ExcludesIdleSessions(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 active session") {
 		t.Errorf("expected '1 active session' in header; got %q", out)
-	}
-}
-
-// hub.run must exit promptly when stop is closed even if a notifier
-// call is in flight. Before the fix, notifier.Send ran inline inside
-// handleEvent, so a hung osascript / notify-send wedged the hub —
-// close(stop) had no effect, and runWatchAll's `<-renderDone` would
-// block forever even after the user pressed Ctrl+C.
-func TestMultiHub_Run_ExitsWhenNotifierStalls(t *testing.T) {
-	bn := newBlockingNotifier()
-	defer close(bn.release)
-
-	p := newStreamPainter(io.Discard, term.Style{})
-	h := newMultiHub(testPrices(t), 0.01, 0, bn, p, nil)
-
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		h.run(stop)
-		close(done)
-	}()
-
-	// Event cost > budget triggers the budget-crossed notifier call.
-	h.eventCh <- taggedEvent{path: "/x.jsonl", ev: fakeAssistantTurn(t, 0.02)}
-
-	select {
-	case <-bn.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("notifier.Send was not invoked within 2s")
-	}
-
-	close(stop)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("hub.run did not exit within 2s after close(stop); blocked by stalled notifier")
 	}
 }
 

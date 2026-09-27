@@ -12,7 +12,6 @@ import (
 
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/notify"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 	"github.com/kurofune/claudit/internal/stat"
@@ -32,17 +31,13 @@ const (
 // runWatchAll is the entry point for `claudit watch --all`. Runs the
 // discovery loop, spawns Tail goroutines per session, fans events
 // into a single render goroutine that owns all state.
-func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, notifyOn, rolling bool) error {
+func runWatchAll(ctx context.Context, root string, prices *pricing.Table, intervalMS int, budget, spikeThresh float64, rolling bool) error {
 	fmt.Fprintf(os.Stderr, "claudit watch --all: tailing every session under %s touched in the last %s\n", root, recentWindow)
 	if budget > 0 {
 		fmt.Fprintf(os.Stderr, "claudit watch --all: budget alert at $%.2f (combined across sessions)\n", budget)
 	}
 
 	p := newPainter(os.Stdout)
-	var notifier notify.Notifier
-	if notifyOn {
-		notifier = notify.Default()
-	}
 	var cache *corpus.Cache
 	if rolling {
 		cache = corpus.New(root)
@@ -58,7 +53,7 @@ func runWatchAll(ctx context.Context, root string, prices *pricing.Table, interv
 		}
 	}
 
-	hub := newMultiHub(prices, budget, spikeThresh, notifier, p, cache)
+	hub := newMultiHub(prices, budget, spikeThresh, p, cache)
 	defer hub.shutdown(os.Stderr)
 	stopCh := make(chan struct{})
 
@@ -105,7 +100,6 @@ type multiHub struct {
 	prices      *pricing.Table
 	budget      float64
 	spikeThresh float64
-	notifier    notify.Notifier
 	painter     painter
 	// cache is the shared corpus loader backing the rolling panel; nil
 	// when rolling totals are disabled.
@@ -130,12 +124,11 @@ type taggedNotice struct {
 	n    watch.Notice
 }
 
-func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, notifier notify.Notifier, p painter, cache *corpus.Cache) *multiHub {
+func newMultiHub(prices *pricing.Table, budget, spikeThresh float64, p painter, cache *corpus.Cache) *multiHub {
 	return &multiHub{
 		prices:      prices,
 		budget:      budget,
 		spikeThresh: spikeThresh,
-		notifier:    notifier,
 		painter:     p,
 		cache:       cache,
 		eventCh:     make(chan taggedEvent, 256),
@@ -265,34 +258,13 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 			}
 			msg := styleSpikeMulti(h.painter.Style(), projectLabel(s.cwd), s.turns, cost, med, tools)
 			h.painter.Alert(msg)
-			// Run notifier off the hub goroutine: osascript / notify-send
-			// can hang, and we cannot let that wedge shutdown.
-			h.notifyAsync("claudit: cost spike",
-				fmt.Sprintf("%s turn %d cost $%.4f (%.1fx median)", projectLabel(s.cwd), s.turns, cost, cost/med))
 		}
 	}
 	if te.ev.Live && h.budget > 0 && !h.state.budgetAlerted && h.state.combinedCost >= h.budget {
 		h.painter.Alert(styleBudgetMulti(h.painter.Style(), h.state.combinedCost, h.budget))
 		h.state.budgetAlerted = true
-		h.notifyAsync("claudit: budget crossed",
-			fmt.Sprintf("Combined cost $%.2f crossed budget $%.2f", h.state.combinedCost, h.budget))
 	}
 	h.paint()
-}
-
-// notifyAsync fires a desktop notification on a fresh goroutine so a
-// slow or hung backend (osascript / notify-send shells out and waits
-// for the subprocess) cannot block the hub goroutine — which must
-// keep reading eventCh and stay responsive to stop on shutdown. The
-// Notifier interface documents non-blocking Send, but the exec-based
-// implementations can stall; this helper makes the call site honor
-// the contract regardless of the backend.
-func (h *multiHub) notifyAsync(title, body string) {
-	if h.notifier == nil {
-		return
-	}
-	n := h.notifier
-	go func() { _ = n.Send(title, body) }()
 }
 
 func (h *multiHub) handleNotice(tn taggedNotice) {

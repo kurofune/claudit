@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+
+- **`claudit watch --notify` is gone.** Desktop notifications on budget crosses and cost spikes (osascript / notify-send / PowerShell) are removed along with the `internal/notify` package. Budget and spike alerts still print in the watch UI. Passing `--notify` is now an unknown-flag error.
+
 ## [1.9.0] — 2026-09-24
 
 Fast-mode turns are now priced at the fast rate. **Upgrade if you use fast mode:** earlier releases report those turns at half their real cost.
