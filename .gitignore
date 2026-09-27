@@ -34,3 +34,7 @@ todo.md
 .djinn/state/
 .djinn/session-id
 go.work
+
+# Djinn (added by djinn init)
+.djinn/seats/*/runs/
+.djinn/needs-you-seen.json

@@ -665,6 +665,44 @@ Rewritten and queued. It goes in the next drain.
 When every non-closed bead has been through this, offer the next drain (Job 2
 again — factory check first, same guards, same refusal check).
 
+### A `needs you:` or `mail:` line arrives with a turn
+
+The UserPromptSubmit hook `djinn init` installs adds a line to a turn for each
+item that newly needs the operator: `needs you: <bead-id> — <title> — bd show
+<bead-id>` for a bead deferred with the `needs-operator` label, and
+`mail: <message-id> — <title> — bd show <message-id>` for a message to the lead's
+seat. Each item arrives once. Every such line is Job 4 input: answer what the
+operator asked first, then put each item to them, one at a time, as one `say`
+block ending in one question. Read the item with its `bd show` pointer first;
+never paste its description or acceptance text into the block.
+
+```say
+<bead or message title>: <what it waits on, in one plain sentence>.
+
+<one question>
+```
+
+A `needs you:` answer goes through the conversation above from step 4. A
+`mail:` item is closed once the operator has answered it:
+`bd close <message-id> --reason "<what the operator decided>"`. The hook is the
+only way new items reach you; nothing else checks for them.
+
+---
+
+## Review follow-ups — proposals the lead re-authors
+
+Review follow-ups are filed `proposed` and have not passed `/create-bead`. Find
+them with
+`bd list --label proposed --status open --desc-contains '**Location:**' --json`.
+Each one becomes workable only this way:
+
+1. Author a fresh bead through `/create-bead` (Job 1 routing and sizing) from
+   the proposal's `**Finding:**` and `**Location:**` lines.
+2. Close the proposal naming it:
+   `bd close <proposal-id> --reason "re-authored as <new-bead-id>"`.
+
+Never remove `proposed` from a review follow-up: that drains it ungated.
+
 ---
 
 ## The proposals setting
@@ -705,6 +743,7 @@ Never change it unasked.
 - Never labels an operator's own ask `proposed`, and never changes
   `factory.proposals` unasked.
 - Never starts a second drain while one is running.
+- Never removes the `proposed` label from a review follow-up.
 - Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
   message bead (`--type message`, no acceptance criteria) filed through
   `Stop one bead / pause the drain`.

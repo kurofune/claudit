@@ -27,6 +27,16 @@
         ],
         "matcher": ""
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "djinn needs-you"
+          }
+        ]
+      }
     ]
   }
 }

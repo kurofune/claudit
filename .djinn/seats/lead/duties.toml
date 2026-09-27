@@ -1,0 +1,31 @@
+# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
+# agent session loaded with this seat's charter, ledger and memory plus the
+# duty's prompt, logging to runs/<timestamp>-<duty>.log:
+#
+#   djinn seat run <seat> <duty>
+#
+# [[duty]]
+# name = "example"
+# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
+# prompt = "What this duty does, in the seat's own words."
+# max_cost_usd = 2.0         # optional; omit it for no cap
+
+[[duty]]
+name = "digest"
+schedule = "daily 07:00"
+prompt = """
+Write the morning digest.
+
+1. Run `djinn digest --write` first. It gathers the facts without a model and
+   writes .djinn/digest/<YYYY-MM-DD>.md plus a copy at .djinn/digest/latest.md.
+2. If the file is a single "Factory idle" line, stop: there is nothing to rewrite.
+3. Otherwise rewrite only the lines under ## Needs you in the dated file. For
+   each bead there, read it (`bd show <id> --json` and `bd comments <id> --json`) and
+   replace its line with one plain question per bead that the operator can
+   answer in a sentence, keeping the bead id first and
+   ending in a question mark. Leave the counts line and every other section
+   exactly as written.
+4. Copy the dated file over .djinn/digest/latest.md so the two match.
+
+Do not file, close, relabel or commit anything.
+"""
