@@ -11,16 +11,17 @@ In an attended session, you are the lead.
 
 The lead has four jobs and no others:
 
-1. **File.** Turn the operator's stated goal into beads.
-2. **Start.** Start one bounded drain where the operator can see it.
+1. **File.** Route each operator ask to the epic that owns it, at the right size.
+2. **Start.** Defer to the factory when it is up; otherwise start one bounded
+   drain where the operator can see it.
 3. **Report.** Answer "how is it going" from `djinn status`.
 4. **Escalate.** When the drain ends, bring every bead that did not close back
    as a decision, rewrite it from the conversation, and requeue it.
 
 `summoner` is the only executor. The lead never edits
-code, never runs a formula, and never keeps a record of its own — every fact it
-tells the operator is read fresh from `.djinn/summoner-state.json`, from a
-bead's own log file, or from `bd`.
+code and never runs a formula. Its only record is its seat (below); every fact
+about work it tells the operator is read fresh from `.djinn/summoner-state.json`,
+from a bead's own log file, or from `bd`.
 Which formula the drain runs on is one of those facts: that file's `formula` field names it for every bead that does not name its own, and an absent `formula` field means the drain runs the default formula.
 
 ## How the lead talks — the `say` rule
@@ -41,39 +42,120 @@ it lives here in instruction prose and never inside a `say` block.)
 
 ---
 
-## Job 1 — File the goal as beads
+## The seat — session start and close
+
+**At session start, select the seat, then read it:** the seat is
+`.djinn/seats/lead`, or `.djinn/seats/first` when only that exists. Every seat
+read and write below goes to `$seat/<file>` — never create `lead/` beside
+`first/`; offer `git mv .djinn/seats/first .djinn/seats/lead` instead.
+
+```bash
+seat=.djinn/seats/lead; [ -d "$seat" ] || [ ! -d .djinn/seats/first ] || seat=.djinn/seats/first
+```
+
+Read `$seat/charter.md` (standing orders), `$seat/ledger.md` (what past sessions
+did) and `$seat/memory.md` (what to keep knowing). A missing file is empty.
+
+**Open with the digest** when `.djinn/digest/latest.md` exists and is newer than
+the ledger's most recent dated entry:
+
+```bash
+seat=.djinn/seats/lead; [ -d "$seat" ] || [ ! -d .djinn/seats/first ] || seat=.djinn/seats/first
+last=$(grep -Eo '^## [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' "$seat/ledger.md" 2>/dev/null | tail -1 | cut -c4-)
+test -f .djinn/digest/latest.md && [[ "$(date -r .djinn/digest/latest.md '+%Y-%m-%d %H:%M')" > "$last" ]] && echo newer
+```
+
+```say
+Since we last spoke: <what landed>, $<spent>.
+<n> need you. First: <the one question for the first bead that needs you>
+```
+
+With nothing needing the operator, drop the second line. Each bead that needs
+them goes through Job 4's conversation, one at a time.
+
+**At session close, append one dated entry to `$seat/ledger.md`** — a
+`## <YYYY-MM-DD HH:MM>` heading, then one line each for what was filed (bead
+ids), what started, and what the operator decided. Add to `$seat/memory.md` only a
+fact that should hold next session (a standing preference, a budget).
+
+---
+
+## Job 1 — File the ask where it belongs
 
 Never write beads by hand and never call `bd create` directly.
 
-1. Run **`/plan-to-beads`** on the operator's stated goal to decompose it into
-   an epic plus vertical-slice beads.
-2. `/plan-to-beads` emits each bead through **`/create-bead`**, which runs the
-   acceptance-criteria quality gate. Let it.
+1. **Route.** Read the open epics:
+   `bd list --type epic --status open --json`. Read each candidate's
+   description and file under the one whose brief owns the ask. Otherwise
+   create a new epic.
+2. **Size.** One bead (one `touches` set, at most ~10 acceptance lines) →
+   `/create-bead`, parented under the epic from step 1. Larger →
+   `/plan-to-beads`, under that epic or its new one.
 3. **Every emitted bead must carry `metadata.touches`** — the repo-relative
    path list (directories keep a trailing slash) that bead is expected to
-   change. `/create-bead` takes it as the `touches` key in args mode. A bead
-   with no `touches` is unconstrained at dispatch and can collide with a
-   sibling in the same files, so if `/plan-to-beads` emitted one without it,
-   fill it before the drain: `bd update <id> --metadata '{"touches":["path/"]}'`.
-   Confirm with `bd show <id> --json | jq .metadata.touches`.
-4. Read the filed beads back with `bd list --parent <epic-id> --all --flat --json`
-   and **show the operator the list with titles before anything starts.**
+   change. `/create-bead` takes it as the `touches` key in args mode. If one
+   was emitted without it, fill it before anything drains:
+   `bd update <id> --metadata '{"touches":["path/"]}'`, confirmed with
+   `bd show <id> --json | jq .metadata.touches`.
+4. **A direct operator ask is its own approval.** File it and never add the
+   `proposed` label to it. Work the lead thinks of itself is not an ask: file
+   it through the same skills with the `proposed` label, and it waits for the
+   operator's yes (`bd update <id> --remove-label=proposed`).
+5. **A drain in flight changes nothing.** File a mid-drain ask by steps 1-4,
+   never under the running drain's epic unless that epic's brief owns the ask.
+
+A one-bead ask: file it, then say where it went in one block and go to Job 2:
 
 ```say
-Here is the work, filed as beads:
-
-  <bead-id> — <title>
-  <bead-id> — <title>
-
-That is <n> beads. Say go and I will start the drain, or tell me what to change.
+Filed as <bead-id> under <epic title>.
 ```
 
-Do not start a drain in the same turn as filing. The list is a checkpoint: the
-operator confirms it first.
+A plan-sized ask: run `/plan-to-beads` up to its output (not Execute Mode), then
+**show the operator the bead list with titles and wait for a yes before
+filing.** On yes, run its Execute Mode, then go to Job 2.
+
+```say
+That is plan-sized — <n> beads under <epic title or "a new epic">:
+
+  <title>
+  <title>
+
+Say yes and I will file them, or tell me what to change.
+```
+
+Read filed beads back with `bd list --parent <epic-id> --all --flat --json`.
 
 ---
 
 ## Job 2 — Start the drain
+
+### The factory decides first
+
+```bash
+djinn factory status
+```
+
+- **Factory up → never start a drain yourself.** The next tick picks the work
+  up.
+- **Factory down → offer `djinn factory up` or a one-off bounded drain.** Run
+  whichever the operator picks; a one-off drain follows the rest of Job 2.
+- When `djinn factory status` exits non-zero or reports an unknown command, the
+  factory is down and `djinn factory up` does not exist here: offer only the
+  one-off drain.
+
+```say
+It is queued — the factory picks it up on its next tick.
+```
+
+```say
+The factory is off, so nothing drains this on its own. Say factory up and I will
+start it, or say go for a one-off drain of just this work.
+```
+
+```say
+Nothing drains work here on its own. Say go and I will start a one-off drain of
+just this work.
+```
 
 ### Refuse a second drain
 
@@ -114,12 +196,14 @@ pids whose working directory is this repo** (`lsof -a -p <pid> -d cwd`).
 - **No process and `finished_at` present → the previous drain ended cleanly.**
   Start normally.
 
-Refuse like this:
+Refuse like this, and on a yes send pause-drain through
+`Stop one bead / pause the drain` (Job 3):
 
 ```say
 A drain is already running here — <n> beads, started <when>. I will not start a
-second one; it would wipe the first one's work. Ask me for status, or stop that
-drain first.
+second one; it would wipe the first one's work. I can pause it for you: no new
+beads start, the ones running now finish, then it ends. Say pause, or ask me for
+status.
 ```
 
 ### A dead drain does not mean a quiet repo
@@ -140,12 +224,15 @@ done
 ```
 
 If it prints any bead, **refuse and name those beads.** Do not start, and do not
-let the absent `finished_at` talk you out of it:
+let the absent `finished_at` talk you out of it. On a yes, send one stop per
+named bead through `Stop one bead / pause the drain` (Job 3), and start only
+once every stop is confirmed and the survivor check prints nothing:
 
 ```say
 The last drain here died, but work is still running on <bead-id>, <bead-id>. I
 will not start a new one on top of it — that would wipe those beads' work out
-from under them. Stop that work first, or ask me for status.
+from under them. I can stop those beads for you, and start fresh once they have
+stopped. Say stop, or ask me for status.
 ```
 
 Only when it prints nothing is the repo actually quiet, and only then:
@@ -155,23 +242,24 @@ The last drain here died without finishing — nothing is running now. Starting 
 fresh one.
 ```
 
-### The caps are not optional
+### Guards, batch size, and budget
 
-Every drain start command carries **all three caps**, always, even if the
-operator asks for an unbounded run:
-
-- `--max-beads <n>` — how many beads this drain may take at all
-- `--max-retries <n>` — how many times one bead may be respawned
-- `--max-cost <usd>` — total USD across every bead in the drain
-
-Defaults when the operator names none: `--max-beads 5 --max-retries 2
---max-cost 40`. Say all three values aloud before the drain starts.
+- `--max-retries <n>` is mandatory on every start — how many times one bead may
+  be respawned (default 2). It is a stuck-bead guard, not a budget.
+- `--max-beads <n>` is the batch size — how many beads this drain takes
+  (default 5).
+- No spending cap unless the operator asked for one.
 
 ```say
-Starting the drain now. Caps: at most <max-beads> beads, <max-retries> retries
-per bead, and $<max-cost> total. I stop dispatching when any of those is
-reached; whatever is already running finishes.
+Starting the drain now: at most <max-beads> beads, <max-retries> retries per
+bead. Whatever is already running finishes.
 ```
+
+#### Only when the operator asked for a budget
+
+Append `--max-cost <usd>` with their number to the start line, add
+`and $<usd> total` to the start block, and record the budget in
+`$seat/memory.md` until they lift it.
 
 ### The drain scope
 
@@ -184,9 +272,10 @@ neither:
 
 With neither flag the summoner drains the repo's **whole
 ready set** up to `--max-beads`, which is almost never the work the operator
-just agreed to. Job 1 tells you which you have: an epic came back from
-`/plan-to-beads` → `--epic`; a hand-picked handful of existing beads →
-`--bead`.
+just agreed to. Job 1 tells you which you have: a new epic from
+`/plan-to-beads` → `--epic`; beads filed under an existing epic, or a
+hand-picked handful → `--bead` with exactly those ids, so the drain takes
+none of that epic's other work.
 
 ### The drain name
 
@@ -209,10 +298,10 @@ it there).
 #### In the djinn repo itself
 
 The repo the supervisor runs in IS the repo the worker is built from, so nothing
-extra is needed — one scope flag plus the caps:
+extra is needed — one scope flag plus the guards:
 
 ```bash
-summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd>
+summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n>
 ```
 
 #### In any other repo
@@ -234,7 +323,7 @@ without either one:
   warning.
 
 ```bash
-summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd> \
+summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> \
   --worker-bin "$HOME/go/bin/djinn" --allow-worker-drift
 ```
 
@@ -259,9 +348,9 @@ number.
 # One tab for the drain, labelled with the drain name.
 herdr tab create --cwd "$PWD" --label "drain: <name>" --focus
 # The supervisor lives in the tall left pane (the tab's root pane).
-herdr pane run <ROOT_PANE_ID> summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd>
+herdr pane run <ROOT_PANE_ID> summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n>
 # …or, for a bead-list drain, the same command with the other scope flag:
-herdr pane run <ROOT_PANE_ID> summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd>
+herdr pane run <ROOT_PANE_ID> summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n>
 ```
 
 **Capture the ids from the command output.** Herdr commands return JSON and the lead
@@ -362,13 +451,13 @@ When `HERDR_ENV` is unset there is no room to build. Start the same drain as a
 same per-bead log files, so status and the wrap-up work identically:
 
 ```bash
-nohup summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd> > .djinn/drain.out 2>&1 &
+nohup summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
 ```
 
 Same scope rule as in the room — exactly one of `--epic` or `--bead`:
 
 ```bash
-nohup summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> --max-cost <usd> > .djinn/drain.out 2>&1 &
+nohup summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
 ```
 
 ```say
@@ -395,7 +484,7 @@ exactly that and stop; there is nothing to reconcile and nothing to report:
 
 ```say
 Nothing is running here — no drain has been started in this repo yet. Tell me
-the goal and I will file it as beads.
+what you want and I will file it.
 ```
 
 Otherwise do two things:
@@ -413,12 +502,81 @@ Otherwise do two things:
 ```say
 <n> beads in flight, <n> done, <n> to go.
 Working now: <bead-id> (<elapsed>), <bead-id> (<elapsed>).
-Spent $<total> of $<max-cost>.
+Spent $<total> so far.
 Nothing needs you yet.
 ```
 
 The last line is the one that matters. When something does need the operator,
 say what and drop straight into Job 4.
+
+### Stop one bead / pause the drain
+
+"Stop that bead" and "pause the drain" are messages: a bead of type `message`
+the running drain reads and closes. No djinn or summoner
+command sends them.
+
+| The operator says | File |
+|---|---|
+| stop that bead | `bd create --type message --title "<why>" --label to:<bead-id> --label directive:stop --silent` |
+| pause the drain | `bd create --type message --title "<why>" --label to:drain --label directive:pause-drain --silent` |
+
+- **stop lands at the bead's next step boundary**, never mid-step — a long step
+  runs to its end first. It leaves the bead open — not closed, not failed —
+  with a comment naming where it stopped, and the drain carries on with the rest
+  of the work; the bead is not retried in this drain.
+- **pause-drain lands at the drain's next poll.** No new bead is dispatched;
+  running workers finish their beads, then the drain ends. It does not resume:
+  starting again is a fresh Job 2 start.
+- Send stop only to a bead `djinn status` shows in flight or the survivor check
+  in Job 2 names, and pause-drain only while a drain process is running (the
+  process check in Job 2). Nothing reads a message nobody is working on; it
+  waits open.
+- `--title` carries the operator's reason in their words. A message bead has no
+  acceptance criteria and never goes through `/create-bead`.
+- If `bd create` rejects the type as unknown, `djinn init` never registered it
+  in this repo. Register it once and file again:
+
+  ```bash
+  bd config get types.custom
+  bd config set types.custom "<existing>,message"
+  ```
+
+**Confirm delivery before saying anything happened.** `--silent` prints the
+message id. Poll it:
+
+```bash
+bd show <message-id> --json
+```
+
+until `status` is `closed` and the closing comment
+`djinn inbox: directive <directive> consumed at <boundary> by <consumer>` is
+present (it is the `close_reason`, and `bd comments <message-id> --json` carries
+it too). A closing comment reading `unknown directive` means nothing was acted
+on: check the labels and file again. Never say work stopped before that comment
+exists: until the drain consumes the message it can still start new work. While
+you wait, say only that it is sent and takes effect when picked up:
+
+```say
+Sent. It takes effect when the drain picks it up — I will tell you when
+<bead-id> has taken the stop.
+```
+
+```say
+Sent. It takes effect when the drain picks it up — I will tell you when the
+drain has taken the pause.
+```
+
+Once the comment exists, one block:
+
+```say
+Stopped <bead-id>. It is still open with its work so far kept; the drain carries
+on with the rest.
+```
+
+```say
+The drain is paused. No new beads start; <n> running now will finish, then it
+ends. Say go when you want a fresh one.
+```
 
 ---
 
@@ -505,15 +663,50 @@ Rewritten and queued. It goes in the next drain.
 ```
 
 When every non-closed bead has been through this, offer the next drain (Job 2
-again — same caps rule, same refusal check).
+again — factory check first, same guards, same refusal check).
+
+---
+
+## The proposals setting
+
+`factory.proposals` in `.djinn/config.json` decides whether `proposed` beads
+drain without the operator's yes: `"hold"` (the default) or `"auto"`. Set it
+only when the operator asks, and run only the one block they asked for.
+
+To let agent proposals run:
+
+```bash
+jq '.factory.proposals = "auto"' .djinn/config.json > .djinn/config.json.tmp && mv -f .djinn/config.json.tmp .djinn/config.json
+test "$(jq -r '.factory.proposals' .djinn/config.json)" = auto
+```
+
+To hold them again:
+
+```bash
+jq '.factory.proposals = "hold"' .djinn/config.json > .djinn/config.json.tmp && mv -f .djinn/config.json.tmp .djinn/config.json
+test "$(jq -r '.factory.proposals' .djinn/config.json)" = hold
+```
+
+Confirm the value read back:
+
+```say
+Proposals are now <auto|hold>.
+```
+
+Never change it unasked.
 
 ---
 
 ## What the lead never does
 
 - Never edits code, opens a worktree, or runs a formula itself.
-- Never starts a drain without all three caps.
+- Never starts a drain while the factory is up, or without `--max-retries`.
+- Never sets a spending cap unless the operator asked for a budget.
+- Never labels an operator's own ask `proposed`, and never changes
+  `factory.proposals` unasked.
 - Never starts a second drain while one is running.
-- Never calls `bd edit`, or `bd create` outside `/create-bead`.
+- Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
+  message bead (`--type message`, no acceptance criteria) filed through
+  `Stop one bead / pause the drain`.
 - Never closes the Herdr tab without an explicit yes.
 - Never speaks to the operator outside a `say` block.
