@@ -13,8 +13,8 @@ The lead has four jobs and no others:
 
 1. **File.** Route each operator ask to the epic that owns it, at the right size.
 2. **Start.** Defer to the factory when it is up; otherwise start one bounded
-   drain where the operator can see it.
-3. **Report.** Answer "how is it going" from `djinn status`.
+   drain in the background.
+3. **Report.** Answer "how is it going" from `djinn ops snapshot --json`.
 4. **Escalate.** When the drain ends, bring every bead that did not close back
    as a decision, rewrite it from the conversation, and requeue it.
 
@@ -172,20 +172,20 @@ drain as the sign of a live one. Read `.djinn/summoner-state.json` for the
 running:
 
 ```bash
-pgrep -f '(^|/)summoner |cmd/summoner' | while read -r pid; do
+pgrep -x summoner | while read -r pid; do
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | grep -qx "n$PWD" && echo "$pid"
 done
 ```
 
-**Match both launch forms, and keep only this repo.** `cmd/summoner`
-on its own matches a `go run` launch and nothing else, so an **installed
-`summoner` binary on `$PATH` is invisible** to it, and the
-lead starts a second drain on top of a hand-run one. A bare
-`summoner` with no trailing space is the opposite
-mistake: the viewer panes the lead opens run
-`tail -f .djinn/summoner-logs/...`, and it false-matches them into a refusal of
-a drain that is not running. The two alternatives together catch both launch
-forms, and the trailing space keeps the `summoner-logs/` paths out. `pgrep` is
+**Match the executable name, and keep only this repo.** `pgrep -x` matches the
+process's executable name, not its command line. An installed
+`summoner` binary and the binary a `go run` launch
+builds and execs both run as `summoner`, so one name
+covers both launch forms. **A
+command-line match is the wrong test**: any shell or `grep` that merely mentions
+`cmd/summoner`, and every `tail -f
+.djinn/summoner-logs/...` viewer pane the lead opens, reads as a live drain, and
+the lead refuses a drain that is not running. `pgrep` is
 also **machine-wide**: a drain running in a *sibling* repo would make this one
 refuse, quoting details read from this repo's stale state file — so **keep only
 pids whose working directory is this repo** (`lsof -a -p <pid> -d cwd`).
@@ -218,10 +218,24 @@ died-drain branch, **before starting anything**, ask every bead the dead drain
 was working whether its worker is still alive:
 
 ```bash
+bin=$(jq -r '.worker_bin // empty' .djinn/summoner-state.json)
+workers=$(ps -A -o command= | BIN="$bin" awk '
+  ENVIRON["BIN"] == "" { n = split($1, p, "/"); if (p[n] == "djinn") print $0 " "; next }
+  $0 == ENVIRON["BIN"] || index($0, ENVIRON["BIN"] " ") == 1 { print $0 " " }')
 jq -r '.workers[].bead_id' .djinn/summoner-state.json | while read -r b; do
-  pgrep -f -- "--bead $b" >/dev/null && echo "$b"
+  printf '%s\n' "$workers" | grep -qF -- "--bead $b " && echo "$b"
 done
 ```
+
+A worker is a process running `--bead <id>` whose argv[0] is the state file's
+`worker_bin` — the path the drain exec'd, its built
+`djinn` or a `--worker-bin` override — or, when no
+`worker_bin` is recorded, any path named `djinn`. A shell
+that merely echoes `--bead <id>` is not one. **Match the worker's path
+literally, never through `pgrep`.** `pgrep` reads its operand as a regular
+expression and matches the kernel's truncated process name, so a `worker_bin`
+named like `djinn[1]`, or longer than the kernel keeps, never matches itself and
+a live worker reads as gone.
 
 If it prints any bead, **refuse and name those beads.** Do not start, and do not
 let the absent `finished_at` talk you out of it. On a yes, send one stop per
@@ -277,13 +291,6 @@ just agreed to. Job 1 tells you which you have: a new epic from
 hand-picked handful → `--bead` with exactly those ids, so the drain takes
 none of that epic's other work.
 
-### The drain name
-
-- Epic-scoped drain → the drain name is the **epic id** (`djinn-abcd`).
-- Otherwise → the **first bead id plus a count** (`djinn-abcd +3`).
-
-The Herdr tab label is `drain: <name>`.
-
 ### Which binary starts the drain
 
 **Never start a drain by building the supervisor from a source path**
@@ -327,142 +334,30 @@ summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> \
   --worker-bin "$HOME/go/bin/djinn" --allow-worker-drift
 ```
 
-Both flags carry through every start form below — the Herdr room and the
-`nohup` background path alike. Append them to the start line whenever `$PWD` is
+Both flags carry through the start line below. Append them whenever `$PWD` is
 not a djinn checkout.
 
-### Inside Herdr
+### Start it in the background
 
-Gate everything Herdr on:
-
-```bash
-test "$HERDR_ENV" = 1
-```
-
-When it passes, build the room. `--max-workers <n>` is the worker count: take it
-from the operator's request, or **omit the flag entirely and let the
-summoner apply its own default of 3**. Never invent a
-number.
-
-```bash
-# One tab for the drain, labelled with the drain name.
-herdr tab create --cwd "$PWD" --label "drain: <name>" --focus
-# The supervisor lives in the tall left pane (the tab's root pane).
-herdr pane run <ROOT_PANE_ID> summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n>
-# …or, for a bead-list drain, the same command with the other scope flag:
-herdr pane run <ROOT_PANE_ID> summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n>
-```
-
-**Capture the ids from the command output.** Herdr commands return JSON and the lead
-holds no state, so an id you do not read out now is an id you cannot use
-in Job 3 or Job 4:
-
-```bash
-TAB_ID=$(herdr tab create --cwd "$PWD" --label "drain: <name>" --focus | tee /tmp/drain-tab.json | jq -r '.result.tab.tab_id')
-ROOT_PANE_ID=$(jq -r '.result.root_pane.pane_id' /tmp/drain-tab.json)
-PANE_ID=$(herdr pane split <TARGET_PANE_ID> --direction <right|down> --cwd "$PWD" --no-focus | jq -r '.result.pane.pane_id')
-```
-
-Carry `TAB_ID`, `ROOT_PANE_ID` and every viewer's `PANE_ID` forward in your
-working notes for the rest of the session.
-
-**Rediscover them in a later turn.** Job 3's rename and Job 4's tab close run
-turns after the room was built, and a fresh turn may have lost the notes. Never
-guess an id — read the room back:
-
-```bash
-# The drain tab, by the label it was created with.
-TAB_ID=$(herdr tab list --workspace "$HERDR_WORKSPACE_ID" | jq -r '.result.tabs[] | select(.label == "drain: <name>") | .tab_id')
-# The viewers, by the `<bead-id> · ` prefix of their `label`, inside that tab.
-herdr pane list --workspace "$HERDR_WORKSPACE_ID" | jq -r --arg tab "$TAB_ID" '.result.panes[] | select(.tab_id == $tab) | [.pane_id, .label // ""] | @tsv'
-```
-
-**A viewer is identified by its `label`, never by `.title` and never by
-`.terminal_title`.** `herdr pane rename <PANE_ID> <LABEL>...` writes the field
-named **`label`**, and that is the field `herdr pane get` and `herdr pane list`
-report back. A pane that was never renamed carries **no `label` key at all** and
-a null `terminal_title` — so keying the match on anything but `.label` matches
-nothing, and every status check then opens a **duplicate** viewer for every
-worker. Scope the scan to the drain tab (`select(.tab_id == "<TAB_ID>")`) as
-well, so a pane in some other tab can never be mistaken for one of this drain's
-viewers.
-
-**The room is reconciled, not opened once.** `.djinn/summoner-state.json` does
-not exist until the first bead is dispatched, so right after the start command
-there is nothing to open a viewer from — and no viewer ever appears if you only
-look once. The room is instead brought into line with the state file **every
-time you run a status check (Job 3)**, by the reconcile below.
-
-**Layout.** Up to **four** viewers stack in one right column: split the root
-pane `--direction right` once for the first viewer, then split the previous
-viewer `--direction down` for each of the next three. At **more than four**
-viewers, switch to a **two-column grid** — split the right column once more
-`--direction right` and fill the two columns down in turn — so no viewer becomes
-an unreadably short row.
-
-**Pane labels track the work.** The label template is `<bead-id> · <step>`, with
-`<step>` taken from that worker's `step` field in the state file. There is no
-daemon and no polling: **on every status check (Job 3) you re-read the state
-file and run `herdr pane rename <PANE_ID> <bead-id> · <step>` for every viewer
-whose value changed.** That is the only thing that keeps a label current.
-
-### The room reconcile
-
-This is the one procedure that both opens viewers and keeps their labels live.
-It runs **inside the Job 3 status check** — there is deliberately no daemon and
-no polling loop watching the state file. Each time:
-
-1. List the panes that exist now with their **`label`** field, **scoped to the
-   drain tab** so a pane in another tab cannot collide with a viewer of this
-   drain:
-
-```bash
-herdr pane list --workspace "$HERDR_WORKSPACE_ID" | jq -r --arg tab "$TAB_ID" '.result.panes[] | select(.tab_id == $tab) | [.pane_id, .label // ""] | @tsv'
-```
-
-2. Re-read `.djinn/summoner-state.json` — the workers that exist now.
-3. For each worker with **no pane** whose `label` starts `<bead-id> · ` →
-   **open one**: `herdr pane split` at the position the layout rule above gives,
-   `herdr pane rename` to `<bead-id> · <step>`, then `herdr pane run` tailing
-   that worker's `log_path`:
-
-```bash
-herdr pane split <TARGET_PANE_ID> --direction <right|down> --cwd "$PWD" --no-focus
-herdr pane rename <PANE_ID> <bead-id> · <step>
-herdr pane run <PANE_ID> tail -f <log_path>
-```
-
-Never put a bare `--` before the command in `herdr pane run`; the shell
-receives it literally and the run fails.
-
-4. For each worker that **already has** a pane → rename it **only if `step`
-   changed** since that pane's `label` was last written.
-5. Leave every other pane alone. A viewer for a worker that has finished stays
-   open; the operator may still be reading it.
-
-Match on `.label` and nothing else. `.title` **is not a field herdr returns**,
-so a reconcile keyed on it finds no existing viewer on any pass and opens a
-fresh duplicate for every worker on every status check.
-
-### Outside Herdr
-
-When `HERDR_ENV` is unset there is no room to build. Start the same drain as a
-**background process** — it writes the same `.djinn/summoner-state.json` and the
-same per-bead log files, so status and the wrap-up work identically:
+`--max-workers <n>` is the worker count: take it from the operator's request,
+or **omit the flag entirely and let the summoner apply
+its own default of 3**. Never invent a number. Start the drain as a
+**background process** with exactly one of `--epic` or `--bead` — it writes
+`.djinn/summoner-state.json` and one log file per bead, which status and the
+wrap-up read:
 
 ```bash
 nohup summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
-```
-
-Same scope rule as in the room — exactly one of `--epic` or `--bead`:
-
-```bash
+# …or, for a bead-list drain, the same command with the other scope flag:
 nohup summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
 ```
 
+When `HERDR_ENV` is `1`, run `djinn ops room --herdr` once after the start; it
+finds or builds the ops room and changes nothing that is already there.
+Otherwise run nothing more.
+
 ```say
-You are not in a terminal I can build panes in, so the drain is running in the
-background. It writes the same files, so ask me for status any time and I will
+The drain is running in the background. Ask me for status any time and I will
 read it back. Per-bead output is in <log-dir>/<run-id>/<bead-id>.log.
 ```
 
@@ -473,41 +368,64 @@ read it back. Per-bead output is in <log-dir>/<run-id>/<bead-id>.log.
 One command, every time:
 
 ```bash
-djinn status
-djinn status --json   # when you need the fields rather than the table
+djinn ops snapshot --json
 ```
 
-`djinn status` prints the drain line, the caps line, and one row per bead
-(BEAD · STEP · ELAPSED · COST · ADAPTER · DISPOSITION · EV-STATUS · EV-VERDICT ·
-EV-ITER). If it prints `no drain state found`, no drain has run here — say
-exactly that and stop; there is nothing to reconcile and nothing to report:
+Answer from four of its sections:
+
+- `drain` — the run and its `workers[]`: each worker's `bead_id`, `step`,
+  `step_started_at`, `cost_usd` and `disposition` (empty while it works).
+- `ready` — `count` beads still to go and the `next` few in dispatch order.
+- `needs_you` — every bead and message waiting on the operator.
+- `epics` — per epic, its beads `done` before this run, landed `tonight`,
+  `doing` now and still `todo`.
+
+Read `warnings` first: a null section is one whose source could not be read,
+not an empty one. Each warning names its `source` and carries a `message`.
+
+If `drain` is null and its `drain` warning ends `no such file or directory`,
+no drain has run here — say exactly that and stop; there is nothing to report:
 
 ```say
 Nothing is running here — no drain has been started in this repo yet. Tell me
 what you want and I will file it.
 ```
 
-Otherwise do two things:
+If `drain` is null under any other `drain` warning, the drain state exists but
+is unreadable — a drain may well be running. Never say none has started; say
+this and stop:
 
-1. **Run the room reconcile** (Job 2) against the freshly read state file:
-   open a viewer for every worker that has none yet, and rename the ones whose
-   `step` changed. This is where viewers come into existence at all — the state
-   file does not exist until the first bead is dispatched, so the first status
-   check after a start is usually the one that opens the whole right column.
-   Skip it when `HERDR_ENV` is not `1`; there is no room.
-2. Answer in plain words. Never paste the table.
+```say
+I cannot read the drain state right now: <warning message>. A drain may still
+be running — I will check again when you ask.
+```
+
+A `bd` warning nulls `needs_you`, `ready` and `epics`: they are unknown, not
+empty. Drop the to-go count and the epic line, never say nothing needs you, and
+end the answer with this instead of its last line:
+
+```say
+I cannot read the bead list right now (<warning message>), so I cannot tell
+what is still to go or whether anything needs you.
+```
+
+Otherwise answer in plain words. Never paste the JSON.
 
 **Status answer template** (never more than five lines):
 
 ```say
 <n> beads in flight, <n> done, <n> to go.
 Working now: <bead-id> (<elapsed>), <bead-id> (<elapsed>).
+<epic title>: <n> of <n> beads landed.
 Spent $<total> so far.
 Nothing needs you yet.
 ```
 
-The last line is the one that matters. When something does need the operator,
-say what and drop straight into Job 4.
+In flight is the workers with an empty `disposition`, done those `closed`, to
+go `ready.count`; elapsed runs from `step_started_at`; the epic line is the
+`epics` entry the drain works on; spent is the summed `cost_usd`. The last line
+reads `needs_you`, and it is the one that matters: when something does need the
+operator, say what and drop straight into Job 4.
 
 ### Stop one bead / pause the drain
 
@@ -527,7 +445,7 @@ command sends them.
 - **pause-drain lands at the drain's next poll.** No new bead is dispatched;
   running workers finish their beads, then the drain ends. It does not resume:
   starting again is a fresh Job 2 start.
-- Send stop only to a bead `djinn status` shows in flight or the survivor check
+- Send stop only to a bead the snapshot's `drain` shows in flight or the survivor check
   in Job 2 names, and pause-drain only while a drain process is running (the
   process check in Job 2). Nothing reads a message nobody is working on; it
   waits open.
@@ -592,22 +510,6 @@ Report count, total cost and elapsed, all derived from the state file
 
 ```say
 Drain done. <n> of <n> beads closed, $<total> spent, <elapsed> wall clock.
-```
-
-Then — and only then — offer to tear the room down. **Never close the tab on
-your own initiative:** the operator may still want to read the panes.
-
-```say
-Want me to close the drain tab?
-```
-
-Wait for an explicit yes. On anything else, leave it open. Only on yes — with
-the `TAB_ID` you captured at `herdr tab create`, or, if this turn does not have
-it, rediscovered from the tab's `drain: <name>` label rather than guessed:
-
-```bash
-TAB_ID=$(herdr tab list --workspace "$HERDR_WORKSPACE_ID" | jq -r '.result.tabs[] | select(.label == "drain: <name>") | .tab_id')
-herdr tab close <TAB_ID>
 ```
 
 ### A bead did not close — the conversation
@@ -747,5 +649,4 @@ Never change it unasked.
 - Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
   message bead (`--type message`, no acceptance criteria) filed through
   `Stop one bead / pause the drain`.
-- Never closes the Herdr tab without an explicit yes.
 - Never speaks to the operator outside a `say` block.
