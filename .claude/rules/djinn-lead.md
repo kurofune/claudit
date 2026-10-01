@@ -411,9 +411,11 @@ I cannot read the drain state right now: <warning message>. A drain may still
 be running — I will check again when you ask.
 ```
 
-A `bd` warning nulls `needs_you`, `ready` and `epics`: they are unknown, not
-empty. Drop the to-go count and the epic line, never say nothing needs you, and
-end the answer with this instead of its last line:
+A `bd` warning nulls `ready` and `epics` and leaves only red-main items in
+`needs_you` (null when main is not red): the beads are unknown, not empty. Put
+any red-main item to the operator as usual, drop the to-go count and the epic
+line, never say nothing needs you, and end the answer with this instead of its
+last line:
 
 ```say
 I cannot read the bead list right now (<warning message>), so I cannot tell
@@ -440,14 +442,15 @@ operator, say what and drop straight into Job 4.
 
 ### Stop one bead / pause the drain
 
-"Stop that bead" and "pause the drain" are messages: a bead of type `message`
-the running drain reads and closes. No djinn or summoner
+"Stop that bead", "pause the drain" and "run 5 workers" are messages: a bead of
+type `message` the running drain reads and closes. No djinn or summoner
 command sends them.
 
 | The operator says | File |
 |---|---|
 | stop that bead | `bd create --type message --title "<why>" --label to:<bead-id> --label directive:stop --silent` |
 | pause the drain | `bd create --type message --title "<why>" --label to:drain --label directive:pause-drain --silent` |
+| run <n> workers | `bd create --type message --title "<why>" --label to:drain --label directive:set-workers --label workers:<n> --silent` |
 
 - **stop lands at the bead's next step boundary**, never mid-step — a long step
   runs to its end first. It leaves the bead open — not closed, not failed —
@@ -456,9 +459,14 @@ command sends them.
 - **pause-drain lands at the drain's next poll.** No new bead is dispatched;
   running workers finish their beads, then the drain ends. It does not resume:
   starting again is a fresh Job 2 start.
+- **set-workers lands at the drain's next poll.** The drain's worker count
+  becomes `<n>`: raising it starts more beads on that poll; lowering it stops
+  no running bead — the drain starts new ones only once fewer than `<n>` run.
+  `<n>` is 1-16; for any other number tell the operator the count must be 1-16
+  and file nothing.
 - Send stop only to a bead the snapshot's `drain` shows in flight or the survivor check
-  in Job 2 names, and pause-drain only while a drain process is running (the
-  process check in Job 2). Nothing reads a message nobody is working on; it
+  in Job 2 names, and pause-drain and set-workers only while a drain process is
+  running (the process check in Job 2). Nothing reads a message nobody is working on; it
   waits open.
 - `--title` carries the operator's reason in their words. A message bead has no
   acceptance criteria and never goes through `/create-bead`.
@@ -481,7 +489,8 @@ until `status` is `closed` and the closing comment
 `djinn inbox: directive <directive> consumed at <boundary> by <consumer>` is
 present (it is the `close_reason`, and `bd comments <message-id> --json` carries
 it too). A closing comment reading `unknown directive` means nothing was acted
-on: check the labels and file again. Never say work stopped before that comment
+on: check the labels and file again. One reading `rejected` names what was
+wrong with the labels; nothing changed. Never say work stopped before that comment
 exists: until the drain consumes the message it can still start new work. While
 you wait, say only that it is sent and takes effect when picked up:
 
@@ -495,6 +504,11 @@ Sent. It takes effect when the drain picks it up — I will tell you when the
 drain has taken the pause.
 ```
 
+```say
+Sent. It takes effect when the drain picks it up — I will tell you when the
+drain has taken the new worker count.
+```
+
 Once the comment exists, one block:
 
 ```say
@@ -505,6 +519,11 @@ on with the rest.
 ```say
 The drain is paused. No new beads start; <n> running now will finish, then it
 ends. Say go when you want a fresh one.
+```
+
+```say
+The drain now runs up to <n> beads at once. Any running past that finish first;
+none is cut short.
 ```
 
 ---
