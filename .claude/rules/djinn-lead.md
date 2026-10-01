@@ -109,9 +109,24 @@ Never write beads by hand and never call `bd create` directly.
    `bd update <id> --metadata '{"touches":["path/"]}'`, confirmed with
    `bd show <id> --json | jq .metadata.touches`.
 4. **A direct operator ask is its own approval.** File it and never add the
-   `proposed` label to it. Work the lead thinks of itself is not an ask: file
-   it through the same skills with the `proposed` label, and it waits for the
-   operator's yes (`bd update <id> --remove-label=proposed`).
+   `proposed` label to it. Work the lead thinks of itself is not an ask: the
+   seat charter decides how it is filed. Read the `## Self-approval` section
+   of `$seat/charter.md`:
+   - **The section names the kind of work** → file it through the same skills
+     with the `lead-approved` label and without `proposed`; it drains like an
+     ask. Record why in one line,
+     `bd update <id> --append-notes "lead-approved: <why>"`, where `<why>` names
+     the approved kind it matches, then say the filed block below.
+   - **Anything the section does not name** → file it through the same skills
+     with the `proposed` label, and it waits for the operator's yes
+     (`bd update <id> --remove-label=proposed`).
+   - **No `## Self-approval` section, or one whose body is only `[TODO]`** →
+     the charter approves nothing: every lead-originated bead is filed
+     `proposed`, exactly as before.
+
+   A review follow-up stays `proposed` whatever the charter says (Review
+   follow-ups, below); the bead re-authored from it is lead-originated work
+   this step governs.
 5. **A drain in flight changes nothing.** File a mid-drain ask by steps 1-4,
    never under the running drain's epic unless that epic's brief owns the ask.
 
@@ -119,6 +134,13 @@ A one-bead ask: file it, then say where it went in one block and go to Job 2:
 
 ```say
 Filed as <bead-id> under <epic title>.
+```
+
+Lead-originated work filed `lead-approved`: say it in one block, the same turn,
+then go to Job 2:
+
+```say
+Filed on my own as <bead-id>: <why>.
 ```
 
 A plan-sized ask: run `/plan-to-beads` up to its output (not Execute Mode), then
@@ -424,15 +446,22 @@ what is still to go or whether anything needs you.
 
 Otherwise answer in plain words. Never paste the JSON.
 
-**Status answer template** (never more than five lines):
+**Status answer template** (never more than five lines, plus one "Filed on my own" line per lead-approved bead):
 
 ```say
 <n> beads in flight, <n> done, <n> to go.
 Working now: <bead-id> (<elapsed>), <bead-id> (<elapsed>).
 <epic title>: <n> of <n> beads landed.
+Filed on my own: <bead-id> — <why>
 Spent $<total> so far.
 Nothing needs you yet.
 ```
+
+The "Filed on my own" line repeats once for each `lead-approved` bead created
+since the lead's last status answer this session, or since session start for
+the first, and is dropped when there is none. Read them with
+`bd list --label lead-approved --json --all -n 0 --created-after "<since>"` (RFC3339);
+`<why>` is the bead's `lead-approved:` notes line.
 
 In flight is the workers with an empty `disposition`, done those `closed`, to
 go `ready.count`; elapsed runs from `step_started_at`; the epic line is the
@@ -553,7 +582,17 @@ a time, never batched:
    criteria.
 3. Put it to the operator as a decision — **the bead's title, what was tried,
    why it stopped, and exactly one question.** One question, not a list: the
-   operator answers in plain words and you do the rest.
+   operator answers in plain words and you do the rest. Before you ask it,
+   record the question and two answers the operator might give where the ops
+   cockpit shows them: three notes lines, each appended with
+   `bd update <bead-id> --append-notes` (never `--notes`, which erases the
+   notes before it):
+
+```bash
+bd update <bead-id> --append-notes "question: <one question>"
+bd update <bead-id> --append-notes "a: <first answer>"
+bd update <bead-id> --append-notes "b: <second answer>"
+```
 
 ```say
 <bead title> did not land.
@@ -684,6 +723,7 @@ Never change it unasked.
   `factory.proposals` unasked.
 - Never starts a second drain while one is running.
 - Never removes the `proposed` label from a review follow-up.
+- Never files lead-approved work the charter's Self-approval list does not name.
 - Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
   message bead (`--type message`, no acceptance criteria) filed through
   `Stop one bead / pause the drain`.
