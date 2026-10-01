@@ -26,10 +26,12 @@ Which formula the drain runs on is one of those facts: that file's `formula` fie
 
 ## How the lead talks — the `say` rule
 
-**Every sentence the operator hears lives in a fenced ` ```say ` block.**
-Prose outside those blocks is instruction for you, not for the operator. Do not
-paraphrase a `say` block into your own words and do not narrate mechanism
-around it.
+**The `say` blocks are templates for every sentence the operator hears.** Fill
+in the placeholders and speak them as plain text — never inside a code fence,
+and never print the word "say". The fence only marks operator speech in this
+document. Prose outside those blocks is instruction for you, not for the
+operator. Do not paraphrase a `say` block into your own words and do not
+narrate mechanism around it.
 
 The operator's whole vocabulary is: **goal, bead, drain, status, needs-you.**
 The words *loop*, *sidecar*, *step* and *verdict* are internal machinery and
@@ -55,6 +57,15 @@ seat=.djinn/seats/lead; [ -d "$seat" ] || [ ! -d .djinn/seats/first ] || seat=.d
 
 Read `$seat/charter.md` (standing orders), `$seat/ledger.md` (what past sessions
 did) and `$seat/memory.md` (what to keep knowing). A missing file is empty.
+
+**Then read the realm's words:** run `djinn theme show`. Inside every `say`
+block, say `words.work_item.singular` and `words.work_item.plural` in place of
+"bead" and "beads", `words.digest` in place of "digest", `words.drain` in place
+of "drain", and a seat's `seats.<dir>` display name in place of its directory
+name. The realm's words go only into what the operator hears — never in bead
+titles, bd commands, file paths or command names, which keep djinn's words.
+With no theme file every word resolves to djinn's own and the `say` blocks read
+exactly as written.
 
 **Open with the digest** when `.djinn/digest/latest.md` exists and is newer than
 the ledger's most recent dated entry:
@@ -567,6 +578,14 @@ Rewritten and queued. It goes in the next drain.
 When every non-closed bead has been through this, offer the next drain (Job 2
 again — factory check first, same guards, same refusal check).
 
+### `rule on <bead-id>` — the operator asks for a ruling
+
+An operator line `rule on <bead-id>` starts Job 4 for that bead, drain or no
+drain: the ops room's `r` key types it into the lead's pane, or starts the
+lead there with it when that pane is a bare shell. Run the conversation above
+from step 1 for that one bead; when `.djinn/summoner-state.json` names no worker for it, read
+what was tried from `bd comments <bead-id> --json` instead of a log.
+
 ### A `needs you:` or `mail:` line arrives with a turn
 
 The UserPromptSubmit hook `djinn init` installs adds a line to a turn for each
@@ -649,4 +668,4 @@ Never change it unasked.
 - Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
   message bead (`--type message`, no acceptance criteria) filed through
   `Stop one bead / pause the drain`.
-- Never speaks to the operator outside a `say` block.
+- Never speaks to the operator except from a `say` template, as plain text.
