@@ -7,9 +7,10 @@
 Anthropic's published rates, the parser current with Claude Code's JSONL schema.
 Ship fixes and small features as they earn their place.
 
-**Last change:** v1.9.0 (2026-09-24) — fast-mode turns use `message.usage.speed` to
-select bundled or overlay fast rates, including cache rates. Standard-rate
-history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.
+**Last change:** Unreleased (2026-10-02) — Sonnet 5.5 rate card added ($2 / $10,
+same as Sonnet 5); rest of the pricing page re-checked, unchanged. Removed
+`watch --notify`. Last release: v1.9.0 (2026-09-24) fast-mode pricing via
+`message.usage.speed`.
 
 **Assumptions:**
 - No bundled model needs rate history right now; the mechanism stays because the
@@ -18,8 +19,9 @@ history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** None scheduled. Next trigger is upstream: new Anthropic
-rates, or a Claude Code JSONL schema change.
+**Next checkpoint:** Cut the next release (Sonnet 5.5 prices at $0 until it
+ships). After that, the next trigger is upstream: new Anthropic rates, or a
+Claude Code JSONL schema change.
 
 **Stop conditions:**
 - Claude Code changes the JSONL schema → parser catch-up becomes the priority.
