@@ -4,6 +4,12 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+Pricing refresh against the live pricing page on 2026-10-02: **Claude Sonnet 5.5** is added. Every other rate on the page was re-checked and is unchanged.
+
+### Added
+
+- **Pricing: Claude Sonnet 5.5.** `claude-sonnet-5-5` and `claude-sonnet-5-5[1m]` are added at $2 input / $10 output, with 5m/1h cache writes of $2.50 / $4 and cache hits at $0.20/MTok, the same card as Sonnet 5. Before this, every Sonnet 5.5 turn landed in `unknown_models` and added **$0** to reported spend.
+
 ### Removed
 
 - **`claudit watch --notify` is gone.** Desktop notifications on budget crosses and cost spikes (osascript / notify-send / PowerShell) are removed along with the `internal/notify` package. Budget and spike alerts still print in the watch UI. Passing `--notify` is now an unknown-flag error.

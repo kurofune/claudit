@@ -156,6 +156,7 @@ func TestDefault_OneMillionContextVariantsMatchBase(t *testing.T) {
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
+		"claude-sonnet-5-5",
 		"claude-sonnet-5",
 		"claude-sonnet-4-6",
 	} {
@@ -182,6 +183,31 @@ func TestDefault_OneMillionContextVariantsMatchBase(t *testing.T) {
 			if !bp.Rates[i].Until.Equal(vp.Rates[i].Until) || bp.Rates[i].Rate != vp.Rates[i].Rate {
 				t.Errorf("%s[1m] rate period %d differs from base: %+v vs %+v", base, i, vp.Rates[i], bp.Rates[i])
 			}
+		}
+	}
+}
+
+func TestDefault_Sonnet55(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sonnet 5.5 shares Sonnet 5's card: $2 input / $10 output, cache rates
+	// on the standard ratios off the $2 input rate.
+	for _, m := range []string{
+		"claude-sonnet-5-5",
+		"claude-sonnet-5-5[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 2.00 || p.Output != 10.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
+		}
+		if p.CacheRead != 0.20 || p.CacheWrite5m != 2.50 || p.CacheWrite1h != 4.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
 		}
 	}
 }
