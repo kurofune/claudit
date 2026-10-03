@@ -24,6 +24,7 @@
 [[duty]]
 name = "plan"
 mail = true
+model = "fable"
 prompt = """
 Plan the ideas the lead mailed you (the ## Mail section below). Each message
 is one idea in the operator's words.
