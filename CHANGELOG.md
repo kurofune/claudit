@@ -2,9 +2,11 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.9.1] — 2026-10-02
 
 Pricing refresh against the live pricing page on 2026-10-02: **Claude Sonnet 5.5** is added. Every other rate on the page was re-checked and is unchanged.
+
+**Upgrade if you run Sonnet 5.5.** v1.9.0 and earlier have no entry for it, so every Sonnet 5.5 turn adds **$0** to reported spend. **Heads-up:** this release also removes `claudit watch --notify`; drop the flag from any scripts that pass it.
 
 ### Added
 
@@ -331,7 +333,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/kurofune/claudit/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/kurofune/claudit/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/kurofune/claudit/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/kurofune/claudit/compare/v1.8.0...v1.8.1
