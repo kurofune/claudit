@@ -401,7 +401,7 @@ svg [data-panel]:hover { opacity: .75; }
   </ol>
   <button id="themeToggle" type="button">Theme</button>
   <div class="rail-foot">
-    Generated<br><span data-sr="gen-date.rail">2026-09-24</span><br>
+    Generated<br><span data-sr="gen-date.rail">2026-10-02</span><br>
     <span style="color:var(--done)">●</span> in sync
   </div>
 </nav>
@@ -413,7 +413,7 @@ svg [data-panel]:hover { opacity: .75; }
     <span>claudit</span><span class="sep">/</span>
     <span>Go CLI</span><span class="sep">/</span>
     <span>MIT</span><span class="sep">/</span>
-    <span data-sr="eyebrow.commits">305 commits</span>
+    <span data-sr="eyebrow.commits">319 commits</span>
   </div>
   <h1>claudit<span class="cursor">▌</span> <span class="thin">the session auditor</span></h1>
   <p class="standfirst">claudit reads the JSONL session logs Claude Code leaves under <code>~/.claude/projects/</code>. It rebuilds each session as a trace you can read and interrogate: every turn, tool call, and sub-agent on one timeline. Cost is one dimension of that trace, not the point of it.</p>
@@ -434,7 +434,7 @@ svg [data-panel]:hover { opacity: .75; }
     <div class="status-cell"><span class="k">Last landed</span><span class="v"><span class="pulse ok"></span>v1.8.2</span></div>
     <div class="status-cell"><span class="k">Needs you</span><span class="v"><span class="pulse watch"></span>5 calls</span></div>
     <div class="status-cell"><span class="k">Next checkpoint</span><span class="v">none scheduled</span></div>
-    <div class="status-cell"><span class="k">Sources</span><span class="v" data-sr="updated">2026-09-24</span></div>
+    <div class="status-cell"><span class="k">Sources</span><span class="v" data-sr="updated">2026-10-02</span></div>
     <div class="status-cell"><span class="k">Narrative</span><span class="v" data-sr="narrative-date">2026-09-24</span></div>
   </div>
 </header>
@@ -444,13 +444,13 @@ svg [data-panel]:hover { opacity: .75; }
   <div class="sec-head"><span class="sec-num">01</span><h2>Vitals</h2>
     <span class="sec-note">counted from the repo at generation time</span></div>
   <div class="vitals">
-    <div class="vital"><div class="n" data-sr="v.models.n">34</div><div class="l">Priced model ids</div>
+    <div class="vital"><div class="n" data-sr="v.models.n">36</div><div class="l">Priced model ids</div>
       <div class="sub">Re-verified against the live pricing page on 2026-09-23.</div></div>
-    <div class="vital"><div class="n" data-sr="v.tests.n">931</div><div class="l">Tests</div>
-      <div class="sub" data-sr="v.tests.sub">486 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
+    <div class="vital"><div class="n" data-sr="v.tests.n">928</div><div class="l">Tests</div>
+      <div class="sub" data-sr="v.tests.sub">483 Go tests. 445 JS tests. Both suites run under <code>make test</code>.</div></div>
     <div class="vital"><div class="n" data-sr="v.rulings.n">12</div><div class="l">Standing rulings</div>
       <div class="sub" data-sr="v.rulings.sub">2 questions still open</div></div>
-    <div class="vital"><div class="n" data-sr="v.releases.n">16</div><div class="l">Releases shipped</div>
+    <div class="vital"><div class="n" data-sr="v.releases.n">17</div><div class="l">Releases shipped</div>
       <div class="sub">v1.8.2 on 2026-09-23. A patch that adds the Opus 5.5 rate card.</div></div>
     <div class="vital"><div class="n zero">0</div><div class="l">Open issues</div>
       <div class="sub">GitHub Issues is empty. No successor initiative is proposed.</div></div>
@@ -827,12 +827,12 @@ svg [data-panel]:hover { opacity: .75; }
     the cleanup target.
   </p>
   <details class="srcfile" id="src-current">
-    <summary><span class="sf-name">CURRENT.md</span><span class="sf-note">Live state — outranks every other doc on "what are we doing now"</span><span class="sf-lines" data-sr="pane.current.lines">27 lines</span></summary>
+    <summary><span class="sf-name">CURRENT.md</span><span class="sf-note">Live state — outranks every other doc on "what are we doing now"</span><span class="sf-lines" data-sr="pane.current.lines">28 lines</span></summary>
     <div class="sf-body" data-sr="pane.current">
 <h3>CURRENT</h3>
 <p><strong>Mode:</strong> Steady-state maintenance. No active initiative — both roadmaps (<code>docs/agents-redesign.md</code>, <code>docs/agents-audit-roadmap.md</code>) are fully shipped.</p>
 <p><strong>Goal:</strong> Keep claudit correct against upstream reality: pricing current with Anthropic's published rates, the parser current with Claude Code's JSONL schema. Ship fixes and small features as they earn their place.</p>
-<p><strong>Last change:</strong> v1.9.0 (2026-09-24) — fast-mode turns use <code>message.usage.speed</code> to select bundled or overlay fast rates, including cache rates. Standard-rate history remains unchanged. Previous release: v1.8.2 added Opus 5.5 pricing.</p>
+<p><strong>Last change:</strong> v1.9.1 (2026-10-02) — Sonnet 5.5 rate card added ($2 / $10, same as Sonnet 5); rest of the pricing page re-checked, unchanged. Removed <code>watch --notify</code>. Previous release: v1.9.0 (2026-09-24) fast-mode pricing via <code>message.usage.speed</code>.</p>
 <p><strong>Assumptions:</strong></p>
 <ul>
 <li>No bundled model needs rate history right now; the mechanism stays because the next real rate change will. Users on v1.8.0 or earlier over-report Sonnet 5 spend by 50% from 2026-09-01 until they upgrade.</li>
@@ -884,7 +884,7 @@ svg [data-panel]:hover { opacity: .75; }
 <li><code>internal/pricing/</code> — bundled <code>default.yaml</code> + overlay loader, date-effective rates</li>
 <li><code>internal/render/</code> — report/diff HTML, tokens.css, static SPA bundling</li>
 <li><code>internal/serve/</code> — web daemon: API, ETag/render cache, SSE <code>/events</code></li>
-<li><code>internal/watch/</code>, <code>internal/notify/</code>, <code>internal/stat/</code> — live TUI, desktop notify, stats</li>
+<li><code>internal/watch/</code>, <code>internal/stat/</code> — live TUI, stats</li>
 <li><code>web/</code> — the SPA: <code>view-*.js</code> (DOM) + <code>*-logic.js</code> (pure, TDD'd), 16 theme CSS files</li>
 <li><code>jstest/</code> — Node-runner JS unit tests; <code>web_embed.go</code> — embeds <code>web/</code> into the binary</li>
 </ul>
@@ -905,7 +905,7 @@ svg [data-panel]:hover { opacity: .75; }
   <strong>Sources</strong> — CURRENT.md, DECISIONS.md, CONTEXT_MAP.md, CHANGELOG.md, docs/agents-audit-roadmap.md, docs/agents-redesign.md, internal/pricing/default.yaml, git log.<br>
   <strong>Authority</strong> — this page holds none. Where it and a source disagree, the source wins and this page is the cleanup target.<br>
   <strong>Regeneration</strong> — rewritten at session close when a phase moves, a verdict lands, or a ruling changes.<br>
-  Generated <span data-sr="gen-date.foot">2026-09-24</span> · <code>skills/situation-room</code>
+  Generated <span data-sr="gen-date.foot">2026-10-02</span> · <code>skills/situation-room</code>
 </footer>
 
 </main>
