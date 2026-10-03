@@ -14,19 +14,40 @@
 name = "digest"
 schedule = "daily 07:00"
 prompt = """
-Write the morning digest.
+Write the morning digest: a short brief for the operator, written from the
+facts file alone.
 
-1. Run `djinn digest --write` first. It gathers the facts without a model and
-   writes .djinn/digest/<YYYY-MM-DD>.md plus a copy at .djinn/digest/latest.md.
-2. If the file is a single "Factory idle" line, stop: there is nothing to rewrite.
-3. Otherwise rewrite only the lines under ## Needs you in the dated file. For
-   each bead there, read it (`bd show <id> --json` and `bd comments <id> --json`) and
-   replace its line with one plain question per bead that the operator can
-   answer in a sentence, keeping the bead id first, keeping its
-   "why you:" reason when the line has one, and
-   ending in a question mark. Leave the counts line and every other section
-   exactly as written.
-4. Copy the dated file over .djinn/digest/latest.md so the two match.
+1. Run `djinn digest --write`. It gathers the facts without a model and writes
+   them to .djinn/digest/<YYYY-MM-DD>.facts.md (today's date; it prints the
+   path). It writes no digest the operator reads: step 4 does.
+2. Read that facts file and nothing else: no bd, git, run logs or older
+   digests. Every bead id and every $ figure in the brief is copied from it,
+   exactly as printed; never total, round or estimate one yourself.
+3. Write the brief to a new temp file (`mktemp`). If the facts file is a single
+   "Factory idle" line, that line is the whole brief. Otherwise write plain
+   sentences for the operator, saying what the work means rather than
+   repeating bead titles written for agents, under these five headings, in
+   this order:
+   - `## Overnight`: two or three sentences on what the night came to (what
+     landed, toward which goals, what it cost) and the one thing worth
+     knowing.
+   - `## Needs you`: one plain question per bead the facts list under Needs
+     you, bead id first, answerable in a sentence, keeping its "why you:"
+     reason, ending in a question mark. "Nothing needs you." when none.
+   - `## What moved`: one line per goal (epic), not per bead: what it can do
+     now that it could not before, and how many beads landed under it.
+   - `## Triage`: one line on what was decided on the operator's behalf
+     (Decided overnight, Filed on my own) and what waits on a yes (Proposed,
+     Ideas); name a bead id only where the operator should review it.
+   - `## Watch`: what to keep an eye on (work in flight, mail waiting,
+     anything stuck or costly). "Nothing to watch." when quiet.
+   End with one last line pointing at the facts:
+   `Facts: .djinn/digest/<YYYY-MM-DD>.facts.md`.
+4. Run `djinn digest --publish <temp file>`. It checks every bead id and $
+   figure in the brief against the facts file and writes the brief to
+   .djinn/digest/<YYYY-MM-DD>.md and latest.md, or, when the brief names one
+   the facts lack, publishes the facts instead under a "Brief rejected" line.
+   It exits 0 either way; note in the ledger which one it published.
 
 Do not file, close, relabel or commit anything.
 """
