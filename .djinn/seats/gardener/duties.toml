@@ -1,0 +1,62 @@
+# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
+# agent session loaded with this seat's charter, ledger and memory plus the
+# duty's prompt, logging to runs/<timestamp>-<duty>.log:
+#
+#   djinn seat run <seat> <duty>
+#
+# [[duty]]
+# name = "example"
+# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
+# prompt = "What this duty does, in the seat's own words."
+# max_cost_usd = 2.0         # optional; omit it for no cap
+# mail = true                # optional; reads the seat's mail at start, and
+#                            # the factory starts it early when mail waits
+# check = "test -s notes/todo.md"
+#                            # optional; a shell command the factory runs in
+#                            # the repo root, with no model, at each slot:
+#                            # exit 0 runs the duty, exit 1 skips the slot,
+#                            # anything else runs it anyway
+#
+# A duty needs a schedule or mail = true. With mail = true and no schedule it
+# runs only when mail waits for this seat, never on a clock (and takes no
+# check).
+
+[[duty]]
+name = "tend"
+schedule = "daily 03:00"
+# Free check, no model: run the duty only when a deferred needs-operator bead
+# exists or the reaper's dry-run finds a candidate. A missing bd or reaper runs
+# the duty anyway.
+check = "bd list --status deferred --label needs-operator -n 1 --json | grep -q '\"id\"' || ! reaper | grep -q 'nothing to reap'"
+prompt = """
+Prune the idle backlog, then tend the beads that failed on bead quality.
+
+1. Prune: run `reaper --judge --live`. It judges each idle bead against the
+   repo at HEAD and closes or defers only what it finds dead. Copy its summary
+   line (the one starting "reaper [LIVE]:") into your ledger entry. Close
+   nothing by hand.
+2. Tend: for each open bead labelled review-follow-up, and each deferred
+   needs-operator bead whose latest comment names bead quality (vague or
+   untestable acceptance criteria, a wrong or missing path, scope the bead
+   cannot meet), author a replacement through /create-bead carrying the
+   proposed label, then close the original with a comment naming the
+   replacement id:
+   `bd close <id> --reason "replaced by <new-id>"`.
+   Leave every other deferred bead as it is: it waits on the operator.
+3. Write one dated ledger entry: the reaper's summary line, then one line per
+   replacement (original id -> replacement id).
+
+Never remove the proposed label from any bead.
+"""
+
+[[duty]]
+name = "inbox"
+mail = true
+prompt = """
+Read your mail (the ## Mail section below) and act on each message as this
+seat's charter directs. A message the charter does not cover, or one only the
+operator can decide, defer to the operator with
+`bd update <id> --status deferred --add-label needs-operator`
+instead of acting on it. Every message still open when you stop is closed as
+read.
+"""

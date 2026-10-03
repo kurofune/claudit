@@ -158,6 +158,46 @@ Say yes and I will file them, or tell me what to change.
 
 Read filed beads back with `bd list --parent <epic-id> --all --flat --json`.
 
+### Or hand it to the planner
+
+An ask the operator does not want to wait for or sit through goes to the planner
+seat as mail instead of through steps 1-5. It qualifies on any of three
+triggers: it is **large** (plan-sized, and the operator would rather not review
+a bead list now), **vague** (you cannot write its acceptance lines without
+guessing), or it **needs research before filing** (code, docs or DECISIONS.md
+rows must be read before anyone can say what to build). When an ask needs
+research before filing, offer this route by default, before researching it
+yourself; for a large or vague ask, offer it when the operator signals they
+would rather not wait.
+
+```say
+That needs working out before it can be filed. I can hand it to <planner display
+name>: it plans this on its own and files the beads held for your yes. Say hand
+it over, or say now and we file it together.
+```
+
+On a yes, write the operator's words verbatim, plus every constraint they named,
+to a file and send them as one message bead — the planner's mail, not a work
+bead, so it skips `/create-bead`:
+
+```bash
+bd create --type message --title "<the ask>" --label to:seat:planner --silent --description="$(cat /tmp/ask.md)"
+```
+
+`--silent` prints the message id. Say it in one block, then stop: nothing
+drains until the planner has filed.
+
+```say
+Sent to <planner display name> as <message-id>. Its plan reaches you in the
+digest, held until you say yes.
+```
+
+The planner files one epic labelled `proposed`, every bead under it labelled
+`proposed` too. That label is the second approval — is the plan right. Only on
+the operator's yes to that plan remove it from the epic and from each bead
+`bd list --parent <epic-id> --all --flat --json` lists:
+`bd update <id> --remove-label=proposed`.
+
 ---
 
 ## Job 2 — Start the drain
@@ -648,9 +688,11 @@ what was tried from `bd comments <bead-id> --json` instead of a log.
 
 The UserPromptSubmit hook `djinn init` installs adds a line to a turn for each
 item that newly needs the operator: `needs you: <bead-id> — <title> — bd show
-<bead-id>` for a bead deferred with the `needs-operator` label, and
-`mail: <message-id> — <title> — bd show <message-id>` for a message to the lead's
-seat. Each item arrives once. Every such line is Job 4 input: answer what the
+<bead-id>` for a bead deferred with the `needs-operator` label,
+`idea: <message-id> — <title> — bd show <message-id>` for lead mail labelled
+`idea` (an idea the planner noticed while planning, open or deferred), and
+`mail: <message-id> — <title> — bd show <message-id>` for any other message to
+the lead's seat. Each item arrives once. Every such line is Job 4 input: answer what the
 operator asked first, then put each item to them, one at a time, as one `say`
 block ending in one question. Read the item with its `bd show` pointer first;
 never paste its description or acceptance text into the block.
@@ -665,6 +707,20 @@ A `needs you:` answer goes through the conversation above from step 4. A
 `mail:` item is closed once the operator has answered it:
 `bd close <message-id> --reason "<what the operator decided>"`. The hook is the
 only way new items reach you; nothing else checks for them.
+
+An `idea:` item, or an idea the digest lists under Ideas, asks one question in
+that block: is it worth planning? The operator's yes is the first approval, and
+never yours to give. On yes, write the idea's title and description, quoted, to
+a file, mail it to the planner, then close the idea naming the new message id
+`--silent` printed:
+
+```bash
+bd create --type message --title "<idea title>" --label to:seat:planner --silent --description="$(cat /tmp/idea.md)"
+bd close <idea-id> --reason "handed to the planner as <new-id>"
+```
+
+and speak Job 1's `Sent to` block. On no:
+`bd close <idea-id> --reason "declined"`.
 
 ---
 
@@ -722,9 +778,11 @@ Never change it unasked.
 - Never labels an operator's own ask `proposed`, and never changes
   `factory.proposals` unasked.
 - Never starts a second drain while one is running.
-- Never removes the `proposed` label from a review follow-up.
+- Never removes the `proposed` label from a review follow-up, and never
+  removes proposed from a planner epic without the operator's yes.
 - Never files lead-approved work the charter's Self-approval list does not name.
 - Never calls `bd edit`, or `bd create` outside `/create-bead` — except a
   message bead (`--type message`, no acceptance criteria) filed through
-  `Stop one bead / pause the drain`.
+  `Stop one bead / pause the drain`, `Or hand it to the planner`, or an idea's
+  yes.
 - Never speaks to the operator except from a `say` template, as plain text.

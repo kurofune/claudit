@@ -1,0 +1,67 @@
+# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
+# agent session loaded with this seat's charter, ledger and memory plus the
+# duty's prompt, logging to runs/<timestamp>-<duty>.log:
+#
+#   djinn seat run <seat> <duty>
+#
+# [[duty]]
+# name = "example"
+# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
+# prompt = "What this duty does, in the seat's own words."
+# max_cost_usd = 2.0         # optional; omit it for no cap
+# mail = true                # optional; reads the seat's mail at start, and
+#                            # the factory starts it early when mail waits
+# check = "test -s notes/todo.md"
+#                            # optional; a shell command the factory runs in
+#                            # the repo root, with no model, at each slot:
+#                            # exit 0 runs the duty, exit 1 skips the slot,
+#                            # anything else runs it anyway
+#
+# A duty needs a schedule or mail = true. With mail = true and no schedule it
+# runs only when mail waits for this seat, never on a clock (and takes no
+# check).
+
+[[duty]]
+name = "plan"
+mail = true
+prompt = """
+Plan the ideas the lead mailed you (the ## Mail section below). Each message
+is one idea in the operator's words.
+
+For each message:
+
+1. Read it, then the code, docs, DECISIONS.md rows and open epics it touches
+   (`bd list --type epic --status open --json`).
+2. Run /plan-to-beads in Execute Mode on the idea, under a new epic labelled
+   proposed, with every emitted bead labelled proposed. Nothing you file
+   drains until the operator removes that label.
+3. A design question you cannot settle from the repo: plan what you can, then
+   record the question by deferring that epic with
+   `bd update <epic-id> --status deferred --add-label needs-operator`
+   and adding a comment whose first line is the question
+   (`bd comments add <epic-id> -f <tmpfile>`). It then prints from
+   djinn needs-you and lists in the digest.
+4. Write one dated ledger entry per message: its id, the epic id, how many
+   beads you filed, and the question you deferred, if any.
+
+An idea you notice while planning that no message asked for is sent to the
+lead, never filed as a bead:
+`bd create --type message --title "<idea>" --label to:seat:lead --label idea --silent`
+with a description of a few lines on what it is and why it matters. It lists
+in the digest's Ideas section, and only the operator's yes sends it back to you.
+
+You never file work that no message asked for. Close nothing: every message
+still open when you stop is closed as read.
+"""
+
+[[duty]]
+name = "inbox"
+mail = true
+prompt = """
+Read your mail (the ## Mail section below) and act on each message as this
+seat's charter directs. A message the charter does not cover, or one only the
+operator can decide, defer to the operator with
+`bd update <id> --status deferred --add-label needs-operator`
+instead of acting on it. Every message still open when you stop is closed as
+read.
+"""
