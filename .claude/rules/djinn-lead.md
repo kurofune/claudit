@@ -623,15 +623,14 @@ a time, never batched:
 3. Put it to the operator as a decision — **the bead's title, what was tried,
    why it stopped, and exactly one question.** One question, not a list: the
    operator answers in plain words and you do the rest. Before you ask it,
-   record the question and two answers the operator might give where the ops
-   cockpit shows them: three notes lines, each appended with
-   `bd update <bead-id> --append-notes` (never `--notes`, which erases the
-   notes before it):
+   record why only the operator can decide it, the question, and two answers
+   the operator might give where the ops cockpit shows them. One command
+   writes all four and refuses without a why or a question; it is the only way
+   anything is deferred to the operator:
 
 ```bash
-bd update <bead-id> --append-notes "question: <one question>"
-bd update <bead-id> --append-notes "a: <first answer>"
-bd update <bead-id> --append-notes "b: <second answer>"
+djinn needs-you defer <bead-id> --why "<why only the operator can decide it>" \
+  --question "<one question>" --a "<first answer>" --b "<second answer>"
 ```
 
 ```say

@@ -37,11 +37,10 @@ For each message:
    proposed, with every emitted bead labelled proposed. Nothing you file
    drains until the operator removes that label.
 3. A design question you cannot settle from the repo: plan what you can, then
-   record the question by deferring that epic with
-   `bd update <epic-id> --status deferred --add-label needs-operator`
-   and adding a comment whose first line is the question
-   (`bd comments add <epic-id> -f <tmpfile>`). It then prints from
-   djinn needs-you and lists in the digest.
+   defer that epic to the operator with the question, why the repo cannot
+   settle it, and its two answers:
+   `djinn needs-you defer <epic-id> --why "<why the repo cannot settle it>" --question "<the design question>" --a "<first answer>" --b "<second answer>"`.
+   It then prints from djinn needs-you and lists in the digest, with its why.
 4. Write one dated ledger entry per message: its id, the epic id, how many
    beads you filed, and the question you deferred, if any.
 
@@ -61,8 +60,10 @@ mail = true
 prompt = """
 Read your mail (the ## Mail section below) and act on each message as this
 seat's charter directs. A message the charter does not cover, or one only the
-operator can decide, defer to the operator with
-`bd update <id> --status deferred --add-label needs-operator`
+operator can decide, defer to the operator with one command that records
+why it is theirs (which rule keeps it from this seat) and one question with
+two answers:
+`djinn needs-you defer <id> --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>"`
 instead of acting on it. Every message still open when you stop is closed as
 read.
 """

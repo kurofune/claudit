@@ -55,8 +55,10 @@ mail = true
 prompt = """
 Read your mail (the ## Mail section below) and act on each message as this
 seat's charter directs. A message the charter does not cover, or one only the
-operator can decide, defer to the operator with
-`bd update <id> --status deferred --add-label needs-operator`
+operator can decide, defer to the operator with one command that records
+why it is theirs (which rule keeps it from this seat) and one question with
+two answers:
+`djinn needs-you defer <id> --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>"`
 instead of acting on it. Every message still open when you stop is closed as
 read.
 """

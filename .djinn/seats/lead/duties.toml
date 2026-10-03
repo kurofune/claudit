@@ -22,7 +22,8 @@ Write the morning digest.
 3. Otherwise rewrite only the lines under ## Needs you in the dated file. For
    each bead there, read it (`bd show <id> --json` and `bd comments <id> --json`) and
    replace its line with one plain question per bead that the operator can
-   answer in a sentence, keeping the bead id first and
+   answer in a sentence, keeping the bead id first, keeping its
+   "why you:" reason when the line has one, and
    ending in a question mark. Leave the counts line and every other section
    exactly as written.
 4. Copy the dated file over .djinn/digest/latest.md so the two match.
@@ -40,9 +41,11 @@ reads lead mail, and a message closed here never reaches them.
 1. Write one dated ledger entry per message: its id, its title, and in one
    line what it asks.
 2. Anything the operator must decide or should see (a sit-in note, an idea, a
-   question), defer to them with
-   `bd update <id> --status deferred --add-label needs-operator`.
-   It then prints from djinn needs-you and lists in the digest.
+   question), defer to them with one command, naming why it is theirs (an
+   idea is theirs because only the operator's yes plans one) and the one
+   question with its two answers:
+   `djinn needs-you defer <id> --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>"`.
+   It then prints from djinn needs-you and lists in the digest, with its why.
 3. Leave every other message as it is: it is closed as read when you stop.
 
 Defer only; file, close or relabel nothing else.
