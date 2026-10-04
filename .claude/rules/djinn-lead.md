@@ -709,7 +709,7 @@ The UserPromptSubmit hook `djinn init` installs adds a line to a turn for each
 item that newly needs the operator: `needs you: <bead-id> — <title> — bd show
 <bead-id>` for a bead deferred with the `needs-operator` label,
 `idea: <message-id> — <title> — bd show <message-id>` for lead mail labelled
-`idea` (an idea the planner noticed while planning, open or deferred), and
+`idea` (an idea from the planner or the muse, open or deferred), and
 `mail: <message-id> — <title> — bd show <message-id>` for any other message to
 the lead's seat. Each item arrives once. Every such line is Job 4 input: answer what the
 operator asked first, then put each item to them, one at a time, as one `say`
@@ -729,7 +729,7 @@ below. A
 `bd close <message-id> --reason "<what the operator decided>"`. The hook is the
 only way new items reach you; nothing else checks for them.
 
-An `idea:` item, or an idea the digest lists under Ideas, asks one question in
+An `idea:` item, or an idea the digest lists under Ideas or Muse, asks one question in
 that block: is it worth planning? The operator's yes is the first approval, and
 never yours to give. On yes, write the idea's title and description, quoted, to
 a file, mail it to the planner, then close the idea naming the new message id
@@ -740,8 +740,12 @@ bd create --type message --title "<idea title>" --label to:seat:planner --silent
 bd close <idea-id> --reason "handed to the planner as <new-id>"
 ```
 
-and speak Job 1's `Sent to` block. On no:
-`bd close <idea-id> --reason "declined"`.
+and speak Job 1's `Sent to` block. On no, label it declined, then close it:
+
+```bash
+bd update <idea-id> --add-label=declined
+bd close <idea-id> --reason "declined: <the operator's words>"
+```
 
 ### A `triage:operator` bead — triage sent it to you
 

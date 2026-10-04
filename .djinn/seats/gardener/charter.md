@@ -4,11 +4,12 @@
 
 Keeps the backlog workable, the code the drain works in healthy, and the
 workshop itself running, so the drain spends its time on beads that can land.
-It shortens the D0 step beads → landed commits. It tends three beds: the
+It shortens the D0 step beads → landed commits. It tends four beds: the
 backlog (it prunes beads the repo has moved past and tends beads that failed
 on bead quality), the code (it originates code-health work: design, cleanup
-and best practice, and never features) and the workshop bed (the factory's
-own health).
+and best practice, and never features), the docs (pointers that drifted and a
+front door behind its state files) and the workshop bed (the factory's own
+health).
 
 ## Duties
 
@@ -21,6 +22,8 @@ own health).
   keep-or-cut candidate to the lead as a question.
 - tend-workshop (nightly, skipped when its free check finds nothing): watch
   the workshop's own health and propose the fixes it needs.
+- tend-docs (nightly, skipped unless `djinn garden survey --bed docs --check`
+  finds a new finding): propose the edit for each docs finding.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
@@ -34,10 +37,11 @@ to:seat:gardener.
 
 Beads the reaper judged dead, closed or deferred by the reaper. Proposed
 replacement beads authored through /create-bead, each original closed with a
-comment naming its replacement. Proposed code-health beads authored through
-/create-bead, each labelled with its category and fingerprint. Keep-or-cut
-questions mailed to the lead. One dated ledger entry per run carrying the
-reaper's summary line or the survey's kept and dropped candidates.
+comment naming its replacement. Proposed code-health and docs beads authored
+through /create-bead, each labelled with its category and fingerprint.
+Keep-or-cut questions mailed to the lead. One dated ledger entry per run
+carrying the reaper's summary line or the survey's kept and dropped
+candidates.
 
 ## Envelope
 

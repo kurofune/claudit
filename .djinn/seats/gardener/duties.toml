@@ -171,6 +171,43 @@ yourself, run a drain, or commit anything.
 """
 
 [[duty]]
+name = "tend-docs"
+schedule = "daily 04:30"
+# Free check, no model: run the duty only when a docs finding no gardener bead
+# carries yet survives the guards and the throughput cap allows a proposal.
+check = "djinn garden survey --bed docs --check"
+max_cost_usd = 10.0
+prompt = """
+Turn the docs survey's findings into proposals the drain can land.
+
+1. Survey: run `djinn garden survey --bed docs --json --max 10`. It prints one
+   object: `candidates` (each with category, file, line, symptom, measure and
+   fingerprint), `throughput` (the most proposals this run may file) and
+   `withheld`. File only from `candidates`; the survey has already dropped
+   every finding a gardener bead carries, filed or declined.
+2. Read: for each candidate, read the doc at its file:line and name the edit
+   that fixes it:
+   - stale-pointer: the path the doc means now (`git log --follow` or the
+     symbol's new home), or deleting the line when the thing is gone.
+   - stale-line: the line the pointer means now, or the pointer without one.
+   - stale-front-door: the CURRENT.md and DECISIONS.md changes the front
+     door's story has not told yet; the fix regenerates it with
+     /situation-room.
+3. File: author each new finding through /create-bead, in survey order, with
+   the labels `proposed`, `from:seat:gardener`, `garden:docs`,
+   `garden:<category>` and `garden-fp:<fingerprint>`. Its description names
+   the measured symptom (the survey's symptom line) and the edit from step 2.
+   File no more beads than the survey's `throughput` field allows; a finding
+   past it waits for the next survey.
+   Add the `from:seat:gardener` label to every bead you file. It names the
+   seat directory, gardener, and never the display name `djinn theme show`
+   prints for this seat.
+4. Write one dated ledger entry: each filed bead (fingerprint -> bead id).
+
+Never remove the proposed label from any bead. Edit no docs and no code.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0
