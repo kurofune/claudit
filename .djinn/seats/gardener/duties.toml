@@ -215,6 +215,8 @@ schedule = "daily 05:00"
 # charter, DECISIONS.md), or no eval is recorded.
 check = "djinn triage eval --due"
 max_cost_usd = 10.0
+# The eval appends its row here; the runner commits it with the ledger.
+commits = [".djinn/triage/evals.tsv"]
 prompt = """
 Rerun the triage eval: what the judges read changed since the last one, so
 their agreement with the operator may have moved.
