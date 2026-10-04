@@ -27,6 +27,7 @@
 [[duty]]
 name = "digest"
 schedule = "daily 07:00"
+max_cost_usd = 10.0
 prompt = """
 Write the morning digest: a short brief for the operator, written from the
 facts file alone.
@@ -70,7 +71,7 @@ Do not file, close, relabel or commit anything.
 name = "follow-ups"
 schedule = "every 5m"
 check = "djinn follow-ups --pending"
-max_cost_usd = 10.0
+max_cost_usd = 15.0
 prompt = """
 Triage the review follow-ups the drain filed, under the charter's
 ## Self-approval, so real defects drain without waiting on the operator.
@@ -134,7 +135,7 @@ run a drain or commit code.
 name = "triage"
 schedule = "every 10m"
 check = "djinn triage --check"
-max_cost_usd = 3.0
+max_cost_usd = 10.0
 model = "opus[1m]"
 prompt = """
 Vote as judge one on the proposals awaiting triage, then decide each, under the
@@ -174,6 +175,7 @@ run a drain or commit anything: decide applies every outcome.
 [[duty]]
 name = "inbox"
 mail = true
+max_cost_usd = 10.0
 prompt = """
 Read your mail (the ## Mail section below). Do not answer it: the operator
 reads lead mail, and a message closed here never reaches them.

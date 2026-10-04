@@ -63,6 +63,7 @@ still open when you stop is closed as read.
 [[duty]]
 name = "inbox"
 mail = true
+max_cost_usd = 10.0
 prompt = """
 Read your mail (the ## Mail section below) and act on each message as this
 seat's charter directs. A message the charter does not cover, or one only the

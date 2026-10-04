@@ -31,6 +31,7 @@ schedule = "daily 03:00"
 # exists or the reaper's dry-run finds a candidate. A missing bd or reaper runs
 # the duty anyway.
 check = "bd list --status deferred --label needs-operator -n 1 --json | grep -q '\"id\"' || ! reaper | grep -q 'nothing to reap'"
+max_cost_usd = 10.0
 prompt = """
 Prune the idle backlog, then tend the beads that failed on bead quality.
 
@@ -62,7 +63,7 @@ schedule = "daily 04:00"
 # yet, or 10 commits landed on main since the mark), a candidate survives the
 # guards, and the throughput cap allows at least one proposal.
 check = "djinn garden survey --check"
-max_cost_usd = 5.0
+max_cost_usd = 10.0
 prompt = """
 Turn the code survey's candidates into proposals the drain can land.
 
@@ -110,7 +111,7 @@ schedule = "daily 02:30"
 # exits 0 when the latest finished run is red and not handed off; otherwise
 # run the duty only when a workshop candidate survives the guards.
 check = "djinn slow-watch || djinn garden survey --bed workshop --check"
-max_cost_usd = 3.0
+max_cost_usd = 10.0
 prompt = """
 Tend the workshop's own health: file the slow-tier breaks the nightly local run
 found, then turn the workshop survey's candidates into proposals.
@@ -172,6 +173,7 @@ yourself, run a drain, or commit anything.
 [[duty]]
 name = "inbox"
 mail = true
+max_cost_usd = 10.0
 prompt = """
 Read your mail (the ## Mail section below) and act on each message as this
 seat's charter directs. A message the charter does not cover, or one only the
