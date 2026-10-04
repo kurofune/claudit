@@ -14,6 +14,8 @@ first.
   each review follow-up whose source bead has landed under ## Self-approval.
 - triage (every 10m, when `djinn triage --check` finds proposals): vote as
   judge one on each proposal, then decide it under ## Triage.
+- red-main (every 10m, when `djinn ci --unfiled` lists a red streak with no
+  fix bead): file one P0 fix bead per streak under ## Self-approval.
 - inbox (on mail): record each message in the ledger and defer what the
   operator must decide to needs-you.
 - In session: file asks, start drains, report status, and bring back every

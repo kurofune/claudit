@@ -173,6 +173,45 @@ run a drain or commit anything: decide applies every outcome.
 """
 
 [[duty]]
+name = "red-main"
+schedule = "every 10m"
+check = "djinn ci --unfiled"
+max_cost_usd = 15.0
+prompt = """
+File the fix for each red streak on main that has none yet, so a red main
+drains without waiting on the operator. The operator hears of a red streak
+only when it is still unfiled 30 minutes after its latest red run finished.
+
+1. List them: `djinn ci --unfiled`. It prints one line per workflow red on
+   main whose red streak no bead, of any status, labels yet:
+   `<call id> <fix label> — <title> — gh run view <run> --log-failed`.
+   If it prints nothing, stop.
+2. For each line, run its `gh run view <run> --log-failed` and note the
+   failing tests and their failure lines. Read code only to name the files
+   the fix changes. Never edit code.
+3. File one P0 bug per line through /create-bead: type bug, priority 0, the
+   title "<workflow> red on main since <first red sha8>: <failing tests>", a
+   description naming the run, the failing tests and their failure lines,
+   acceptance criteria that those tests pass and the workflow is green on
+   main again, touches listing every file the fix and its tests change, and
+   the parent the open epic whose brief owns the failing code
+   (`bd list --type epic --status open --json`), none when no epic does.
+   Label it `seat-approved`, `from:seat:lead` and the line's fix label
+   (`ci-red:<workflow>:<first red sha8>`, copied exactly), never `proposed`:
+   a red main is work the charter's ## Self-approval approves. When that
+   section does not name a red main, label it `proposed` in place of
+   `seat-approved`, so it goes to triage. The `from:seat:lead` label names
+   the seat directory, lead, and never the display name `djinn theme show`
+   prints. When filed seat-approved, run
+   `bd update <new-id> --append-notes "seat-approved: a red main"`.
+4. Write one ledger entry for the run, `## YYYY-MM-DD HH:MM — red-main`,
+   naming each call id and the bead filed for it.
+
+One bead per line, never two: the fix label is what drops a streak from the
+list. Never edit code, run a drain, close a bead or commit code.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0
