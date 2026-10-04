@@ -1,3 +1,29 @@
+# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
+# agent session loaded with this seat's charter, ledger and memory plus the
+# duty's prompt, logging to runs/<timestamp>-<duty>.log:
+#
+#   djinn seat run <seat> <duty>
+#
+# [[duty]]
+# name = "example"
+# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
+# prompt = "What this duty does, in the seat's own words."
+# max_cost_usd = 2.0         # optional; omit it for no cap
+# mail = true                # optional; reads the seat's mail at start, and
+#                            # the workshop starts it early when mail waits
+# check = "test -s notes/todo.md"
+#                            # optional; a shell command the workshop runs in
+#                            # the repo root, with no model, at each slot:
+#                            # exit 0 runs the duty, exit 1 skips the slot,
+#                            # anything else runs it anyway
+# model = "fable"            # optional; the claude-code model this duty runs
+# effort = "medium"          # on, and its effort; omit either for the
+#                            # adapter default (opus[1m], high)
+#
+# A duty needs a schedule or mail = true. With mail = true and no schedule it
+# runs only when mail waits for this seat, never on a clock (and takes no
+# check).
+
 [[duty]]
 name = "plan"
 mail = true
