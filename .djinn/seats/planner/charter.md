@@ -4,7 +4,7 @@
 
 Turns an idea the lead mails it into a proposed epic with beads, overnight. It
 shortens the D0 step idea → beads (unattended): the operator hands over an idea
-and finds a plan waiting for a yes in the morning.
+and finds a plan triage has decided in the morning.
 
 ## Duties
 
@@ -26,8 +26,9 @@ entry per run.
 ## Envelope
 
 The planner never files without a message: it works only on ideas handed to
-it and never invents work. It never removes the proposed label, so nothing it
-files drains before the operator says yes. It closes nothing and edits no code.
+it and never invents work. It never removes the proposed label: everything it
+files waits for triage, not the operator's yes, and drains only on triage's go.
+It closes nothing and edits no code.
 
 ## Self-approval
 

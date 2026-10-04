@@ -1,28 +1,5 @@
-# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
-# agent session loaded with this seat's charter, ledger and memory plus the
-# duty's prompt, logging to runs/<timestamp>-<duty>.log:
-#
-#   djinn seat run <seat> <duty>
-#
-# [[duty]]
-# name = "example"
-# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
-# prompt = "What this duty does, in the seat's own words."
-# max_cost_usd = 2.0         # optional; omit it for no cap
-# mail = true                # optional; reads the seat's mail at start, and
-#                            # the factory starts it early when mail waits
-# check = "test -s notes/todo.md"
-#                            # optional; a shell command the factory runs in
-#                            # the repo root, with no model, at each slot:
-#                            # exit 0 runs the duty, exit 1 skips the slot,
-#                            # anything else runs it anyway
-#
-# A duty needs a schedule or mail = true. With mail = true and no schedule it
-# runs only when mail waits for this seat, never on a clock (and takes no
-# check).
-
 [[duty]]
-name = "tend"
+name = "tend-backlog"
 schedule = "daily 03:00"
 # Free check, no model: run the duty only when a deferred needs-operator bead
 # exists or the reaper's dry-run finds a candidate. A missing bd or reaper runs
@@ -42,11 +19,128 @@ Prune the idle backlog, then tend the beads that failed on bead quality.
    proposed label, then close the original with a comment naming the
    replacement id:
    `bd close <id> --reason "replaced by <new-id>"`.
+   Add the `from:seat:gardener` label to every replacement bead. It names the
+   seat directory, gardener, and never the display name `djinn theme show`
+   prints for this seat.
    Leave every other deferred bead as it is: it waits on the operator.
 3. Write one dated ledger entry: the reaper's summary line, then one line per
    replacement (original id -> replacement id).
 
 Never remove the proposed label from any bead.
+"""
+
+[[duty]]
+name = "tend-code"
+schedule = "daily 04:00"
+# Free check, no model: run the duty only when a survey is due (none marked
+# yet, or 10 commits landed on main since the mark), a candidate survives the
+# guards, and the throughput cap allows at least one proposal.
+check = "djinn garden survey --check"
+max_cost_usd = 5.0
+prompt = """
+Turn the code survey's candidates into proposals the drain can land.
+
+1. Survey: run `djinn garden survey --json --max 10`. It prints one object:
+   `candidates` (each with category, file, line, symptom, measure and
+   fingerprint), `throughput` (the most proposals this run may file) and
+   `withheld`. File only from `candidates`.
+2. Read: for each candidate, read the code at its file:line and apply its
+   category's lens:
+   - hotspot: /codebase-design for the deepening the churn asks for, and
+     /simplify-style judgment on the review findings that keep recurring there.
+   - aging-todo: whether the TODO or FIXME still describes work the code needs.
+   - dead-code and stale-pointer: no lens; the fix is deleting the unreachable
+     code or correcting the pointer.
+   - keep-or-cut: no lens; it goes to the lead in step 4.
+   Drop a candidate whose fix lacks one reasonable shape (two plausible
+   designs, a fix that is a feature, or no fix at all) and write each drop and
+   its reason to your ledger entry.
+3. File: author each kept candidate through /create-bead, in survey order,
+   with the labels `proposed`, `from:seat:gardener`, `garden:<category>` and
+   `garden-fp:<fingerprint>`. Its description names the measured symptom (the
+   survey's symptom line) and the test that pins today's behaviour, which the
+   fix must keep green. File no more beads than the survey's `throughput`
+   field allows; a candidate past it waits for the next survey.
+   Add the `from:seat:gardener` label to every bead and message you file. It
+   names the seat directory, gardener, and never the display name
+   `djinn theme show` prints for this seat.
+4. Keep-or-cut: file no bead for a keep-or-cut candidate. Deleting behaviour is
+   the operator's call, so mail it to the lead as one keep-or-cut question with
+   evidence of use: its non-test call sites, any data still in bd or other
+   repos that sets it, and its git history (when it landed and why). Write the
+   body to a file and send it:
+   `bd create --type message --title "Keep or cut <name>?" --label to:seat:lead --label from:seat:gardener --silent --description="$(cat <file>)"`.
+5. Mark: run `djinn garden survey --mark`, so the next survey counts from now.
+6. Write one dated ledger entry: each filed bead (fingerprint -> bead id),
+   each keep-or-cut message id, and each drop with its reason.
+
+Never remove the proposed label from any bead. Edit no code.
+"""
+
+[[duty]]
+name = "tend-workshop"
+schedule = "daily 02:30"
+# Free check, no model: `djinn slow-watch` starts the nightly slow tier and
+# exits 0 when the latest finished run is red and not handed off; otherwise
+# run the duty only when a workshop candidate survives the guards.
+check = "djinn slow-watch || djinn garden survey --bed workshop --check"
+max_cost_usd = 3.0
+prompt = """
+Tend the workshop's own health: file the slow-tier breaks the nightly local run
+found, then turn the workshop survey's candidates into proposals.
+
+Every bead you file carries the `proposed` and `from:seat:gardener` labels.
+The `from:seat:gardener` label names the seat directory, gardener, and never
+the display name `djinn theme show` prints for this seat.
+
+1. Slow tier: run `djinn slow-watch`. When it exits 0 it prints one line: the
+   log path of the latest finished slow-tier run (go test -tags=slow ./...),
+   which failed and has not been handed off. When it exits 1, or prints no log
+   path, go to step 2.
+   a. Read that log. Each failure is a `--- FAIL: <Test>` line under a
+      `FAIL <package>` line, a build failure (`[build failed]`,
+      `[setup failed]`), or a panic or timeout inside a package's output.
+      Group them into distinct breaks: one per failing test, or one per
+      package when the whole package failed to build or timed out.
+   b. For each break, first look for an open bead that already names it:
+      `bd search "<TestName or package>" --status open`. When one does, add
+      one comment to it with the run date and the failure line, and file
+      nothing. Otherwise file one bead through /create-bead, labelled
+      `proposed`, `from:seat:gardener` and `garden:slow-tier`: the failing
+      package and test, the log's failure lines as evidence, and an
+      acceptance criterion that `go test -tags=slow -run '<TestName>' <package>`
+      exits 0.
+   c. Run `djinn slow-watch --handed-off <log path>` with the exact log path
+      step 1 printed. It marks only that run; a newer run that has finished
+      red since stays unmarked and is reported next time.
+2. Survey: run `djinn garden survey --bed workshop --json --max 10`. It prints
+   one object: `candidates` (each with category, file, line, symptom, measure
+   and fingerprint), `throughput` (the most proposals this run may file) and
+   `withheld`. File only from `candidates`. Skip a flaky-test candidate whose
+   test step 1 already filed or commented on.
+3. File: author each candidate through /create-bead, in survey order, with the
+   labels `proposed`, `from:seat:gardener`, `garden:<category>` and
+   `garden-fp:<fingerprint>`. Its description names the measured symptom (the
+   survey's symptom line) and the fix the category asks for:
+   - slow-creep: find the packages whose time grew most across the recent
+     .djinn/slow-watch logs and bring the tier back under its median.
+   - flaky-test: make the test deterministic; its criterion is that
+     `go test -tags=slow -count=5 -run '<TestName>' ./<file>` exits 0.
+   - dolt-size: compact the store (`bd gc`, or `dolt gc` with writers stopped)
+     until .beads/dolt is under 500 MB.
+   - stale-binary: find why the workshop tick's reinstall left it behind and
+     fix that; name `go install ./cmd/djinn ./cmd/summoner` in the description
+     as the operator's interim step.
+   - stale-current: re-verify CURRENT.md against the repo and bd, and update
+     its Last verified line.
+   File no more beads than the survey's `throughput` field allows; a candidate
+   past it waits for the next survey.
+4. Write one dated ledger entry: the slow-tier run you handed off (or none),
+   each break (bead id filed, or the open bead you commented on), and each
+   filed candidate (fingerprint -> bead id).
+
+Never remove the proposed label from any bead. Never edit code, run the tests
+yourself, run a drain, or commit anything.
 """
 
 [[duty]]

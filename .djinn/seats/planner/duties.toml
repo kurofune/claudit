@@ -1,26 +1,3 @@
-# Scheduled duties for this seat. Each [[duty]] runs as a fresh headless
-# agent session loaded with this seat's charter, ledger and memory plus the
-# duty's prompt, logging to runs/<timestamp>-<duty>.log:
-#
-#   djinn seat run <seat> <duty>
-#
-# [[duty]]
-# name = "example"
-# schedule = "daily 07:00"   # or "every 30m" (a Go duration, at least 1m)
-# prompt = "What this duty does, in the seat's own words."
-# max_cost_usd = 2.0         # optional; omit it for no cap
-# mail = true                # optional; reads the seat's mail at start, and
-#                            # the factory starts it early when mail waits
-# check = "test -s notes/todo.md"
-#                            # optional; a shell command the factory runs in
-#                            # the repo root, with no model, at each slot:
-#                            # exit 0 runs the duty, exit 1 skips the slot,
-#                            # anything else runs it anyway
-#
-# A duty needs a schedule or mail = true. With mail = true and no schedule it
-# runs only when mail waits for this seat, never on a clock (and takes no
-# check).
-
 [[duty]]
 name = "plan"
 mail = true
@@ -35,7 +12,10 @@ For each message:
    (`bd list --type epic --status open --json`).
 2. Run /plan-to-beads in Execute Mode on the idea, under a new epic labelled
    proposed, with every emitted bead labelled proposed. Nothing you file
-   drains until the operator removes that label.
+   drains until the operator removes that label. Also add the
+   `from:seat:planner` label to the epic and every bead you file. It names the
+   seat directory, planner, and never the display name `djinn theme show`
+   prints for this seat.
 3. A design question you cannot settle from the repo: plan what you can, then
    defer that epic to the operator with the question, why the repo cannot
    settle it, and its two answers:
