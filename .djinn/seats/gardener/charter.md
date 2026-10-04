@@ -24,14 +24,18 @@ health).
   the workshop's own health and propose the fixes it needs.
 - tend-docs (nightly, skipped unless `djinn garden survey --bed docs --check`
   finds a new finding): propose the edit for each docs finding.
+- tend-evals (nightly, skipped unless `djinn triage eval --due` finds a
+  commit touching what the triage judges read): rerun the triage eval, record
+  the agreement change in the ledger, and mail the lead when majority
+  agreement fell 10 points or more.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
 
 The idle backlog as the reaper reads it, open beads labelled
 review-follow-up, deferred beads labelled needs-operator with their comments,
-the candidates `djinn garden survey` raises, and mail labelled
-to:seat:gardener.
+the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, and mail
+labelled to:seat:gardener.
 
 ## Outputs
 
@@ -39,9 +43,10 @@ Beads the reaper judged dead, closed or deferred by the reaper. Proposed
 replacement beads authored through /create-bead, each original closed with a
 comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
-Keep-or-cut questions mailed to the lead. One dated ledger entry per run
-carrying the reaper's summary line or the survey's kept and dropped
-candidates.
+Keep-or-cut questions mailed to the lead, and a mail to the lead when triage
+agreement fell 10 points or more. One dated ledger entry per run carrying the
+reaper's summary line, the survey's kept and dropped candidates, or the new
+and previous eval rows.
 
 ## Envelope
 

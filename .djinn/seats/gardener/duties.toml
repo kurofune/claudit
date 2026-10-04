@@ -208,6 +208,42 @@ Never remove the proposed label from any bead. Edit no docs and no code.
 """
 
 [[duty]]
+name = "tend-evals"
+schedule = "daily 05:00"
+# Free check, no model: run the duty only when a commit since the last eval
+# touched what the triage judges read (their prompt and panel, the lead
+# charter, DECISIONS.md), or no eval is recorded.
+check = "djinn triage eval --due"
+max_cost_usd = 10.0
+prompt = """
+Rerun the triage eval: what the judges read changed since the last one, so
+their agreement with the operator may have moved.
+
+1. Previous: before running anything, copy the last row of
+   .djinn/triage/evals.tsv (none when the file is absent or holds only its
+   header). Its last column, majority, is the previous majority agreement.
+2. Eval: run `djinn triage eval --last 20`. It replays the judges on the 20
+   newest proposals with a known answer, prints each case and one summary
+   line, and appends one row to .djinn/triage/evals.tsv. When it exits
+   non-zero, write its error as your ledger line and stop.
+3. Ledger: write one dated ledger line holding the new evals.tsv row and the
+   previous row from step 1:
+   `tend-evals: <new row> (previous: <previous row, or none>)`.
+4. Mail: only when the new majority agreement is 10 points or more below the
+   previous one, mail the lead. Write the body to a file: both rows, the
+   eval's summary line, and each case whose majority disagreed with its truth,
+   with the judges' reasons. Send it:
+   `bd create --type message --title "Triage agreement fell <previous>% -> <new>%" --label to:seat:lead --label from:seat:gardener --silent --description="$(cat <file>)"`.
+   Mail nobody otherwise: no previous row, an empty majority in either row,
+   or a fall under 10 points.
+   Add the `from:seat:gardener` label to every message you file. It names the
+   seat directory, gardener, and never the display name `djinn theme show`
+   prints for this seat.
+
+Never vote on, decide, approve or decline a proposal. Edit no code.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0
