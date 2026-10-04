@@ -1,6 +1,6 @@
 # Per-Bead Work Contract
 
-Always-on rules for working one bead. The steps themselves live in the formula (`djinn formula describe --embedded iter --json`; shapes in `core/SHAPE-REGISTRY.md`), `/wish`, and the skills each step names; this page holds only the rules they share. Every formula runs claim → implement → review-light-loop → regression-loop → commit-push.
+Always-on rules for working one bead. The steps themselves live in the formula (`djinn formula describe --embedded iter --json`; shapes in `core/SHAPE-REGISTRY.md`), `/wish`, and the skills each step names; this page holds only the rules they share. Every formula runs claim → implement → review-loop → regression-loop → commit-push.
 
 ## 1. Work a bead only through /wish or a drain
 
@@ -27,11 +27,11 @@ Changed `web/` files: walk every acceptance criterion in a browser with the adap
 
 ## 5. Review
 
-Run the review the active formula declares — `review-light` (`core/skills/review-light/SKILL.body.md`) — as the named procedure; a self-assessment or a custom review prompt does not count. Fix every BLOCKER and IMPORTANT; never act on counter-findings. Follow-up filing and its P2 floor: the review-light skill.
+Run the review the active formula declares — `review` (`core/skills/review/SKILL.body.md`) — as the named procedure; a self-assessment or a custom review prompt does not count. Fix every BLOCKER and IMPORTANT; never act on counter-findings. Follow-up filing and its P2 floor: the review skill.
 
 ## 6. Evidence on the bead
 
-The per-criterion record is a `djinn-evidence` JSON comment on the bead (`bd comments add <id> -f <tmpfile>`), one row per acceptance-criteria line — never a file, never `--notes`. Under every formula, commit-push writes it, and the `evidence_*` labels, from review-light's sidecar `criteria[]`. Schema and lifetimes: `docs/verdict-state.md`.
+The per-criterion record is a `djinn-evidence` JSON comment on the bead (`bd comments add <id> -f <tmpfile>`), one row per acceptance-criteria line — never a file, never `--notes`. Under every formula, commit-push writes it, and the `evidence_*` labels, from review's sidecar `criteria[]`. Schema and lifetimes: `docs/verdict-state.md`.
 
 ## 7. Stay in scope
 
