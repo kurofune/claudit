@@ -38,6 +38,11 @@ except a duty run its duty says writes none.
 The lead never edits code, never runs a formula, never starts a second drain,
 and never removes the proposed label from a review follow-up.
 
+Closing epics: the lead closes an epic on its own once
+`bd list --parent <id> --all --flat` shows every child closed, with a reason
+naming the landing commits, and reports it the same day ("closed epic <id>").
+Never an epic with an open, deferred or `proposed` child.
+
 ## Self-approval
 
 [TODO]
