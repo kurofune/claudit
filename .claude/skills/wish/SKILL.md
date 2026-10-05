@@ -946,7 +946,43 @@ contract — lives in exactly ONE generated body
 (`core/skills/review/SKILL.body.md`) that the autonomous
 `BuildReviewPrompt` and this handler both dispatch. Paraphrasing it here
 is what let this section drift from the Go filer before (djinn-itudg). Pass the
-subagent the bead id and the diff base; let the skill supply the rubric.
+subagent the review dispatch prompt below; let the skill supply the rubric.
+
+#### Review dispatch prompt
+
+The reviewer reads no tracker: it may run in a sandbox with no beads database.
+You read the bead for it — `bd show <bead-id> --long --json` (`--long` carries
+`notes`) — and fill this block, each field copied verbatim, an empty field left
+as an empty section. Every review dispatch carries it whole, after the §4b
+preamble: the Claude subagent's prompt, and step 3 of a §4c procedure prompt.
+
+```text
+Review bead <bead-id> with the review procedure. Judge the bead from the block
+below, copied verbatim from the tracker; do not query the tracker yourself.
+
+<bead>
+ID: <bead-id>
+Title: <title>
+
+Description:
+<description>
+
+Acceptance Criteria:
+<acceptance_criteria>
+
+Design:
+<design>
+
+Notes:
+<notes>
+</bead>
+
+The diff under review is `git diff <base>..HEAD`, run in <worktree>. Every
+promoted fix finding must cite a file:line inside it.
+```
+
+On a re-review, append the two prior-iteration blocks the review skill names
+("What iteration N-1 found", "What the last fix changed") after it.
 
 The skill emits a fenced ```json``` sidecar as the LAST thing in the subagent's
 visible response text — `verdict` (`SHIP` / `SHIP-WITH-FIXES` / `REWORK`),
@@ -1102,10 +1138,9 @@ interactive realization of the formula's per-step knob. Two consequences:
      Skill/slash mechanism, so the procedure rubric is embedded below — follow
      it verbatim against bead `<bead-id>`."
   3. Any step-specific inputs the Claude dispatch would have passed. For a
-     review body that is: the bead id (and that `bd show <bead-id> --json`
-     yields its `acceptance_criteria`), the diff base ref and that the diff
-     under review is `git diff <base>..HEAD`, the root `<worktree>`, and whether
-     this is a first full pass or a re-review after a fix.
+     review body that is the filled review dispatch prompt (§4c), with the
+     prior-iteration blocks on a re-review after a fix — never an instruction
+     to read the bead: a read-only sandbox has no beads database.
   4. The literal marker line `----- BEGIN PROCEDURE RUBRIC -----`, then the
      rubric body (`$OUT/rubric.md`), then the literal marker line
      `----- END PROCEDURE RUBRIC -----`.

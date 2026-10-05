@@ -49,10 +49,12 @@ Two more hard rules, symmetric with every other review path:
 
 The invoker provides:
 
-1. **`bead_id`** — e.g. `phoenix-abcd`. Read it with
-   `bd show <bead_id> --json | jq -r '.[0] | {title, description, acceptance_criteria, design}'`.
-   The `acceptance_criteria` are what the completeness concern below is scored
-   against.
+1. **The bead, in a `<bead>` block** — its id, title, description,
+   acceptance_criteria, design and notes, copied verbatim from the tracker by
+   the invoker. Judge the bead from that block alone. Run no `bd` command: a
+   reviewer may run in a sandbox with no beads database, and the block is the
+   bead as the invoker read it. The `acceptance_criteria` lines are what the
+   completeness concern below is scored against — one `criteria` row each.
 2. **The diff to review** — either an explicit base ref, or the
    pre-implementation baseline. Absent an explicit base, reconstruct it:
    `git diff <base>..HEAD` (plus `git status` / `git diff` for uncommitted work).
@@ -65,7 +67,8 @@ The invoker provides:
    half of this review; see "Answering the previous iteration" below. On
    iteration 1 neither block is present and there is nothing to answer.
 
-If `bead_id` is missing, stop and ask.
+If the prompt carries no `<bead>` block, stop and say so — a review with no
+acceptance criteria in hand cannot be scored.
 
 ## Answering the previous iteration
 
