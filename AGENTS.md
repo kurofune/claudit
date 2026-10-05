@@ -107,32 +107,28 @@ Speak to the operator only from those files' `say` templates, as plain text.
 
 Only one `summoner` may run per repo: its startup sweep
 runs `git worktree remove --force` over every
-summoner worktree, with no liveness check, so a second
-one destroys the first one's work.
-
-**The process check decides, not the state file.** `finished_at` is never
-stamped on a SIGKILL or a crash; read `.djinn/summoner-state.json` only for
-details to say aloud.
+summoner worktree, so a second one destroys the first
+one's work. Each summoner holds a repo lock for its whole
+life and refuses to start while another holds it; ask that lock before any
+start:
 
 ```bash
-pgrep -x summoner | while read -r pid; do
-  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | grep -qx "n$PWD" && echo "$pid"
-done
+djinn drain alive
 ```
 
-**Match the executable name, and keep only this repo.** An installed binary
-and a `go run` build both run under that name, so one name covers both launch
-forms. **A command-line match is the wrong test**: a shell, `grep` or `tail -f`
-that mentions it reads as a live drain. `pgrep` is machine-wide, so **keep
-only pids whose working directory is this repo**.
+**The lock decides, not the state file.** `finished_at` is never stamped on a
+SIGKILL or a crash; read `.djinn/summoner-state.json` only for details to say
+aloud.
 
-- **A process in this repo is found → refuse**, whatever the state file says.
-- **No process, and the state file has no `finished_at` → the previous drain
+- **`alive pid <pid>` → refuse**, whatever the state file says.
+- **`unknown`, or any other non-zero exit → refuse.** The check could not
+  tell; start nothing.
+- **`not-running`, and the state file has no `finished_at` → the previous drain
   died.** Check for surviving workers (below) before starting a fresh one.
-- **No process and `finished_at` present →** start normally.
+- **`not-running` and `finished_at` present →** start normally.
 
-On a yes, send pause-drain through `Stop one bead / pause the drain`
-(`.djinn/lead/status.md`):
+On `alive`, refuse; on a yes, send pause-drain through `Stop one bead / pause
+the drain` (`.djinn/lead/status.md`):
 
 ```say
 A drain is already running here — <n> beads, started <when>. I will not start a
@@ -141,10 +137,17 @@ beads start, the ones running now finish, then it ends. Say pause, or ask me for
 status.
 ```
 
+On `unknown`, refuse with the reason it printed:
+
+```say
+I cannot tell whether a drain is already running here (<reason>), so I will not
+start one — a second drain would wipe the first one's work.
+```
+
 ## A dead drain does not mean a quiet repo
 
-**An absent `summoner` process does not prove there is
-nothing live to destroy.** It traps only Interrupt and SIGTERM, so after a
+**`not-running` does not prove there is nothing live to destroy.** The
+summoner traps only Interrupt and SIGTERM, so after a
 SIGHUP or SIGKILL its workers outlive it in their worktrees, which the next
 sweep force-removes. Before starting anything, check every bead it worked:
 
@@ -160,7 +163,8 @@ done
 
 A worker runs `--bead <id>` with argv[0] equal to `worker_bin`, or, when none
 is recorded, any path named `djinn`. **Match the worker's
-path literally, never through `pgrep`.** It reads a regex and a truncated name.
+path literally, never by process name.** A name match reads a regex and a
+truncated name.
 
 If it prints any bead, **refuse and name those beads.** On a yes, send one stop
 per bead through `Stop one bead / pause the drain`; start only once every stop

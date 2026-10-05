@@ -32,10 +32,10 @@ just this work.
 
 ### Refuse a second drain
 
-Before any start, run the second-drain refusal and the dead-drain survivor
-check in the lead kernel (the djinn block of `AGENTS.md`). Its refusals send
-stop and pause through `Stop one bead / pause the drain`
-(`.djinn/lead/status.md`).
+Before any start, run `djinn drain alive` and refuse on `alive` or `unknown`
+— any exit but 0 — then the dead-drain survivor check, both in the lead kernel
+(the djinn block of `AGENTS.md`). Its refusals send stop and pause through
+`Stop one bead / pause the drain` (`.djinn/lead/status.md`).
 
 ### Guards, batch size, and budget
 

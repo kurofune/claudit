@@ -100,7 +100,7 @@ command sends them.
   and file nothing.
 - Send stop only to a bead the snapshot's `drain` shows in flight or the survivor check
   in the lead kernel names, and pause-drain and set-workers only while a drain
-  process is running (the kernel's process check). Nothing reads a message nobody is working on; it
+  is running (`djinn drain alive` prints `alive`). Nothing reads a message nobody is working on; it
   waits open.
 - `--title` carries the operator's reason in their words. A message bead has no
   acceptance criteria and never goes through `/create-bead`.
