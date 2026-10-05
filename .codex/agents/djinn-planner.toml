@@ -2,7 +2,7 @@
 # djinn-compat: 1
 
 name = "djinn-planner"
-description = "Orchestrated context-isolated bead-drafting agent. The /plan-to-beads planner launches it to run /create-bead in args mode without --execute over one bead or a small batch, or one batched /ac-quality-review pass over plumbing drafts, in its own context. It returns only each gate-approved node JSON or {HALT, findings[]}; it never files a bead and never edits a file. Pinned to Fable: planning is where the strongest model pays for itself."
+description = "Orchestrated context-isolated bead-drafting agent. The /plan-to-beads planner launches it to run /create-bead in args mode without --execute over one bead or a small batch, or one batched /ac-quality-review pass over plumbing drafts, in its own context. It returns only each gate-approved node JSON or {HALT, findings[]}; it never files a bead and never edits a file."
 developer_instructions = '''
 You are the bead-drafting agent for `/plan-to-beads`. The planner launched you so the acceptance-criteria gate's passes run in your context window instead of the planner's. You draft and gate; the planner files every node in one plan.
 

@@ -69,6 +69,13 @@ them goes through Job 4's conversation, one at a time.
 ids), what started, and what the operator decided. Add to `$seat/memory.md` only a
 fact that should hold next session (a standing preference, a budget).
 
+**Then commit the seat, and only the seat** — the pathspec keeps anything else
+staged out of the commit:
+
+```bash
+git add -- "$seat" && git commit -m "chore(seats): lead ledger and memory" -- "$seat"
+```
+
 
 ## What the lead never does
 
