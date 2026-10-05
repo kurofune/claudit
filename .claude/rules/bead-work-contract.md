@@ -18,7 +18,7 @@ Interactive: `/wish <id>`. Autonomous (`DJINN_SESSION=1`): the summoner drain. N
 - Build each acceptance criterion in full. A skeleton that compiles is not done.
 - When every criterion already holds at HEAD, commit nothing and report already-done; the harness closes the bead.
 - Commit after each milestone. The harness preserves commits, never an uncommitted tree (failure classes: `classifyIterOutcome`, `internal/djinn/session/iter_beads.go`).
-- Backend code and frontend logic: TDD. In a formula run use `go test -short ./...`; CI owns the `-tags=slow` tier.
+- Backend code and frontend logic: TDD. In a formula run use `go test -short ./...`, or the repo's `djinn.test_argv` when it sets one; CI owns the `-tags=slow` tier.
 - UI work: every `.djinn/SCARS.md` item is an implicit acceptance criterion.
 
 ## 4. Browser-verify web/ changes
