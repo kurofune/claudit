@@ -109,12 +109,15 @@ name = "tend-workshop"
 schedule = "daily 02:30"
 # Free check, no model: `djinn slow-watch` starts the nightly slow tier and
 # exits 0 when the latest finished run is red and not handed off; otherwise
-# run the duty only when a workshop candidate survives the guards.
-check = "djinn slow-watch || djinn garden survey --bed workshop --check"
+# run the duty when a vendored skill's upstream moved past its pin (repos
+# carrying scripts/sync-vendored-skills.sh, with no bump bead open yet) or a
+# workshop candidate survives the guards.
+check = "djinn slow-watch || { [ -x scripts/sync-vendored-skills.sh ] && ! bd list --label garden:vendor-bump -n 1 --json | grep -q '\"id\"' && { scripts/sync-vendored-skills.sh --check >/dev/null 2>&1; [ $? -eq 1 ]; }; } || djinn garden survey --bed workshop --check"
 max_cost_usd = 10.0
 prompt = """
 Tend the workshop's own health: file the slow-tier breaks the nightly local run
-found, then turn the workshop survey's candidates into proposals.
+found, turn the workshop survey's candidates into proposals, then propose a
+bump for each vendored skill whose upstream moved past its pin.
 
 Every bead you file carries the `proposed` and `from:seat:gardener` labels.
 The `from:seat:gardener` label names the seat directory, gardener, and never
@@ -162,9 +165,26 @@ the display name `djinn theme show` prints for this seat.
      its Last verified line.
    File no more beads than the survey's `throughput` field allows; a candidate
    past it waits for the next survey.
-4. Write one dated ledger entry: the slow-tier run you handed off (or none),
-   each break (bead id filed, or the open bead you commented on), and each
-   filed candidate (fingerprint -> bead id).
+4. Vendored skills: only when `scripts/sync-vendored-skills.sh` exists, run
+   `scripts/sync-vendored-skills.sh --check`, always with `--check` (without
+   it the script rewrites the vendored copy). Exit 0: every vendored skill
+   matches its pin; file nothing. Exit 2: it could not read upstream; copy its
+   error into your ledger entry and file nothing. Exit 1: it prints one
+   `<skill>: upstream moved — <repo> <path>: <old-sha> -> <new-sha>` line per
+   moved skill. For each, first look for an open bump bead:
+   `bd list --label garden:vendor-bump --json`. When one names the skill in
+   its title, file nothing. Otherwise file one bead through /create-bead,
+   labelled `proposed`, `from:seat:gardener` and `garden:vendor-bump`, titled
+   `Bump vendored <skill> <old-sha> -> <new-sha>`. Its description names the
+   upstream repo, both SHAs and the steps
+   `scripts/sync-vendored-skills.sh --sha <new-sha> <skill>`, then
+   `go run ./cmd/djinn-gen-adapters --theme djinn --adapter claude-code`; its
+   acceptance criteria are that core/vendor/<skill>.pin names
+   `commit=<new-sha>` and `go test -short ./...` exits 0.
+5. Write one dated ledger entry: the slow-tier run you handed off (or none),
+   each break (bead id filed, or the open bead you commented on), each filed
+   candidate (fingerprint -> bead id), and the vendored-skill check (current,
+   the bump bead filed, the open bump bead, or its error).
 
 Never remove the proposed label from any bead. Never edit code, run the tests
 yourself, run a drain, or commit anything.
