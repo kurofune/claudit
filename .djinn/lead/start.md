@@ -83,35 +83,17 @@ found`. Every start line below invokes the **installed**
 (`go install ./cmd/summoner` from a djinn checkout puts
 it there).
 
-#### In the djinn repo itself
-
-The repo the supervisor runs in IS the repo the worker is built from, so nothing
-extra is needed — one scope flag plus the guards:
+The start line is the same in every repo — one scope flag plus the guards:
 
 ```bash
 summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n>
 ```
 
-#### In any other repo
-
-A repo is a djinn checkout only when its root `go.mod` names the module
-`github.com/kurofune/djinn`. Any other repo MUST pass one extra flag, and the
-run dies without it:
-
-- `--worker-bin <path to an installed djinn binary>` —
-  with the flag ABSENT the summoner "builds
-  ./cmd/djinn from its repo root to a temp path at startup
-  and execs that", and a consumer repo has no
-  `./cmd/djinn` to build. Point it at the installed worker
-  (`$HOME/go/bin/djinn`).
-
-```bash
-summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> \
-  --worker-bin "$HOME/go/bin/djinn"
-```
-
-The flag carries through the start line below. Append it whenever `$PWD` is
-not a djinn checkout.
+**Which binary runs the worker.** Inside djinn's module (a root `go.mod` naming
+`github.com/kurofune/djinn`) the summoner builds
+`./cmd/djinn` from HEAD; in any other repo it runs the
+`djinn` installed beside it, else the one on `$PATH`.
+`--worker-bin <path>` overrides either; add it only when the operator asks.
 
 At startup the summoner checks that the worker comes
 from its own build and aborts "before any bead is claimed" when it does not —
