@@ -177,15 +177,6 @@ Precedence summary: **explicit arg (path or bare variant name) >
 three tiers in order: **`.djinn/` override → on-disk `core/` canonical →
 `djinn formula describe --embedded <name>` (the binary).**
 
-<!-- djinn-dispatch: codex -->
-**On Codex, the default arm resolves the `codex` variant.** Where arm 3 would
-take the default formula, resolve the bare variant name `codex` instead, by the
-same three tiers (`.djinn/iter-codex.formula.toml` →
-`core/iter-codex.formula.toml` → `djinn formula describe --embedded iter-codex
---json`), and record the arm as `default`. It is the formula a drain runs under
-the `codex` provider profile: every step pins a codex model, where the default
-formula builds on Claude, which a Codex session cannot start.
-<!-- djinn-dispatch: end -->
 
 **Record what you took, and — when the explicit arm won — what the bead alone
 would have taken.** Carry two facts out of this step for Step 2c to announce:
@@ -280,20 +271,6 @@ report the failure to the operator** rather than proceeding on a partial or
 guessed graph (the same stop-and-report posture as the cycle check in Step 3). Do
 NOT hand-author the step list — the JSON from `formula describe` is the single
 source of truth so the orchestrator tracks formula edits automatically.
-<!-- djinn-dispatch: codex -->
-
-**Check that every declared provider can start, before claiming.** When any
-step or loop-body child in the JSON resolves to `adapter: "claude-code"` (§4c's
-claude-p rule runs it on `claude -p`), run `command -v claude`. When it prints
-nothing, stop here — before `claim` touches the bead — and print:
-
-```text
-stop: <step-id> declares adapter=claude-code, and this Codex session cannot start it: claude is not on PATH. Install Claude Code, run /wish from a Claude session, or pick a codex formula: /wish <bead-id> codex
-```
-
-Never run such a step on `codex exec` instead: that would silently replace the
-model the operator chose.
-<!-- djinn-dispatch: end -->
 
 ## Step 2b — Resume preamble (re-invocation resumes at the first incomplete step)
 
@@ -516,33 +493,11 @@ A step whose `type` matches none of the rows is a contract violation (the parity
 test `TestFormulaStepsAllHaveKnownShapes` would have caught it upstream) —
 stop and report the unknown shape rather than skipping it silently.
 
-<!-- djinn-dispatch: codex -->
-**Starting a dispatch.** Codex has no in-session agent call this walk can wait
-on, so every dispatch is its own headless run: a fresh process with its own
-context, the same isolation the autonomous harness gets. A step whose resolved
-`adapter` is `claude-code` runs on `claude -p` by the claude-p rule in §4c;
-every other step is a `codex exec` run built by the codex-exec rule in §4c (the
-prompt on stdin, the run's files under `$OUT`, the step's resolved `model` /
-`effort` on the argv). The implementer and fixer are
-the Codex agents `djinn init` writes, `.codex/agents/djinn-implementer.toml`
-and `.codex/agents/djinn-fixer.toml`; a write step's prompt opens with the line
-naming its agent file:
-
-```text
-Act as the <name> agent: read .codex/agents/<name>.toml and follow its developer_instructions as your own.
-```
-
-```bash
-codex exec --skip-git-repo-check -C "<worktree>" \
-  -m "<resolved model>" -c model_reasoning_effort="<resolved effort>" \
-  --json -o "$OUT/last-message.md" - \
-  < "$OUT/prompt.txt" > "$OUT/rollout.jsonl" 2> "$OUT/stderr.log"
-```
-
-The agent's summary is `$OUT/last-message.md`. A reviewer takes no agent file:
-its prompt embeds the review rubric instead (§4c). `codex exec` needs the
-network and `bd` its database, so run it outside this session's sandbox
-(approve the escalation).
+<!-- djinn-dispatch: claude-code -->
+**Starting a dispatch.** The agents are the `.claude/agents/<name>.md` files
+`djinn init` writes. Start each dispatch with the Agent tool, naming the agent
+by bare name as `subagent_type` (a reviewer takes no agent file: dispatch it as
+a general-purpose subagent).
 <!-- djinn-dispatch: end -->
 
 ### §4a — `go-mode-step` (in-process bookends)
@@ -701,9 +656,9 @@ step's work does not crowd the orchestrator's context. Route by step id:
   dispatched by the W3.2 loop driver — the spine lists them here for completeness
   of the dispatch table, but does not invoke them at the top level.
 
-<!-- djinn-dispatch: codex -->
-The Codex agent files pin no model: the step's resolved `model` and `effort`
-ride the `codex exec` argv (the `claude -p` argv for a `claude-code` step),
+<!-- djinn-dispatch: claude-code -->
+The implementer and fixer subagents are pinned to Opus per the Djinn
+model decision; a model knob on the dispatched step overrides the fixer's pin
 per the §4c knob pass-through rule.
 <!-- djinn-dispatch: end -->
 
@@ -976,11 +931,8 @@ mid-budget, not at its attempt ceiling.
 binding a formula can declare. Dispatch it as **ONE** context-isolated
 subagent under the §4b worktree dispatch preamble, running the **`/review` skill**:
 
-<!-- djinn-dispatch: codex -->
-one `codex exec` run built as a §4c procedure step (a `claude -p` run by the
-claude-p rule when `review` resolves to `adapter: "claude-code"`): its prompt
-embeds the `review` rubric (`djinn skills print review`), and it runs
-read-only.
+<!-- djinn-dispatch: claude-code -->
+have that subagent invoke the `/review` skill via the Skill tool.
 <!-- djinn-dispatch: end -->
 
 The subagent MUST NOT invoke any other review skill or command, or
@@ -1012,39 +964,15 @@ Read `model` (and `effort`) off `djinn formula describe <path> --json` for each
 step you dispatch — body children AND `fix-*` children alike — and pass any
 declared knob through on the dispatch.
 
-<!-- djinn-dispatch: codex -->
-A step whose resolved `adapter` is `codex` runs through `codex exec` by the
-codex-exec rule below. **A step whose resolved `adapter` is `claude-code` (a
-`formula:claude` label, or a mixed formula passed explicitly) RUNS ON CLAUDE —
-shell out to `claude -p`; never run it on `codex exec`, and never drop its
-knobs.** The operator chose that provider; Step 2's claude check has already
-stopped the walk when this machine cannot honor the choice.
+<!-- djinn-dispatch: claude-code -->
+A per-call model argument
+overrides an agent's frontmatter pin (verified 2026-07-28), so this is the
+interactive realization of the formula's per-step knob. Two consequences:
 
-- **The claude-p rule.** Build the step exactly as the codex-exec rule below
-  builds it — the same prompt shape, the same `$OUT` dir, the same artifact,
-  verdict and fallback rules — and change only the argv, to the one the
-  harness's claude-code driver builds
-  (`internal/djinn/runtime/claudecode/profile.go`), carrying that step's
-  resolved `model` and `effort` off the same `formula describe --json` record:
-
-  ```bash
-  claude -p --dangerously-skip-permissions --output-format stream-json --verbose \
-    --model "<resolved model>" --effort "<resolved effort>" \
-    < "$OUT/prompt.txt" > "$OUT/stream.jsonl" 2> "$OUT/stderr.log"
-  jq -rs 'map(select(.type == "result")) | last | .result // empty' \
-    "$OUT/stream.jsonl" > "$OUT/last-message.md"
-  ```
-
-  Run it from `<worktree>`, outside this session's sandbox (it needs the
-  network, and `bd` its database). A write step's prompt opens with the line
-  naming its Claude agent file, which `djinn init` writes:
-
-  ```text
-  Act as the <name> agent: read .claude/agents/<name>.md and follow its instructions as your own.
-  ```
-
-  Print `notice: <step-id> declares adapter=claude-code; running it on claude -p (model=<resolved model>, effort=<resolved effort>)`
-  before the dispatch.
+- A knob on a `fix-*` child (e.g. `fix-review`) overrides the fixer agent's
+  frontmatter default for that dispatch only.
+- **A step whose resolved `adapter` is `codex` RUNS ON CODEX — shell out to
+  `codex exec`; do NOT substitute an Opus subagent.**
 <!-- djinn-dispatch: end -->
 
 - **The codex-exec rule.** When
@@ -1252,8 +1180,8 @@ stopped the walk when this machine cannot honor the choice.
   notice: <step-id> declares adapter=codex; running it on codex exec (model=<resolved model>, effort=<resolved effort>)
   ```
 
-  <!-- djinn-dispatch: codex -->
-  **The fallback is one retry.** Take it on either trigger, and only these two:
+  <!-- djinn-dispatch: claude-code -->
+  **Opus is the FALLBACK ONLY.** Take it on either trigger, and only these two:
   <!-- djinn-dispatch: end -->
 
   1. **The run failed.** The binary is not on `PATH`, an auth or quota failure,
@@ -1265,16 +1193,25 @@ stopped the walk when this machine cannot honor the choice.
      file to the loop is the failure mode this trigger exists to catch. It
      does **not** apply to a write step, which emits no artifact by design.
 
-  <!-- djinn-dispatch: codex -->
-  Only then re-run the same command once (`codex exec`, or `claude -p` for a
-  `claude-code` step), printing
-  `notice: <step-id> <command> failed (<reason>) — retrying once`. A second
-  failure on either trigger is not retried again: stop the walk, keep the bead
-  `in_progress` and `<worktree>`, record it on the bead with
-  `bd update <bead-id> --append-notes="codex dispatch failed: <step-id> — <reason>"`
-  (never `--notes`, which overwrites), and report the step, the reason and
-  `$OUT/stderr.log` to the operator. There is no other harness to fall back to
-  here.
+  <!-- djinn-dispatch: claude-code -->
+  Only then dispatch the step as ONE context-isolated Agent subagent
+  with `model: opus`, print this notice instead:
+
+  ```
+  notice: <step-id> declares adapter=codex; codex exec unavailable (<reason>) — fell back to an opus subagent
+  ```
+
+  and **record the fallback on the bead**, naming the step and the reason, so
+  the substitution is not invisible in the run's record:
+
+  ```bash
+  bd update <bead-id> --append-notes="codex fallback: <step-id> ran as an opus subagent — <reason>"
+  ```
+
+  Use `--append-notes`, never `--notes` (which overwrites). The reason the
+  fallback is a subagent rather than an in-context run: a step run in-context
+  inherits the chair's model, which is the expensive model the adapter pin
+  exists to avoid spending in the first place.
   <!-- djinn-dispatch: end -->
 
 The shipped pins (operator ruling 2026-09-25, guarded by

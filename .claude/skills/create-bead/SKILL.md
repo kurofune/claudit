@@ -520,8 +520,8 @@ For multiline `description` / `design` / `notes` / `acceptance_criteria` contain
 
 Before filing, this skill invokes `/ac-quality-review` on the drafted `acceptance_criteria`. This is the only place the gate runs: the bead-work contract (§2) settles acceptance-criteria quality at filing, and no shipped formula re-checks it after the claim.
 
-<!-- djinn-dispatch: codex -->
-**Invoking the gate:** Codex has no slash command for a skill. Wherever this skill says to invoke `/ac-quality-review`, run the `$ac-quality-review` skill (`.agents/skills/ac-quality-review/SKILL.md`) in this session on the draft, and read its verdict block before going on.
+<!-- djinn-dispatch: claude-code -->
+**Invoking the gate:** run `/ac-quality-review` through the Skill tool, in this conversation.
 <!-- djinn-dispatch: end -->
 
 **A CONCRETE verdict does not end this skill.** `/ac-quality-review` returns a verdict and hands control back. In the same turn, continue to the `bd create --graph` call (Filing) and report the new bead id(s) — or, in args mode without `--execute`, return the gate-approved node. A run that stops at the verdict has filed nothing.

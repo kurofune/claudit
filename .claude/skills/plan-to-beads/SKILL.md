@@ -415,22 +415,8 @@ Graph-filed children get flat ids, not the `<parent>.N` ids the Step 6 preview s
 
 Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gates, and never files a bead or edits a file. When its agent file is missing, run `djinn init --resync` first.
 
-<!-- djinn-dispatch: codex -->
-**Starting a subagent:** each one is its own `codex exec` run — a fresh process is Codex's context-isolated subagent. Write the dispatch prompt to a file, start every run in the background and `wait` for all of them, then read each node from its `last-message.md`:
-
-```bash
-OUT=$(mktemp -d)   # one per subagent
-MODEL=$(djinn formula describe --embedded iter-codex --json | jq -r '.steps[] | select(.id == "implement") | .model')
-# $OUT/prompt.txt opens with the line naming the agent file, then the job and its payloads:
-#   Act as the djinn-planner agent: read .codex/agents/djinn-planner.toml and follow its developer_instructions as your own.
-#   Draft beads: use the $create-bead skill (.agents/skills/create-bead/SKILL.md) on each payload below.
-#   (or) Pre-gate plumbing: run the $ac-quality-review skill once over every draft below.
-codex exec --skip-git-repo-check -C "$(git rev-parse --show-toplevel)" -m "$MODEL" \
-  -c model_reasoning_effort=high -o "$OUT/last-message.md" - \
-  < "$OUT/prompt.txt" > "$OUT/stdout.log" 2> "$OUT/stderr.log" &
-```
-
-`$MODEL` is the strongest model the binary pins for Codex. `codex exec` needs the network and `bd` its database: run it outside this session's sandbox (approve the escalation). A run that exits non-zero or leaves `last-message.md` empty returned nothing: re-dispatch that bead once, then report it as failed.
+<!-- djinn-dispatch: claude-code -->
+**Starting a subagent:** use the Agent tool with `subagent_type: djinn-planner` (`.claude/agents/djinn-planner.md`), and **`model: fable` on every Agent call**.
 <!-- djinn-dispatch: end -->
 
 **Post-filing verification — required.** Filed beads are claims until read back. After the `bd create --graph` call:
