@@ -296,11 +296,12 @@ map. Reading the on-disk state is the interactive realization of the autonomous
 anchor lookup, exactly as §4c reads the on-disk verdict artifact instead of
 re-running the Go check.
 
-**Idempotency guard (already-closed = no-op).** First, run `bd show <bead-id>` and
-read its status. If the bead is **already `closed`**, this is a **no-op**: report
-that the bead is complete and **stop** — do NOT re-run the walk, do NOT re-dispatch
-any step. Re-invoking `/wish` on an already-closed bead
-reports completion, it does not redo the work.
+**Idempotency guard (already-closed = finish, then stop).** First, run
+`bd show <bead-id>` and read its status. If the bead is **already `closed`**, do
+NOT re-run the walk and do NOT re-dispatch any step. When `wish/<bead-id>` or
+`<worktree>` still exists, an earlier `commit-push` was interrupted: run
+`cd "<repo-root>" && djinn wish land <bead-id>`, which finishes the remaining
+stages (§4a `commit-push`). Then report that the bead is complete and **stop**.
 
 **Fresh-run guard (empty/absent state = clean start).** Next, check
 `<worktree>/.djinn/state/<bead>/` — run state lives inside the bead worktree, so
@@ -554,52 +555,48 @@ names the worktree path.
 
 #### `commit-push`
 
-Record the evidence, land the bead branch on `main` and close the bead
-in-process. In order:
+Run the whole finish as one command, from `<repo-root>` (never from
+`<worktree>`, which it removes):
 
-1. Write the §6 evidence comment from the final review (below).
-2. Stage and commit any remaining changes in `<worktree>`.
-3. Run `go test -short ./...` inside `<worktree>`. A red tree stops here: escalate,
-   bead `in_progress`, worktree kept.
-4. Fast-forward the shared checkout's `main` to the bead branch. Check that
-   `<repo-root>` is on `main` (`git -C "<repo-root>" symbolic-ref --short HEAD`),
-   then:
+```bash
+cd "<repo-root>" && djinn wish land <bead-id>
+```
 
-   ```bash
-   git -C "<repo-root>" merge --ff-only wish/<bead-id>
-   ```
+Never perform any of its stages by hand, and never close any bead but
+`<bead-id>` — not its parent epic, even when it has no other open child.
+`djinn wish land` (`cmd/djinn/wish_land.go`) runs, in order:
 
-   **When the fast-forward is refused** (`main` moved on), stop: leave the
-   worktree and branch, keep the bead `in_progress`, and escalate naming the
-   worktree path and the rebase command — `git -C <worktree> rebase main`, then
-   re-run `/wish <bead-id>` (it resumes at
-   `regression-loop`, which re-tests the rebased tree, then `commit-push`).
-5. Push the code from the shared checkout: `git -C "<repo-root>" push`.
-6. `bd close <bead-id>`, then push the bead state (`bd dolt commit -m
-   "<bead-id>: <summary>" && bd dolt push`). The Dolt push is not optional —
-   `git push` does not carry the bead's closed status or `evidence_*` labels, so
-   a code-only push leaves the bead invisible to collaborators querying `bd`
-   (`core/bead-work-contract.md` §8).
-7. Tear down from `<repo-root>`: `git worktree remove "<worktree>"` (never
-   `--force`), then `git branch -d wish/<bead-id>`. If the
-   remove refuses, the worktree is dirty: leave it and report its path.
+1. A refusal check: the latest `review` sidecar under
+   `<worktree>/.djinn/state/<bead-id>/` must approve the bead (`SHIP`, or
+   `SHIP-WITH-FIXES` whose every actionable IMPORTANT finding is fixed or filed
+   as a `review-follow-up` bead discovered from `<bead-id>`), `<repo-root>`
+   must be on `main`, and `main` must still fast-forward to `wish/<bead-id>`.
+2. Commit whatever is left in `<worktree>`.
+3. The repo's test command inside `<worktree>`: `djinn.test_argv` from
+   `.djinn/config.json`, else `go test -short ./...`.
+4. `git -C "<repo-root>" merge --ff-only wish/<bead-id>`.
+5. The §6 evidence comment and the four `evidence_*` labels, transcribed from
+   that sidecar with the mapping the autonomous `djinn.commit_push` StepFunc
+   uses (`ReviewEvidence`, `internal/djinn/session/formula_evidence.go`).
+6. `git push` of `main`, `bd close <bead-id>`, then `bd dolt commit` and
+   `bd dolt push` — a code-only push leaves the bead's closed status and labels
+   invisible to collaborators (`core/bead-work-contract.md` §8).
+7. `git worktree remove "<worktree>"` (never `--force`), then
+   `git branch -d wish/<bead-id>`.
 
-This mirrors the autonomous `djinn.commit_push` StepFunc, which runs
-`git push → bd close → bd dolt push`. The evidence comment is a bd comment, so it
-outlives the worktree.
+Each stage first reads whether it already happened, so a rerun after an
+interruption anywhere finishes the rest without a second evidence comment or a
+second close. On a non-zero exit, relay its message to the operator and stop:
 
-**The evidence comment comes from the review sidecar.** Read the
-`review` sidecar of the highest `review-loop.iter-<N>` (§4d) and
-transcribe it, as `emitFormulaEvidence` does
-(`internal/djinn/session/formula_evidence.go`): one `criteria` entry per
-`acceptance_criteria` segment, paired with the sidecar's `criteria[]` row of
-the same 1-based `index` — `text` verbatim from the bead, `status` copied from
-the row, `implementation` its `file:line`, its `note` as an observation. A
-segment with no row is recorded `fail`. Build it with `jq -n` (`schema:
-"djinn-evidence"`, `run`: a stable label such as `wish-<date>-<bead-id>`,
-`iter`: that `N`), attach it with `bd comments add <bead-id> -f <tmpfile>`,
-and confirm it reads back:
-`bd comments <bead-id> --json | jq -r '.[-1].text' | jq -e '.schema == "djinn-evidence"'`.
+- **Red tree, or a review that did not approve:** nothing landed; the bead
+  stays `in_progress` and the worktree is kept. Escalate.
+- **Fast-forward refused** (`main` moved on): the bead, worktree and branch are
+  untouched. The message names the worktree and the rebase —
+  `git -C <worktree> rebase main`, then re-run
+  `/wish <bead-id>` (it resumes at
+  `regression-loop`, which re-tests the rebased tree, then `commit-push`).
+- **Anything later** (a push, bd, or a dirty worktree at teardown): fix the
+  cause it names, then re-run `djinn wish land <bead-id>`.
 
 **Interactive checkpoint (Step 1b #3):** in `--interactive` mode, pause BEFORE
 `commit-push` and surface `git diff <pre>..HEAD --stat` so the operator can review
@@ -633,7 +630,7 @@ step's work does not crowd the orchestrator's context. Route by step id:
   autonomous `ErrFreshnessStale` route (the 2026-09-26 lean-formula ruling):
   `bd close <bead-id>` with the implementer's evidence as the reason, skip every
   later step, run `bd dolt commit -m "<bead-id>: already done" && bd dolt push`,
-  tear the worktree down as §4a `commit-push` step 7 does, and end the walk. It is a successful finish — never an `on_exhausted`
+  tear the worktree down with §4a `commit-push`'s stage 7 commands, and end the walk. It is a successful finish — never an `on_exhausted`
   disposition, never a reopen.
 
   **Interactive checkpoint (Step 1b #1):** in `--interactive` mode, pause after
@@ -1335,9 +1332,9 @@ writes, so an interactive run is schema-equivalent to an autonomous one
 - **Evidence** → a JSON bd comment (`schema: "djinn-evidence"`, `run`, `iter`) on the bead (`bd comments add <bead> -f <tmpfile>`,
   read back with `bd comments <bead> --json`), one `criteria` entry per
   `acceptance_criteria` segment, per `core/bead-work-contract.md` §6. It is a
-  comment, not a file, so it outlives the run's worktree (djinn-mr56i). YOU write
-  it at `commit-push`, transcribed from the final review sidecar (§4a) — the
-  same point and source the autonomous harness uses.
+  comment, not a file, so it outlives the run's worktree (djinn-mr56i).
+  `djinn wish land` writes it at `commit-push`, transcribed from the final review
+  sidecar (§4a) — the same point, source and mapping the autonomous harness uses.
 
 Writing the body verdict to `.djinn/state/<bead>/<loop-id>.iter-<N>/<step-id>` is
 what lets the loop driver re-read "the latest body output" the same way the
