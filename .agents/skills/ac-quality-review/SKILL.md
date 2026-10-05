@@ -17,7 +17,7 @@ This skill is the **filing-time acceptance-criteria quality gate**. It answers o
 
 > "What is the cheapest implementation that literally satisfies every line of this bead's `acceptance_criteria`? Would shipping that be embarrassing?"
 
-If the cheapest satisfying implementation would embarrass you, the criteria are under-specified. The skill emits an `UNDERSPEC` verdict and lists the specific criteria that admit a skin-deep implementation. `/create-bead` runs it on every draft before `bd create`, which is where the contract (`.claude/rules/bead-work-contract.md` §2) settles acceptance-criteria quality; the summoner's `--preflight` reads the same sidecar.
+If the cheapest satisfying implementation would embarrass you, the criteria are under-specified. The skill emits an `UNDERSPEC` verdict and lists the specific criteria that admit a skin-deep implementation. `/create-bead` runs it on every draft before `bd create`, which is where the work contract (§2, in the `AGENTS.md` djinn block) settles acceptance-criteria quality; the summoner's `--preflight` reads the same sidecar.
 
 This is a **single-lens** review — one agent, one pass, one verdict. It does not iterate, dedupe, or fan out. The cost model is "one call to refuse one draft before it is filed" because filing is the cheapest moment to refuse — every downstream step (implement, review, fix-review) is more expensive than tightening a few `acceptance_criteria` lines now.
 
