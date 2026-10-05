@@ -112,10 +112,16 @@ its own default of 3**. Never invent a number. Start the drain as a
 wrap-up read:
 
 ```bash
-nohup summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
+summoner --detach --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1
 # …or, for a bead-list drain, the same command with the other scope flag:
-nohup summoner --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1 &
+summoner --detach --bead <id>,<id> --max-workers <n> --max-beads <n> --max-retries <n> > .djinn/drain.out 2>&1
 ```
+
+Run the line as its own command, exactly as written: never add `nohup` or `&`.
+`--detach` moves the drain into its own session, which outlives a harness that
+kills the shell's process group when the command returns, and returns once the
+drain holds the repo's lock. A non-zero exit means no drain started; relay the
+last `summoner:` line of `.djinn/drain.out` to the operator.
 
 When `HERDR_ENV` is `1`, run `djinn ops room --herdr` once after the start; it
 finds or builds the ops room and changes nothing that is already there.
