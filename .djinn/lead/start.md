@@ -94,8 +94,9 @@ summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n>
 
 #### In any other repo
 
-A consumer repo MUST pass **both** of these extra flags, and the run dies
-without either one:
+A repo is a djinn checkout only when its root `go.mod` names the module
+`github.com/kurofune/djinn`. Any other repo MUST pass one extra flag, and the
+run dies without it:
 
 - `--worker-bin <path to an installed djinn binary>` —
   with the flag ABSENT the summoner "builds
@@ -103,20 +104,21 @@ without either one:
   and execs that", and a consumer repo has no
   `./cmd/djinn` to build. Point it at the installed worker
   (`$HOME/go/bin/djinn`).
-- `--allow-worker-drift` — the startup worker-SHA drift guard aborts "before any
-  bead is claimed" when the resolved worker's build SHA "does not match repo
-  HEAD". The worker was built from djinn and the repo HEAD is the CONSUMER
-  repo's, so they can never match; without this flag the drain aborts before it
-  claims a single bead. This flag downgrades that hard abort to one logged
-  warning.
 
 ```bash
 summoner --epic <epic-id> --max-workers <n> --max-beads <n> --max-retries <n> \
-  --worker-bin "$HOME/go/bin/djinn" --allow-worker-drift
+  --worker-bin "$HOME/go/bin/djinn"
 ```
 
-Both flags carry through the start line below. Append them whenever `$PWD` is
+The flag carries through the start line below. Append it whenever `$PWD` is
 not a djinn checkout.
+
+At startup the summoner checks that the worker comes
+from its own build and aborts "before any bead is claimed" when it does not —
+a half-finished upgrade. The abort names the fix: reinstall both from one
+build (`scripts/install.sh`). Relay that to the operator; never add the escape
+hatch `--skip-worker-version-check` to a start line unless the operator asks
+for it by name.
 
 ### Start it in the background
 
