@@ -28,13 +28,18 @@ health).
   commit touching what the triage judges read): rerun the triage eval, record
   the agreement change in the ledger, and mail the lead when majority
   agreement fell 10 points or more.
+- tend-seats (weekly, skipped unless a commit in the last 8 days touched a
+  seat's charter, memory or duties, or DECISIONS.md): propose a fix for each
+  contradiction among the seats' standing rules and each workaround their
+  memories repeat.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
 
 The idle backlog as the reaper reads it, open beads labelled
 review-follow-up, deferred beads labelled needs-operator with their comments,
-the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, and mail
+the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, every
+seat's charter, memory and duties with DECISIONS.md `## Decided`, and mail
 labelled to:seat:gardener.
 
 ## Outputs
@@ -43,6 +48,8 @@ Beads the reaper judged dead, closed or deferred by the reaper. Proposed
 replacement beads authored through /create-bead, each original closed with a
 comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
+Proposed seat-rule beads, one per contradiction or repeated workaround, each
+fingerprinted.
 Keep-or-cut questions mailed to the lead, and a mail to the lead when triage
 agreement fell 10 points or more. One dated ledger entry per run carrying the
 reaper's summary line, the survey's kept and dropped candidates, or the new

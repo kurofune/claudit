@@ -266,6 +266,56 @@ Never vote on, decide, approve or decline a proposal. Edit no code.
 """
 
 [[duty]]
+name = "tend-seats"
+schedule = "every 168h"
+# Free check, no model: run the duty only when a commit in the last 8 days
+# touched a seat's charter, memory or duties, or DECISIONS.md.
+check = "git log -1 --since='8 days ago' --format=%h -- '.djinn/seats/*/charter.md' '.djinn/seats/*/memory.md' '.djinn/seats/*/duties.toml' DECISIONS.md | grep -q ."
+max_cost_usd = 10.0
+prompt = """
+Audit the seats' standing rules: find the lines that contradict each other and
+the workarounds the seats keep repeating, and propose one fix for each.
+
+1. Read: every seat's charter.md, memory.md and duties.toml under
+   .djinn/seats/, and the DECISIONS.md `## Decided` section, together. Note
+   each line's file:line.
+2. Find two kinds of finding:
+   - contradiction: two lines that direct different actions for the same
+     situation, in one file, across seats, or a seat line against a
+     DECISIONS.md `## Decided` row. A line a newer line superseded counts
+     too. Precedence decides which line holds:
+     DECISIONS.md ## Decided > charter > duty prompt > memory, and within
+     memory the newer line wins.
+   - repeated workaround: two or more memory lines, in any seat, describing
+     the same manual step taken around the same tool behaviour.
+3. Fingerprint: write each line of the finding as `<file>:<line text>` (the
+   path, a colon, the line's text, no line number), sort them one per line,
+   and take the first 12 hex digits of their sha256:
+   `printf '%s\\n' '<file>:<line text>' ... | LC_ALL=C sort | shasum -a 256 | cut -c1-12`.
+   That is the finding's fp. Skip a finding whose `garden-fp:<fp>` label any
+   bead already carries, of any status, declined included:
+   `bd list --label garden-fp:<fp> --all`.
+4. File: author each remaining finding through /create-bead, with the labels
+   `proposed`, `from:seat:gardener`, `garden:seat-contradiction` or
+   `garden:seat-workaround`, and `garden-fp:<fp>`.
+   - A contradiction bead quotes both lines with their file:line, names the
+     line that holds and why, and states the edit: delete or rewrite the
+     losing line.
+   - A workaround bead names the tool behaviour to fix in code and cites the
+     memory lines. One of its acceptance criteria deletes those lines once
+     the fix lands.
+   At most 5 beads per run; a finding past the cap waits for next week.
+   Add the `from:seat:gardener` label to every bead you file. It names the
+   seat directory, gardener, and never the display name `djinn theme show`
+   prints for this seat.
+5. Write one dated ledger entry: each filed bead (fp -> bead id), each
+   skipped finding (fp -> the bead already carrying it), and each finding
+   past the cap.
+
+Never remove the proposed label from any bead. Edit no seat file, doc or code.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0
