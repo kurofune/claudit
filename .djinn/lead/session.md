@@ -80,6 +80,93 @@ staged out of the commit:
 git add -- "$seat" && git commit -m "chore(seats): lead ledger and memory" -- "$seat"
 ```
 
+## Relay — handing off to a fresh context
+
+**Trigger:** a hook line reading `Context is at <n>% of this session's ... relay
+line: finish this answer, then follow the relay procedure in
+.djinn/lead/session.md. This session's id is <session-id>.` Finish the answer
+you are in, then relay. Do not wait for the operator.
+
+**1. Fill the handoff.** It carries intent, never facts — the successor re-reads
+every fact. Fields:
+
+| Field | Holds |
+|---|---|
+| `source_session_id` | the session id the hook line names (required) |
+| `done` | what this session finished: beads filed, drains started, rulings recorded |
+| `next` | what you were about to do |
+| `tried` | what you tried that did not work |
+| `asks_in_flight` | every operator request heard but not yet filed — the one thing a relay must never lose |
+| `watchers` | each thing you were waiting on: `purpose`, `source` (the durable file or command to re-read), `last_event` (the last event you saw from it) |
+| `open_questions` | questions you asked the operator that are still unanswered |
+
+**2. Write it** — it prints the relay id:
+
+```bash
+djinn lead handoff write <<'EOF'
+{"source_session_id":"<session-id>","done":[],"next":[],"tried":[],"asks_in_flight":[],
+ "watchers":[{"purpose":"","source":"","last_event":""}],"open_questions":[]}
+EOF
+```
+
+It lands in `.djinn/state/lead-handoff.json`, never in the seat. Skip the
+session-close ledger entry: the successor's first turn records the relay in
+`$seat/ledger.md` under `### relay <id>`.
+
+**3. Respawn in the same pane.** When `HERDR_ENV` is `1`, start the detached
+helper as this turn's last tool call — verified live in a Herdr pane
+(`docs/research/2026-10-05-herdr-self-clear.md`, "Recommendation for t-relay"):
+it waits until this turn ends, sends `/clear`, then sends the resume prompt.
+
+```bash
+[ "${HERDR_ENV:-}" = 1 ] && nohup sh -c 'self="$1"; resume="$2"
+  herdr agent wait "$self" --until idle --until done || exit 1
+  herdr agent prompt "$self" "/clear" || exit 2
+  herdr agent wait "$self" --until idle --until done --timeout 30000 || exit 3
+  herdr agent prompt "$self" "$resume" || exit 4
+' sh "$HERDR_PANE_ID" "Resume from the lead handoff: follow the successor steps in the Relay section of .djinn/lead/session.md." >"${TMPDIR:-/tmp}/djinn-relay-helper.log" 2>&1 &
+```
+
+Then end the turn with:
+
+```say
+My context is filling up, so I am handing off to a fresh one in this pane
+(relay <relay-id>). Everything you asked for goes with me: <n> unfiled asks,
+<n> open questions. Back in a moment; if this pane has not cleared itself,
+type /clear.
+```
+
+When `HERDR_ENV` is not `1`, start no helper — it would aim at whichever pane
+has focus — and end the turn with:
+
+```say
+My context is filling up, so I saved everything I am holding (relay
+<relay-id>). Type /clear and I will pick up from there in a fresh context.
+```
+
+**The successor's first turn.** After `/clear` the SessionStart hook injects the
+handoff with its relay id. Before anything else:
+
+1. Re-read the authoritative state: `.djinn/summoner-state.json`, `bd`
+   (`bd list --status in_progress`, `bd ready`) and `djinn needs-you`.
+2. Re-arm each listed watcher once, from its `source`, and reconcile what
+   happened after its `last_event`.
+3. Never start a drain because of a relay.
+4. Say, then carry on with `next`:
+
+```say
+Resumed from relay <relay-id> in a fresh context. Picking up: <next>.
+Still open for you: <the unfiled asks and open questions, or "nothing">.
+```
+
+The Stop hook records the relay in the ledger when that turn ends. A hook line
+saying a relay is stale offers its unfiled asks: file each the operator still
+wants through Job 1. A line saying a relay was never acknowledged names a
+handoff two successors failed to pick up: tell the operator through Job 4.
+When a handoff stays pending while this session is at or above the relay line,
+the Stop hook shows the operator "relay pending — type /clear" — inside Herdr
+too, on the handoff turn itself: the hook cannot see the helper.
+
 
 ## What the lead never does
 
@@ -88,6 +175,7 @@ git add -- "$seat" && git commit -m "chore(seats): lead ledger and memory" -- "$
 - Never sets a spending cap unless the operator asked for a budget.
 - Never labels an operator's own ask `proposed`.
 - Never starts a second drain while one is running.
+- Never starts a drain because of a relay.
 - Never removes the `proposed` label from a review follow-up, and never
   removes proposed from a planner epic by hand: triage's go removes it, or the
   operator's approve of a `triage:operator` bead.
