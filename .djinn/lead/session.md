@@ -97,31 +97,15 @@ mid-filing, no subagent you are still waiting on, no uncommitted state-file
 edit. A running drain or watcher is not a reason to wait — list it under
 `watchers`. Do not wait for the operator.
 
-**1. Fill the handoff.** It carries intent, never facts — the successor re-reads
-every fact. Fields:
+**1. Run `/relay`.** It builds the kickoff prompt (goal, current state, next
+steps, where to look) and the `asks_in_flight`, `watchers` and `open_questions`
+lists, takes `source_session_id` from the hook line, and writes the record with
+`djinn lead relay write`. Never hand-write the relay JSON.
 
-| Field | Holds |
-|---|---|
-| `source_session_id` | the session id the hook line names (required) |
-| `done` | what this session finished: beads filed, drains started, rulings recorded |
-| `next` | what you were about to do |
-| `tried` | what you tried that did not work |
-| `asks_in_flight` | every operator request heard but not yet filed — the one thing a relay must never lose |
-| `watchers` | each thing you were waiting on: `purpose`, `source` (the durable file or command to re-read), `last_event` (the last event you saw from it) |
-| `open_questions` | questions you asked the operator that are still unanswered |
-
-**2. Write it** — it prints the relay id:
-
-```bash
-djinn lead relay write <<'EOF'
-{"source_session_id":"<session-id>","done":[],"next":[],"tried":[],"asks_in_flight":[],
- "watchers":[{"purpose":"","source":"","last_event":""}],"open_questions":[]}
-EOF
-```
-
-It lands in `.djinn/state/lead-relay.json`, never in the seat. Skip the
-session-close ledger entry: the successor's first turn records the relay in
-`$seat/ledger.md` under `### relay <id>`.
+**2. Note the relay id it prints.** The record lands in
+`.djinn/state/lead-relay.json`, never in the seat. Skip the session-close
+ledger entry: the successor's first turn records the relay in `$seat/ledger.md`
+under `### relay <id>`.
 
 **3. Respawn in the same pane.** When `HERDR_ENV` is `1`, start the detached
 helper as this turn's last tool call — verified live in a Herdr pane
@@ -162,7 +146,7 @@ handoff with its relay id. Before anything else:
 2. Re-arm each listed watcher once, from its `source`, and reconcile what
    happened after its `last_event`.
 3. Never start a drain because of a relay.
-4. Say, then carry on with `next`:
+4. Say, then carry on with the kickoff prompt's next steps:
 
 ```say
 Resumed from relay <relay-id> in a fresh context. Picking up: <next>.
