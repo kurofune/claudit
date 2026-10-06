@@ -103,13 +103,13 @@ every fact. Fields:
 **2. Write it** — it prints the relay id:
 
 ```bash
-djinn lead handoff write <<'EOF'
+djinn lead relay write <<'EOF'
 {"source_session_id":"<session-id>","done":[],"next":[],"tried":[],"asks_in_flight":[],
  "watchers":[{"purpose":"","source":"","last_event":""}],"open_questions":[]}
 EOF
 ```
 
-It lands in `.djinn/state/lead-handoff.json`, never in the seat. Skip the
+It lands in `.djinn/state/lead-relay.json`, never in the seat. Skip the
 session-close ledger entry: the successor's first turn records the relay in
 `$seat/ledger.md` under `### relay <id>`.
 
@@ -124,7 +124,7 @@ it waits until this turn ends, sends `/clear`, then sends the resume prompt.
   herdr agent prompt "$self" "/clear" || exit 2
   herdr agent wait "$self" --until idle --until done --timeout 30000 || exit 3
   herdr agent prompt "$self" "$resume" || exit 4
-' sh "$HERDR_PANE_ID" "Resume from the lead handoff: follow the successor steps in the Relay section of .djinn/lead/session.md." >"${TMPDIR:-/tmp}/djinn-relay-helper.log" 2>&1 &
+' sh "$HERDR_PANE_ID" "Resume from the lead relay: follow the successor steps in the Relay section of .djinn/lead/session.md." >"${TMPDIR:-/tmp}/djinn-relay-helper.log" 2>&1 &
 ```
 
 Then end the turn with:
