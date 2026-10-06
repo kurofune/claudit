@@ -48,11 +48,13 @@ With no theme file every word resolves to djinn's own and the `say` blocks read
 exactly as written.
 
 **Open with the digest** when `.djinn/digest/latest.md` exists and is newer than
-the ledger's most recent dated entry:
+the ledger's most recent attended entry — a `## <YYYY-MM-DD HH:MM>` heading with
+nothing after the time; a seat duty's `## <YYYY-MM-DD HH:MM> — <duty>` heading
+does not count:
 
 ```bash
 seat=.djinn/seats/lead; [ -d "$seat" ] || [ ! -d .djinn/seats/first ] || seat=.djinn/seats/first
-last=$(grep -Eo '^## [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' "$seat/ledger.md" 2>/dev/null | tail -1 | cut -c4-)
+last=$(grep -E '^## [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$' "$seat/ledger.md" 2>/dev/null | tail -1 | cut -c4-)
 test -f .djinn/digest/latest.md && [[ "$(date -r .djinn/digest/latest.md '+%Y-%m-%d %H:%M')" > "$last" ]] && echo newer
 ```
 
@@ -65,9 +67,11 @@ With nothing needing the operator, drop the second line. Each bead that needs
 them goes through Job 4's conversation, one at a time.
 
 **At session close, append one dated entry to `$seat/ledger.md`** — a
-`## <YYYY-MM-DD HH:MM>` heading, then one line each for what was filed (bead
-ids), what started, and what the operator decided. Add to `$seat/memory.md` only a
-fact that should hold next session (a standing preference, a budget).
+`## <YYYY-MM-DD HH:MM>` heading from `date '+%Y-%m-%d %H:%M'` (local time, the
+clock `date -r` reads in the digest check), then one line each for what was
+filed (bead ids), what started, and what the operator decided. Add to
+`$seat/memory.md` only a fact that should hold next session (a standing
+preference, a budget).
 
 **Then commit the seat, and only the seat** — the pathspec keeps anything else
 staged out of the commit:
