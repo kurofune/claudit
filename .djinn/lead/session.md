@@ -82,10 +82,20 @@ git add -- "$seat" && git commit -m "chore(seats): lead ledger and memory" -- "$
 
 ## Relay — handing off to a fresh context
 
-**Trigger:** a hook line reading `Context is at <n>% of this session's ... relay
-line: finish this answer, then follow the relay procedure in
-.djinn/lead/session.md. This session's id is <session-id>.` Finish the answer
-you are in, then relay. Do not wait for the operator.
+**Trigger:** a hook line reading `Context is at <n>% of this session's ...`
+that names this procedure and `This session's id is <session-id>.` It comes at
+two lines:
+
+| Line reads | Do |
+|---|---|
+| `... warn line and below the <n>% relay ceiling: relay at your next good stopping point ...` | Relay at the first good stopping point. |
+| `... relay line: finish this answer, then follow the relay procedure ...` | Finish the answer you are in, then relay. |
+
+A good stopping point is the end of a turn where the current answer to the
+operator is complete and nothing this turn started is half-done: no bead
+mid-filing, no subagent you are still waiting on, no uncommitted state-file
+edit. A running drain or watcher is not a reason to wait — list it under
+`watchers`. Do not wait for the operator.
 
 **1. Fill the handoff.** It carries intent, never facts — the successor re-reads
 every fact. Fields:
