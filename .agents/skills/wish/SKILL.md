@@ -1126,14 +1126,14 @@ stopped the walk when this machine cannot honor the choice.
     `fix-*` step built in `implement`'s shape carries **no findings** — the
     fixer then has nothing to act on:
 
-    - **`implement`** (`buildImplementPrompt`, `formula_prompts.go`) — the
-      header line, the bead block, `## Step contract` with its instruction
-      list, the `## Already done at HEAD` exit on a first claim, then the
-      `## What this step does NOT do` list. No payload: the bead IS the input.
+    - **`implement`** (`buildImplementPrompt`, `internal/djinn/session/formula_prompts.go`)
+      — the header line, the bead block, `## Step contract` with its
+      instruction list, the `## Already done at HEAD` exit on a first claim,
+      then the `## What this step does NOT do` list. No payload: the bead IS the input.
       A codex `implement` that answers already-done leaves its verdict in
       `.djinn/last-status.json`; read it there and take §4b's close-and-skip.
-    - **`try`** (`buildTryPrompt`, `formula_prompts.go`) — `implement`'s
-      shape without the already-done exit, plus `## The number` (the bead's
+    - **`try`** (`buildTryPrompt`, `internal/djinn/session/formula_prompts.go`)
+      — `implement`'s shape without the already-done exit, plus `## The number` (the bead's
       `crucible` measure, direction, baseline and best) and `## Tries so far`
       (the rows of the bead's `.djinn/crucible/<bead-id>.tsv` record) ahead of `## Step contract`.
     - **Every `fix-*`** — the builder's own header/contract framing wrapped
@@ -1144,8 +1144,8 @@ stopped the walk when this machine cannot honor the choice.
 
       | step | builder | shape |
       |---|---|---|
-      | `fix-review` | `buildReviewFixPrompt`, `fix_prompt.go:135` | `## Fix step <id>` + the INVENTED/counter guardrail clause + the slow-tier clause + `## Findings to apply` + a numbered list, one line per finding: ``N. [SEVERITY] `<file>:<line>` — <action>``. **No bead block, no `## Step contract`, no does-NOT-do list.** The findings are the ratcheted actionable set for this iter (this review's findings minus the latent IMPORTANTs filed as follow-ups, plus the unresolved carry from earlier passes) — for a codex run, the findings you extracted from the codex sidecar. |
-      | `fix-regression` | `BuildFixRegressionPrompt`, `formula_prompts.go:566` | Header + `## Step contract` + a numbered list whose item 1 embeds the gate's full-tree `go test -short ./...` + lint output **verbatim**, fenced with a backtick run **longer than the longest run inside the payload** (`markdownFenceFor`) — a fixed ``` fence is closed early by a transcript that quotes backticks, and the fixer then reads the step contract as test output. |
+      | `fix-review` | `buildReviewFixPrompt`, `internal/djinn/session/fix_prompt.go` | `## Fix step <id>` + the INVENTED/counter guardrail clause + the slow-tier clause + `## Findings to apply` + a numbered list, one line per finding: ``N. [SEVERITY] `<file>:<line>` — <action>``. **No bead block, no `## Step contract`, no does-NOT-do list.** The findings are the ratcheted actionable set for this iter (this review's findings minus the latent IMPORTANTs filed as follow-ups, plus the unresolved carry from earlier passes) — for a codex run, the findings you extracted from the codex sidecar. |
+      | `fix-regression` | `BuildFixRegressionPrompt`, `internal/djinn/session/formula_prompts.go` | Header + `## Step contract` + a numbered list whose item 1 embeds the gate's full-tree `go test -short ./...` + lint output **verbatim**, fenced with a backtick run **longer than the longest run inside the payload** (`markdownFenceFor`) — a fixed ``` fence is closed early by a transcript that quotes backticks, and the fixer then reads the step contract as test output. |
 
     The argv, sandbox and artifact rules on this page apply to a write step
     unchanged. **Verdict extraction and the sidecar check do NOT** — a write
