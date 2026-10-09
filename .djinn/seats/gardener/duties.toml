@@ -316,6 +316,35 @@ Never remove the proposed label from any bead. Edit no seat file, doc or code.
 """
 
 [[duty]]
+name = "tend-front-door"
+schedule = "daily 04:15"
+# Free check, no model: run the duty only when the situation-room skill is
+# installed and SITUATION_ROOM.html's narrative-date slot is earlier than the
+# newest commit date of CURRENT.md or DECISIONS.md.
+check = "test -e \"$HOME/.claude/skills/situation-room/SKILL.md\" && djinn garden front-door --check"
+max_cost_usd = 10.0
+# The runner commits the regenerated page with the ledger.
+commits = ["SITUATION_ROOM.html"]
+prompt = """
+Regenerate the front door's story: CURRENT.md or DECISIONS.md moved past the
+day SITUATION_ROOM.html's narrative was written.
+
+1. Regenerate: run /situation-room. It rewrites the page's narrative from the
+   state files and stamps its narrative-date slot. When the skill is
+   unavailable, write that as your ledger line and stop.
+2. Confirm: the page's narrative-date slot
+   (`grep -o 'data-sr="narrative-date">[^<]*' SITUATION_ROOM.html`) reads
+   today's date. When it does not, name the date it reads in your ledger
+   line.
+3. Write one dated ledger line: the narrative-date the page carried before,
+   the one it carries now, and the state files whose commits moved past it.
+
+Edit none of CURRENT.md, DECISIONS.md or CONTEXT_MAP.md: the page tells their
+story and never changes it. Edit no other file, and commit nothing: the runner
+commits SITUATION_ROOM.html with your ledger.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0

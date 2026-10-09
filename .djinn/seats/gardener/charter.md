@@ -32,6 +32,10 @@ health).
   seat's charter, memory or duties, or DECISIONS.md): propose a fix for each
   contradiction among the seats' standing rules and each workaround their
   memories repeat.
+- tend-front-door (nightly, skipped unless the situation-room skill is
+  installed and `djinn garden front-door --check` finds the front door's
+  narrative older than CURRENT.md's or DECISIONS.md's newest commit):
+  regenerate SITUATION_ROOM.html's story with /situation-room.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
@@ -50,6 +54,8 @@ comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
 Proposed seat-rule beads, one per contradiction or repeated workaround, each
 fingerprinted.
+SITUATION_ROOM.html's story regenerated with /situation-room, committed by the
+runner.
 Keep-or-cut questions mailed to the lead, and a mail to the lead when triage
 agreement fell 10 points or more. One dated ledger entry per run carrying the
 reaper's summary line, the survey's kept and dropped candidates, or the new
