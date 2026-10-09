@@ -24,25 +24,32 @@ a time, never batched:
 2. Read the bead: `bd show <bead-id> --json` for the title and the acceptance
    criteria.
 3. Put it to the operator as a decision — **the bead's title, what was tried,
-   why it stopped, and exactly one question.** One question, not a list: the
+   why it stopped, your recommendation with its one-line why, and exactly one
+   question.** Explain in everyday words, for someone who has never seen this
+   bead: what it is for and what happened. One question, not a list: the
    operator answers in plain words and you do the rest. Before you ask it,
-   record why only the operator can decide it, the question, and two answers
-   the operator might give where the ops cockpit shows them. One command
-   writes all four and refuses without a why or a question; it is the only way
-   anything is deferred to the operator:
+   record the explanation, the question, and two answers the operator might
+   give where the ops cockpit shows them: `--why` carries the plain-language
+   explanation (what it is, what happened, why only the operator can decide),
+   `--a` the recommended answer, named first, and `--b` the alternative. One
+   command writes all four and refuses without a why or a question; it is the
+   only way anything is deferred to the operator:
 
 ```bash
-djinn needs-you defer <bead-id> --why "<why only the operator can decide it>" \
-  --question "<one question>" --a "<first answer>" --b "<second answer>"
+djinn needs-you defer <bead-id> --why "<the plain-language explanation>" \
+  --question "<one question>" --a "<the recommended answer>" --b "<the alternative>"
 ```
 
 ```say
 <bead title> did not land.
 
-What was tried: <one or two sentences from the log>.
-Why it stopped: <the disposition, in plain words>.
+<what this bead is for, in everyday words>
+What was tried: <one or two sentences from the log, in everyday words>.
+Why it stopped: <what went wrong, in everyday words>.
 
-<one question>
+Recommendation: <what you would do> — <its one-line why>.
+
+<one question>?
 ```
 
 4. Take the answer and **rewrite the bead from it**. Never `bd edit` — it opens
@@ -96,13 +103,16 @@ item that newly needs the operator: `needs you: <bead-id> — <title> — bd sho
 `mail: <message-id> — <title> — bd show <message-id>` for any other message to
 the lead's seat. Each item arrives once. Every such line is Job 4 input: answer what the
 operator asked first, then put each item to them, one at a time, as one `say`
-block ending in one question. Read the item with its `bd show` pointer first;
-never paste its description or acceptance text into the block.
+block: what it is and what it waits on in everyday words, your recommendation
+with its one-line why, and one question last. Read the item with its `bd show`
+pointer first; never paste its description or acceptance text into the block.
 
 ```say
-<bead or message title>: <what it waits on, in one plain sentence>.
+<bead or message title>: <what it is and what it waits on, in everyday words>.
 
-<one question>
+Recommendation: <the answer you would give> — <its one-line why>.
+
+<one question>?
 ```
 
 A `needs you:` answer goes through the conversation above from step 4, except
@@ -137,10 +147,13 @@ rule, one with no majority, or one whose category the operator reversed twice
 lately. That bead keeps `proposed`, gains `triage:operator`, and arrives as a
 `needs you:` line whose question is `Approve <id>?`. Read it with
 `bd show <id> --json` and each judge's vote with `djinn triage show <id>`, then
-put it to the operator as one block:
+put it to the operator as one block: what the bead would do and why the judge
+flagged it, in everyday words, then your recommendation with its one-line why:
 
 ```say
-<bead title> waits on you: <the flagging judge's reason, in plain words>.
+<bead title> waits on you: <what it would do and the flagging judge's reason, in everyday words>.
+
+Recommendation: <approve or decline> — <its one-line why>.
 
 Approve it, or decline it?
 ```

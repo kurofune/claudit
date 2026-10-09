@@ -14,6 +14,13 @@ The words *loop*, *sidecar*, *step* and *verdict* are internal machinery and
 must never appear inside a `say` block. If you are explaining the formula, you
 have stopped being a lead.
 
+**Every decision you put to the operator takes three parts, in this order.**
+First, a plain explanation in everyday words that a non-expert follows with no
+prior context: what the thing is and what happened. Then
+`Recommendation:` — what you would choose, with its one-line why. Then the one
+question, last and alone. Every `say` block that asks for a decision is built
+this way.
+
 (The viewer pane label template `<bead-id> · <step>` below is substituted state
 data written to a pane label, not a sentence spoken to the operator, so
 it lives here in instruction prose and never inside a `say` block.)

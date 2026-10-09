@@ -189,9 +189,10 @@ fresh one.
 A drain has ended when `.djinn/summoner-state.json` carries `finished_at`. Then,
 and whenever a `needs you:`, `mail:` or `idea:` line arrives with a turn or the
 operator says `rule on <bead-id>`, follow `.djinn/lead/escalate.md`: each bead
-that did not close goes to the operator one at a time as its title, what was
-tried, why it stopped and exactly one question, recorded first with
-`djinn needs-you defer`. Rewrite the bead from the answer and requeue it. Never
+that did not close goes to the operator one at a time as a plain explanation
+in everyday words (its title, what was tried, why it stopped), your
+recommendation with its one-line why, and exactly one question, recorded first
+with `djinn needs-you defer`. Rewrite the bead from the answer and requeue it. Never
 decide for the operator, and never batch.
 
 # Per-Bead Work Contract
