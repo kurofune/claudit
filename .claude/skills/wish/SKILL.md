@@ -776,7 +776,7 @@ Now run the cycle. For attempt `N` from 1 to `max_attempts`:
      (BLOCKER-count mismatch or invented-rate trip — see §4c), **HALT the walk
      immediately regardless of `N`/remaining budget**: never route it through
      spawn-next or terminal-iter/exhaustion. The detection logic and thresholds live
-     in §4c and `review_approved.go` — do not restate them here.
+     in §4c and `internal/djinn/formula/checks/review_approved.go` — do not restate them here.
    - **pass** (verdict == the shape's pass token) → the loop is satisfied; **exit
      the loop** and advance the spine to the next step. **Interactive checkpoint
      (Step 1b #2):** in `--interactive` mode, pause here and surface the pass verdict
@@ -795,9 +795,9 @@ Now run the cycle. For attempt `N` from 1 to `max_attempts`:
        verdict is `SHIP-WITH-FIXES` with **no BLOCKER**, the loop **passes**: file
        the remaining actionable IMPORTANT/NIT findings as `review-follow-up` beads
        (**you** file them, per the `file-nits-*` child rule above) and advance
-       the spine — do **not** escalate. This mirrors `tryTerminalIterRescue`
-       (`internal/djinn/formula/checks/review_approved.go:308-373`), which files
-       the residue and returns exit 0. A BLOCKER on the final iter is **not**
+       the spine — do **not** escalate. This mirrors
+       `tryTerminalIterRescue` (`internal/djinn/formula/checks/review_approved.go`),
+       which files the residue and returns exit 0. A BLOCKER on the final iter is **not**
        rescued (the "BLOCKER means do not ship" gate fires before the rescue), nor
        is a `REWORK` verdict — both fall through to the exhaustion matrix below.
      - **`loop-with-regression` has NO rescue.** A tree still broken on the final
@@ -897,7 +897,7 @@ thresholds in prose; read the same two signals off that sidecar:
   total finding count (sum of every `severity_counts` bucket) **is at least 10** — the
   floor below which a high rate is small-sample noise and stays advisory. Those two
   constants (`inventedRateHaltThreshold = 30.0`, `inventedRateFloorCount = 10`) are
-  pinned in `review_approved.go` as the source of truth — mirror that read-condition
+  pinned in `internal/djinn/formula/checks/review_approved.go` as the source of truth — mirror that read-condition
   here, do not re-judge or re-derive its logic.
 
 Only the **review loops** (`loop-with-review`) carry this halt; a
