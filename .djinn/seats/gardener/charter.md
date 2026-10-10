@@ -31,7 +31,8 @@ health).
 - tend-seats (weekly, skipped unless a commit in the last 8 days touched a
   seat's charter, memory or duties, or DECISIONS.md): propose a fix for each
   contradiction among the seats' standing rules and each workaround their
-  memories repeat.
+  memories repeat, keep every seat's memory.md within 16 KB and true, sweep
+  `bd memories` the same way, and mail the lead a Claude/Codex memory audit.
 - tend-front-door (nightly, skipped unless the situation-room skill is
   installed and `djinn garden front-door --check` finds the front door's
   narrative older than CURRENT.md's or DECISIONS.md's newest commit):
@@ -43,7 +44,9 @@ health).
 The idle backlog as the reaper reads it, open beads labelled
 review-follow-up, deferred beads labelled needs-operator with their comments,
 the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, every
-seat's charter, memory and duties with DECISIONS.md `## Decided`, and mail
+seat's charter, memory and duties with DECISIONS.md `## Decided`,
+`bd memories`, the Claude project memory directory
+(`~/.claude/projects/<slug>/memory/`) and `~/.codex/memories/`, and mail
 labelled to:seat:gardener.
 
 ## Outputs
@@ -53,13 +56,16 @@ replacement beads authored through /create-bead, each original closed with a
 comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
 Proposed seat-rule beads, one per contradiction or repeated workaround, each
+fingerprinted. Proposed memory beads, labelled `garden:seat-memory` or
+`garden:bd-memory`, one per duplicate, stale, superseded or log finding, each
 fingerprinted.
 SITUATION_ROOM.html's story regenerated with /situation-room, committed by the
 runner.
-Keep-or-cut questions mailed to the lead, and a mail to the lead when triage
-agreement fell 10 points or more. One dated ledger entry per run carrying the
-reaper's summary line, the survey's kept and dropped candidates, or the new
-and previous eval rows.
+Keep-or-cut questions mailed to the lead, a mail to the lead when triage
+agreement fell 10 points or more, and a weekly memory audit mailed to the lead
+when the Claude or Codex memories hold a finding. One dated ledger entry per
+run carrying the reaper's summary line, the survey's kept and dropped
+candidates, or the new and previous eval rows.
 
 ## Envelope
 

@@ -304,13 +304,59 @@ the workarounds the seats keep repeating, and propose one fix for each.
    - A workaround bead names the tool behaviour to fix in code and cites the
      memory lines. One of its acceptance criteria deletes those lines once
      the fix lands.
-   At most 5 beads per run; a finding past the cap waits for next week.
+   At most 5 beads per run, one cap shared by contradictions, workarounds
+   and step 5's memory findings: find those before filing here, file the
+   findings on a memory.md over budget first, then the rest; a finding past
+   the cap waits for next week.
    Add the `from:seat:gardener` label to every bead you file. It names the
    seat directory, gardener, and never the display name `djinn theme show`
    prints for this seat.
-5. Write one dated ledger entry: each filed bead (fp -> bead id), each
-   skipped finding (fp -> the bead already carrying it), and each finding
-   past the cap.
+5. Sweep the memories, keeping each small and true.
+   - Budget: run `wc -c .djinn/seats/*/memory.md`. The budget is 16384 bytes
+     per file, because a seat's memory is inlined whole into every prompt of
+     that seat. Sweep a file over budget first.
+   - Read every memory.md and the repo's bd memories: `bd memories --json`
+     prints a key-to-text map; skip its `schema_version` key, which is not a
+     memory. Find four kinds of finding, each with its check:
+     - duplicate: two or more lines say the same thing; the edit is one
+       merged line.
+     - stale: a line names a file, flag, function, test, command or bead
+       that HEAD or bd lacks; check it with `git grep -F`, `test -e` or
+       `bd show <id>`, never from memory.
+     - superseded: a later line replaces an earlier line about the same
+       thing; the edit deletes the earlier line.
+     - log: dated run-by-run notes (`tend-docs, 2026-10-06: ...`) that
+       should be one standing rule; the edit is that rule.
+   - Fingerprint each finding by step 3's recipe, a memory.md line written
+     `<file>:<line text>` and a bd memory written `bd:<key>:<text>`. Skip an
+     fp `bd list --label garden-fp:<fp> --all` already returns.
+   - File each remaining finding through /create-bead with the labels
+     `proposed`, `from:seat:gardener`, `garden:seat-memory` (a memory.md) or
+     `garden:bd-memory` (a bd memory), and `garden-fp:<fp>`. The bead quotes
+     the lines with their file:line, or the key, and states the exact edit:
+     the replacement line, delete, `bd forget <key>` or
+     `bd remember --key <key> "<text>"`.
+6. Audit the harness memories outside the repo, read-only. Edit nothing
+   outside the repo.
+   - Claude: the directory is `$HOME/.claude/projects/<slug>/memory/`, the
+     slug being the repo root's absolute path with every character outside
+     A-Z, a-z and 0-9 replaced by `-`:
+     `printf '%s' "$PWD" | sed 's#[^A-Za-z0-9]#-#g'`
+     (/Users/nathangross/Projects/djinn gives
+     `-Users-nathangross-Projects-djinn`). Read MEMORY.md and every *.md
+     there.
+   - Codex: read every *.md under `$HOME/.codex/memories/`.
+   - Apply step 5's four kinds to both stores.
+   - When at least one finding exists, write them to a file, one per line as
+     store, file, lines, kind, edit, and send one mail:
+     `bd create --type message --title "Memory audit: <n> Claude, <m> Codex findings" --label to:seat:lead --label from:seat:gardener --silent --description="$(cat <file>)"`.
+     A missing directory or zero findings sends no mail. The mail carries no
+     fingerprint: a finding nobody applied is mailed again next week.
+7. Write one dated ledger entry: each filed bead (fp -> bead id), each
+   skipped finding (fp -> the bead already carrying it), each finding past
+   the cap, each memory.md's size in bytes against the budget, the bd memory
+   count, and one line
+   `memory audit: claude <n> files, codex <m> files, <k> findings, mail <id or none>`.
 
 Never remove the proposed label from any bead. Edit no seat file, doc or code.
 """
