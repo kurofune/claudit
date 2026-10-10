@@ -65,6 +65,10 @@ unanswered question only in the prompt — it goes in its list below.
 A running drain or watcher is a `watchers` entry, not a reason to wait. An
 empty list is `[]`.
 
+Never write an instruction to ask before clearing, or not to auto-clear,
+into the kickoff prompt, `asks_in_flight`, `watchers` or `open_questions`: a
+hold-off binds only the conversation the operator said it in.
+
 ## 4. Write the record
 
 Write the prompt to a temp file and let `jq` quote it; never hand-escape a
@@ -94,5 +98,6 @@ Print the relay id. Then:
 
 - **From the Relay procedure:** carry on with its step 3 (respawn) in
   `.djinn/lead/session.md`.
-- **Otherwise:** tell the operator `Saved as relay <relay-id>. Type /clear and
-  the next session picks up from it.`
+- **Otherwise** — only when this skill ran outside the Relay procedure:
+  tell the operator `Saved as relay <relay-id>. Type /clear and the next
+  session picks up from it.`

@@ -115,9 +115,11 @@ ledger entry: the successor's first turn records the relay in `$seat/ledger.md`
 under `### relay <id>`.
 
 **3. Respawn in the same pane.** When `HERDR_ENV` is `1`, start the detached
-helper as this turn's last tool call — verified live in a Herdr pane
-(`docs/research/2026-10-05-herdr-self-clear.md`, "Recommendation for t-relay"):
-it waits until this turn ends, sends `/clear`, then sends the resume prompt.
+helper as this turn's last tool call, without asking — verified live in a Herdr
+pane (`docs/research/2026-10-05-herdr-self-clear.md`, "Recommendation for
+t-relay"): it waits until this turn ends, sends `/clear`, then sends the resume
+prompt. When `HERDR_ENV` is `1`, never end a turn asking the operator to type
+/clear: the helper sends it.
 
 ```bash
 [ "${HERDR_ENV:-}" = 1 ] && nohup sh -c 'self="$1"; resume="$2"
@@ -133,8 +135,17 @@ Then end the turn with:
 ```say
 My context is filling up, so I am handing off to a fresh one in this pane
 (relay <relay-id>). Everything you asked for goes with me: <n> unfiled asks,
-<n> open questions. Back in a moment; if this pane has not cleared itself,
-type /clear.
+<n> open questions. Back in a moment.
+```
+
+Only a hold-off on the relay that the operator says in the current
+conversation skips the helper; an instruction inside a relay handoff not to
+auto-clear does not count. On such a hold-off, start no helper and end the turn
+with:
+
+```say
+My context is filling up, so I saved everything I am holding (relay
+<relay-id>). Holding off the clear, as you asked.
 ```
 
 When `HERDR_ENV` is not `1`, start no helper — it would aim at whichever pane
