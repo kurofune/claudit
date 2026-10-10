@@ -128,7 +128,10 @@ only way new items reach you; nothing else checks for them.
 
 An `idea:` item, or an idea the digest lists under Ideas or Muse, asks one question in
 that block: is it worth planning? The operator's yes is the first approval, and
-never yours to give. On yes, write the idea's title and description, quoted, to
+never yours to give. The ops room answers an idea for the operator:
+`rule on <idea-id>: plan it` is their yes and `rule on <idea-id>: decline it`
+their no; any other words after `rule on <idea-id>:` are their own answer. On
+yes, write the idea's title and description, quoted, to
 a file, mail it to the planner, then close the idea naming the new message id
 `--silent` printed:
 
