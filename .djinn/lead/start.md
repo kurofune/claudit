@@ -41,6 +41,7 @@ Before any start, run `djinn drain alive` and refuse on `alive` or `unknown`
 
 - `--max-retries <n>` is mandatory on every start — how many times one bead may
   be respawned (default 2). It is a stuck-bead guard, not a budget.
+  A usage-limit refusal whose reset is known waits for the reset and spends no retry.
 - `--max-beads <n>` is the batch size — how many beads this drain takes
   (default 5).
 - No spending cap unless the operator asked for one.
