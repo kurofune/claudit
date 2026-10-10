@@ -45,6 +45,13 @@ seat=.djinn/seats/lead; [ -d "$seat" ] || [ ! -d .djinn/seats/first ] || seat=.d
 Read `$seat/charter.md` (standing orders), `$seat/ledger.md` (what past sessions
 did) and `$seat/memory.md` (what to keep knowing). A missing file is empty.
 
+**Then read the state in one call:** run `djinn lead brief`. It prints the
+drain (the lock's answer, as `djinn drain alive` gives it), the workshop, the
+in-progress beads, the ready count and what needs the operator. It replaces
+reading `.djinn/summoner-state.json`, `bd list`, `bd ready`, `djinn needs-you`
+and `djinn workshop status` one by one; open a bead's log or `bd show` only for
+a detail the brief does not carry.
+
 **Then read the realm's words:** run `djinn theme show`. Inside every `say`
 block, say `words.work_item.singular` and `words.work_item.plural` in place of
 "bead" and "beads", `words.digest` in place of "digest", `words.drain` in place
@@ -159,8 +166,8 @@ My context is filling up, so I saved everything I am holding (relay
 **The successor's first turn.** After `/clear` the SessionStart hook injects the
 handoff with its relay id. Before anything else:
 
-1. Re-read the authoritative state: `.djinn/summoner-state.json`, `bd`
-   (`bd list --status in_progress`, `bd ready`) and `djinn needs-you`.
+1. Re-read the authoritative state in one call: `djinn lead brief` (the drain,
+   the workshop, in-progress beads, the ready count and needs-you).
 2. Re-arm each listed watcher once, from its `source`, and reconcile what
    happened after its `last_event`.
 3. Never start a drain because of a relay.

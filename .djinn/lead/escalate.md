@@ -3,12 +3,18 @@
 ## Job 4 — When the drain ends
 
 The drain has ended when `.djinn/summoner-state.json` carries `finished_at`.
-Read every worker's `disposition`.
+Read it in one call, `djinn lead brief`, never the state file, `bd` and
+`djinn needs-you` one by one: its `result:` line is `<closed> of <total>
+closed`, the summed `cost_usd` and the wall clock, and its `not closed` list
+names every worker whose `disposition` is not `closed`, with that disposition
+and its `log_path`. Past the list's cap (`+<n> more`), read the rest from the
+state file.
 
 ### Everything closed
 
 Report count, total cost and elapsed, all derived from the state file
-(`workers[]`, the summed `cost_usd`, `finished_at` minus `started_at`):
+(`workers[]`, the summed `cost_usd`, `finished_at` minus `started_at`) — the
+brief's `result:` line:
 
 ```say
 Drain done. <n> of <n> beads closed, $<total> spent, <elapsed> wall clock.
@@ -19,8 +25,8 @@ Drain done. <n> of <n> beads closed, $<total> spent, <elapsed> wall clock.
 For **each** worker whose `disposition` is anything other than `closed`, one at
 a time, never batched:
 
-1. Read that worker's `log_path` from `.djinn/summoner-state.json` and its
-   `disposition`.
+1. Take that worker's `disposition` and `log_path` from the brief's `not
+   closed` list, and read the log.
 2. Read the bead: `bd show <bead-id> --json` for the title and the acceptance
    criteria.
 3. Put it to the operator as a decision — **the bead's title, what was tried,
