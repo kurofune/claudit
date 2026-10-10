@@ -394,6 +394,59 @@ commits SITUATION_ROOM.html with your ledger.
 """
 
 [[duty]]
+name = "tend-epics"
+schedule = "daily 03:30"
+# Free check, no model: run the duty only when bd lists an open epic whose
+# children are all closed. A missing bd prints no epic and skips the slot.
+check = "bd epic close-eligible --dry-run --json | grep -q '\"id\"'"
+max_cost_usd = 5.0
+prompt = """
+Close out the epics whose children are done, but only after checking the
+epic's own acceptance lines: every child closed is not the epic done.
+
+1. List: run `bd epic close-eligible --dry-run --json`. It prints one object per
+   open epic whose children bd counts as complete; each `epic.id` is a
+   candidate. Never run it without `--dry-run`: that closes every epic on
+   children alone.
+2. Skip: for each candidate, run
+   `bd list --parent <epic-id> --all --flat --json`. Skip the epic, judging
+   nothing, when its most recently closed child closed under 24 hours ago (the
+   newest `closed_at`), or when it has any child whose status is not closed
+   (deferred counts as not closed). Its children have not settled yet.
+3. Judge: run `bd show <epic-id> --json` and read its `acceptance_criteria`.
+   Check every acceptance line of the epic other than the one saying every
+   child is closed against the repo at HEAD: read the file, run the command or
+   find the commit the line names. Never take a child's closing as proof of a
+   line. Each line ends in one of four places:
+   - a line that holds: note one evidence pointer for it (a file:line, a
+     command and its result, or a commit).
+   - a line an open bead would make true: name that bead.
+   - a line no open bead would make true: send the planner one message naming
+     the epic id and the unmet line, so it plans the work, and leave the epic
+     open. Write the body to a file and send it:
+     `bd create --type message --label to:seat:planner --label from:seat:gardener --title "Epic <epic-id> has an unmet line" --silent --description="$(cat <file>)"`.
+   - a line that needs the operator (dogfooding or a human judgment no
+     command can make): defer the epic to the operator with one command in
+     plain words, and leave the epic open:
+     `djinn needs-you defer <epic-id> --what "<2-4 sentences in everyday words: what the epic set out to do, which of its checks only a person can make, and what they would look at; no file paths, bead ids or code names>" --why "<why only the operator can settle that check>" --question "<one question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`.
+   Add the `from:seat:gardener` label to every message you file. It names the
+   seat directory, gardener, and never the display name `djinn theme show`
+   prints for this seat.
+4. Close: only when every line holds, run
+   `bd close <epic-id> --reason "<one evidence pointer per line>"`.
+   Otherwise leave the epic open: an unmet line, a planner message or a
+   deferral never closes it.
+5. Write one dated ledger entry with one line per judged epic:
+   `<epic-id> -> closed | planner <message-id> | needs-you`, joining the
+   outcomes with a comma when an epic has more than one, and
+   `<epic-id> -> waits on <bead-id>` when an open bead would make its line
+   true.
+
+Close no bead but an epic every one of whose lines you checked. Edit no code
+and no doc.
+"""
+
+[[duty]]
 name = "inbox"
 mail = true
 max_cost_usd = 10.0

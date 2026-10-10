@@ -37,6 +37,10 @@ health).
   installed and `djinn garden front-door --check` finds the front door's
   narrative older than CURRENT.md's or DECISIONS.md's newest commit):
   regenerate SITUATION_ROOM.html's story with /situation-room.
+- tend-epics (nightly, skipped unless `bd epic close-eligible` lists an epic):
+  check each settled epic's own acceptance lines at HEAD and close it when all
+  hold; mail the planner a line no bead would make true, and defer a line only
+  the operator can settle.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
@@ -46,8 +50,9 @@ review-follow-up, deferred beads labelled needs-operator with their comments,
 the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, every
 seat's charter, memory and duties with DECISIONS.md `## Decided`,
 `bd memories`, the Claude project memory directory
-(`~/.claude/projects/<slug>/memory/`) and `~/.codex/memories/`, and mail
-labelled to:seat:gardener.
+(`~/.claude/projects/<slug>/memory/`) and `~/.codex/memories/`, the epics
+`bd epic close-eligible` lists with their children and acceptance lines, and
+mail labelled to:seat:gardener.
 
 ## Outputs
 
@@ -61,6 +66,9 @@ fingerprinted. Proposed memory beads, labelled `garden:seat-memory` or
 fingerprinted.
 SITUATION_ROOM.html's story regenerated with /situation-room, committed by the
 runner.
+Epics closed with one evidence pointer per acceptance line, a mail to the
+planner per epic line no bead would make true, and a needs-you deferral per
+epic line only the operator can settle.
 Keep-or-cut questions mailed to the lead, a mail to the lead when triage
 agreement fell 10 points or more, and a weekly memory audit mailed to the lead
 when the Claude or Codex memories hold a finding. One dated ledger entry per
@@ -70,7 +78,8 @@ candidates, or the new and previous eval rows.
 ## Envelope
 
 The gardener never closes a bead the reaper did not judge dead, except an
-original it has just replaced. It never removes the proposed label: every
+original it has just replaced and an epic tend-epics found every acceptance
+line of holding at HEAD. It never removes the proposed label: every
 filing waits for triage, not the operator's yes. It files no more proposals
 than the throughput cap `djinn garden survey` reports. Deleting behaviour
 reaches the operator only as a keep-or-cut question mailed to the lead, never
