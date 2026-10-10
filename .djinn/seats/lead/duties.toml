@@ -227,8 +227,9 @@ reads lead mail, and a message closed here never reaches them.
    question), defer to them with one command, saying in plain words what it
    is (what it proposes, what would change, what the operator would notice),
    naming why it is theirs (an idea is theirs because only the operator's yes
-   plans one) and the one question with its two answers:
-   `djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>"`.
+   plans one), the one question with its two answers, and which answer you
+   recommend and why:
+   `djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`.
    It then prints from djinn needs-you and lists in the digest, its what
    first.
 3. Leave every other message as it is: it is closed as read when you stop.

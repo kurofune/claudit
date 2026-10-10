@@ -28,18 +28,20 @@ a time, never batched:
    question.** Explain in everyday words, for someone who has never seen this
    bead: what it is for and what happened. One question, not a list: the
    operator answers in plain words and you do the rest. Before you ask it,
-   record the explanation, the question, and two answers the operator might
-   give where the ops cockpit shows them: `--what` carries the plain-language
-   explanation the ops room and the digest show first (what the bead is for,
-   what happened, what the operator would notice), `--why` why only the
-   operator can decide, `--a` the recommended answer, named first, and `--b`
-   the alternative. One command writes all five and refuses without any of
-   them; it is the only way anything is deferred to the operator:
+   record the explanation, the question, two answers the operator might give,
+   and your recommendation where the ops cockpit shows them: `--what` carries
+   the plain-language explanation the ops room and the digest show first (what
+   the bead is for, what happened, what the operator would notice), `--why` why
+   only the operator can decide, `--a` and `--b` the two answers, `--recommend`
+   which of them you recommend (`a` or `b`) and `--because` its one-line why in
+   everyday words, which the ops room shows above the answers and the digest
+   prints. One command writes them all and refuses without any of them; it is
+   the only way anything is deferred to the operator:
 
 ```bash
-djinn needs-you defer <bead-id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" \
+djinn needs-you defer <bead-id> --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>" --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" \
   --why "<why only the operator can decide>" \
-  --question "<one question>" --a "<the recommended answer>" --b "<the alternative>"
+  --question "<one question>" --a "<first answer>" --b "<second answer>"
 ```
 
 ```say

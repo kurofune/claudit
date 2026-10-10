@@ -47,8 +47,9 @@ For each message:
    titles are what triage and the operator read first.
 3. A design question you cannot settle from the repo: plan what you can, then
    defer that epic to the operator with what the epic is in plain words, the
-   question, why the repo cannot settle it, and its two answers:
-   `djinn needs-you defer <epic-id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why the repo cannot settle it>" --question "<the design question>" --a "<first answer>" --b "<second answer>"`.
+   question, why the repo cannot settle it, its two answers, and which you
+   recommend and why:
+   `djinn needs-you defer <epic-id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why the repo cannot settle it>" --question "<the design question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`.
    It then prints from djinn needs-you and lists in the digest, its what
    first.
 4. Write one dated ledger entry per message: its id, the epic id, how many
@@ -73,8 +74,8 @@ Read your mail (the ## Mail section below) and act on each message as this
 seat's charter directs. A message the charter does not cover, or one only the
 operator can decide, defer to the operator with one command that records
 what it is in plain words, why it is theirs (which rule keeps it from this
-seat) and one question with two answers:
-`djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>"`
+seat), one question with two answers, and which answer you recommend and why:
+`djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`
 instead of acting on it. Every message still open when you stop is closed as
 read.
 """
