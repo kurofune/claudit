@@ -29,14 +29,16 @@ a time, never batched:
    bead: what it is for and what happened. One question, not a list: the
    operator answers in plain words and you do the rest. Before you ask it,
    record the explanation, the question, and two answers the operator might
-   give where the ops cockpit shows them: `--why` carries the plain-language
-   explanation (what it is, what happened, why only the operator can decide),
-   `--a` the recommended answer, named first, and `--b` the alternative. One
-   command writes all four and refuses without a why or a question; it is the
-   only way anything is deferred to the operator:
+   give where the ops cockpit shows them: `--what` carries the plain-language
+   explanation the ops room and the digest show first (what the bead is for,
+   what happened, what the operator would notice), `--why` why only the
+   operator can decide, `--a` the recommended answer, named first, and `--b`
+   the alternative. One command writes all five and refuses without any of
+   them; it is the only way anything is deferred to the operator:
 
 ```bash
-djinn needs-you defer <bead-id> --why "<the plain-language explanation>" \
+djinn needs-you defer <bead-id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" \
+  --why "<why only the operator can decide>" \
   --question "<one question>" --a "<the recommended answer>" --b "<the alternative>"
 ```
 
