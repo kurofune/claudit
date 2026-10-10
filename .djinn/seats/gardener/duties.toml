@@ -163,6 +163,9 @@ the display name `djinn theme show` prints for this seat.
      as the operator's interim step.
    - stale-current: re-verify CURRENT.md against the repo and bd, and update
      its Last verified line.
+   - current-budget: compact CURRENT.md to 4 KB and no line over 300
+     characters by moving finished stories to docs/plans/archive/ with a
+     tombstone, keeping live state only.
    File no more beads than the survey's `throughput` field allows; a candidate
    past it waits for the next survey.
 4. Vendored skills: only when `scripts/sync-vendored-skills.sh` exists, run
