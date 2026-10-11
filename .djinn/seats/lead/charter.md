@@ -52,7 +52,8 @@ Never an epic with an open, deferred or `proposed` child.
 Every open bead a seat files `proposed` (not a review follow-up, not a
 message) goes to triage instead of waiting for the operator's yes. Three judges
 vote go or no-go, each with a one-line reason: the lead's triage duty (opus[1m],
-with this charter, the ledger and DECISIONS.md `## Decided`), then codex
+with this charter, the ledger and the DECISIONS.md `## Decided` ruling index,
+each line linking its docs/adr/ file), then codex
 gpt-6-astra and claude-code fable, both at high effort, which
 `djinn triage decide` spawns. The majority decides: go removes `proposed` and
 the bead drains on the next tick; no-go closes it `declined`, and no seat
@@ -64,12 +65,12 @@ as the why, whatever the tally.
 
 - `deleting-behaviour`: deleting behaviour a user or consumer repo can see or
   depend on (a command, flag, config key, duty, label meaning, file format,
-  digest or ops output), behaviour a DECISIONS row or doc promises, or code
-  unreachable only by today's data. Deleting code unreachable by construction
-  (no non-test caller, a dead branch), proven by a caller search the bead cites
-  and each judge re-runs at HEAD, is not a hard-rule case.
+  digest or ops output), behaviour a DECISIONS.md ruling or doc promises, or
+  code unreachable only by today's data. Deleting code unreachable by
+  construction (no non-test caller, a dead branch), proven by a caller search
+  the bead cites and each judge re-runs at HEAD, is not a hard-rule case.
 - `new-scope`: new product scope.
-- `contradicts-decisions`: contradicting a DECISIONS ruling.
+- `contradicts-decisions`: contradicting a DECISIONS.md ruling.
 - `changes-how-the-workshop-decides`: changing how the workshop decides
   (formulas, approval rules, work contract).
 

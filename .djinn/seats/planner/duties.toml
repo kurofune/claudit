@@ -34,7 +34,8 @@ is one idea in the operator's words.
 
 For each message:
 
-1. Read it, then the code, docs, DECISIONS.md rows and open epics it touches
+1. Read it, then the code, docs, DECISIONS.md rulings (the ruling index;
+   each line links its docs/adr/ file) and open epics it touches
    (`bd list --type epic --status open --json`).
 2. Run /plan-to-beads in Execute Mode on the idea, under a new epic labelled
    proposed, with every emitted bead labelled proposed. Everything you file

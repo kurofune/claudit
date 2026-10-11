@@ -114,7 +114,7 @@ Triage the review follow-ups the drain filed, under the charter's
      goes to triage. Cite that search in the new bead so each judge can re-run
      it. Then `bd close <id> --reason "re-authored as <new-id>"`.
    - Anything else (new scope, deleting behaviour a user or consumer repo can
-     see or depend on or a DECISIONS row or doc promises, deleting code
+     see or depend on or a DECISIONS.md ruling or doc promises, deleting code
      unreachable only by today's data, two reasonable fixes, a matter of
      taste): leave it proposed. Append four notes, one call each,
      with `bd update <id> --append-notes`: "why: <why only the operator can
@@ -143,8 +143,9 @@ charter's ## Triage. Two more judges vote inside decide; the majority decides.
 
 1. List them: `djinn triage --list --json`. Work at most 8, oldest first; the
    rest wait for the next run ten minutes later. If it lists nothing, stop.
-2. Read once for the run: the `## Decided` section of DECISIONS.md and the
-   hard rules in the charter's ## Triage.
+2. Read once for the run: the `## Decided` ruling index of DECISIONS.md and
+   the hard rules in the charter's ## Triage. Each index line is a ruling in
+   force; open the docs/adr/ file it links when a bead touches that ruling.
 3. For each id, read `bd show <id> --json` (title, description,
    acceptance_criteria, labels, notes) and its parent's description
    (`bd show <parent-id> --json`), the brief the bead serves. Read code only
@@ -157,10 +158,10 @@ charter's ## Triage. Two more judges vote inside decide; the majority decides.
    of these four names: deleting-behaviour, new-scope, contradicts-decisions,
    changes-how-the-workshop-decides. A hard rule sends the bead to the
    operator whatever the tally. deleting-behaviour covers deleting behaviour
-   a user or consumer repo can see or depend on, behaviour a DECISIONS row or
-   doc promises, or code unreachable only by today's data; deleting code
-   unreachable by construction (no non-test caller, a dead branch) is not a
-   hard-rule case. Before voting on a deletion, re-run at HEAD every caller
+   a user or consumer repo can see or depend on, behaviour a DECISIONS.md
+   ruling or doc promises, or code unreachable only by today's data;
+   deleting code unreachable by construction (no non-test caller, a dead
+   branch) is not a hard-rule case. Before voting on a deletion, re-run at HEAD every caller
    search or data query the bead cites, and flag deleting-behaviour when the
    cited evidence does not reproduce or the deletion cites none.
 5. Then run `djinn triage decide <id>`. It spawns the other two judges,

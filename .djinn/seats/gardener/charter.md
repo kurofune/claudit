@@ -48,7 +48,8 @@ health).
 The idle backlog as the reaper reads it, open beads labelled
 review-follow-up, deferred beads labelled needs-operator with their comments,
 the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, every
-seat's charter, memory and duties with DECISIONS.md `## Decided`,
+seat's charter, memory and duties with DECISIONS.md `## Decided` (the ruling
+index; each line links its docs/adr/ file),
 `bd memories`, the Claude project memory directory
 (`~/.claude/projects/<slug>/memory/`) and `~/.codex/memories/`, the epics
 `bd epic close-eligible` lists with their children and acceptance lines, and

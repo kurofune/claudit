@@ -15,7 +15,8 @@ and finds a plan triage has decided in the morning.
 ## Inputs
 
 Mail labelled to:seat:planner, one idea per message, and the repo at HEAD:
-code, docs, DECISIONS.md and the open epics.
+code, docs, DECISIONS.md (the ruling index; each line links its docs/adr/
+file) and the open epics.
 
 ## Outputs
 
