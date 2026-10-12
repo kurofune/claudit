@@ -76,6 +76,7 @@ Embarrassing minimum outputs are the failure mode this gate exists to catch. The
 | **Verifiable by the cheapest impl?** *(structural)* | "Idempotence contract" / "well-defined behavior" / "passes correctness" — abstract nouns with no observable signature. Rewrite as `Render(Render(F))` bit-identical to `Render(F)` on every Step (named operation, named equivalence, named scope). |
 | **Precondition or trigger unstated?** *(behavioral)* | A behavioral criterion whose given-state or trigger is omitted, AND the omission changes the cheapest satisfying implementation. "Returns 401 for expired tokens" passes (the precondition "expired token" is stated); "Shows an error message" fails (error from what? the cheapest impl hard-codes one banner for one case and skips the rest). Rewrite in the compact form `Given X → Y` (`Given expired token on a protected route → 401`) or fold the precondition into the sentence. Do NOT flag criteria whose implicit precondition is unambiguous in the bead's context — this row exists for meaning-changing omissions, not ceremony. |
 | **Test assertion masquerading as user-visible outcome?** | "Test coverage for all branches" / "100% coverage" — implementation artifacts, not user-visible outcomes. (Acceptable on plumbing beads; otherwise rewrite to the user-visible behavior the test would prove.) |
+| **Epic closing line checkable at HEAD?** *(epic beads: `bead_type` is `epic`)* | A criterion predicts a measurement of a live artifact ("the live ledger ends at or under 32 KB", "the first rotating commit leaves ≤ N bytes") or asks for a sighting in a log, ledger or run ("the tick log names this repo's resync"), with no command, test or query that checks it at HEAD. A later run of something satisfies it, so no closer can prove it when the children land. Rewrite hint: "state the rule a command checks at HEAD (a test name, a grep, a bd query)". |
 
 Plumbing beads (DB migrations, single API endpoints, type definitions) are held to a lower bar: structural criteria ("endpoint returns 200 for valid input", "migration adds column FOO with type BAR NOT NULL") are sufficient. Feature beads (UI capabilities, interactive workflows, anything user-facing) MUST pass the rubric above.
 
@@ -156,7 +157,7 @@ Emit a fenced ```json``` sidecar matching the schema below. Optional Markdown pr
 - **`findings[]`** — one entry per `embarrassing` segment. Empty when verdict is `CONCRETE`. Each entry names the segment `index` (1-based), quotes the `criterion` text verbatim, describes the cheapest `minimum_output` in one sentence, and offers a one-sentence `rewrite_hint` so the caller has a concrete handle.
 - **`operator_required[]`** — one entry per criterion the **unattended autonomous harness cannot satisfy** (Step 3b). ORTHOGONAL to `verdict` and to `findings[]`: a `CONCRETE` bead can carry a non-empty `operator_required[]`, and a flagged criterion may also appear in `findings[]` if it is independently embarrassing. Empty (`[]`) for the common case. Each entry names the segment `index` (1-based), quotes the `criterion` verbatim, gives the `reason` (which trigger class — interactive-operator / external-action — and why), and the `manual_step` (what the operator does by hand). A non-empty array blocks `/create-bead` and marks the bead `OPERATOR-REQUIRED` in `summoner --preflight`.
 - **`operator_required_count`** — count of `operator_required[]` entries. `0` for the common case; equals `len(operator_required)`.
-- **`bead_type`** — the bead's `type` (`feature` | `task` | `chore` | `bug` | `epic`), echoed verbatim from `bd show` or the draft input. Echoed for the record so a reader of the sidecar sees the bead shape the review judged; not currently gated on by the check.
+- **`bead_type`** — the bead's `type` (`feature` | `task` | `chore` | `bug` | `epic`), echoed verbatim from `bd show` or the draft input. Read by the Step 3 epic closing-line row, which applies only when it is `epic`; also echoed so a reader of the sidecar sees the bead shape the review judged.
 - **`acceptance_criteria`** — the bead's raw `acceptance_criteria` text (newline-separated segments), echoed verbatim, for the same record-keeping reason as `bead_type`.
 
 ### Required tokens (skill-prompt-contract gate)
@@ -264,6 +265,39 @@ Criteria 1–5 are concrete and autonomously satisfiable — every one names an 
 
 `/create-bead` refuses to file this bead as written, and `summoner --preflight` reports it `OPERATOR-REQUIRED`, rather than letting a drain burn implementation iterations against a criterion no unattended agent can finish. This is exactly the failure the skill exists to catch cheaply: a `CONCRETE` bead that is nonetheless mode-incompatible.
 
+### Example 5 — UNDERSPEC verdict (epic closing line predicts a live figure)
+
+Draft epic (the djinn-g391a shape, before its ruling), `type` `epic`:
+
+```
+acceptance_criteria:
+  Both children are closed: bd list --parent <this epic id> --all --flat --json shows no child in any status but closed
+  After the rotation child lands, the live ledger ends at or under 32 KB
+```
+
+Criterion 1 is a check a command runs at HEAD. Criterion 2 trips the Step 3 epic closing-line row: it predicts a size the live `.djinn/seats/lead/ledger.md` reaches only after some later seat run, so the closer, working at HEAD when the children land, has nothing to run, and the line comes back weeks later as an operator question. The rewrite names the rule the rotation child's code enforces and the test that proves it:
+
+```json
+{
+  "verdict": "UNDERSPEC",
+  "bead": "draft",
+  "criteria_count": 2,
+  "embarrassing_count": 1,
+  "findings": [
+    {
+      "index": 2,
+      "criterion": "After the rotation child lands, the live ledger ends at or under 32 KB",
+      "minimum_output": "The closer cannot measure a ledger no seat run has rotated yet, so it closes on the children's word or defers the epic to the operator.",
+      "rewrite_hint": "State the rule a command checks at HEAD (a test name, a grep, a bd query): e.g. 'go test -short ./internal/djinn/seat/ -run TestRotateLedger_TodayAndYesterdayNeverMove exits 0'."
+    }
+  ],
+  "operator_required_count": 0,
+  "operator_required": [],
+  "bead_type": "epic",
+  "acceptance_criteria": "Both children are closed: bd list --parent <this epic id> --all --flat --json shows no child in any status but closed\nAfter the rotation child lands, the live ledger ends at or under 32 KB"
+}
+```
+
 ## Anti-patterns the rubric MUST catch
 
 The rubric must surface these as `UNDERSPEC` because the underlying failure mode has shipped before. Each row maps to a Case File entry in `~/.claude/commands/plan-to-beads.md` — the rubric here and the case files there are the two halves of the same defense.
@@ -276,6 +310,7 @@ The rubric must surface these as `UNDERSPEC` because the underlying failure mode
 | "Gantt timeline with dependency lines" — no Reference Standard, no hover payload, no zoom | Case 4 | Admits a static SVG picture-of-a-tool with no interactivity. |
 | "Shows a list of alerts" — no filter, sort, scale criterion | Case 5 | Admits a flat scrollable table that breaks past a few dozen rows. |
 | Empirical threshold ("under 5s", "500 ticks") with no verification surface | bead-authoring rule | Algorithmic reasoning in prose passes the criterion; no test or dogfooding step ever exercises the number. |
+| Epic closing line predicts a figure or wants a live sighting | bead-authoring rule | A later run of something satisfies it, so no closer can prove it at HEAD; the operator gets the paperwork question. |
 
 When a finding matches one of these patterns, the `rewrite_hint` should reference the case file by number (e.g. "See Case 1") so `/create-bead` has a concrete vocabulary for the tightening.
 
