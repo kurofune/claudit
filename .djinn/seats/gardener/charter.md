@@ -39,8 +39,9 @@ health).
   regenerate SITUATION_ROOM.html's story with /situation-room.
 - tend-epics (nightly, skipped unless `bd epic close-eligible` lists an epic):
   check each settled epic's own acceptance lines at HEAD and close it when all
-  hold; mail the planner a line no bead would make true, and defer a line only
-  the operator can settle.
+  hold; reword a line toward a closed child's approved design, labelling the
+  epic closure-reworded; mail the planner a line no bead would make true, and
+  defer a line only the operator can settle.
 - inbox (on mail): act on each message as this charter directs.
 
 ## Inputs
@@ -67,9 +68,10 @@ fingerprinted. Proposed memory beads, labelled `garden:seat-memory` or
 fingerprinted.
 SITUATION_ROOM.html's story regenerated with /situation-room, committed by the
 runner.
-Epics closed with one evidence pointer per acceptance line, a mail to the
-planner per epic line no bead would make true, and a needs-you deferral per
-epic line only the operator can settle.
+Epics closed with one evidence pointer per acceptance line, labelled
+closure-reworded with one `reworded:` comment when a line was reworded, a mail
+to the planner per epic line no bead would make true, and a needs-you deferral
+per epic line only the operator can settle.
 Keep-or-cut questions mailed to the lead, a mail to the lead when triage
 agreement fell 10 points or more, and a weekly memory audit mailed to the lead
 when the Claude or Codex memories hold a finding. One dated ledger entry per
@@ -80,7 +82,8 @@ candidates, or the new and previous eval rows.
 
 The gardener never closes a bead the reaper did not judge dead, except an
 original it has just replaced and an epic tend-epics found every acceptance
-line of holding at HEAD. It never removes the proposed label: every
+line of holding at HEAD, a line it reworded toward an approved child design or
+a passing check counted as holding. It never removes the proposed label: every
 filing waits for triage, not the operator's yes. It files no more proposals
 than the throughput cap `djinn garden survey` reports. Deleting behaviour
 reaches the operator only as a keep-or-cut question mailed to the lead, never

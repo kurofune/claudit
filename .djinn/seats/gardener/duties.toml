@@ -418,9 +418,17 @@ epic's own acceptance lines: every child closed is not the epic done.
    Check every acceptance line of the epic other than the one saying every
    child is closed against the repo at HEAD: read the file, run the command or
    find the commit the line names. Never take a child's closing as proof of a
-   line. Each line ends in one of four places:
+   line. Each line ends in one of five places:
    - a line that holds: note one evidence pointer for it (a file:line, a
      command and its result, or a commit).
+   - a line that a closed child's approved design contradicts (the child
+     carries triage:go, or a lead-signed ruling comment or an operator answer
+     in its notes settled the point), or whose intent a passing test or
+     command at HEAD proves: reword the line to the approved behaviour —
+     write the epic's full acceptance text with that line replaced to a file
+     and run `bd update <epic-id> --acceptance "$(cat <file>)"` — citing the
+     child and the approval; the line then holds. Reword only toward what was
+     approved: a trial never run, a dogfood walk, or a judgment only a person can make still goes to the operator.
    - a line an open bead would make true: name that bead.
    - a line no open bead would make true: send the planner one message naming
      the epic id and the unmet line, so it plans the work, and leave the epic
@@ -433,13 +441,18 @@ epic's own acceptance lines: every child closed is not the epic done.
    Add the `from:seat:gardener` label to every message you file. It names the
    seat directory, gardener, and never the display name `djinn theme show`
    prints for this seat.
-4. Close: only when every line holds, run
+4. Close: only when every line holds. When you reworded any line, first run
+   `bd update <epic-id> --add-label closure-reworded` and add one comment,
+   written to a file and sent with `bd comments add <epic-id> -f <file>`,
+   carrying one line per reworded line, the first of them
+   `reworded: <old line> → <new line> (per <child-id>, <approval>)`. Then run
    `bd close <epic-id> --reason "<one evidence pointer per line>"`.
    Otherwise leave the epic open: an unmet line, a planner message or a
    deferral never closes it.
 5. Write one dated ledger entry with one line per judged epic:
    `<epic-id> -> closed | planner <message-id> | needs-you`, joining the
-   outcomes with a comma when an epic has more than one, and
+   outcomes with a comma when an epic has more than one,
+   `<epic-id> -> closed, reworded <n> line(s)` when you reworded any, and
    `<epic-id> -> waits on <bead-id>` when an open bead would make its line
    true.
 
