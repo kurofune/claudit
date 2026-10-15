@@ -139,10 +139,10 @@ to *keep/advisory*) when ANY of these holds:
   **non-zero `UpdatedAt`** still **within its grace
   window** — `now - UpdatedAt ≤ IdleThreshold + FollowupGrace` (168h + 14d). A
   follow-up PAST the grace window is no longer protected. **Caveat (mirrors
-  `judgmentExempt`, `judgment.go:228`):** the grace check is gated on
-  `&& !UpdatedAt.IsZero()` — a follow-up with a **ZERO `UpdatedAt`** (never
-  updated) does NOT take the grace exemption; it falls through to non-exempt and
-  is judged like any other candidate.
+  `judgmentExempt`, `internal/djinn/reaper/judgment.go`):** the grace check is
+  gated on `&& !UpdatedAt.IsZero()` — a follow-up with a **ZERO `UpdatedAt`**
+  (never updated) does NOT take the grace exemption; it falls through to
+  non-exempt and is judged like any other candidate.
 
 Surface the exempt candidates in the review table as **`keep (exempt: <which
 rule>)`** so the operator sees they were considered and protected — do not
@@ -189,7 +189,8 @@ Two guardrails carried over from the scriptable edge:
   confusion, or a crafted description), the verdict is **not attributable** —
   leave that candidate untouched (keep), do not close it on another bead's verdict.
   A **BLANK** sidecar `bead` is **tolerated** (the skill simply omitted it) — only
-  a **present-and-different** id is non-attributable (mirrors `judge.go:168`:
+  a **present-and-different** id is non-attributable (mirrors
+  `parseFreshnessVerdict` in `cmd/reaper/judge.go`:
   `sb != "" && sb != candidateID`).
 
 A candidate `/freshness-triage` cannot judge (skill error, no parseable sidecar)
