@@ -387,8 +387,9 @@ lexicographically**, so `iter-10` ranks above `iter-9` (a string compare would
 wrongly pick `iter-9`, re-running a completed iteration on any 10+-iteration rework
 bead) — and **re-run only that unfinished iteration**,
 continuing the §4c cycle from there with `N` set to that highest recorded index. This
-mirrors the autonomous anchored-iter resume (`resume.go` sets `s.iter = anchor.IterIndex`
-rather than restarting at iter 1) — the interactive loop driver resumes at the highest
+mirrors the autonomous anchored-iter resume
+(`internal/djinn/session/resume.go` sets `s.iter = anchor.IterIndex` rather than
+restarting at iter 1) — the interactive loop driver resumes at the highest
 on-disk `iter-<N>` rather than re-running iterations that already completed.
 
 Once the resume target is identified, hand control to the Step 3 walk **starting at
@@ -1108,8 +1109,8 @@ stopped the walk when this machine cannot honor the choice.
     |---|---|
     | `review` | `skills/review/SKILL.md` |
 
-    `procbind.go` is canonical — read the mapping there if it and this table
-    ever disagree. Resolve the path from the step's `prompt` binding, not its
+    `internal/djinn/runtime/procbind.go` is canonical — read the mapping there
+    if it and this table ever disagree. Resolve the path from the step's `prompt` binding, not its
     `id`: a renamed step id points at a directory that does not exist, and
     hands codex an empty rubric with no error.
 
