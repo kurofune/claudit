@@ -1121,10 +1121,25 @@ interactive realization of the formula's per-step knob. Two consequences:
   **`-s read-only` is for procedure/review steps only.** A read-only step
   (`review`) passes `-s read-only`,
   matching the "Do not modify code" clause its prompt closes with. A **WRITE**
-  step — `implement`, and any `fix-*` resolved to the codex adapter — **omits
-  `-s read-only` entirely** and inherits whatever sandbox the operator's
-  `~/.codex/config.toml` sets. Passing `-s read-only` to a write step would
-  leave it unable to do the one thing it exists to do.
+  step — `implement`, and any `fix-*` resolved to the codex adapter — passes
+  **`-s danger-full-access -c approval_policy=never`** in its place, the
+  policy the drain gives the same steps (`CapabilityDefault`,
+  `internal/djinn/runtime/codex/profile.go`):
+
+  ```bash
+  codex exec --skip-git-repo-check -C "<worktree>" \
+    -m "<resolved model>" -c model_reasoning_effort="<resolved effort>" \
+    -s danger-full-access -c approval_policy=never \
+    --json -o "$OUT/last-message.md" - \
+    < "$OUT/prompt.txt" > "$OUT/rollout.jsonl" 2> "$OUT/stderr.log"
+  ```
+
+  Never leave a write step's sandbox off the argv: codex then falls back to
+  `~/.codex/config.toml`, read-only on a fresh install, and even
+  `workspace-write` cannot write a linked worktree's index under the main
+  repo's `.git/worktrees/` or the beads database, so `git add` fails on
+  `index.lock` and the step cannot commit. Never retry a failed write step
+  with a different sandbox either; the argv above is the only one.
 
   **The prompt — procedure steps.** Build it on disk in the exact shape
   `buildCodexProcedurePrompt` builds
