@@ -2,11 +2,10 @@
 
 Pointers only — what exists and where.
 
-## State & front door
+## State
 
 - `CURRENT.md` — live state (mode, goal, checkpoints)
 - `DECISIONS.md` — settled choices + open questions
-- `SITUATION_ROOM.html` — generated director brief (via the `situation-room` skill; never hand-edit)
 - `AGENTS.md` / `CLAUDE.md` — how to work here; TDD policy is user-global (`~/.agents/AGENTS.md`)
 
 ## Code
