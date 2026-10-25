@@ -790,6 +790,27 @@ func TestCostAt_Haiku55PromptOverThresholdPricesEveryTokenLong(t *testing.T) {
 	}
 }
 
+func TestCostAt_Haiku55CacheWritesCountTowardThreshold(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name         string
+		cw5m, cw1h   int
+		wantPerMToks float64
+	}{
+		{"5m writes cross", 50_001, 0, 50_000*0.50 + 1_000*2.50 + 50_001*0.625},
+		{"1h writes cross", 0, 50_001, 50_000*0.50 + 1_000*2.50 + 50_001*1.00},
+	} {
+		cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 50_000, 1_000, tc.cw5m, tc.cw1h, 0, "")
+		want := tc.wantPerMToks / 1_000_000
+		if !known || math.Abs(cost-want) > 1e-9 {
+			t.Errorf("%s: cost=%v known=%v, want %v", tc.name, cost, known, want)
+		}
+	}
+}
+
 func TestCostAt_Haiku55OutputDoesNotCountTowardThreshold(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
