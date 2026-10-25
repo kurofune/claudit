@@ -4,6 +4,12 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.9.2] — 2026-10-24
+
+Pricing refresh against the live pricing page on 2026-10-24: **Claude Haiku 5.5** is added, and the **Sonnet 5.5 cache-read cut** of 2026-10-07 is applied. Every other rate on the page was re-checked and is unchanged.
+
+**Upgrade if you run Haiku 5.5 or Sonnet 5.5.** v1.9.1 and earlier price every Haiku 5.5 turn at **$0** and over-report Sonnet 5.5 cache reads since 2026-10-07 by 2x.
+
 ### Added
 
 - **Pricing: Claude Haiku 5.5, with a prompt-length price tier.** `claude-haiku-5-5` and `claude-haiku-5-5[1m]` are added. Haiku 5.5 is priced by prompt length: a request whose prompt (input + cache reads + cache writes) is up to 100,000 tokens pays $0.10 input / $0.50 output, with 5m/1h cache writes of $0.125 / $0.20 and cache hits at $0.01/MTok; a prompt over 100,000 tokens pays $0.50 input / $2.50 output, with 5m/1h cache writes of $0.625 / $1.00 and cache hits at $0.05/MTok, on every token of that request, output included. Each turn is priced on its own. `prices.yaml` gains an optional `long_prompt:` block (`threshold_tokens` plus the five rate fields) to express this; fast mode still wins over it. Before this, every Haiku 5.5 turn landed in `unknown_models` and added **$0** to reported spend.
@@ -343,7 +349,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.2...HEAD
+[1.9.2]: https://github.com/kurofune/claudit/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/kurofune/claudit/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/kurofune/claudit/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/kurofune/claudit/compare/v1.8.1...v1.8.2
