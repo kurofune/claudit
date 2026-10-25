@@ -37,3 +37,10 @@ go.work
 # Djinn (added by djinn init)
 .djinn/seats/*/runs/
 .djinn/needs-you-seen.json
+
+# Djinn (added by djinn init)
+.djinn/summoner-logs/
+.djinn/summoner-state.json
+.djinn/summoner-runs.jsonl
+.djinn/ops/
+.djinn/drain.out
