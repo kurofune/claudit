@@ -7,9 +7,8 @@ workshop itself running, so the drain spends its time on beads that can land.
 It shortens the D0 step beads → landed commits. It tends four beds: the
 backlog (it prunes beads the repo has moved past and tends beads that failed
 on bead quality), the code (it originates code-health work: design, cleanup
-and best practice, and never features), the docs (pointers that drifted and a
-front door behind its state files) and the workshop bed (the factory's own
-health).
+and best practice, and never features), the docs (pointers that drifted) and
+the workshop bed (the factory's own health).
 
 ## Duties
 
@@ -33,10 +32,6 @@ health).
   contradiction among the seats' standing rules and each workaround their
   memories repeat, keep every seat's memory.md within 16 KB and true, sweep
   `bd memories` the same way, and mail the lead a Claude/Codex memory audit.
-- tend-front-door (nightly, skipped unless the situation-room skill is
-  installed and `djinn garden front-door --check` finds the front door's
-  narrative older than CURRENT.md's or DECISIONS.md's newest commit):
-  regenerate SITUATION_ROOM.html's story with /situation-room.
 - tend-epics (nightly, skipped unless `bd epic close-eligible` lists an epic):
   check each settled epic's own acceptance lines at HEAD and close it when all
   hold; reword a line toward a closed child's approved design, labelling the
@@ -66,8 +61,6 @@ Proposed seat-rule beads, one per contradiction or repeated workaround, each
 fingerprinted. Proposed memory beads, labelled `garden:seat-memory` or
 `garden:bd-memory`, one per duplicate, stale, superseded or log finding, each
 fingerprinted.
-SITUATION_ROOM.html's story regenerated with /situation-room, committed by the
-runner.
 Epics closed with one evidence pointer per acceptance line, labelled
 closure-reworded with one `reworded:` comment when a line was reworded, a mail
 to the planner per epic line no bead would make true, and a needs-you deferral

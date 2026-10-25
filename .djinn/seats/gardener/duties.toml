@@ -213,9 +213,6 @@ Turn the docs survey's findings into proposals the drain can land.
    - stale-pointer: the path the doc means now (`git log --follow` or the
      symbol's new home), or deleting the line when the thing is gone.
    - stale-line: the line the pointer means now, or the pointer without one.
-   - stale-front-door: the CURRENT.md and DECISIONS.md changes the front
-     door's story has not told yet; the fix regenerates it with
-     /situation-room.
 3. File: author each new finding through /create-bead, in survey order, with
    the labels `proposed`, `from:seat:gardener`, `garden:docs`,
    `garden:<category>` and `garden-fp:<fingerprint>`. Its description names
@@ -363,35 +360,6 @@ the workarounds the seats keep repeating, and propose one fix for each.
    `memory audit: claude <n> files, codex <m> files, <k> findings, mail <id or none>`.
 
 Never remove the proposed label from any bead. Edit no seat file, doc or code.
-"""
-
-[[duty]]
-name = "tend-front-door"
-schedule = "daily 04:15"
-# Free check, no model: run the duty only when the situation-room skill is
-# installed and SITUATION_ROOM.html's narrative-date slot is earlier than the
-# newest commit date of CURRENT.md or DECISIONS.md.
-check = "test -e \"$HOME/.claude/skills/situation-room/SKILL.md\" && djinn garden front-door --check"
-max_cost_usd = 10.0
-# The runner commits the regenerated page with the ledger.
-commits = ["SITUATION_ROOM.html"]
-prompt = """
-Regenerate the front door's story: CURRENT.md or DECISIONS.md moved past the
-day SITUATION_ROOM.html's narrative was written.
-
-1. Regenerate: run /situation-room. It rewrites the page's narrative from the
-   state files and stamps its narrative-date slot. When the skill is
-   unavailable, write that as your ledger line and stop.
-2. Confirm: the page's narrative-date slot
-   (`grep -o 'data-sr="narrative-date">[^<]*' SITUATION_ROOM.html`) reads
-   today's date. When it does not, name the date it reads in your ledger
-   line.
-3. Write one dated ledger line: the narrative-date the page carried before,
-   the one it carries now, and the state files whose commits moved past it.
-
-Edit none of CURRENT.md, DECISIONS.md or CONTEXT_MAP.md: the page tells their
-story and never changes it. Edit no other file, and commit nothing: the runner
-commits SITUATION_ROOM.html with your ledger.
 """
 
 [[duty]]
