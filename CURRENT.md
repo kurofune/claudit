@@ -7,19 +7,14 @@
 Anthropic's published rates, the parser current with Claude Code's JSONL schema.
 Ship fixes and small features as they earn their place.
 
-**Last change:** v1.9.1 (2026-10-02) — Sonnet 5.5 rate card added ($2 / $10,
-same as Sonnet 5); rest of the pricing page re-checked, unchanged. Removed
-`watch --notify`. Previous release: v1.9.0 (2026-09-24) fast-mode pricing via
-`message.usage.speed`.
+**Last change:** 2026-10-24 (unreleased on main) — Haiku 5.5 added with its >100K-token prompt tier; Sonnet 5.5 cache reads $0.20 → $0.10 from 2026-10-07; rest of the pricing page re-checked, unchanged.
 
 **Assumptions:**
-- No bundled model needs rate history right now; the mechanism stays because the
-  next real rate change will. Users on v1.8.0 or earlier over-report Sonnet 5
-  spend by 50% from 2026-09-01 until they upgrade.
+- Sonnet 5.5 is the first bundled model with rate history (`rates:` until 2026-10-06); Haiku 5.5 is the first with a prompt-length tier (`long_prompt:`). Users on v1.9.1 or earlier price Haiku 5.5 at $0 and over-report Sonnet 5.5 cache reads.
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** None scheduled. Next trigger is upstream: new Anthropic
+**Next checkpoint:** Cut v1.9.2 with the two pricing fixes. Next trigger is upstream: new Anthropic
 rates, or a Claude Code JSONL schema change.
 
 **Stop conditions:**
