@@ -41,8 +41,8 @@ the workshop bed (the factory's own health).
 
 ## Inputs
 
-The idle backlog as the reaper reads it, open beads labelled
-review-follow-up, deferred beads labelled needs-operator with their comments,
+The idle backlog as the reaper reads it, deferred beads labelled
+needs-operator with their comments,
 the candidates `djinn garden survey` raises, .djinn/triage/evals.tsv, every
 seat's charter, memory and duties with DECISIONS.md `## Decided` (the ruling
 index; each line links its docs/adr/ file),

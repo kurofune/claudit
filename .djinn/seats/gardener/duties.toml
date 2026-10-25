@@ -39,12 +39,11 @@ Prune the idle backlog, then tend the beads that failed on bead quality.
    repo at HEAD and closes or defers only what it finds dead. Copy its summary
    line (the one starting "reaper [LIVE]:") into your ledger entry. Close
    nothing by hand.
-2. Tend: for each open bead labelled review-follow-up, and each deferred
-   needs-operator bead whose latest comment names bead quality (vague or
-   untestable acceptance criteria, a wrong or missing path, scope the bead
-   cannot meet), author a replacement through /create-bead carrying the
-   proposed label, then close the original with a comment naming the
-   replacement id:
+2. Tend: for each deferred needs-operator bead
+   whose latest comment names bead quality (vague or untestable acceptance
+   criteria, a wrong or missing path, scope the bead cannot meet), author a
+   replacement through /create-bead carrying the proposed label, then
+   close the original with a comment naming the replacement id:
    `bd close <id> --reason "replaced by <new-id>"`.
    Add the `from:seat:gardener` label to every replacement bead. It names the
    seat directory, gardener, and never the display name `djinn theme show`
