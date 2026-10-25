@@ -147,6 +147,35 @@ is a flat current rate; `rates:` history applies only to standard pricing.
 Overlays replace the entire model, including `fast:` and `rates:`; omitting
 `fast:` in an override removes that model's bundled fast rates.
 
+### Long-prompt rates
+
+Some models charge more for long prompts. An optional `long_prompt:` block
+holds `threshold_tokens` plus the same five per-million-token USD fields. When
+a standard-speed turn's prompt (input + cache reads + cache writes) is over the
+threshold, every token in that turn, output included, prices at the block's
+rates. Output tokens never count toward the threshold. Each turn is checked on
+its own, and fast mode wins over the tier. Bundled Haiku 5.5 uses it:
+
+```yaml
+models:
+  claude-haiku-5-5:
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    cache_read_per_mtok: 0.01
+    cache_write_5m_per_mtok: 0.125
+    cache_write_1h_per_mtok: 0.20
+    long_prompt:
+      threshold_tokens: 100000
+      input_per_mtok: 0.50
+      output_per_mtok: 2.50
+      cache_read_per_mtok: 0.05
+      cache_write_5m_per_mtok: 0.625
+      cache_write_1h_per_mtok: 1.00
+```
+
+Like `fast:`, the tier is a flat current rate, and an overlay that omits
+`long_prompt:` removes the model's bundled tier.
+
 ### Rates that change over time
 
 claudit prices *historical* sessions, so a rate change isn't a simple edit: bump the number and old turns re-price at rates that were never charged; leave it and new turns are wrong. A model's top-level fields are therefore the rate in effect **now**, and an optional `rates:` list holds what came before:

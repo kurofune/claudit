@@ -40,18 +40,27 @@ type RatePeriod struct {
 	Rate  `yaml:",inline"`
 }
 
+// LongPromptRate is the Rate a request pays on every token, output included,
+// when its prompt (input plus cache reads and writes) exceeds ThresholdTokens.
+type LongPromptRate struct {
+	ThresholdTokens int `yaml:"threshold_tokens"`
+	Rate            `yaml:",inline"`
+}
+
 // ModelPrice is a model's current rate plus, optionally, the rates that
 // applied before it. The rate fields sit at the top level so the original
 // flat form keeps parsing unchanged. Rates holds standard-rate history;
-// Fast is an optional current fast-mode rate, with no rate history.
+// Fast is an optional current fast-mode rate, with no rate history;
+// LongPrompt is an optional current prompt-length tier for standard turns.
 //
 // Periods may be listed in any order — the lookup picks the narrowest one
 // covering the timestamp, so neither oldest-first nor newest-first is
 // privileged.
 type ModelPrice struct {
-	Rate  `yaml:",inline"`
-	Rates []RatePeriod `yaml:"rates"`
-	Fast  *Rate        `yaml:"fast"`
+	Rate       `yaml:",inline"`
+	Rates      []RatePeriod    `yaml:"rates"`
+	Fast       *Rate           `yaml:"fast"`
+	LongPrompt *LongPromptRate `yaml:"long_prompt"`
 }
 
 // RateAt returns the rate in effect for ts. It picks the period with the
@@ -90,7 +99,9 @@ type Table struct {
 // CostAt returns total USD for the given token counts, priced at the rate in
 // effect for ts. Unknown models return cost=0 and known=false so the caller
 // can warn. Only speed "fast" selects the optional Fast rate; every other
-// speed, or a missing Fast rate, uses standard date-effective pricing.
+// speed, or a missing Fast rate, uses standard date-effective pricing,
+// unless the prompt exceeds the model's LongPrompt threshold — then the
+// tier's rate prices the whole turn. Fast wins over LongPrompt.
 // A zero ts prices at the model's current rate — see RateAt.
 func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cacheCreate1h, cacheRead int, speed string) (cost float64, known bool) {
 	p, ok := t.Models[model]
@@ -98,8 +109,12 @@ func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cache
 		return 0, false
 	}
 	r := p.RateAt(ts)
-	if speed == "fast" && p.Fast != nil {
+	prompt := in + cacheCreate5m + cacheCreate1h + cacheRead
+	switch {
+	case speed == "fast" && p.Fast != nil:
 		r = *p.Fast
+	case p.LongPrompt != nil && prompt > p.LongPrompt.ThresholdTokens:
+		r = p.LongPrompt.Rate
 	}
 	const m = 1_000_000.0
 	cost = float64(in)*r.Input/m +

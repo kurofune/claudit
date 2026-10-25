@@ -3,7 +3,7 @@
 # Every rate below was re-verified against
 # https://platform.claude.com/docs/en/about-claude/pricing on 2026-09-01
 # (Fable 5.1 / Mythos 5.1 added then); Opus 5.5 added 2026-09-23; Sonnet 5.5
-# added and the full page re-checked 2026-10-02. Entries
+# added and the full page re-checked 2026-10-02; Haiku 5.5 added 2026-10-23. Entries
 # are tagged with the date they were last checked — refresh those tags if you
 # re-check the page.
 #
@@ -20,6 +20,11 @@
 # just a context-mode marker, not a pricing tier, so we list those at the same
 # prices as their base model.
 #
+# Exception: Haiku 5.5 is priced by prompt length. A request whose prompt
+# (input + cache reads + cache writes) is over 100,000 tokens pays the higher
+# card on all of its tokens, output included; each request is priced on its
+# own. Its "[1m]" id carries the same two cards as the base id.
+#
 # Rate changes: a model's top-level fields are the rate in effect *now*.
 # When a rate changes, move the outgoing rate into a `rates:` entry tagged
 # with the last date it applied (inclusive, UTC) and update the top-level
@@ -30,6 +35,12 @@
 # Fast mode: message.usage.speed == "fast" selects the model's `fast:` block.
 # It carries current rates only; `rates:` periods govern standard pricing.
 # Cache ratios apply to the fast input rate as well.
+#
+# Long prompts: an optional `long_prompt:` block holds `threshold_tokens` plus
+# a full set of rate fields. A standard-speed turn whose prompt (input + cache
+# reads + cache writes) exceeds the threshold prices every token, output
+# included, at that block's rates. Output never counts toward the threshold.
+# Fast mode wins over the tier; like `fast:`, it carries current rates only.
 
 models:
   # ── Fable 5.1 / Mythos 5.1 — $10 / $50 base, 0.025x cache reads ──
@@ -277,6 +288,36 @@ models:
     cache_read_per_mtok: 0.10
     cache_write_5m_per_mtok: 1.25
     cache_write_1h_per_mtok: 2.00
+
+  # ── Haiku 5.5 — $0.10 / $0.50 base, $0.50 / $2.50 over 100K prompt tokens ──
+  # The one prompt-length-tiered card: see "Exception" in the header.
+  claude-haiku-5-5:                 # verified 2026-10-23
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    cache_read_per_mtok: 0.01
+    cache_write_5m_per_mtok: 0.125
+    cache_write_1h_per_mtok: 0.20
+    long_prompt:                    # prompts over 100K tokens price every token here
+      threshold_tokens: 100000
+      input_per_mtok: 0.50
+      output_per_mtok: 2.50
+      cache_read_per_mtok: 0.05
+      cache_write_5m_per_mtok: 0.625
+      cache_write_1h_per_mtok: 1.00
+
+  "claude-haiku-5-5[1m]":           # verified 2026-10-23 — same tiered card as the base id
+    input_per_mtok: 0.10
+    output_per_mtok: 0.50
+    cache_read_per_mtok: 0.01
+    cache_write_5m_per_mtok: 0.125
+    cache_write_1h_per_mtok: 0.20
+    long_prompt:                    # prompts over 100K tokens price every token here
+      threshold_tokens: 100000
+      input_per_mtok: 0.50
+      output_per_mtok: 2.50
+      cache_read_per_mtok: 0.05
+      cache_write_5m_per_mtok: 0.625
+      cache_write_1h_per_mtok: 1.00
 
   # ── Legacy models (pre-Opus-4.5) ──
   # Keyed on the dated ids Claude Code wrote into old transcripts (the

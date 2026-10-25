@@ -2,6 +2,12 @@
 
 All notable changes to claudit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Pricing: Claude Haiku 5.5, with a prompt-length price tier.** `claude-haiku-5-5` and `claude-haiku-5-5[1m]` are added. Haiku 5.5 is priced by prompt length: a request whose prompt (input + cache reads + cache writes) is up to 100,000 tokens pays $0.10 input / $0.50 output, with 5m/1h cache writes of $0.125 / $0.20 and cache hits at $0.01/MTok; a prompt over 100,000 tokens pays $0.50 input / $2.50 output, with 5m/1h cache writes of $0.625 / $1.00 and cache hits at $0.05/MTok, on every token of that request, output included. Each turn is priced on its own. `prices.yaml` gains an optional `long_prompt:` block (`threshold_tokens` plus the five rate fields) to express this; fast mode still wins over it. Before this, every Haiku 5.5 turn landed in `unknown_models` and added **$0** to reported spend.
+
 ## [1.9.1] — 2026-10-02
 
 Pricing refresh against the live pricing page on 2026-10-02: **Claude Sonnet 5.5** is added. Every other rate on the page was re-checked and is unchanged.

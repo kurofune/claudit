@@ -725,3 +725,132 @@ func TestLoad_FastOverlayReplacesModel(t *testing.T) {
 		}
 	}
 }
+
+func TestDefault_Haiku55(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Haiku 5.5 is priced by prompt length: prompts over 100,000 tokens pay
+	// the long-prompt card on every token, output included.
+	for _, m := range []string{
+		"claude-haiku-5-5",
+		"claude-haiku-5-5[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 0.10 || p.Output != 0.50 {
+			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
+		}
+		if p.CacheRead != 0.01 || p.CacheWrite5m != 0.125 || p.CacheWrite1h != 0.20 {
+			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
+		}
+		if p.LongPrompt == nil {
+			t.Errorf("%s missing long_prompt tier", m)
+			continue
+		}
+		lp := p.LongPrompt
+		if lp.ThresholdTokens != 100_000 {
+			t.Errorf("%s long_prompt threshold = %d, want 100000", m, lp.ThresholdTokens)
+		}
+		if lp.Input != 0.50 || lp.Output != 2.50 {
+			t.Errorf("%s long_prompt base rates wrong: %+v", m, lp.Rate)
+		}
+		if lp.CacheRead != 0.05 || lp.CacheWrite5m != 0.625 || lp.CacheWrite1h != 1.00 {
+			t.Errorf("%s long_prompt cache rates wrong: %+v", m, lp.Rate)
+		}
+	}
+}
+
+func TestCostAt_Haiku55PromptAtThresholdPricesStandard(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 40_000, 10_000, 5_000, 5_000, 50_000, "")
+	if !known || math.Abs(cost-0.011125) > 1e-9 {
+		t.Errorf("cost=%v known=%v, want $0.011125", cost, known)
+	}
+}
+
+func TestCostAt_Haiku55PromptOverThresholdPricesEveryTokenLong(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10,001 input + 90,000 cache reads = 100,001 prompt tokens; the 1,000
+	// output tokens pay the long-prompt output rate too.
+	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 10_001, 1_000, 0, 0, 90_000, "")
+	want := (10_001*0.50 + 90_000*0.05 + 1_000*2.50) / 1_000_000
+	if !known || math.Abs(cost-want) > 1e-9 {
+		t.Errorf("cost=%v known=%v, want %v", cost, known, want)
+	}
+}
+
+func TestCostAt_Haiku55OutputDoesNotCountTowardThreshold(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 1_000, 200_000, 0, 0, 0, "")
+	want := (1_000*0.10 + 200_000*0.50) / 1_000_000
+	if !known || math.Abs(cost-want) > 1e-9 {
+		t.Errorf("cost=%v known=%v, want %v", cost, known, want)
+	}
+}
+
+func TestCostAt_FastWinsOverLongPrompt(t *testing.T) {
+	tab := &Table{Models: map[string]ModelPrice{
+		"tiered": {
+			Rate:       Rate{Input: 1, Output: 2},
+			Fast:       &Rate{Input: 8, Output: 40},
+			LongPrompt: &LongPromptRate{ThresholdTokens: 100, Rate: Rate{Input: 3, Output: 6}},
+		},
+	}}
+	cost, known := tab.CostAt("tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
+	if !known || cost != 48 {
+		t.Errorf("fast: cost=%v known=%v, want $48", cost, known)
+	}
+	cost, _ = tab.CostAt("tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
+	if cost != 9 {
+		t.Errorf("standard over threshold: cost=%v, want $9", cost)
+	}
+}
+
+func TestLoad_UserFileWithLongPromptTier(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prices.yaml")
+	userYAML := `models:
+  my-tiered-model:
+    input_per_mtok: 1
+    output_per_mtok: 5
+    long_prompt:
+      threshold_tokens: 200000
+      input_per_mtok: 2
+      output_per_mtok: 10
+      cache_read_per_mtok: 0.2
+      cache_write_5m_per_mtok: 2.5
+      cache_write_1h_per_mtok: 4
+`
+	if err := os.WriteFile(path, []byte(userYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := tab.Models["my-tiered-model"]
+	if !ok {
+		t.Fatal("my-tiered-model not added")
+	}
+	if p.LongPrompt == nil {
+		t.Fatal("long_prompt tier not loaded")
+	}
+	want := LongPromptRate{ThresholdTokens: 200_000, Rate: Rate{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite5m: 2.5, CacheWrite1h: 4}}
+	if *p.LongPrompt != want {
+		t.Errorf("long_prompt = %+v, want %+v", *p.LongPrompt, want)
+	}
+}
