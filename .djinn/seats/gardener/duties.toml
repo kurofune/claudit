@@ -106,17 +106,20 @@ Never remove the proposed label from any bead. Edit no code.
 [[duty]]
 name = "tend-workshop"
 schedule = "daily 02:30"
-# Free check, no model: `djinn slow-watch` starts the nightly slow tier and
-# exits 0 when the latest finished run is red and not handed off; otherwise
-# run the duty when a vendored skill's upstream moved past its pin (repos
+# Free check, no model: `djinn dolt-tend` restarts the beads Dolt server
+# around a `dolt gc --full` at most weekly on a quiet repo and exits 0 when
+# that failed, or while a failure waits for `--handed-off`; `djinn slow-watch` starts the nightly slow tier and exits 0
+# when the latest finished run is red and not handed off; otherwise run the
+# duty when a vendored skill's upstream moved past its pin (repos
 # carrying scripts/sync-vendored-skills.sh, with no bump bead open yet) or a
 # workshop candidate survives the guards.
-check = "djinn slow-watch || { [ -x scripts/sync-vendored-skills.sh ] && ! bd list --label garden:vendor-bump -n 1 --json | grep -q '\"id\"' && { scripts/sync-vendored-skills.sh --check >/dev/null 2>&1; [ $? -eq 1 ]; }; } || djinn garden survey --bed workshop --check"
+check = "djinn dolt-tend || djinn slow-watch || { [ -x scripts/sync-vendored-skills.sh ] && ! bd list --label garden:vendor-bump -n 1 --json | grep -q '\"id\"' && { scripts/sync-vendored-skills.sh --check >/dev/null 2>&1; [ $? -eq 1 ]; }; } || djinn garden survey --bed workshop --check"
 max_cost_usd = 10.0
 prompt = """
 Tend the workshop's own health: file the slow-tier breaks the nightly local run
-found, turn the workshop survey's candidates into proposals, then propose a
-bump for each vendored skill whose upstream moved past its pin.
+found, turn the workshop survey's candidates into proposals, propose a bump for
+each vendored skill whose upstream moved past its pin, then file a failed
+weekly Dolt server restart and gc.
 
 Every bead you file carries the `proposed` and `from:seat:gardener` labels.
 The `from:seat:gardener` label names the seat directory, gardener, and never
@@ -155,8 +158,10 @@ the display name `djinn theme show` prints for this seat.
      .djinn/slow-watch logs and bring the tier back under its median.
    - flaky-test: make the test deterministic; its criterion is that
      `go test -tags=slow -count=5 -run '<TestName>' ./<file>` exits 0.
-   - dolt-size: compact the store (`bd gc`, or `dolt gc` with writers stopped)
-     until .beads/dolt is under 500 MB.
+   - dolt-size: compact the store with writers stopped — `bd dolt stop`,
+     `dolt gc --full` in .beads/dolt/<db>, `bd dolt start`, as `djinn
+     dolt-tend` does weekly — until .beads/dolt is under 500 MB. Never `bd gc`:
+     it squashes Dolt history and deletes closed beads older than 90 days.
    - stale-binary: find why the workshop tick's reinstall left it behind and
      fix that; name `go install ./cmd/djinn ./cmd/summoner` in the description
      as the operator's interim step.
@@ -183,10 +188,25 @@ the display name `djinn theme show` prints for this seat.
    `go run ./cmd/djinn-gen-adapters --theme djinn --adapter claude-code`; its
    acceptance criteria are that core/vendor/<skill>.pin names
    `commit=<new-sha>` and `go test -short ./...` exits 0.
-5. Write one dated ledger entry: the slow-tier run you handed off (or none),
+5. Dolt store: run `djinn dolt-tend`. Exit 1: nothing failed (it ran
+   successfully and wrote its own ledger entry, or had nothing to do); file
+   nothing. Exit 0: it prints `dolt-tend:` lines naming the failing command
+   and its stderr, or the issue counts before and after that differ. A failed
+   run's lines stay pending, so this prints the failure this duty's check saw,
+   even when the server is still down. First look for an open bead that
+   already names it: `bd search "dolt-tend" --status open`. When one does, add
+   one comment to it with today's date and the printed lines, and file
+   nothing. Otherwise file one bead through /create-bead, labelled `proposed`,
+   `from:seat:gardener` and `garden:dolt-tend`: the printed lines verbatim as
+   evidence, and an acceptance criterion that `djinn dolt-tend` on a quiet
+   repo exits 1 and appends a dolt-tend entry to this ledger. Then run
+   `djinn dolt-tend --handed-off`, only after the comment or bead exists.
+   Never run `bd gc`, and never run `bd dolt stop` or `dolt gc` yourself.
+6. Write one dated ledger entry: the slow-tier run you handed off (or none),
    each break (bead id filed, or the open bead you commented on), each filed
-   candidate (fingerprint -> bead id), and the vendored-skill check (current,
-   the bump bead filed, the open bump bead, or its error).
+   candidate (fingerprint -> bead id), the vendored-skill check (current,
+   the bump bead filed, the open bump bead, or its error), and the dolt-tend
+   result (nothing failed, the bead filed, or the open bead you commented on).
 
 Never remove the proposed label from any bead. Never edit code, run the tests
 yourself, run a drain, or commit anything.
