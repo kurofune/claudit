@@ -192,8 +192,9 @@ func TestDefault_Sonnet55(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sonnet 5.5 shares Sonnet 5's card: $2 input / $10 output, cache rates
-	// on the standard ratios off the $2 input rate.
+	// Sonnet 5.5 is $2 input / $10 output with standard cache writes. Cache
+	// hits were cut from 0.10x input ($0.20) to 0.05x ($0.10) on 2026-10-07;
+	// the old card is kept as a period ending 2026-10-06.
 	for _, m := range []string{
 		"claude-sonnet-5-5",
 		"claude-sonnet-5-5[1m]",
@@ -206,9 +207,53 @@ func TestDefault_Sonnet55(t *testing.T) {
 		if p.Input != 2.00 || p.Output != 10.00 {
 			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
 		}
-		if p.CacheRead != 0.20 || p.CacheWrite5m != 2.50 || p.CacheWrite1h != 4.00 {
+		if p.CacheRead != 0.10 || p.CacheWrite5m != 2.50 || p.CacheWrite1h != 4.00 {
 			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
 		}
+		if len(p.Rates) != 1 {
+			t.Errorf("%s: want 1 historical rate period, got %d", m, len(p.Rates))
+			continue
+		}
+		old := p.Rates[0]
+		if got := old.Until.Format("2006-01-02"); got != "2026-10-06" {
+			t.Errorf("%s: period until = %s, want 2026-10-06", m, got)
+		}
+		want := Rate{Input: 2.00, Output: 10.00, CacheRead: 0.20, CacheWrite5m: 2.50, CacheWrite1h: 4.00}
+		if old.Rate != want {
+			t.Errorf("%s: pre-cut rate = %+v, want %+v", m, old.Rate, want)
+		}
+	}
+}
+
+// 1M Sonnet 5.5 cache reads cost $0.20 through 2026-10-06 and $0.10 from the
+// 2026-10-07 cut on.
+func TestCostAt_Sonnet55CacheReadCut(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		ts   string
+		want float64
+	}{
+		{"2026-10-06T23:59:59Z", 0.20},
+		{"2026-10-07T00:00:00Z", 0.10},
+	} {
+		cost, known := tab.CostAt("claude-sonnet-5-5", mustTime(t, tc.ts), 0, 0, 0, 0, 1_000_000, "")
+		if !known || math.Abs(cost-tc.want) > 1e-9 {
+			t.Errorf("sonnet-5-5 cache read at %s: cost=%v known=%v, want %v", tc.ts, cost, known, tc.want)
+		}
+	}
+}
+
+func TestCostAt_Sonnet55ZeroTimestampUsesCurrentCacheRead(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cost, known := tab.CostAt("claude-sonnet-5-5", time.Time{}, 0, 0, 0, 0, 1_000_000, "")
+	if !known || math.Abs(cost-0.10) > 1e-9 {
+		t.Errorf("sonnet-5-5 cache read at zero ts: cost=%v known=%v, want 0.10", cost, known)
 	}
 }
 

@@ -3,7 +3,8 @@
 # Every rate below was re-verified against
 # https://platform.claude.com/docs/en/about-claude/pricing on 2026-09-01
 # (Fable 5.1 / Mythos 5.1 added then); Opus 5.5 added 2026-09-23; Sonnet 5.5
-# added and the full page re-checked 2026-10-02; Haiku 5.5 added 2026-10-23. Entries
+# added and the full page re-checked 2026-10-02; Haiku 5.5 added 2026-10-23;
+# Sonnet 5.5 cache-read cut (2026-10-07) applied 2026-10-24. Entries
 # are tagged with the date they were last checked — refresh those tags if you
 # re-check the page.
 #
@@ -12,7 +13,8 @@
 #   cache_write_5m = input * 1.25
 #   cache_write_1h = input * 2.00
 # Exceptions: Fable 5.1 and Mythos 5.1 price cache hits at 0.025x input
-# ($0.25/MTok), and Opus 5.5 at 0.05x input ($0.20/MTok), not 0.10x.
+# ($0.25/MTok), not 0.10x.
+# Opus 5.5 ($0.20/MTok) and Sonnet 5.5 ($0.10/MTok, from 2026-10-07) price cache hits at 0.05x input.
 #
 # 1M-context-window pricing: Fable 5.1, Mythos 5.1, Fable 5, Mythos 5, Opus 5.5, Opus 5, Opus 4.6, Opus 4.7,
 # Opus 4.8, Sonnet 5.5, Sonnet 5, and Sonnet 4.6 include the full 1M context at *standard*
@@ -224,21 +226,37 @@ models:
     cache_write_5m_per_mtok: 6.25
     cache_write_1h_per_mtok: 10.00
 
-  # ── Sonnet 5.5 — $2 / $10 base ──
-  # Same rate card as Sonnet 5, standard cache ratios.
-  claude-sonnet-5-5:                # verified 2026-10-02
+  # ── Sonnet 5.5 — $2 / $10 base, 0.05x cache reads ──
+  # Same rate card as Sonnet 5 until 2026-10-06. On 2026-10-07 cache hits
+  # were cut from 0.10x input ($0.20/MTok) to 0.05x ($0.10/MTok); every other
+  # rate is unchanged.
+  claude-sonnet-5-5:                # verified 2026-10-24
     input_per_mtok: 2.00
     output_per_mtok: 10.00
-    cache_read_per_mtok: 0.20
+    cache_read_per_mtok: 0.10
     cache_write_5m_per_mtok: 2.50
     cache_write_1h_per_mtok: 4.00
+    rates:
+      - until: 2026-10-06
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+        cache_read_per_mtok: 0.20
+        cache_write_5m_per_mtok: 2.50
+        cache_write_1h_per_mtok: 4.00
 
-  "claude-sonnet-5-5[1m]":          # verified 2026-10-02 — 1M context bundled at standard rates
+  "claude-sonnet-5-5[1m]":          # verified 2026-10-24 — 1M context bundled at standard rates
     input_per_mtok: 2.00
     output_per_mtok: 10.00
-    cache_read_per_mtok: 0.20
+    cache_read_per_mtok: 0.10
     cache_write_5m_per_mtok: 2.50
     cache_write_1h_per_mtok: 4.00
+    rates:
+      - until: 2026-10-06
+        input_per_mtok: 2.00
+        output_per_mtok: 10.00
+        cache_read_per_mtok: 0.20
+        cache_write_5m_per_mtok: 2.50
+        cache_write_1h_per_mtok: 4.00
 
   # ── Sonnet 5 — $2 / $10 base, flat ──
   # What launched as introductory pricing through 2026-08-31 is now the
