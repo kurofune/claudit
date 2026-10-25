@@ -234,6 +234,8 @@ The per-criterion record is a `djinn-evidence` JSON comment on the bead (`bd com
 
 Adjacent work is out of scope: file it through `/create-bead`, stating why it matters, and move on.
 
+Workers never edit `CONTEXT_MAP.md`: the gardener seat maintains it, and a landing that changes it is deferred.
+
 ## 8. Commit, then push git and Dolt together
 
 Interactive: after `bd close`, run `bd dolt push` with the `git push` (repos without Dolt auto-commit run `bd dolt commit` first), so code and bead state land together. Under `DJINN_SESSION=1` the harness pushes both (`commitClose`); never push by hand.

@@ -180,6 +180,8 @@ When `touches` is absent — not passed in args mode, or `none` in interactive m
 
 **What to list.** The paths the work will edit, at the coarsest honest granularity: the directory when the bead owns the whole package, the file when it touches one corner of a shared one. Listing too wide costs parallelism — the bead serializes against siblings it would never have collided with. Listing too narrow costs a collision. When unsure, take the directory: a lost slot is cheaper than a lost worktree.
 
+**Never `CONTEXT_MAP.md`.** Workers never edit the root `CONTEXT_MAP.md` (work contract §7): the gardener seat maintains it, and a landing that changes it is deferred. A `touches` entry equal to `CONTEXT_MAP.md` — the exact root path, nothing else — plans a change no worker may make. In args mode, return a structured error naming the entry and contract §7 (route the map change to the gardener seat as a duty) and build no node. In interactive mode, drop the entry, say why, and file the rest. Only the exact entry triggers this: `docs/CONTEXT_MAP.md` is an ordinary file, and a description that mentions `CONTEXT_MAP.md` is no reason to refuse.
+
 Round-trip check after filing: `bd show <id> --json | jq '.[0].metadata.touches'`.
 
 ## `agent` — who does the agent work
