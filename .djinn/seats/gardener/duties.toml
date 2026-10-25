@@ -303,12 +303,11 @@ the workarounds the seats keep repeating, and propose one fix for each.
      line that holds and why, and states the edit: delete or rewrite the
      losing line.
    - A workaround bead names the tool behaviour to fix in code and cites the
-     memory lines. One of its acceptance criteria deletes those lines once
-     the fix lands.
+     memory lines. It carries no criterion that edits a memory.md: once the
+     fix lands, the next tend-seats run finds those lines stale.
    At most 5 beads per run, one cap shared by contradictions, workarounds
-   and step 5's memory findings: find those before filing here, file the
-   findings on a memory.md over budget first, then the rest; a finding past
-   the cap waits for next week.
+   and step 5's bd-memory findings: find those before filing here; a
+   finding past the cap waits for next week.
    Add the `from:seat:gardener` label to every bead you file. It names the
    seat directory, gardener, and never the display name `djinn theme show`
    prints for this seat.
@@ -331,12 +330,20 @@ the workarounds the seats keep repeating, and propose one fix for each.
    - Fingerprint each finding by step 3's recipe, a memory.md line written
      `<file>:<line text>` and a bd memory written `bd:<key>:<text>`. Skip an
      fp `bd list --label garden-fp:<fp> --all` already returns.
-   - File each remaining finding through /create-bead with the labels
-     `proposed`, `from:seat:gardener`, `garden:seat-memory` (a memory.md) or
-     `garden:bd-memory` (a bd memory), and `garden-fp:<fp>`. The bead quotes
-     the lines with their file:line, or the key, and states the exact edit:
-     the replacement line, delete, `bd forget <key>` or
-     `bd remember --key <key> "<text>"`.
+   - A memory.md finding is never filed as a bead; a drain worker never
+     edits a seat file.
+     - On `.djinn/seats/gardener/memory.md`: apply the edit in this run.
+     - On another seat's memory.md: send that seat one message per run.
+       Write its findings to a file, one per line as file:line, the quoted
+       line, kind, fp and the exact edit (the replacement line, or delete),
+       then send it:
+       `bd create --type message --title "Memory sweep: <n> findings" --label to:seat:<seat> --label from:seat:gardener --silent --description="$(cat <file>)"`.
+       The mail carries no fingerprint label: a finding the seat did not
+       apply is found and mailed again next week.
+   - File each remaining bd memory finding through /create-bead with the
+     labels `proposed`, `from:seat:gardener`, `garden:bd-memory` and
+     `garden-fp:<fp>`. The bead quotes the key and states the exact edit:
+     `bd forget <key>` or `bd remember --key <key> "<text>"`.
 6. Audit the harness memories outside the repo, read-only. Edit nothing
    outside the repo.
    - Claude: the directory is `$HOME/.claude/projects/<slug>/memory/`, the
@@ -355,11 +362,13 @@ the workarounds the seats keep repeating, and propose one fix for each.
      fingerprint: a finding nobody applied is mailed again next week.
 7. Write one dated ledger entry: each filed bead (fp -> bead id), each
    skipped finding (fp -> the bead already carrying it), each finding past
-   the cap, each memory.md's size in bytes against the budget, the bd memory
-   count, and one line
+   the cap, each finding applied to this seat's memory.md, each memory sweep
+   (seat -> message id, finding count), each memory.md's size in bytes
+   against the budget, the bd memory count, and one line
    `memory audit: claude <n> files, codex <m> files, <k> findings, mail <id or none>`.
 
-Never remove the proposed label from any bead. Edit no seat file, doc or code.
+Never remove the proposed label from any bead.
+Edit no seat file but this seat's own memory.md, and no doc or code.
 """
 
 [[duty]]

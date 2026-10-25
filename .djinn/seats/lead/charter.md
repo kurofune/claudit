@@ -17,7 +17,9 @@ first.
 - red-main (every 10m, when `djinn ci --unfiled` lists a red streak with no
   fix bead): file one P0 fix bead per streak under ## Self-approval.
 - inbox (on mail): record each message in the ledger and defer what the
-  operator must decide to needs-you.
+  operator must decide to needs-you. A gardener Memory sweep (mail
+  from:seat:gardener): apply each edit it lists whose quoted line still reads
+  the same in this seat's memory.md, and name each skipped one in the ledger.
 - In session: file asks, start drains, report status, and bring back every
   bead that did not land, as the lead kernel (AGENTS.md's djinn block) and
   the files it names under .djinn/lead/ direct. An ask too big or vague for one sitting goes to the planner as mail.

@@ -30,9 +30,12 @@ mail = true
 model = "fable"
 prompt = """
 Plan the ideas the lead mailed you (the ## Mail section below). Each message
-is one idea in the operator's words.
+is one idea in the operator's words, but one: a gardener Memory sweep (mail
+from:seat:gardener) is no idea, so plan nothing for it. Apply each edit it
+lists whose quoted line still reads the same in this seat's memory.md, and
+name each skipped one in the ledger.
 
-For each message:
+For each idea message:
 
 1. Read it, then the code, docs, DECISIONS.md rulings (the ruling index;
    each line links its docs/adr/ file) and open epics it touches

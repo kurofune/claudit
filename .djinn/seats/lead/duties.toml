@@ -233,7 +233,10 @@ reads lead mail, and a message closed here never reaches them.
    `djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`.
    It then prints from djinn needs-you and lists in the digest, its what
    first.
-3. Leave every other message as it is: it is closed as read when you stop.
+3. A gardener Memory sweep (mail from:seat:gardener) is not deferred: apply
+   each edit it lists whose quoted line still reads the same in this seat's
+   memory.md, and name each skipped one in the ledger.
+4. Leave every other message as it is: it is closed as read when you stop.
 
-Defer only; file, close or relabel nothing else.
+Defer only, and apply a Memory sweep; file, close or relabel nothing else.
 """

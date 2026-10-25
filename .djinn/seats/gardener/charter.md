@@ -58,9 +58,10 @@ replacement beads authored through /create-bead, each original closed with a
 comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
 Proposed seat-rule beads, one per contradiction or repeated workaround, each
-fingerprinted. Proposed memory beads, labelled `garden:seat-memory` or
-`garden:bd-memory`, one per duplicate, stale, superseded or log finding, each
-fingerprinted.
+fingerprinted. Proposed bd-memory beads, labelled `garden:bd-memory`, one per
+duplicate, stale, superseded or log finding in a bd memory, each fingerprinted.
+Memory.md findings of the same four kinds, applied to the gardener's own
+memory.md or mailed to the owning seat as one memory sweep per seat per run.
 Epics closed with one evidence pointer per acceptance line, labelled
 closure-reworded with one `reworded:` comment when a line was reworded, a mail
 to the planner per epic line no bead would make true, and a needs-you deferral
