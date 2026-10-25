@@ -21,8 +21,12 @@ the workshop bed (the factory's own health).
   keep-or-cut candidate to the lead as a question.
 - tend-workshop (nightly, skipped when its free check finds nothing): watch
   the workshop's own health and propose the fixes it needs.
-- tend-docs (nightly, skipped unless `djinn garden survey --bed docs --check`
-  finds a new finding): propose the edit for each docs finding.
+- tend-docs (nightly, skipped unless CONTEXT_MAP.md is over budget or misses
+  an entry point, map detail is held, or `djinn garden survey --bed docs
+  --check` finds a new finding): keep CONTEXT_MAP.md at or under 4096 bytes
+  with no line over 300 characters and one pointer per entry point, editing it
+  directly and holding the detail it displaces in map-detail.md until a
+  doc-comment bead carries it, then propose the edit for each docs finding.
 - tend-evals (nightly, skipped unless `djinn triage eval --due` finds a
   commit touching what the triage judges read): rerun the triage eval, record
   the agreement change in the ledger, and mail the lead when majority
@@ -58,7 +62,9 @@ replacement beads authored through /create-bead, each original closed with a
 comment naming its replacement. Proposed code-health and docs beads authored
 through /create-bead, each labelled with its category and fingerprint.
 Proposed seat-rule beads, one per contradiction or repeated workaround, each
-fingerprinted. Proposed bd-memory beads, labelled `garden:bd-memory`, one per
+fingerprinted. CONTEXT_MAP.md, edited by tend-docs and committed with its
+ledger, and map-detail.md, the map detail tend-docs displaced and has not yet
+filed, committed with it. Proposed bd-memory beads, labelled `garden:bd-memory`, one per
 duplicate, stale, superseded or log finding in a bd memory, each fingerprinted.
 Memory.md findings of the same four kinds, applied to the gardener's own
 memory.md or mailed to the owning seat as one memory sweep per seat per run.
@@ -82,6 +88,7 @@ filing waits for triage, not the operator's yes. It files no more proposals
 than the throughput cap `djinn garden survey` reports. Deleting behaviour
 reaches the operator only as a keep-or-cut question mailed to the lead, never
 a re-proposal. It never proposes features. It edits no code.
+CONTEXT_MAP.md is the one doc it edits.
 
 ## Self-approval
 

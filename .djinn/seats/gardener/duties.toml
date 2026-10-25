@@ -195,35 +195,69 @@ yourself, run a drain, or commit anything.
 [[duty]]
 name = "tend-docs"
 schedule = "daily 04:30"
-# Free check, no model: run the duty only when a docs finding no gardener bead
-# carries yet survives the guards and the throughput cap allows a proposal.
-check = "djinn garden survey --bed docs --check"
+# Free check, no model: run the duty only when CONTEXT_MAP.md is over 4096
+# bytes, holds a line over 300 characters or lacks a pointer to an existing
+# cmd/ or internal/ entry point, when map detail is still held for a
+# doc-comment bead, or when a docs finding no gardener bead carries yet
+# survives the guards and the throughput cap allows a proposal.
+check = "[ -f CONTEXT_MAP.md ] && { [ $(wc -c < CONTEXT_MAP.md) -gt 4096 ] || awk 'length($0) > 300 { f = 1 } END { exit !f }' CONTEXT_MAP.md || { m=; for d in cmd/*/ internal/*/ internal/*/*/; do [ -d \"$d\" ] && ! grep -qF \"\\`$d\\`\" CONTEXT_MAP.md && m=1; done; [ -n \"$m\" ]; }; } || [ -s .djinn/seats/gardener/map-detail.md ] || djinn garden survey --bed docs --check"
 max_cost_usd = 10.0
+# The map step edits the map and holds the detail it displaces here; the
+# runner commits both with the ledger.
+commits = ["CONTEXT_MAP.md", ".djinn/seats/gardener/map-detail.md"]
 prompt = """
-Turn the docs survey's findings into proposals the drain can land.
+Keep CONTEXT_MAP.md true, then turn the docs survey's findings into proposals
+the drain can land.
 
-1. Survey: run `djinn garden survey --bed docs --json --max 10`. It prints one
+1. Map: when CONTEXT_MAP.md exists, measure it: `wc -c < CONTEXT_MAP.md`,
+   `awk 'length($0) > 300' CONTEXT_MAP.md`, and each directory matching
+   `cmd/*/`, `internal/*/` or `internal/*/*/` with no backticked pointer in it.
+   When any of those fired, edit CONTEXT_MAP.md directly, the one doc this duty
+   edits: one line per entry point, pointers only; add the missing pointer and
+   delete a gone one; shorten any line past 300 characters; stay at or under
+   4096 bytes with no line over 300 characters, re-checked with `wc -c` and awk
+   before the run ends. You edit no code, so detail that no longer fits is
+   held, never dropped: before deleting it from the map, append it verbatim
+   to `.djinn/seats/gardener/map-detail.md` under a `## <dir>` heading naming
+   its entry-point directory, adding to that heading when one exists. Step 4
+   files it as a `proposed` bead for that package's doc comment.
+2. Survey: run `djinn garden survey --bed docs --json --max 10`. It prints one
    object: `candidates` (each with category, file, line, symptom, measure and
    fingerprint), `throughput` (the most proposals this run may file) and
-   `withheld`. File only from `candidates`; the survey has already dropped
-   every finding a gardener bead carries, filed or declined.
-2. Read: for each candidate, read the doc at its file:line and name the edit
+   `withheld`. File survey findings only from `candidates`; the survey has
+   already dropped every finding a gardener bead carries, filed or declined.
+   The held map detail is this duty's one other source of proposals.
+3. Read: for each candidate, read the doc at its file:line and name the edit
    that fixes it:
    - stale-pointer: the path the doc means now (`git log --follow` or the
      symbol's new home), or deleting the line when the thing is gone.
    - stale-line: the line the pointer means now, or the pointer without one.
-3. File: author each new finding through /create-bead, in survey order, with
-   the labels `proposed`, `from:seat:gardener`, `garden:docs`,
-   `garden:<category>` and `garden-fp:<fingerprint>`. Its description names
-   the measured symptom (the survey's symptom line) and the edit from step 2.
-   File no more beads than the survey's `throughput` field allows; a finding
-   past it waits for the next survey.
+4. File: first the held map detail, one heading of map-detail.md at a time in
+   file order. When an open bead from `bd list --label garden:docs --json` is
+   titled `Move <dir> map detail into its doc comment`, add the heading's
+   detail to it with `bd comments add <id> -f <file>`; otherwise author one
+   bead through /create-bead, labelled `proposed`, `from:seat:gardener` and
+   `garden:docs`, with that title and the heading's detail verbatim in its
+   description. Once that bead or comment carries it, delete the heading and
+   its detail from map-detail.md, and the file once no heading is left. Then author each new survey
+   finding through /create-bead, in survey order, with the labels `proposed`,
+   `from:seat:gardener`, `garden:docs`, `garden:<category>` and
+   `garden-fp:<fingerprint>`. Its description names the measured symptom (the
+   survey's symptom line) and the edit from step 3. File no more new beads,
+   held detail and survey findings together, than the survey's `throughput`
+   field allows, zero included; a comment on an open bead files none. Held
+   detail past it stays in map-detail.md, and the check reruns this duty
+   while the file holds any; a finding past it waits for the next survey.
    Add the `from:seat:gardener` label to every bead you file. It names the
    seat directory, gardener, and never the display name `djinn theme show`
    prints for this seat.
-4. Write one dated ledger entry: each filed bead (fingerprint -> bead id).
+5. Write one dated ledger entry: the map edit (each pointer added, deleted or
+   shortened, and the byte count after) or none, each heading held in
+   map-detail.md and each still held after step 4, and each filed bead or
+   comment (fingerprint or `<dir> map detail` -> bead id).
 
-Never remove the proposed label from any bead. Edit no docs and no code.
+Never remove the proposed label from any bead. Edit no doc but CONTEXT_MAP.md,
+no seat file but map-detail.md and the ledger, and no code.
 """
 
 [[duty]]
