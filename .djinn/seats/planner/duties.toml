@@ -57,7 +57,8 @@ For each idea message:
    It then prints from djinn needs-you and lists in the digest, its what
    first.
 4. Write one dated ledger entry per message: its id, the epic id, how many
-   beads you filed, and the question you deferred, if any.
+   beads you filed, the pre-filing check's verdict with each finding fixed or
+   rejected, and the question you deferred, if any.
 
 An idea you notice while planning that no message asked for is sent to the
 lead, never filed as a bead:

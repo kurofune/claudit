@@ -395,7 +395,33 @@ File nothing until every bead has a gate-approved node. One HALT holds the whole
 - `nodes` — every returned node, verbatim, plus its parent: `parent_key` when the parent is in the plan, `parent_id` when it already exists. Top-level epics carry neither.
 - `edges` — every Step 5 blocking edge, from the waiting bead to its blocker: `{"from_key": "<blocked>", "to_key": "<blocker>", "type": "blocks"}`, or `"to_id": "<existing id>"` for a blocker outside the plan. A plan-named epic barrier is the same edge between two epic keys. Non-blocking relationships ride the same list with `"type": "related"` or `"type": "discovered-from"`.
 
-Save each returned node to its own file and merge with `jq` (`jq -s` over the node files) rather than retyping them: retyping is where a gate-approved criterion silently changes.
+Save each returned node, with its `parent_key` or `parent_id` added, to its own file under `$d/nodes/`, and the edges to `$d/edges.json`. Build `plan.json` from those files with `jq` rather than retyping them: retyping is where a gate-approved criterion silently changes.
+
+```bash
+jq -n --arg msg "<commit message>" --slurpfile edges "$d/edges.json" \
+  '{commit_message: $msg, nodes: [inputs], edges: $edges[0]}' "$d"/nodes/*.json > "$d/plan.json"
+```
+
+The node and edge files are the plan; `plan.json` is only built from them. Never edit `plan.json` by hand.
+
+**3b. Pre-filing check (one round).** Before filing, ask a judge of the other model family whether the plan is worth building, so its objections arrive while fixing them is still an edit, not a re-filing. It runs only when a node's labels hold proposed. With no `proposed` label, skip to step 4 and record nothing. This check never blocks filing. It runs once per plan.
+
+<!-- djinn-dispatch: claude-code -->
+The judge is astra: pass `--only astra`.
+<!-- djinn-dispatch: end -->
+
+```bash
+djinn triage preview --plan "$d/plan.json" --only <judge> --json > "$d/prefile.json"
+# → [{"key": "<top-level key>", "votes": [{"vote": "go|no-go|abstain", "hard_rule": null|"<name>", "reason": "<one sentence>"}]}]
+```
+
+Each top-level node (no `parent_key`) gets one vote; record one `prefile:` line per top-level node, on that node's `notes` (the epic node), in its saved file under `$d/nodes/`. Then take exactly one branch:
+
+- **`no-go`, or a non-null `hard_rule`, on any node.** Fix each finding you agree with in the saved node files. A changed node goes back through `/create-bead` (step 2), and its re-gated node, with its `parent_key` or `parent_id` re-added, replaces its file. For each finding you reject, append one line `prefile rejected: <finding> — <why>` to the epic node's `notes`. Then append `prefile: <judge> <vote>[ [<hard-rule>]] — <reason>; fixed <n>, rejected <m>`. Do not run the preview again.
+- **`go`.** Append `prefile: <judge> go — <reason>` to the epic node's `notes`.
+- **`abstain`, or a non-zero exit** (the named judge off the profile's roster included: a single-CLI provider profile exits 3). Append `prefile: unavailable — <reason>` to the epic node's `notes`, the reason being the vote's reason or the command's error.
+
+Every branch ends the same way: rebuild `plan.json` with the step 3 `jq` command, so the `prefile:` lines, the fixes, every node's parent and every edge reach the plan step 4 files. Then confirm each top-level node's `notes` in `plan.json` holds its `prefile:` line, and go to step 4. A `plan.json` built before the notes were appended files the plan without its record.
 
 **4. Dry-run, then file once.**
 
