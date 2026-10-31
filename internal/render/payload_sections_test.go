@@ -106,7 +106,8 @@ func TestBuildTools_ShapeAndKeys(t *testing.T) {
 // TestBuildTools_RowFields: one turn calls Bash three times — `go test`
 // twice (one errors) and `git status` once — and all three results arrive
 // timed, 100/200/300ms after the turn's last line. The next turn writes
-// their 5,000 bytes-split cache tokens; the one after re-reads them. Every
+// their 5,000 bytes-split cache tokens; the one after re-reads them, so
+// every row counts that one turn once however many results it re-read. Every
 // field on by_tool and by_tool_detail rows is asserted through the JSON the
 // SPA reads.
 func TestBuildTools_RowFields(t *testing.T) {
@@ -149,7 +150,7 @@ func TestBuildTools_RowFields(t *testing.T) {
 	assertRow(t, "Bash", got.ByTool[0], map[string]any{
 		"tool": "Bash", "calls": 3.0, "results": 3.0, "error_count": 1.0, "error_rate": 1.0 / 3,
 		"timed_calls": 3.0, "duration_median_ms": 200.0, "duration_p95_ms": 300.0,
-		"context_tokens": 5000.0, "reread_turns": 3.0,
+		"context_tokens": 5000.0, "reread_turns": 1.0,
 		"context_write_usd": 0.02, "context_read_usd": 0.005, "context_cost_usd": 0.025,
 	})
 	detail := got.ByToolDetail["Bash"]
@@ -159,7 +160,7 @@ func TestBuildTools_RowFields(t *testing.T) {
 	assertRow(t, "Bash·go test", detail[0], map[string]any{
 		"tool": "Bash", "pattern": "go test", "calls": 2.0, "results": 2.0, "error_count": 1.0, "error_rate": 0.5,
 		"timed_calls": 2.0, "duration_median_ms": 100.0, "duration_p95_ms": 300.0,
-		"context_tokens": 4000.0, "reread_turns": 2.0,
+		"context_tokens": 4000.0, "reread_turns": 1.0,
 		"context_write_usd": 0.016, "context_read_usd": 0.004, "context_cost_usd": 0.02,
 	})
 	assertRow(t, "Bash·git status", detail[1], map[string]any{

@@ -15,19 +15,40 @@ type ContextCost struct {
 	// ContextTokens is the share of the attributing turn's cache-creation
 	// tokens, split across the tool results it carried by OutputBytes.
 	ContextTokens int64
-	// RereadTurns counts the later turns that read those tokens from cache.
+	// RereadTurns counts the distinct later turns that read those tokens
+	// from cache; a turn re-reading several of a row's results counts once.
 	RereadTurns    int
 	WriteCostUSD   float64
 	ReadCostUSD    float64
 	ContextCostUSD float64 // WriteCostUSD + ReadCostUSD
 }
 
-func (c *ContextCost) add(o ContextCost) {
-	c.ContextTokens += o.ContextTokens
-	c.RereadTurns += o.RereadTurns
-	c.WriteCostUSD += o.WriteCostUSD
-	c.ReadCostUSD += o.ReadCostUSD
-	c.ContextCostUSD += o.ContextCostUSD
+// turnRef names one turn of the attribution walk: its session file and its
+// index in that file's time-ordered turns.
+type turnRef struct {
+	file string
+	idx  int
+}
+
+// contextCostSum sums results' ContextCost, counting each re-reading turn
+// once however many of the summed results it re-read.
+type contextCostSum struct {
+	ContextCost
+	rereadBy map[turnRef]struct{}
+}
+
+func (c *contextCostSum) add(r resultContextCost) {
+	c.ContextTokens += r.ContextTokens
+	c.WriteCostUSD += r.WriteCostUSD
+	c.ReadCostUSD += r.ReadCostUSD
+	c.ContextCostUSD += r.ContextCostUSD
+	if c.rereadBy == nil {
+		c.rereadBy = map[turnRef]struct{}{}
+	}
+	for _, t := range r.rereadBy {
+		c.rereadBy[t] = struct{}{}
+	}
+	c.RereadTurns = len(c.rereadBy)
 }
 
 // ToolContextCost is one tool's summed ContextCost.
@@ -64,6 +85,7 @@ type contextTurn struct {
 type resultContextCost struct {
 	tool, detail, sessionID string
 	input, sourceFile       string
+	rereadBy                []turnRef
 	ContextCost
 }
 
@@ -187,7 +209,7 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 			u := c.usage
 			prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
 			rate, _ := a.prices.EffectiveRate(c.model, c.ts, prompt, u.Speed)
-			a.chargeRereads(out, live, c, rate.CacheRead)
+			a.chargeRereads(out, live, turnRef{file, i}, c, rate.CacheRead)
 
 			cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens
 			writePerTok := 0.0
@@ -226,7 +248,7 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 
 // chargeRereads bills turn c's re-read of every live result at readRate
 // (USD per MTok), scaled so the total never exceeds c's CacheReadTokens.
-func (a *Aggregator) chargeRereads(out []resultContextCost, live []int, c contextTurn, readRate float64) {
+func (a *Aggregator) chargeRereads(out []resultContextCost, live []int, ref turnRef, c contextTurn, readRate float64) {
 	var liveTokens int64
 	for _, idx := range live {
 		liveTokens += out[idx].ContextTokens
@@ -247,23 +269,24 @@ func (a *Aggregator) chargeRereads(out []resultContextCost, live []int, c contex
 		r.ReadCostUSD += read
 		r.ContextCostUSD += read
 		r.RereadTurns++
+		r.rereadBy = append(r.rereadBy, ref)
 	}
 }
 
 // ContextCostByTool returns per-tool context cost, highest first.
 func (a *Aggregator) ContextCostByTool() []ToolContextCost {
-	byTool := map[string]*ToolContextCost{}
+	byTool := map[string]*contextCostSum{}
 	for _, r := range a.contextCosts() {
 		row := byTool[r.tool]
 		if row == nil {
-			row = &ToolContextCost{Tool: r.tool}
+			row = &contextCostSum{}
 			byTool[r.tool] = row
 		}
-		row.add(r.ContextCost)
+		row.add(r)
 	}
 	out := make([]ToolContextCost, 0, len(byTool))
-	for _, row := range byTool {
-		out = append(out, *row)
+	for tool, row := range byTool {
+		out = append(out, ToolContextCost{Tool: tool, ContextCost: row.ContextCost})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ContextCostUSD != out[j].ContextCostUSD {
@@ -279,7 +302,7 @@ func (a *Aggregator) ContextCostByTool() []ToolContextCost {
 // ByToolDetail.
 func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
 	type key struct{ tool, detail string }
-	byKey := map[key]*DetailContextCost{}
+	byKey := map[key]*contextCostSum{}
 	for _, r := range a.contextCosts() {
 		if r.detail == "" {
 			continue
@@ -287,14 +310,14 @@ func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
 		k := key{r.tool, r.detail}
 		row := byKey[k]
 		if row == nil {
-			row = &DetailContextCost{Tool: r.tool, Detail: r.detail}
+			row = &contextCostSum{}
 			byKey[k] = row
 		}
-		row.add(r.ContextCost)
+		row.add(r)
 	}
 	out := map[string][]DetailContextCost{}
 	for k, row := range byKey {
-		out[k.tool] = append(out[k.tool], *row)
+		out[k.tool] = append(out[k.tool], DetailContextCost{Tool: k.tool, Detail: k.detail, ContextCost: row.ContextCost})
 	}
 	for _, rows := range out {
 		sort.Slice(rows, func(i, j int) bool {
@@ -310,21 +333,21 @@ func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
 // ContextCostBySession returns per-session context cost, highest first.
 // Results from turns without a session id are absent.
 func (a *Aggregator) ContextCostBySession() []SessionContextCost {
-	bySession := map[string]*SessionContextCost{}
+	bySession := map[string]*contextCostSum{}
 	for _, r := range a.contextCosts() {
 		if r.sessionID == "" {
 			continue
 		}
 		row := bySession[r.sessionID]
 		if row == nil {
-			row = &SessionContextCost{SessionID: r.sessionID}
+			row = &contextCostSum{}
 			bySession[r.sessionID] = row
 		}
-		row.add(r.ContextCost)
+		row.add(r)
 	}
 	out := make([]SessionContextCost, 0, len(bySession))
-	for _, row := range bySession {
-		out = append(out, *row)
+	for id, row := range bySession {
+		out = append(out, SessionContextCost{SessionID: id, ContextCost: row.ContextCost})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ContextCostUSD != out[j].ContextCostUSD {
@@ -338,11 +361,11 @@ func (a *Aggregator) ContextCostBySession() []SessionContextCost {
 // ContextCostTotal is the context cost summed over every attributed tool
 // result — the denominator of a hotspot's share.
 func (a *Aggregator) ContextCostTotal() ContextCost {
-	var total ContextCost
+	var total contextCostSum
 	for _, r := range a.contextCosts() {
-		total.add(r.ContextCost)
+		total.add(r)
 	}
-	return total
+	return total.ContextCost
 }
 
 // ContextExample is one tool invocation behind a pattern: what was run,
