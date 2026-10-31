@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,5 +212,44 @@ func TestBuildTokens_ByModelMatchesAggregator(t *testing.T) {
 	}
 	if sumCacheRead != totals.CacheReadTokens {
 		t.Errorf("sum of row cache_read = %d, want corpus cache_read %d", sumCacheRead, totals.CacheReadTokens)
+	}
+}
+
+// TestBuildTokens_RowsCarryCost: every token row ships its bucket's
+// dollar cost so the Spend view's min-cost filter applies in Tokens
+// mode exactly as it does in Dollars mode.
+func TestBuildTokens_RowsCarryCost(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := aggregate.New(prices)
+	t0 := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	a.Add(mkTurn("claude-opus-4-7", "/p/big", 1_000_000, 200_000, t0))
+	a.Add(turnSkill("claude-opus-4-7", "/p/big", 5_000, 1_000, t0, "tdd"))
+
+	p := BuildTokens(a)
+	cost := BuildCost(a)
+
+	if len(p.ByModel) != 1 || p.ByModel[0].CostUSD != cost.ByModel[0].CostUSD || p.ByModel[0].CostUSD <= 0 {
+		t.Errorf("by_model cost = %+v, want %v", p.ByModel, cost.ByModel[0].CostUSD)
+	}
+	if len(p.ByProject) != 1 || p.ByProject[0].CostUSD != cost.ByProject[0].CostUSD {
+		t.Errorf("by_project cost = %+v, want %v", p.ByProject, cost.ByProject[0].CostUSD)
+	}
+	if len(p.BySkill) != 1 || p.BySkill[0].CostUSD != cost.BySkill[0].CostUSD || p.BySkill[0].CostUSD <= 0 {
+		t.Errorf("by_skill cost = %+v, want %v", p.BySkill, cost.BySkill[0].CostUSD)
+	}
+	for _, row := range p.ByPrompt {
+		if row.CostUSD <= 0 {
+			t.Errorf("by_prompt row %q cost = %v, want > 0", row.Label, row.CostUSD)
+		}
+	}
+	got, err := json.Marshal(p.ByProject[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `"cost_usd":`) {
+		t.Errorf("project row JSON %s lacks cost_usd", got)
 	}
 }

@@ -23,6 +23,9 @@ type TokenModelRow struct {
 	CacheRead  int64   `json:"cache_read"`
 	Total      int64   `json:"total"`
 	Pct        float64 `json:"pct"` // share of grand total tokens, 0..100
+	// CostUSD is the bucket's dollar cost, shipped so the Spend view's
+	// min-cost filter applies to token rows too.
+	CostUSD float64 `json:"cost_usd"`
 }
 
 // TokenBreakdownRow is one row of a by-X token table (project, skill, or
@@ -39,6 +42,7 @@ type TokenBreakdownRow struct {
 	CacheRead  int64   `json:"cache_read"`
 	Total      int64   `json:"total"`
 	Pct        float64 `json:"pct"`
+	CostUSD    float64 `json:"cost_usd"`
 }
 
 // TokensPayload backs /_claudit/api/tokens — the token-composition
@@ -107,6 +111,7 @@ func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 			CacheRead:  b.CacheReadTokens,
 			Total:      total,
 			Pct:        pct(total),
+			CostUSD:    b.CostUSD,
 		})
 	}
 
@@ -126,8 +131,8 @@ func BuildTokens(a *aggregate.Aggregator) TokensPayload {
 // breakdownRow turns a token tuple + identifying label into one
 // TokenBreakdownRow, computing the cache-write fold and the share of the
 // grand total. sample carries the untruncated label text (only prompts
-// use it; project/skill pass "").
-func breakdownRow(label, sample string, tok aggregate.Tokens, grand int64) TokenBreakdownRow {
+// use it; project/skill pass ""); cost is the bucket's dollar cost.
+func breakdownRow(label, sample string, tok aggregate.Tokens, cost float64, grand int64) TokenBreakdownRow {
 	total := tok.Total()
 	pct := 0.0
 	if grand > 0 {
@@ -142,6 +147,7 @@ func breakdownRow(label, sample string, tok aggregate.Tokens, grand int64) Token
 		CacheRead:  tok.CacheReadTokens,
 		Total:      total,
 		Pct:        pct,
+		CostUSD:    cost,
 	}
 }
 
@@ -156,7 +162,7 @@ func projectTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow 
 	buckets := a.ByProject()
 	rows := make([]TokenBreakdownRow, 0, len(buckets))
 	for _, b := range buckets {
-		rows = append(rows, breakdownRow(b.Project, "", b.Tokens, grand))
+		rows = append(rows, breakdownRow(b.Project, "", b.Tokens, b.CostUSD, grand))
 	}
 	sortByTotalDesc(rows)
 	return rows
@@ -166,7 +172,7 @@ func subagentTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow
 	buckets := a.BySubagent()
 	rows := make([]TokenBreakdownRow, 0, len(buckets))
 	for _, b := range buckets {
-		rows = append(rows, breakdownRow(b.Type, "", b.Tokens, grand))
+		rows = append(rows, breakdownRow(b.Type, "", b.Tokens, b.CostUSD, grand))
 	}
 	sortByTotalDesc(rows)
 	return rows
@@ -176,7 +182,7 @@ func skillTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow {
 	buckets := a.BySkill()
 	rows := make([]TokenBreakdownRow, 0, len(buckets))
 	for _, b := range buckets {
-		rows = append(rows, breakdownRow(b.Key, "", b.Tokens, grand))
+		rows = append(rows, breakdownRow(b.Key, "", b.Tokens, b.CostUSD, grand))
 	}
 	sortByTotalDesc(rows)
 	return rows
@@ -192,7 +198,7 @@ func promptTokenRows(a *aggregate.Aggregator, grand int64) []TokenBreakdownRow {
 		if label == "" {
 			label = b.Key
 		}
-		rows = append(rows, breakdownRow(label, b.Sample, b.Tokens, grand))
+		rows = append(rows, breakdownRow(label, b.Sample, b.Tokens, b.CostUSD, grand))
 	}
 	sortByTotalDesc(rows)
 	return rows
