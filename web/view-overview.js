@@ -10,6 +10,8 @@ import { fetchOverview, fetchAnomalies } from './api.js';
 import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
+import { agentsSessionHash } from './router.js';
+import { hotspotTrend } from './overview-logic.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -40,34 +42,56 @@ function totalsHTML(totals, overallHitRatio, totalTokens) {
     </div>`;
 }
 
+const kindLabel = kind => String(kind).replace(/_/g, ' ');
+
+function exampleHTML(e) {
+  const sid = e.session_id || '';
+  const input = e.input ? `<code class="ex-input">${escHtml(e.input)}</code>` : '<span class="ex-input is-empty">(no input recorded)</span>';
+  const session = sid
+    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)} in the Agents tree">session ${escHtml(sid.length > 8 ? sid.slice(0, 8) : sid)}</a>`
+    : '<span class="ex-session">no session</span>';
+  return `<li class="hotspot-example">
+      ${input}
+      <span class="ex-meta"><span class="ex-tokens">${escHtml(fmtNum(e.context_tokens || 0))} tokens</span> · ${session} · <span class="ex-file">${escHtml(e.source_file || '')}</span></span>
+    </li>`;
+}
+
 function hotspotCard(h, idx) {
   const rank = idx + 1;
   const anchorID = `hotspot-${rank}`;
-  const kindFmt = escHtml(String(h.kind).replace(/_/g, ' '));
-  const titleEsc = escHtml(h.title);
-  const promptEsc = escHtml(h.prompt);
-  return `<details class="hotspot" id="${anchorID}">
-    <summary>
+  const trend = hotspotTrend(h);
+  const trendHTML = trend
+    ? `<span class="h-trend is-${trend.dir}" title="${escHtml(trend.title)}">${escHtml(trend.text)}</span>`
+    : '';
+  const examples = (h.examples || []);
+  const examplesHTML = examples.length
+    ? `<ol class="hotspot-examples" aria-label="Biggest invocations by context added">${examples.map(exampleHTML).join('')}</ol>`
+    : '';
+  return `<article class="hotspot" id="${anchorID}" aria-labelledby="${anchorID}-title">
+    <header class="hotspot-head">
       <span class="rank">#${rank}</span>
-      <span class="hotspot-kind">${kindFmt}</span>
-      <span class="h-title" title="${titleEsc}">${titleEsc}</span>
-      <span class="h-cost">${escHtml(fmtMoney(h.cost_usd))}</span>
-      <span class="h-pct">(${(h.pct_of_total || 0).toFixed(1)}%)</span>
+      <span class="hotspot-kind">${escHtml(kindLabel(h.kind))}</span>
+      <h3 class="h-title" id="${anchorID}-title">${escHtml(h.title)}</h3>
+      <span class="h-cost" title="Context cost: writing this output into context and re-reading it on later turns">${escHtml(fmtMoney(h.cost_usd))}</span>
+      <span class="h-pct">${(h.pct_of_total || 0).toFixed(1)}% of context cost</span>
+      ${trendHTML}
       <a class="anchor-link" href="#overview/${anchorID}" title="Copy link to this hotspot" aria-label="Copy link to hotspot ${rank}">#</a>
-    </summary>
-    <div class="body">
-      <div class="actions">
-        <button class="copy" data-hotspot="${idx}">Copy prompt</button>
-        <span class="small">Paste this into Claude or another LLM for specific advice.</span>
-      </div>
-      <pre>${promptEsc}</pre>
+    </header>
+    ${examplesHTML}
+    <div class="actions">
+      <button type="button" class="copy" data-hotspot="${idx}">Copy prompt</button>
+      <span class="small">For the coding agent in this repo: the evidence, one change to make, and a target.</span>
     </div>
-  </details>`;
+    <details class="hotspot-prompt">
+      <summary>Show prompt</summary>
+      <pre>${escHtml(h.prompt)}</pre>
+    </details>
+  </article>`;
 }
 
 function hotspotsHTML(hotspots) {
   if (!hotspots || hotspots.length === 0) {
-    return `<p class="small empty-state">No hotspots in this window. Try widening the time range with <code>--since</code>, or lowering <code>-hotspots</code>.</p>`;
+    return `<p class="small empty-state">No hotspots in this window. Widen the date range to take in sessions whose tool calls put output into context.</p>`;
   }
   return hotspots.map(hotspotCard).join('');
 }
@@ -145,8 +169,10 @@ function wireHotspots(container, hotspots) {
   container.querySelectorAll('button.copy').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
-      const pre = btn.closest('.body').querySelector('pre');
-      const text = pre ? pre.textContent : '';
+      const card = btn.closest('.hotspot');
+      const pre = card ? card.querySelector('pre') : null;
+      const h = hotspots[Number(btn.dataset.hotspot)];
+      const text = h ? h.prompt : (pre ? pre.textContent : '');
       let ok = false;
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -155,16 +181,18 @@ function wireHotspots(container, hotspots) {
         }
       } catch { ok = false; }
       if (!ok && pre) {
+        const details = pre.closest('details');
+        if (details) details.open = true;
         const range = document.createRange();
         range.selectNodeContents(pre);
         const sel = window.getSelection();
         sel.removeAllRanges(); sel.addRange(range);
         try { ok = document.execCommand('copy'); } catch { ok = false; }
       }
-      const old = btn.textContent;
-      btn.textContent = ok ? 'Copied — paste into your LLM' : 'Select & copy manually';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 2200);
+      btn.textContent = ok ? 'Copied' : 'Copy failed — select the prompt below';
+      btn.classList.toggle('copied', ok);
+      clearTimeout(btn._resetTimer);
+      btn._resetTimer = setTimeout(() => { btn.textContent = 'Copy prompt'; btn.classList.remove('copied'); }, 2200);
     });
   });
 }
@@ -221,8 +249,12 @@ export async function paint() {
       fetchAnomalies().catch(() => ({ anomalies: [] })),
     ]);
   } catch (err) {
+    const reason = err && err.status ? `HTTP ${err.status}${err.statusText ? ' ' + err.statusText : ''}` : (err && err.message) || 'network error';
     container.innerHTML = `<div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
-      <div class="warning-card" role="alert"><strong class="danger">Failed to load overview:</strong> ${escHtml(err.message)}</div>`;
+      <div class="warning-card" role="alert"><strong class="danger">Failed to load overview:</strong> ${escHtml(reason)}
+        <button type="button" class="retry" data-retry>Retry</button></div>`;
+    const retry = container.querySelector('[data-retry]');
+    if (retry) retry.addEventListener('click', () => { paint(); });
     skeletonResetIfPending('nav-metric-overview');
     skeletonResetIfPending('date-range');
     return;
@@ -239,8 +271,8 @@ export async function paint() {
     <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0)}</div>
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
-    <h2>${labelIcon('flame')}Top cost hotspots</h2>
-    <div class="small">Each card opens to reveal a tailored prompt — click <strong>Copy prompt</strong> and paste into Claude for specific advice.</div>
+    <h2>${labelIcon('flame')}Top context-cost hotspots</h2>
+    <div class="small">Ranked by context cost: what each pattern's output cost to write into context and re-read on later turns. Each card's change is against the previous window of equal length. <strong>Copy prompt</strong> hands the evidence to the coding agent working in this repo (Claude Code or Codex).</div>
     <div class="hotspots">${hotspotsHTML(overview.hotspots)}</div>`;
 
   wireHotspots(container, overview.hotspots || []);

@@ -39,7 +39,11 @@ async function getJSON(path) {
     // to loopback only and has no auth layer.
   });
   if (!res.ok) {
-    throw new Error(`GET ${url}: ${res.status} ${res.statusText}`);
+    const err = new Error(`GET ${url}: ${res.status} ${res.statusText}`);
+    // status lets a view name the HTTP failure without parsing the message.
+    /** @type {any} */ (err).status = res.status;
+    /** @type {any} */ (err).statusText = res.statusText;
+    throw err;
   }
   return res.json();
 }

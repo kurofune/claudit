@@ -979,22 +979,49 @@
   @media (prefers-reduced-motion: reduce) {
     .hotspot { transition: none; }
   }
-  .hotspot summary { display: flex; align-items: baseline; gap: var(--s-3);
-                     list-style: none; cursor: pointer; }
-  .hotspot summary::-webkit-details-marker { display: none; }
+  .hotspot-head { display: flex; align-items: baseline; gap: var(--s-3);
+                  flex-wrap: wrap; }
   .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.5em;
                    font-variant-numeric: tabular-nums; }
-  .hotspot .h-title { font-weight: 600; flex: 1; overflow: hidden;
-                      text-overflow: ellipsis; white-space: nowrap;
-                      color: var(--ink); }
+  .hotspot .h-title { font-weight: 600; flex: 1 1 16em; min-width: 0;
+                      margin: 0; font-size: inherit;
+                      overflow-wrap: anywhere; color: var(--ink); }
   .hotspot .h-cost { font-weight: 600; color: var(--hot);
                      font-variant-numeric: tabular-nums; }
   .hotspot .h-pct { color: var(--muted); font-size: var(--t-2);
                     font-variant-numeric: tabular-nums; }
-  .hotspot[open] { border-color: var(--accent); }
-  .hotspot .body { margin-top: var(--s-2); }
-  .hotspot .actions { display: flex; gap: var(--s-2);
-                      margin: 0 0 var(--s-2); align-items: center; }
+  .hotspot .h-trend { font-size: var(--t-2); font-weight: 600;
+                      font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hotspot .h-trend.is-up { color: var(--hot); }
+  .hotspot .h-trend.is-down { color: var(--accent-2); }
+  .hotspot .h-trend.is-new { color: var(--muted); }
+  .hotspot-examples { margin: var(--s-2) 0; padding-left: var(--s-5, 1.5rem);
+                      display: grid; gap: var(--s-1); font-size: var(--t-2); }
+  .hotspot-example { color: var(--ink-2); min-width: 0; }
+  .hotspot-example .ex-input { font-family: var(--font-mono);
+                               overflow-wrap: anywhere; white-space: pre-wrap; }
+  .hotspot-example .ex-meta { display: block; color: var(--muted);
+                              overflow-wrap: anywhere; }
+  .hotspot-example .ex-file { font-family: var(--font-mono); }
+  .hotspot-example a.ex-session { color: var(--accent); cursor: pointer;
+                                  text-decoration: underline;
+                                  text-underline-offset: 2px; }
+  .hotspot-example a.ex-session:hover { text-decoration-thickness: 2px; }
+  .hotspot-example a.ex-session:focus-visible { outline: 2px solid var(--accent);
+                                                outline-offset: 1px; }
+  .hotspot .actions { display: flex; gap: var(--s-2); flex-wrap: wrap;
+                      margin: var(--s-2) 0; align-items: center; }
+  .hotspot-prompt > summary { cursor: pointer; color: var(--accent);
+                              font-size: var(--t-2); margin-bottom: var(--s-1); }
+  .hotspot-prompt > summary:hover { text-decoration: underline; }
+  .warning-card button.retry {
+    font: inherit; font-weight: 500; margin-left: var(--s-2);
+    padding: var(--s-1) var(--s-3); cursor: pointer;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  }
+  .warning-card button.retry:hover { border-color: var(--accent); }
+  .warning-card button.retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .hotspot button.copy {
     font: inherit; font-weight: 500;
     padding: var(--s-1) var(--s-3);

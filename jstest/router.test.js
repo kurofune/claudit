@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, redirectHash, spendHash, REDIRECTS } from '../web/router.js';
+import { parseHash, redirectHash, spendHash, REDIRECTS, agentsSessionHash, parseAgentsSub } from '../web/router.js';
 
 test('parseHash reads the Spend tab and Tokens unit from the hash', () => {
   assert.deepEqual(parseHash('#spend/project/tokens'), { view: 'spend', sub: 'project', unit: 'tokens' });
@@ -63,4 +63,18 @@ test('redirectHash leaves current hashes alone', () => {
 });
 test('the redirect table names exactly the three retired views', () => {
   assert.deepEqual(REDIRECTS.map(r => r.from).sort(), ['cache', 'cost', 'tokens']);
+});
+
+test('agentsSessionHash deep-links a session into the Tree lens', () => {
+  const h = agentsSessionHash('3f2a-session');
+  assert.equal(h, '#agents/tree/3f2a-session');
+  const route = parseHash(h);
+  assert.equal(route.view, 'agents');
+  assert.deepEqual(parseAgentsSub(route.sub), { lens: 'tree', sessionId: '3f2a-session' });
+});
+test('parseAgentsSub reads a bare lens and survives a malformed session id', () => {
+  assert.deepEqual(parseAgentsSub('timeline'), { lens: 'timeline', sessionId: '' });
+  assert.deepEqual(parseAgentsSub(''), { lens: '', sessionId: '' });
+  assert.deepEqual(parseAgentsSub('tree/%E0%A4%A'), { lens: 'tree', sessionId: '' });
+  assert.equal(parseAgentsSub(parseHash(agentsSessionHash('a b/c')).sub).sessionId, 'a b/c');
 });

@@ -3,6 +3,7 @@
 //   #spend/<tab>               → Spend, <tab>, Dollars
 //   #spend/<tab>/tokens        → Spend, <tab>, Tokens
 //   #tools, #agents/<lens>     → Tools, Agents
+//   #agents/tree/<session>     → Agents Tree with <session> selected
 //
 // Retired views (#cost, #tokens, #cache) redirect through REDIRECTS so
 // old bookmarks land on the Spend view.
@@ -42,6 +43,21 @@ export function redirectHash(raw) {
   if (!rule) return null;
   const tab = rule.keepTab ? (rest[0] || '') : '';
   return spendHash(tab, rule.unit);
+}
+
+// agentsSessionHash is the hash that opens the Agents Tree lens with
+// sessionId selected.
+export function agentsSessionHash(sessionId) {
+  return `#agents/tree/${encodeURIComponent(sessionId)}`;
+}
+
+// parseAgentsSub splits an Agents route's sub into its lens and the
+// session it should select ('' when none, or when the id is malformed).
+export function parseAgentsSub(sub) {
+  const [lens, ...rest] = String(sub || '').split('/');
+  let sessionId = '';
+  try { sessionId = decodeURIComponent(rest.join('/')); } catch { sessionId = ''; }
+  return { lens, sessionId };
 }
 
 // parseHash reads a route from raw (a hash string, '#' optional), or

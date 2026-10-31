@@ -30,6 +30,7 @@ import { fetchAgents } from './api.js';
 import { fmtMoney, fmtNum, fmtCompact, fmtPct1, escHtml } from './format.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
+import { parseAgentsSub } from './router.js';
 import {
   flattenSession, agentLabel, graphStats, parseTime, refKey, parseRefKey,
   resolveRef, defaultRef, projectName, formatElapsed,
@@ -222,7 +223,17 @@ export async function paintNav() {
 export async function paint(route) {
   const container = document.getElementById('view-agents');
   if (!container) return;
-  setActiveSub(wantedSub(route && route.sub));
+  const { lens, sessionId } = parseAgentsSub(route && route.sub);
+  setActiveSub(wantedSub(lens));
+  // A session deep link (#agents/tree/<session>, e.g. from an Overview
+  // hotspot example) selects that session's main agent and lands on the
+  // plain lens hash, so a reload or lens switch doesn't re-apply it.
+  if (sessionId) {
+    const ref = refKey({ sessionId, agentIndex: 0 });
+    setSelectedRef(ref);
+    pendingJumpRef = ref;
+    history.replaceState(history.state, '', `#agents/${activeSub}`);
+  }
 
   // First paint builds the shell + a skeleton; later paints (lens swap)
   // reuse it. Register the live updater + start the timer ticker once.
