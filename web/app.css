@@ -999,7 +999,9 @@
                       display: grid; gap: var(--s-1); font-size: var(--t-2); }
   .hotspot-example { color: var(--ink-2); min-width: 0; }
   .hotspot-example .ex-input { font-family: var(--font-mono);
-                               overflow-wrap: anywhere; white-space: pre-wrap; }
+                               overflow-wrap: anywhere;
+                               display: -webkit-box; -webkit-box-orient: vertical;
+                               -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .hotspot-example .ex-meta { display: block; color: var(--muted);
                               overflow-wrap: anywhere; }
   .hotspot-example .ex-file { font-family: var(--font-mono); }

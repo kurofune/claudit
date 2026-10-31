@@ -46,7 +46,9 @@ const kindLabel = kind => String(kind).replace(/_/g, ' ');
 
 function exampleHTML(e) {
   const sid = e.session_id || '';
-  const input = e.input ? `<code class="ex-input">${escHtml(e.input)}</code>` : '<span class="ex-input is-empty">(no input recorded)</span>';
+  const input = e.input
+    ? `<code class="ex-input" title="${escHtml(e.input)}">${escHtml(e.input.replace(/\s+/g, ' ').trim())}</code>`
+    : '<span class="ex-input is-empty">(no input recorded)</span>';
   const session = sid
     ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)} in the Agents tree">session ${escHtml(sid.length > 8 ? sid.slice(0, 8) : sid)}</a>`
     : '<span class="ex-session">no session</span>';
