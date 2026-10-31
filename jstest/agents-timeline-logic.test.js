@@ -853,6 +853,7 @@ test('timelineSessionList maps sessionId/cwd/index plus the sessionStats rollups
   assert.deepEqual(out[0], {
     sessionId: 'stats-1',
     cwd: '/home/me/proj',
+    project: 'proj',
     entrypoint: '',
     index: 0,
     durationMs: 60000,

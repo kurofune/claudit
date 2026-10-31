@@ -5,7 +5,7 @@
 // facade).
 
 import {
-  agentLabel, agentSpan, agentTokens, baseName,
+  agentLabel, agentSpan, agentTokens, projectName,
   refKey, resolveRef, spawnTargetIndex,
 } from './agents-model.js';
 
@@ -87,7 +87,7 @@ export function buildDrawerPayload(graph, ref, fullByTool = null, fullByTurn = n
   return {
     type,
     refKey: refKey({ sessionId: session.session_id, agentIndex, stepIndex, toolIndex }),
-    project: baseName(session.cwd),
+    project: projectName(session),
     cwd: session.cwd || '',
     sessionId: session.session_id || '',
     agentLabel: agentLabel(agent),

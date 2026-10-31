@@ -108,6 +108,7 @@
  * @typedef {Object} AgentSession
  * @property {string} session_id
  * @property {string} cwd
+ * @property {string} [project]         resolved project name (git repo root's basename, or a fallback bucket)
  * @property {string} entrypoint        "cli" | "sdk-cli" | ""
  * @property {string} started_at        RFC3339
  * @property {string} ended_at          RFC3339

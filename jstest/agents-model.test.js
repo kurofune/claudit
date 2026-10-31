@@ -11,6 +11,7 @@ import {
   agentSpan,
   agentTokens,
   baseName,
+  projectName,
   clampConvSidebarWidth,
   clampDrawerWidth,
   clampTreeWidth,
@@ -512,4 +513,20 @@ test('agentOutcome: null / step-less done agents are ok', () => {
   assert.equal(agentOutcome({ kind: 'subagent', status: 'done', error_count: 0, steps: [
     { timestamp: 0, tools: null },
   ] }), 'ok');
+});
+
+// ── projectName ─────────────────────────────────────────────────────
+test('projectName prefers the resolved project over the cwd basename', () => {
+  assert.equal(projectName({ project: 'the-pit', cwd: '/x/the-pit-pit-2mr.1/web' }), 'the-pit');
+});
+
+test('projectName falls back to baseName(cwd) when project is absent or empty', () => {
+  assert.equal(projectName({ cwd: '/Users/x/Projects/claudit/' }), 'claudit');
+  assert.equal(projectName({ project: '', cwd: '/a/b' }), 'b');
+});
+
+test('projectName returns "" for a missing session or no cwd', () => {
+  assert.equal(projectName(null), '');
+  assert.equal(projectName(undefined), '');
+  assert.equal(projectName({}), '');
 });

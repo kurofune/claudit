@@ -186,6 +186,15 @@ export function baseName(path) {
   return parts.length ? parts[parts.length - 1] : '';
 }
 
+// projectName is the label for a session (or a row derived from one): the
+// server-resolved project — the git repo a worktree or subdirectory belongs
+// to — falling back to the cwd's folder name when the payload has none.
+/** @param {{project?: string, cwd?: string}|null|undefined} s @returns {string} */
+export function projectName(s) {
+  if (!s) return '';
+  return s.project || baseName(s.cwd);
+}
+
 // agentTokens sums an agent's token tuple into a flat, 0-safe shape.
 // Reads the Go-marshalled field names (Tokens has no json tags), folding
 // the 5m + 1h cache-creation buckets into a single cacheWrite.

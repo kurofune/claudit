@@ -6,7 +6,7 @@
 import { fmtMoney, fmtNum, fmtCompact, escHtml } from './format.js';
 import {
   flattenSession, agentLabel, agentTokens, agentElapsedMs, formatElapsed,
-  parseTime, refKey, parseRefKey, resolveRef, spawnTargetIndex, baseName,
+  parseTime, refKey, parseRefKey, resolveRef, spawnTargetIndex, projectName,
 } from './agents-logic.js';
 import {
   lastGraph, selectedRef, treeLimit, TREE_PAGE, openAgentBodies,
@@ -58,7 +58,7 @@ function itreeSessionHTML(session, si, sel) {
   return `<details class="itree-sess" data-skey="${escHtml(sid)}" open>
     <summary class="itree-sess-head" data-c="${c}" title="${escHtml(session.cwd || '')}">
       <span class="itree-caret" aria-hidden="true">▸</span>
-      <span class="insp-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
+      <span class="insp-sess-proj">${escHtml(projectName(session) || '—')}</span>
       <span class="insp-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
       ${originBadgeHTML(session)}
     </summary>

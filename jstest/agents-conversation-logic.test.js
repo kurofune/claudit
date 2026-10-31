@@ -95,6 +95,7 @@ test('conversationSessionList maps the per-session summary fields', () => {
   const session = {
     session_id: 'sid-1',
     cwd: '/home/me/proj',
+    project: 'the-repo',
     entrypoint: 'sdk-cli',
     prompts: [{ uuid: 'u1', text: 'hi', first_step_index: 0 }],
     main: {
@@ -109,6 +110,7 @@ test('conversationSessionList maps the per-session summary fields', () => {
   assert.deepEqual(out[0], {
     sessionId: 'sid-1',
     cwd: '/home/me/proj',
+    project: 'the-repo',
     entrypoint: 'sdk-cli',
     index: 0,
     promptCount: 1,

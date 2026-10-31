@@ -32,7 +32,7 @@ import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
 import {
   flattenSession, agentLabel, graphStats, parseTime, refKey, parseRefKey,
-  resolveRef, defaultRef, baseName, formatElapsed,
+  resolveRef, defaultRef, projectName, formatElapsed,
   conversationSegments, conversationReplies, conversationSessionList,
   clampTreeWidth, clampDrawerWidth, orderTreeSessions, treeFollowMode,
   toolMix, percentiles, durationHistogram, costPareto, errorRates,
@@ -801,7 +801,7 @@ function conversationSidebarHTML(list, curSid) {
     const turns = `${fmtNum(e.replyCount)} ${e.replyCount === 1 ? 'reply' : 'replies'}`;
     return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}">
       <span class="conv-sess-item-head">
-        <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+        <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(projectName(e) || '—')}</span>
         ${originBadgeHTML(e)}
       </span>
       <span class="conv-sess-item-meta">
@@ -902,7 +902,7 @@ function insightsScopeAgents() {
   if (scope === 'agent' && !agentAvail) scope = 'graph';
   if (scope === 'session') {
     return { scope, agents: sessionAgents, sessionAvail, agentAvail,
-      label: `${baseName(cur.session.cwd) || '—'} · ${shortId(cur.session.session_id || '')}` };
+      label: `${projectName(cur.session) || '—'} · ${shortId(cur.session.session_id || '')}` };
   }
   if (scope === 'agent') {
     return { scope, agents: [agentNode], sessionAvail, agentAvail, label: agentLabel(agentNode) };
@@ -1047,7 +1047,7 @@ function renderTimePanel(scope, agents) {
   const maxTotal = data.rows.reduce((m, r) => Math.max(m, r.totalMs), 0) || 1;
   const rows = data.rows.map(r => {
     const label = graphScoped
-      ? `<span class="ins-grp-key" title="${escHtml(r.cwd || '')}">${escHtml(baseName(r.cwd) || '—')} · ${escHtml(shortId(r.sessionId))}</span>`
+      ? `<span class="ins-grp-key" title="${escHtml(r.cwd || '')}">${escHtml(projectName(r) || '—')} · ${escHtml(shortId(r.sessionId))}</span>`
       : `<span class="ins-grp-key" title="${escHtml(r.label)}">${escHtml(r.label)}</span>`;
     const barPct = Math.max(2, (r.totalMs / maxTotal) * 100);
     const seg = (cls, v, name) => v > 0

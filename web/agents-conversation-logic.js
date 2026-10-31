@@ -3,6 +3,8 @@
 // user prompt into segments/replies, plus the session-picker summary list.
 // Split out of agents-logic.js (re-exported by the facade).
 
+import { projectName } from './agents-model.js';
+
 /** @import { AgentSession, AgentStep } from './api-types.js' */
 
 /**
@@ -85,7 +87,7 @@ export function conversationReplies(seg) {
 // segment. Null/main-less sessions are excluded; a null/empty input → [].
 /**
  * @param {AgentSession[]|null|undefined} sessions
- * @returns {{sessionId: string, cwd: string, entrypoint: string, index: number,
+ * @returns {{sessionId: string, cwd: string, project: string, entrypoint: string, index: number,
  *   promptCount: number, replyCount: number}[]}
  */
 export function conversationSessionList(sessions) {
@@ -103,6 +105,7 @@ export function conversationSessionList(sessions) {
     out.push({
       sessionId: session.session_id || '',
       cwd: session.cwd || '',
+      project: projectName(session),
       entrypoint: session.entrypoint || '',
       index,
       promptCount,

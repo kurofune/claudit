@@ -5,7 +5,7 @@
 
 import {
   agentElapsedMs, agentLabel, agentTokens, currentToolKind,
-  flattenSession, parseTime,
+  flattenSession, parseTime, projectName,
 } from './agents-model.js';
 
 /** @import { AgentGraph } from './api-types.js' */
@@ -34,6 +34,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
   for (const s of sessions) {
     const sid = (s && s.session_id) || '';
     const cwd = (s && s.cwd) || '';
+    const project = projectName(s);
     // Session origin, stamped on every event so a Feed row can mark headless
     // (SDK) runs without re-deriving it per row.
     const entrypoint = (s && s.entrypoint) || '';
@@ -45,7 +46,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const st = parseTime(a.started_at);
         if (!Number.isNaN(st)) {
           events.push({
-            kind: 'spawn', t: st, sessionId: sid, cwd, entrypoint, agentIndex: idx,
+            kind: 'spawn', t: st, sessionId: sid, cwd, project, entrypoint, agentIndex: idx,
             agentLabel: label, description: a.description || '',
           });
         }
@@ -56,7 +57,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         (step.tools || []).forEach((tool, toolIndex) => {
           if (!tool) return;
           events.push({
-            kind: 'tool', t, sessionId: sid, cwd, entrypoint, agentIndex: idx, agentLabel: label,
+            kind: 'tool', t, sessionId: sid, cwd, project, entrypoint, agentIndex: idx, agentLabel: label,
             tool: tool.name || '', toolKind: tool.kind || '', detail: tool.detail || '',
             input: tool.input || '', status: tool.status || '',
             output: tool.output || '',
@@ -72,7 +73,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const et = parseTime(a.ended_at);
         if (!Number.isNaN(et)) {
           events.push({
-            kind: 'done', t: et, sessionId: sid, cwd, entrypoint, agentIndex: idx,
+            kind: 'done', t: et, sessionId: sid, cwd, project, entrypoint, agentIndex: idx,
             agentLabel: label, steps: (a.steps || []).length, cost_usd: a.cost_usd || 0,
             tokens: agentTokens(a).total,
           });
@@ -101,10 +102,11 @@ export function buildLiveFeed(graph, nowMs = Date.now()) {
   for (const s of sessions) {
     const sid = (s && s.session_id) || '';
     const cwd = (s && s.cwd) || '';
+    const project = projectName(s);
     flattenSession(s).forEach((a, idx) => {
       if (!a || a.status !== 'running') return;
       live.push({
-        sessionId: sid, cwd, agentIndex: idx,
+        sessionId: sid, cwd, project, agentIndex: idx,
         agentLabel: agentLabel(a), kind: a.kind || '',
         description: a.description || '',
         currentTool: a.current_tool || '', currentToolKind: currentToolKind(a),

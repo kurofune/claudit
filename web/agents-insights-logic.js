@@ -5,7 +5,7 @@
 // pip bucketing. Split out of agents-logic.js (re-exported by the facade).
 
 import {
-  agentLabel, agentTokens, flattenSession, parseRefKey, parseTime,
+  agentLabel, agentTokens, flattenSession, parseRefKey, parseTime, projectName,
 } from './agents-model.js';
 import { agentTimeRollup, sessionTimeRollup } from './agents-timeline-logic.js';
 
@@ -439,7 +439,7 @@ export function sessionTimeRows(sessions, opts = {}) {
   const topN = opts.topN != null ? opts.topN : 10;
   const rows = (Array.isArray(sessions) ? sessions : [])
     .filter(s => s)
-    .map(s => ({ sessionId: s.session_id || '', cwd: s.cwd || '', ...sessionTimeRollup(s, opts) }))
+    .map(s => ({ sessionId: s.session_id || '', cwd: s.cwd || '', project: projectName(s), ...sessionTimeRollup(s, opts) }))
     .filter(r => r.totalMs > 0)
     .sort((a, b) => b.totalMs - a.totalMs);
   const total = rows.reduce(

@@ -52,7 +52,7 @@ const SHELL = `
     <div class="body">
       <ul>
         <li><strong>By model</strong> — what fraction of spend went to each model. Opus dominating is expected for hard work; if it's also serving small or repetitive tasks, those are candidates to route to Sonnet or Haiku.</li>
-        <li><strong>By project</strong> — which working directories cost the most. A surprise winner here is usually a side project quietly running up more spend than you realized.</li>
+        <li><strong>By project</strong> — which repos cost the most (worktrees and subdirectories fold into their repo). A surprise winner here is usually a side project quietly running up more spend than you realized.</li>
         <li><strong>Subagents</strong> — main thread (your direct conversation) vs sidechain (work delegated to subagents). Sidechain cost &gt; main cost usually means over-delegating; one subagent type dominating the sidechain is your best optimization target.</li>
         <li><strong>By skill &amp; slash command</strong> — cost per invoked <code>/command</code> or skill. A high <em>cost-per-call</em> ratio flags candidates for tightening (smaller starting context, less tool output) or replacement.</li>
         <li><strong>Top expensive prompts</strong> — recurring prompts that kicked off long, costly turn chains. Repeated expensive prompts often justify a custom skill or compact agent that does the same job with less context.</li>
@@ -87,8 +87,8 @@ const SHELL = `
     <div class="hbar-list" id="cost-bars-project"></div>
     <table data-table="project">
       <thead><tr>
-        <th data-key="Project" title="Working directory the session ran in (its CWD when Claude Code was launched).">Project</th>
-        <th data-key="CostUSD" class="num" title="Dollar cost of all sessions whose CWD was this project.">Cost</th>
+        <th data-key="Project" title="The git repo the session ran in — worktrees and subdirectories fold into it. Removed dirs and tmp scratch dirs land in their own buckets.">Project</th>
+        <th data-key="CostUSD" class="num" title="Dollar cost of all sessions that ran in this project.">Cost</th>
         <th data-key="Pct" class="num" title="Share of total cost in this window.">%</th>
         <th data-key="Sessions" class="num" title="Number of distinct session IDs that ran in this project.">Sessions</th>
         <th data-key="Turns" class="num" title="Number of assistant turns across those sessions.">Turns</th>
@@ -133,7 +133,7 @@ const SHELL = `
         <th data-key="Description" title="The description argument passed when this subagent was invoked.">Description</th>
         <th data-key="CostUSD" class="num" title="Dollar cost of this single invocation. Outliers here often signal a poorly-scoped delegation.">Cost</th>
         <th data-key="Turns" class="num" title="Assistant turns in this invocation.">Turns</th>
-        <th data-key="Project" title="Working directory the parent session was running in.">Project</th>
+        <th data-key="Project" title="The git repo the parent session was running in.">Project</th>
         <th data-key="First" title="Timestamp this subagent invocation started.">Started</th>
       </tr></thead>
       <tbody></tbody>

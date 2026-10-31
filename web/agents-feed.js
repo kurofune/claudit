@@ -4,7 +4,7 @@
 
 import { fmtMoney, fmtNum, fmtCompact, escHtml } from './format.js';
 import {
-  buildEventFeed, buildLiveFeed, refKey, formatElapsed, baseName, originClass,
+  buildEventFeed, buildLiveFeed, refKey, formatElapsed, projectName, originClass,
 } from './agents-logic.js';
 import {
   lastGraph, selectedRef, colorSlot, kindBadge, kindFamily,
@@ -118,7 +118,7 @@ function feedRowHTML(e) {
 // from: the cwd's project folder and the short session id. The full path and
 // id ride on the title for disambiguation when basenames collide.
 function feCtx(e) {
-  const proj = baseName(e.cwd) || '—';
+  const proj = projectName(e) || '—';
   const thread = shortId(e.sessionId || '');
   const title = `${e.cwd || ''}${thread ? ` · ${e.sessionId}` : ''}`;
   // A headless (SDK) origin is marked with a compact accent tag, not the full

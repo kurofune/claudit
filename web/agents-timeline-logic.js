@@ -6,7 +6,7 @@
 
 import {
   agentLabel, agentSpan, agentTokens, flattenSession,
-  parseRefKey, parseTime, refKey,
+  parseRefKey, parseTime, projectName, refKey,
 } from './agents-model.js';
 import { conversationSegments } from './agents-conversation-logic.js';
 
@@ -68,7 +68,7 @@ import { conversationSegments } from './agents-conversation-logic.js';
 // timelineSessionList summarizes each session for the Timeline lens's session
 // picker — the sibling of conversationSessionList. One entry per session that
 // has a real main agent, in ORIGINAL input order (index = unfiltered position,
-// a stable color slot). Each entry carries { sessionId, cwd, entrypoint, index }
+// a stable color slot). Each entry carries { sessionId, cwd, project, entrypoint, index }
 // plus the whole-session rollups the picker rows triage on, by reusing
 // sessionStats. entrypoint feeds the SDK badge, matching conversationSessionList.
 // Null/main-less sessions are excluded; a null/empty input → [].
@@ -81,6 +81,7 @@ export function timelineSessionList(sessions, nowMs = Date.now()) {
     out.push({
       sessionId: session.session_id || '',
       cwd: session.cwd || '',
+      project: projectName(session),
       entrypoint: session.entrypoint || '',
       index,
       ...sessionStats(session, nowMs),

@@ -7,7 +7,7 @@
 
 import { fmtMoney, fmtNum, fmtCompact, escHtml } from './format.js';
 import {
-  flattenSession, agentTokens, agentElapsedMs, formatElapsed, baseName,
+  flattenSession, agentTokens, agentElapsedMs, formatElapsed, projectName,
   refKey, parseRefKey, resolveRef, sessionStats, timelineSessionList, pickTimelineSid,
   playheadBounds, playheadStats, timelineAtTime, buildTimeline, timelineKinds,
   makeTimeScale, promptBands, narrativeStrip, sessionTimeRollup, agentOutcome,
@@ -126,7 +126,7 @@ function timelineSidebarHTML(list, curSid) {
       : '';
     return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}">
       <span class="tl-sess-item-head">
-        <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(baseName(e.cwd) || '—')}</span>
+        <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(projectName(e) || '—')}</span>
         ${originBadgeHTML(e)}
       </span>
       <span class="tl-sess-item-meta">
@@ -375,7 +375,7 @@ function timelineSessionHTML(session, si, hostW, nowMs, T, selAgentKey, seen, ne
 
   return `<div class="timeline-sess">
     <div class="timeline-sess-head" data-c="${colorSlot(si)}" title="${escHtml(session.cwd || '')}">
-      <span class="timeline-sess-proj">${escHtml(baseName(session.cwd) || '—')}</span>
+      <span class="timeline-sess-proj">${escHtml(projectName(session) || '—')}</span>
       <span class="timeline-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
       <button type="button" class="timeline-jump" data-tljump="${escHtml(sid)}" hidden>● now</button>
     </div>

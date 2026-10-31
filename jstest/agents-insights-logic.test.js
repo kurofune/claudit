@@ -1298,7 +1298,7 @@ test('sessionTimeRows: one row per session with id/cwd + buckets, sorted, capped
   assert.deepEqual(rows.map(r => r.sessionId), ['s2', 's3']);
   assert.deepEqual(rows.map(r => r.cwd), ['/b', '/c']);
   // s2: gen 500, tool 500, idle 0 → the buckets ride on each row.
-  assert.deepEqual(rows[0], { sessionId: 's2', cwd: '/b', genMs: 500, toolMs: 500, idleMs: 0, totalMs: 1000 });
+  assert.deepEqual(rows[0], { sessionId: 's2', cwd: '/b', project: 'b', genMs: 500, toolMs: 500, idleMs: 0, totalMs: 1000 });
   assert.equal(overflow, 1);
   assert.equal(total.totalMs, 2000); // truncated s1 still counts
 });

@@ -50,7 +50,7 @@ const SHELL = `
   <div class="subview is-active" data-subview="projects">
     <table data-table="cache-project">
       <thead><tr>
-        <th data-key="Key" title="Working directory the session ran in.">Project</th>
+        <th data-key="Key" title="The git repo the session ran in (worktrees fold into it).">Project</th>
         <th data-key="HitRatio" class="num" title="cache_read / (cache_read + input + cache_create_5m + cache_create_1h). Higher is better.">Hit ratio</th>
         <th data-key="Miss" class="num" title="Tokens paid full price (input) or cache-write price (cache_create) instead of the cheap cache-read price. Lower is better — this is your cost lever.">Miss tokens</th>
         <th data-key="CacheReadTokens" class="num" title="Tokens served from cache. Cheapest input price (~10% of fresh).">Cache read</th>
@@ -65,7 +65,7 @@ const SHELL = `
     <table data-table="cache-session">
       <thead><tr>
         <th data-key="Key" title="Session ID (matches the .jsonl filename in ~/.claude/projects/…).">Session</th>
-        <th data-key="Subtitle" title="Working directory of this session.">Project</th>
+        <th data-key="Subtitle" title="The git repo this session ran in.">Project</th>
         <th data-key="HitRatio" class="num" title="cache_read / (cache_read + input + cache_create_5m + cache_create_1h). Higher is better.">Hit ratio</th>
         <th data-key="Miss" class="num" title="Tokens paid full price or cache-write price in this session. High in long sessions = cache invalidated often (large file edits, /compact, jumping tasks).">Miss tokens</th>
         <th data-key="CacheReadTokens" class="num" title="Tokens served from cache in this session.">Cache read</th>
