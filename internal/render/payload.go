@@ -2,16 +2,10 @@ package render
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
 )
-
-// firstPromptPreviewChars caps the kickoff-prompt preview shipped on each
-// session row. Short enough to keep the list payload light; the full prompt
-// is still available via the per-session timeline endpoint.
-const firstPromptPreviewChars = 200
 
 // HotspotForJSON is the same data as aggregate.Hotspot but with the
 // pre-rendered LLM prompt baked in, so the front-end can copy it to the
@@ -143,34 +137,6 @@ type TrendsPayload struct {
 	Series map[string][]aggregate.TrendPoint `json:"series"`
 }
 
-// SessionSummary is one row in /_claudit/api/sessions. Carries the
-// totals view of a session without the per-prompt Timeline body —
-// that's the lazy-fetch payload served by
-// /_claudit/api/sessions/{id}/timeline.
-type SessionSummary struct {
-	SessionID string    `json:"session_id"`
-	CWD       string    `json:"cwd"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at"`
-	CostUSD   float64   `json:"cost_usd"`
-	Turns     int       `json:"turns"`
-	// Entrypoint is the session origin ("cli" interactive, "sdk-cli" headless)
-	// so the Sessions list can split interactive from SDK runs.
-	Entrypoint string `json:"entrypoint"`
-	// FirstPrompt is a short preview of the session's kickoff prompt so the
-	// list is scannable without fetching each per-session timeline. Capped to
-	// firstPromptPreviewChars; empty when the session has no recognized prompt.
-	FirstPrompt string `json:"first_prompt"`
-}
-
-// SessionsPayload backs /_claudit/api/sessions. The wrapper struct
-// (vs a bare []SessionSummary) lets future fields (pagination
-// cursor, redaction notice) land without an API-shape break.
-type SessionsPayload struct {
-	Sessions      []SessionSummary `json:"sessions"`
-	TotalSessions int              `json:"total_sessions"`
-}
-
 // BuildOverview rolls the aggregator's landing-tab data into the
 // umbrella struct the SPA fetches in one round trip.
 func BuildOverview(a *aggregate.Aggregator) OverviewPayload {
@@ -272,56 +238,4 @@ func BuildTrends(a *aggregate.Aggregator, dim string) (TrendsPayload, error) {
 		Dim:    dim,
 		Series: series,
 	}, nil
-}
-
-// BuildSessions projects an already-built timeline slice into the
-// summary-only payload the sessions LIST endpoint returns. Takes
-// timelines (rather than rebuilding from scratch) so callers that
-// already have them — e.g. the static report renderer — don't pay
-// twice. The Prompts slice is intentionally dropped here; clients
-// fetch it per-session via /_claudit/api/sessions/{id}/timeline.
-//
-// totalSessions is the full count of distinct sessions in the window
-// (aggregator's Totals().Sessions), which may exceed len(Sessions)
-// because the timeline slice is capped (q.SessionsTop). Shipping it
-// alongside the capped list lets the UI render "N of M" rather than a
-// bare "N" that contradicts the Overview tile's session total.
-func BuildSessions(timelines []aggregate.SessionTimeline, totalSessions int) SessionsPayload {
-	out := make([]SessionSummary, 0, len(timelines))
-	for _, s := range timelines {
-		out = append(out, SessionSummary{
-			SessionID:   s.SessionID,
-			CWD:         s.CWD,
-			StartedAt:   s.StartedAt,
-			EndedAt:     s.EndedAt,
-			CostUSD:     s.CostUSD,
-			Turns:       s.Turns,
-			Entrypoint:  s.Entrypoint,
-			FirstPrompt: firstPromptPreview(s),
-		})
-	}
-	return SessionsPayload{Sessions: out, TotalSessions: totalSessions}
-}
-
-// firstPromptPreview returns a short, single-line preview of the session's
-// first real (non-orphan) prompt, capped to firstPromptPreviewChars. Returns
-// "" when the session has only orphan turns or empty prompt text. The prompt
-// Text is already redaction-aware from the timeline builder, so a redacted
-// session previews as "[redacted N chars]" rather than leaking content.
-func firstPromptPreview(s aggregate.SessionTimeline) string {
-	for _, p := range s.Prompts {
-		if p.UUID == "" { // orphan bucket — no originating prompt
-			continue
-		}
-		txt := strings.TrimSpace(p.Text)
-		if txt == "" {
-			continue
-		}
-		txt = strings.Join(strings.Fields(txt), " ") // collapse newlines/runs to one line
-		if r := []rune(txt); len(r) > firstPromptPreviewChars {
-			return string(r[:firstPromptPreviewChars]) + "…"
-		}
-		return txt
-	}
-	return ""
 }

@@ -26,7 +26,6 @@ const (
 	apiPathTokens    = "/_claudit/api/tokens"
 	apiPathTools     = "/_claudit/api/tools"
 	apiPathSubagents = "/_claudit/api/subagents"
-	apiPathSessions  = "/_claudit/api/sessions"
 	apiPathTrends    = "/_claudit/api/trends"
 	apiPathAnomalies = "/_claudit/api/anomalies"
 	apiPathTheme     = "/_claudit/api/theme"
@@ -35,11 +34,6 @@ const (
 	// (non-subtree) patterns, so they're simply two distinct routes —
 	// no precedence interplay.
 	apiPathAgentsFull = "/_claudit/api/agents/full"
-
-	// sessionTimelineSuffix is the trailing segment of the
-	// "/api/sessions/{id}/timeline" route pattern; routes() composes
-	// the pattern from apiPathSessions + "/{id}" + this suffix.
-	sessionTimelineSuffix = "/timeline"
 )
 
 // Section labels for the per-section render cache. Trends uses a
@@ -52,23 +46,15 @@ const (
 	apiSectionTokens    = "api-tokens"
 	apiSectionTools     = "api-tools"
 	apiSectionSubagents = "api-subagents"
-	apiSectionSessions  = "api-sessions"
 	apiSectionAnomalies = "api-anomalies"
 	apiSectionTrends    = "api-trends"
 	apiSectionAgents    = "api-agents"
 )
 
-// sectionBuilder receives the aggregator and the lazily-built session
-// timelines and returns a section's payload. Returning `any` keeps
-// each builder's static type intact at the call site while letting
-// the shared handler marshal uniformly.
-//
-// timelines are nil for handlers that don't need them — the shared
-// handler avoids the timeline pass entirely when no builder asks for
-// them, since timeline construction is the most expensive step in
-// sharedAggregateData and the per-section caches already short-
-// circuit repeat work.
-type sectionBuilder func(a *aggregate.Aggregator, timelines []aggregate.SessionTimeline) (any, error)
+// sectionBuilder receives the shared aggregator and returns a section's
+// payload. Returning `any` keeps each builder's static type intact at
+// the call site while letting the shared handler marshal uniformly.
+type sectionBuilder func(a *aggregate.Aggregator) (any, error)
 
 // apiResponse describes everything the shared handler needs to know
 // to serve one section. Built per-request by each handler before
@@ -78,16 +64,11 @@ type apiSectionSpec struct {
 	// the ETag. Must be stable for repeated equivalent requests.
 	section string
 	// build extracts and marshals the section's payload from the
-	// shared aggregator (and timelines, when needed).
+	// shared aggregator.
 	build sectionBuilder
-	// needsTimelines flips on the BuildSessionTimelines pass inside
-	// sharedAggregateData. Skipping it for sections that don't use
-	// timelines (Cost, Cache, Tools, Subagents, Anomalies, Trends,
-	// Overview) shaves the multi-MB walk off the cold path.
-	needsTimelines bool
 	// buildFromSnapshot, when set, builds the payload straight from the
 	// snapshot + query and bypasses sharedAggregateData entirely (no
-	// Aggregator, no timeline pass). Used by sections like /agents that
+	// Aggregator). Used by sections like /agents that
 	// derive their own structure from raw turns. Takes precedence over build.
 	buildFromSnapshot func(snap *Snapshot, q Query) (any, error)
 }
@@ -144,11 +125,11 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 
 	var payload any
 	if spec.buildFromSnapshot != nil {
-		// Snapshot-derived section (e.g. /agents): skip the Aggregator +
-		// timeline pass entirely and build straight from raw turns.
+		// Snapshot-derived section (e.g. /agents): skip the Aggregator
+		// pass entirely and build straight from raw turns.
 		payload, err = spec.buildFromSnapshot(snap, q)
 	} else {
-		agg, timelines, aerr := s.sharedAggregateData(r.Context(), snap, q)
+		agg, aerr := s.sharedAggregateData(r.Context(), snap, q)
 		if aerr != nil {
 			if isClientGone(aerr) {
 				// Client disconnected mid-aggregation (reload/navigation).
@@ -162,10 +143,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 			http.Error(w, "aggregate failed", http.StatusInternalServerError)
 			return
 		}
-		if !spec.needsTimelines {
-			timelines = nil
-		}
-		payload, err = spec.build(agg, timelines)
+		payload, err = spec.build(agg)
 	}
 	if err != nil {
 		// Distinguish "user gave bad input" from "we screwed up":
@@ -277,10 +255,7 @@ func isClientGone(err error) bool {
 }
 
 // API handlers — one per route. Each is a thin wrapper that names
-// its cache section and provides the right builder closure. The
-// repetition is intentional: a table-driven dispatcher would hide
-// the per-section toggle (needsTimelines) and require a switch
-// somewhere else to keep the closure types straight.
+// its cache section and provides the right builder closure.
 
 func (s *Server) handleAPISnapshot(w http.ResponseWriter, r *http.Request) {
 	snap := s.cache.Snapshot()
@@ -318,7 +293,7 @@ func (s *Server) handleAPISnapshot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIOverview(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionOverview,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildOverview(a), nil
 		},
 	})
@@ -327,7 +302,7 @@ func (s *Server) handleAPIOverview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICost(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionCost,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildCost(a), nil
 		},
 	})
@@ -336,7 +311,7 @@ func (s *Server) handleAPICost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICache(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionCache,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildCache(a), nil
 		},
 	})
@@ -345,7 +320,7 @@ func (s *Server) handleAPICache(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPITokens(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionTokens,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildTokens(a), nil
 		},
 	})
@@ -354,7 +329,7 @@ func (s *Server) handleAPITokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPITools(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionTools,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildTools(a), nil
 		},
 	})
@@ -363,7 +338,7 @@ func (s *Server) handleAPITools(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPISubagents(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSubagents,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildSubagents(a), nil
 		},
 	})
@@ -372,7 +347,7 @@ func (s *Server) handleAPISubagents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIAnomalies(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionAnomalies,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			return render.BuildAnomalies(a), nil
 		},
 	})
@@ -390,7 +365,7 @@ func (s *Server) handleAPITrends(w http.ResponseWriter, r *http.Request) {
 	section := apiSectionTrends + "-" + dim
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: section,
-		build: func(a *aggregate.Aggregator, _ []aggregate.SessionTimeline) (any, error) {
+		build: func(a *aggregate.Aggregator) (any, error) {
 			p, err := render.BuildTrends(a, dim)
 			if err != nil {
 				return nil, &userInputError{err: err}

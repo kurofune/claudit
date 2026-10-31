@@ -41,7 +41,6 @@ type Options struct {
 	DefaultHotspots    int
 	DefaultSessionsTop int
 	DefaultPeriod      aggregate.Period
-	DefaultRedact      bool
 
 	// MaxCachedRenders bounds the (filter, generation) HTML cache.
 	// 0 disables caching; 16 is plenty for a single-user tool.
@@ -92,7 +91,7 @@ type Server struct {
 	// 0.
 	renderCache *renderLRU
 
-	// aggregateSF collapses concurrent in-flight aggregate+timeline
+	// aggregateSF collapses concurrent in-flight aggregate
 	// builds for the same (snapshot generation, canonical query).
 	// Without it, N parallel cold first-paint fetches (one per browser
 	// tab, or the canonical "open /; page fetches /_claudit/data.json
@@ -101,7 +100,7 @@ type Server struct {
 	// rest share the result.
 	aggregateSF singleflight.Group
 
-	// aggregateBuildN counts the number of aggregate+timeline builds
+	// aggregateBuildN counts the number of aggregate builds
 	// actually executed (i.e. once per singleflight.Do callback
 	// invocation). Test-only hook for asserting the collapse — see
 	// TestServer_Singleflight_CollapsesConcurrentBuilds.
@@ -260,11 +259,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPathTheme, s.handleAPITheme)
 	s.mux.HandleFunc("GET "+apiPathAgents, s.handleAPIAgents)
 	s.mux.HandleFunc("GET "+apiPathAgentsFull, s.handleAPIAgentsFull)
-	// Per-session timelines use a {id} wildcard; anything else under
-	// /api/sessions/ (bare {id}, unknown subpaths, trailing slash)
-	// falls through to ServeMux's 404.
-	s.mux.HandleFunc("GET "+apiPathSessions, s.handleAPISessions)
-	s.mux.HandleFunc("GET "+apiPathSessions+"/{id}"+sessionTimelineSuffix, s.handleAPISessionTimeline)
 
 	s.mux.HandleFunc("GET "+webAssetURLPrefix, s.handleWebAsset)
 
@@ -479,7 +473,7 @@ func (s *Server) Addr() string {
 //     time-window keys at all (?last, ?since, ?until).
 //   - Server's DefaultSessionsTop applies only when the URL didn't
 //     specify ?sessions.
-//   - Server's DefaultHotspots / DefaultPeriod / DefaultRedact apply
+//   - Server's DefaultHotspots / DefaultPeriod apply
 //     when the URL didn't specify them.
 func (s *Server) applyDefaults(q *Query, now time.Time) {
 	urlSetWindow := q.URLHasLast || q.URLHasSince || q.URLHasUntil
@@ -540,7 +534,7 @@ func isSingleLocalDay(since, until time.Time) bool {
 	return until.Equal(midnight.AddDate(0, 0, 1))
 }
 
-// sharedAggregateData runs buildAggregator + buildTimelines for
+// sharedAggregateData runs buildAggregator for
 // (snap.Generation, q.rawQuery), collapsing concurrent in-flight
 // computations into one via singleflight. The pageload pattern that
 // motivated this is the cold open: the browser fetches / and then,
@@ -553,30 +547,26 @@ func isSingleLocalDay(since, until time.Time) bool {
 // The build counter is incremented inside the singleflight callback,
 // so it's incremented exactly once per actual build — not per caller.
 // Test-only accessor: aggregateBuildCount().
-type aggregateData struct {
-	agg       *aggregate.Aggregator
-	timelines []aggregate.SessionTimeline
-}
-
-func (s *Server) sharedAggregateData(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, []aggregate.SessionTimeline, error) {
+//
+// A request whose client already hung up returns ctx's error without
+// building, so the handler can drop it silently instead of paying for
+// a build nobody will read.
+func (s *Server) sharedAggregateData(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	key := fmt.Sprintf("%d|%s", snap.Generation, q.rawQuery)
 	v, err, _ := s.aggregateSF.Do(key, func() (any, error) {
 		s.aggregateBuildN.Add(1)
-		agg := s.buildAggregator(snap, q)
-		timelines, terr := s.buildTimelines(ctx, snap, q)
-		if terr != nil {
-			return nil, terr
-		}
-		return aggregateData{agg: agg, timelines: timelines}, nil
+		return s.buildAggregator(snap, q), nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	d := v.(aggregateData)
-	return d.agg, d.timelines, nil
+	return v.(*aggregate.Aggregator), nil
 }
 
-// aggregateBuildCount returns the number of aggregate+timeline builds
+// aggregateBuildCount returns the number of aggregate builds
 // executed since the server started. Test-only accessor.
 func (s *Server) aggregateBuildCount() int64 {
 	return s.aggregateBuildN.Load()
@@ -629,8 +619,8 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 		WithPeriod(q.Period).
 		WithTrendFill(q.TrendFillStart, q.TrendFillEnd).
 		WithPromptIndex(promptIdx).
-		// Same canonical replay dedup as the Sessions/Agents drill-downs, so the
-		// headline per-session figures match those views deterministically.
+		// Same canonical replay dedup as the Agents view, so the headline
+		// per-session figures match it deterministically.
 		WithReplaySet(replays)
 	for _, t := range snap.Turns {
 		agg.AddWithSubagent(t, s.subagentLookup)

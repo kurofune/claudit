@@ -38,9 +38,8 @@ func runServe(args []string) error {
 	pollMS := fs.Int("poll-ms", 2000, "how often to re-scan the projects root for changed JSONLs")
 	last := fs.String("last", "7d", "default time window when the URL doesn't specify one — Nd or Nw (use empty string to disable; ?scope=all also lifts it per-request)")
 	hotspots := fs.Int("hotspots", 10, "default hotspots count when ?hotspots is not in the URL (0 disables)")
-	sessionsTop := fs.Int("sessions", 0, "cap the Sessions/Agents views to the N most-recently-active sessions when ?sessions is not in the URL (0 = no cap: show every session in the time window, paged 10 at a time)")
+	sessionsTop := fs.Int("sessions", 0, "cap the Agents view to the N most-recently-active sessions when ?sessions is not in the URL (0 = no cap: show every session in the time window)")
 	by := fs.String("by", "day", "default trend bucket when ?by is not in the URL (day|week|month|off)")
-	redact := fs.Bool("redact", false, "default redaction state when ?redact is not in the URL")
 	cacheSize := fs.Int("cache", 16, "max rendered HTML responses to cache, keyed on (filter, generation); 0 disables")
 	openBrowser := fs.Bool("open", true, "open the report in your default browser on startup (skipped on headless hosts)")
 	fs.Usage = func() {
@@ -104,7 +103,6 @@ func runServe(args []string) error {
 		DefaultHotspots:    *hotspots,
 		DefaultSessionsTop: *sessionsTop,
 		DefaultPeriod:      period,
-		DefaultRedact:      *redact,
 		MaxCachedRenders:   *cacheSize,
 		Version:            versionShort(),
 	})

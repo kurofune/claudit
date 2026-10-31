@@ -672,30 +672,6 @@ func TestBuildAgentGraph_StepCarriesUUID(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_RedactsThinkingAndText(t *testing.T) {
-	// Under Redact, reasoning/narration become length-echoing markers — but
-	// an empty field stays empty (no "[redacted 0 chars]" noise), matching
-	// how tool-input redaction is gated on non-empty.
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
-	turn.Thinking = "secret reasoning"
-	turn.Text = "" // empty narration must stay empty
-	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
-
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Redact: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	step := g.Sessions[0].Main.Steps[0]
-	if want := aggregate.RedactMarker("secret reasoning"); step.Thinking != want {
-		t.Errorf("Thinking = %q, want %q", step.Thinking, want)
-	}
-	if step.Text != "" {
-		t.Errorf("Text = %q, want empty (not a redacted-0 marker)", step.Text)
-	}
-}
-
 func TestBuildAgentGraph_PromptMarkersSegmentMainTimeline(t *testing.T) {
 	// Two user prompts in one session: prompt A produced two turns, prompt B
 	// produced one. The main timeline (sorted by time) should segment into two
@@ -766,69 +742,6 @@ func TestBuildAgentGraph_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
 	}
 	if !prompts[0].Timestamp.Equal(promptTS) {
 		t.Errorf("Timestamp = %v, want %v", prompts[0].Timestamp, promptTS)
-	}
-}
-
-func TestBuildAgentGraph_RedactsPromptMarkerText(t *testing.T) {
-	// Under Redact the prompt body becomes a length-echoing marker so a shared
-	// report doesn't leak the conversation — mirroring tool-input/thinking
-	// redaction. UUID and timestamp still flow (they're not secret).
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	src := "/root/-p-x/s1.jsonl"
-
-	user := parse.UserMessage{UUID: "uA", SessionID: "s1", Text: "secret prompt body", Timestamp: t0}
-	turn := mkTurn("t1", "s1", src, t0.Add(10*time.Second))
-	turn.ParentUUID = "uA"
-
-	snap := &corpus.Snapshot{
-		Turns: []parse.Turn{turn},
-		Users: []parse.UserMessage{user},
-	}
-
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Redact: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	prompts := g.Sessions[0].Prompts
-	if len(prompts) != 1 {
-		t.Fatalf("want 1 prompt marker, got %d", len(prompts))
-	}
-	if want := aggregate.RedactMarker("secret prompt body"); prompts[0].Text != want {
-		t.Errorf("Text = %q, want %q", prompts[0].Text, want)
-	}
-	if prompts[0].UUID != "uA" {
-		t.Errorf("UUID = %q, want uA (redaction must not hide the id)", prompts[0].UUID)
-	}
-}
-
-func TestBuildAgentGraph_RedactsToolInput(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
-	turn.ToolUses = []parse.ToolUse{{Name: "Bash", Detail: "git status", Input: "git status -s"}}
-	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
-
-	// Redact off: raw input passes through.
-	plain, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := plain.Sessions[0].Main.Steps[0].Tools[0].Input; got != "git status -s" {
-		t.Errorf("unredacted Input = %q, want %q", got, "git status -s")
-	}
-
-	// Redact on: input becomes the length-echoing marker, never the raw text.
-	red, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Redact: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got := red.Sessions[0].Main.Steps[0].Tools[0].Input
-	if got == "git status -s" {
-		t.Errorf("Input = %q, want redacted marker (raw text leaked under Redact)", got)
-	}
-	if got != "[redacted 13 chars]" {
-		t.Errorf("Input = %q, want %q", got, "[redacted 13 chars]")
 	}
 }
 

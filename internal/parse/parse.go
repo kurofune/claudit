@@ -61,8 +61,7 @@ type ToolResult struct {
 	// OutputBytes is the byte length of the FULL (untruncated) result content
 	// text — the size the tool actually returned, measured before Content's
 	// snippet cap. OutputLines is that text's line count. Both are pure counts
-	// (they leak no content, so they survive redaction). Zero for an empty
-	// result.
+	// that carry no content. Zero for an empty result.
 	OutputBytes int
 	OutputLines int
 	// Rows is a structured record count parsed from the line's `toolUseResult`

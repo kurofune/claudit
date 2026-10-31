@@ -21,7 +21,6 @@ type Query struct {
 	// View knobs — equivalent to the report flags of the same name.
 	Hotspots    int // -1 means "use server default"
 	SessionsTop int // -1 means "use server default"
-	Redact      bool
 
 	// Window provenance — which keys the URL provided. Used by
 	// applyDefaults to know whether to overlay the server default
@@ -127,13 +126,6 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 		}
 		q.SessionsTop = n
 		q.URLHasSess = true
-	}
-	if s, ok := lookupTrim(v, "redact"); ok {
-		b, err := strconv.ParseBool(s)
-		if err != nil {
-			return q, fmt.Errorf("?redact: must be true/false, got %q", s)
-		}
-		q.Redact = b
 	}
 	if s, ok := lookupTrim(v, "scope"); ok {
 		switch s {

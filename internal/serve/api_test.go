@@ -237,7 +237,6 @@ func TestAPISections_EtagRevalidation(t *testing.T) {
 		"/_claudit/api/subagents",
 		"/_claudit/api/anomalies",
 		"/_claudit/api/trends?dim=model",
-		"/_claudit/api/sessions",
 	}
 	for _, path := range endpoints {
 		t.Run(strings.ReplaceAll(strings.TrimPrefix(path, "/_claudit/api/"), "?", "_"), func(t *testing.T) {
@@ -354,7 +353,6 @@ func TestAPISections_FilterCombinations(t *testing.T) {
 		{"since", "?since=2026-05-01"},
 		{"until", "?until=2026-05-02"},
 		{"last_7d", "?last=7d"},
-		{"redact", "?redact=true"},
 		{"scope_all", "?scope=all"},
 		{"by_week", "?by=week"},
 		{"sessions_cap", "?sessions=10"},
@@ -449,140 +447,21 @@ func TestAPITrends_DimsCoverPlanTable(t *testing.T) {
 	}
 }
 
-// TestAPISessions_ListShape returns one row per session, totals
-// only, no per-prompt timeline blob.
-func TestAPISessions_ListShape(t *testing.T) {
+// TestRoutes_RemovedEndpoints404 pins the session-list and per-session
+// timeline routes as gone: no SPA module fetches them, and serving them
+// would re-run the per-session timeline pass on demand.
+func TestRoutes_RemovedEndpoints404(t *testing.T) {
 	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	body := readJSONResponse(t, w)
-	assertTopLevelKeys(t, body, []string{"sessions", "total_sessions"})
-
-	// One session-summary per fixture session, no per-prompt data.
-	var p struct {
-		Sessions []struct {
-			SessionID string  `json:"session_id"`
-			CWD       string  `json:"cwd"`
-			CostUSD   float64 `json:"cost_usd"`
-			Turns     int     `json:"turns"`
-		} `json:"sessions"`
-	}
-	if err := json.Unmarshal(body["sessions"], &p.Sessions); err != nil {
-		t.Fatalf("unmarshal sessions array: %v", err)
-	}
-	if len(p.Sessions) < 2 {
-		t.Errorf("want at least 2 sessions in fixture; got %d", len(p.Sessions))
-	}
-	// Defensive: serialized body must not carry per-prompt timeline
-	// data (drives the SPA's lazy-fetch design).
-	if bytes.Contains(body["sessions"], []byte(`"prompts":`)) {
-		t.Errorf("/api/sessions response carries per-prompt timeline data; should be lazy-fetched")
-	}
-}
-
-// TestAPISessionTimeline_GetExisting fetches one session's timeline
-// and asserts the response shape carries prompts + turns.
-func TestAPISessionTimeline_GetExisting(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/s-alpha/timeline", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if got := w.Header().Get("Cache-Control"); got != "no-cache, must-revalidate" {
-		t.Errorf("Cache-Control = %q, want no-cache, must-revalidate", got)
-	}
-	// ETag should be mtime-derived (sess-{id}-mt-{nanos}) because
-	// fixture files exist on disk and are stattable.
-	etag := w.Header().Get("ETag")
-	if !strings.HasPrefix(etag, `W/"sess-s-alpha-mt-`) {
-		t.Errorf("ETag = %q, want W/\"sess-s-alpha-mt-...\"", etag)
-	}
-
-	body := readJSONResponse(t, w)
-	if _, ok := body["session_id"]; !ok {
-		t.Errorf("timeline response missing session_id key; keys=%v", keysOf(body))
-	}
-	if _, ok := body["prompts"]; !ok {
-		t.Errorf("timeline response missing prompts key; keys=%v", keysOf(body))
-	}
-}
-
-// TestAPISessionTimeline_UnknownSession returns 404, not a 200 with
-// an empty body — a SPA should see a clean error path.
-func TestAPISessionTimeline_UnknownSession(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/does-not-exist/timeline", nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body=%s", w.Code, w.Body.String())
-	}
-}
-
-// TestAPISessionTimeline_EtagRevalidation: same If-None-Match flow
-// as the section endpoints, but the ETag here is per-session-mtime
-// so adding turns to a *different* session doesn't invalidate this
-// one. Replaying the ETag must still return 304.
-func TestAPISessionTimeline_EtagRevalidation(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/s-alpha/timeline", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("first: status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	etag := w.Header().Get("ETag")
-	if etag == "" {
-		t.Fatalf("missing ETag on first response")
-	}
-	w2 := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/s-alpha/timeline", http.Header{"If-None-Match": []string{etag}})
-	if w2.Code != http.StatusNotModified {
-		t.Errorf("replay: status = %d, want 304", w2.Code)
-	}
-}
-
-// TestAPISessionsTree_UnknownSubpath: anything under /sessions/
-// other than /timeline is a 404, not a 500.
-func TestAPISessionsTree_UnknownSubpath(t *testing.T) {
-	srv := fixtureServer(t)
-	cases := []string{
-		"/_claudit/api/sessions/s-alpha",            // no subpath
-		"/_claudit/api/sessions/s-alpha/bogus",      // unknown subpath
-		"/_claudit/api/sessions/s-alpha/timeline/x", // extra segment
-	}
-	for _, target := range cases {
+	for _, target := range []string{
+		"/_claudit/api/sessions",
+		"/_claudit/api/sessions/abc/timeline",
+	} {
 		t.Run(target, func(t *testing.T) {
 			w := doAPI(t, srv, http.MethodGet, target, nil)
 			if w.Code != http.StatusNotFound {
-				t.Errorf("status = %d, want 404; body=%s", w.Code, w.Body.String())
+				t.Errorf("GET %s status = %d, want 404; body=%s", target, w.Code, w.Body.String())
 			}
 		})
-	}
-}
-
-// TestAPISessions_TrailingSlash404NoRedirect pins the bare
-// "/_claudit/api/sessions/" (empty session id) shape: a plain 404,
-// never a 301 back to the list endpoint. A redirect would make a
-// typo'd fetch silently return the wrong payload.
-func TestAPISessions_TrailingSlash404NoRedirect(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/sessions/", nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body=%s", w.Code, w.Body.String())
-	}
-	if loc := w.Header().Get("Location"); loc != "" {
-		t.Errorf("Location = %q, want no redirect", loc)
-	}
-}
-
-// TestAPISessionTimeline_MethodNotAllowed: the timeline endpoint is
-// GET/HEAD only, like the section endpoints.
-func TestAPISessionTimeline_MethodNotAllowed(t *testing.T) {
-	srv := fixtureServer(t)
-	w := doAPI(t, srv, http.MethodPost, "/_claudit/api/sessions/s-alpha/timeline", nil)
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want 405; body=%s", w.Code, w.Body.String())
-	}
-	if allow := w.Header().Get("Allow"); !strings.Contains(allow, "GET") {
-		t.Errorf("Allow = %q, want GET listed", allow)
 	}
 }
 
@@ -597,13 +476,4 @@ func TestAPITheme_MethodNotAllowed(t *testing.T) {
 	if allow := w.Header().Get("Allow"); !strings.Contains(allow, "POST") {
 		t.Errorf("Allow = %q, want POST listed", allow)
 	}
-}
-
-func keysOf(m map[string]json.RawMessage) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

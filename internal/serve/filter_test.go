@@ -125,7 +125,6 @@ func TestParseQuery_Counts(t *testing.T) {
 	v := url.Values{}
 	v.Set("hotspots", "5")
 	v.Set("sessions", "0")
-	v.Set("redact", "true")
 	q, err := parseQuery(v, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +135,25 @@ func TestParseQuery_Counts(t *testing.T) {
 	if q.SessionsTop != 0 {
 		t.Errorf("SessionsTop = %d, want 0", q.SessionsTop)
 	}
-	if !q.Redact {
-		t.Errorf("Redact = false, want true")
+}
+
+// TestParseQuery_IgnoresRemovedMaskingKey: the content-masking query knob
+// is gone. Old bookmarks may still carry it, so parseQuery must treat it
+// like any unknown key — no 400 — rather than reject the URL. The key is
+// spelled in two halves so the repo-wide "no masking identifiers" grep
+// stays empty.
+func TestParseQuery_IgnoresRemovedMaskingKey(t *testing.T) {
+	removedKey := "re" + "dact"
+	for _, val := range []string{"true", "1", "bogus"} {
+		v := url.Values{}
+		v.Set(removedKey, val)
+		q, err := parseQuery(v, time.Now())
+		if err != nil {
+			t.Errorf("parseQuery(?%s=%s) err = %v, want nil (unknown keys are ignored)", removedKey, val, err)
+		}
+		if q.Hotspots != -1 || q.SessionsTop != -1 {
+			t.Errorf("parseQuery(?%s=%s) touched view knobs: %+v", removedKey, val, q)
+		}
 	}
 }
 

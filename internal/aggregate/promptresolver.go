@@ -7,10 +7,9 @@ import (
 )
 
 // PromptResolver maps any turn (or intermediate) UUID to the UUID of the user
-// prompt that originated its parentUuid chain. It's the chain-walk shared by
-// the Sessions drill-down (BuildSessionTimelines) and the Agents Conversation
-// lens (agentflow.BuildAgentGraph): both need to attribute a turn back to the
-// prompt that produced it, climbing through non-content lines (system events,
+// prompt that originated its parentUuid chain. The Agents Conversation lens
+// (agentflow.BuildAgentGraph) uses it to attribute a turn back to the prompt
+// that produced it, climbing through non-content lines (system events,
 // file-history snapshots) via parse.ParentLink edges.
 //
 // Build once over a corpus's turns + user messages + parent links; Resolve
@@ -89,7 +88,7 @@ func (r *PromptResolver) Resolve(start string) string {
 	return found
 }
 
-// Text returns the raw (un-redacted, un-truncated) prompt text for a resolved
+// Text returns the raw (untruncated) prompt text for a resolved
 // prompt UUID, or "" if the UUID is not a known prompt.
 func (r *PromptResolver) Text(uuid string) string { return r.userText[uuid] }
 

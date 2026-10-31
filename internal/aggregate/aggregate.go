@@ -238,7 +238,7 @@ func (a *Aggregator) WithPromptIndex(p *PromptIndex) *Aggregator {
 // source file for each duplicated message.id). With it set, Add() skips every
 // non-canonical replayed copy so the canonical session/project is credited
 // regardless of the order turns arrive — keeping the headline per-session
-// rollup in lockstep with the Sessions and Agents views. Build the set from
+// rollup in lockstep with the Agents view. Build the set from
 // the full corpus and call this before Add(); without it, dedup falls back to
 // the order-dependent first-occurrence path.
 func (a *Aggregator) WithReplaySet(rs ReplaySet) *Aggregator {

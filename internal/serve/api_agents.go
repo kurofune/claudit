@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/parse"
 )
 
@@ -20,16 +19,16 @@ const agentActiveWindow = 60 * time.Second
 // data. Reconstructs the per-session agent tree (main + sub-agents) and each
 // agent's tool-call timeline straight from the snapshot. Reuses the shared
 // section machinery (ETag, cache, gzip, 304) via buildFromSnapshot, which
-// bypasses the Aggregator/timeline pass the other sections need.
+// bypasses the Aggregator pass the other sections need.
 func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionAgents,
 		buildFromSnapshot: func(snap *Snapshot, q Query) (any, error) {
-			// TopN honors the same --sessions cap the Sessions tab uses (set
-			// by applyDefaults). It defaults to 0 (no cap — every session in
-			// the window, both views recency-sorted); a positive --sessions
-			// bounds both to the N most-recently-active sessions. A negative
-			// value (unset sentinel) is normalized to 0.
+			// TopN honors the --sessions cap (set by applyDefaults). It
+			// defaults to 0 (no cap — every session in the window,
+			// recency-sorted); a positive --sessions bounds the view to the N
+			// most-recently-active sessions. A negative value (unset sentinel)
+			// is normalized to 0.
 			topN := q.SessionsTop
 			if topN < 0 {
 				topN = 0
@@ -37,7 +36,6 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 			return agentflow.BuildAgentGraph(snap, s.opts.Prices, q.Filter, agentflow.Options{
 				Now:          time.Now(),
 				ActiveWindow: agentActiveWindow,
-				Redact:       q.Redact,
 				TopN:         topN,
 			})
 		},
@@ -66,10 +64,9 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "need session plus exactly one of tool or turn", http.StatusBadRequest)
 		return
 	}
-	// Parse the query for the redact flag (and to 400 on a malformed filter,
-	// matching the sibling endpoints), even though session/tool drive the lookup.
-	q, err := parseQuery(v, time.Now())
-	if err != nil {
+	// Parse the query only to 400 on a malformed filter, matching the sibling
+	// endpoints, even though session/tool drive the lookup.
+	if _, err := parseQuery(v, time.Now()); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -81,7 +78,7 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if turnUUID != "" {
-		s.serveAgentsFullTurn(w, r, snap, q, session, turnUUID)
+		s.serveAgentsFullTurn(w, r, snap, session, turnUUID)
 		return
 	}
 
@@ -121,15 +118,6 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if q.Redact {
-		if detail.Input != "" {
-			detail.Input = aggregate.RedactMarker(detail.Input)
-		}
-		if detail.Output != "" {
-			detail.Output = aggregate.RedactMarker(detail.Output)
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	if r.Method == http.MethodHead {
@@ -143,8 +131,8 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 
 // serveAgentsFullTurn answers /agents/full's ?turn= mode: the untruncated
 // thinking/text of the coalesced turn whose first-line uuid == turnUUID,
-// within the named session. Mirrors the ?tool= mode's resolution/redaction.
-func (s *Server) serveAgentsFullTurn(w http.ResponseWriter, r *http.Request, snap *Snapshot, q Query, session, turnUUID string) {
+// within the named session. Mirrors the ?tool= mode's resolution.
+func (s *Server) serveAgentsFullTurn(w http.ResponseWriter, r *http.Request, snap *Snapshot, session, turnUUID string) {
 	// Resolve the on-disk source file from the trusted snapshot.
 	sourceFile := ""
 	for i := range snap.Turns {
@@ -170,15 +158,6 @@ func (s *Server) serveAgentsFullTurn(w http.ResponseWriter, r *http.Request, sna
 	if !ok {
 		http.NotFound(w, r)
 		return
-	}
-
-	if q.Redact {
-		if detail.Thinking != "" {
-			detail.Thinking = aggregate.RedactMarker(detail.Thinking)
-		}
-		if detail.Text != "" {
-			detail.Text = aggregate.RedactMarker(detail.Text)
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

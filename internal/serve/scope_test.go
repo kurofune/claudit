@@ -10,7 +10,7 @@ import (
 
 // newTestServerWithDefaults builds a Server with a positive sessions cap
 // (10) so the plumbing tests can assert the configured cap is applied. The
-// CLI itself now ships sessions=0 (no cap — the Sessions view paginates),
+// CLI itself ships sessions=0 (no cap — every session in the window),
 // but a positive value here exercises the capping path. The cache is empty
 // by default; pass a seed dir via newTestServer when you want real data.
 func newTestServerWithDefaults(t *testing.T, dir string) *Server {

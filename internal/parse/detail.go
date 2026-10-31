@@ -108,7 +108,7 @@ const toolInputMaxChars = 2000
 // input for the high-value tools — the full Bash command, the prompt handed
 // to an Agent/Task subagent, the slash-command line, a WebFetch URL. Unlike
 // extractDetail (which buckets to a coarse key for roll-ups), this preserves
-// the actual input so the Sessions view can show what the agent did. Returns
+// the actual input so the Agents view can show what the agent did. Returns
 // "" for tools whose Detail already captures everything useful.
 func extractToolInput(name string, raw json.RawMessage) string {
 	return truncateRunes(extractToolInputFull(name, raw), toolInputMaxChars)

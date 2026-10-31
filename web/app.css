@@ -1433,10 +1433,6 @@
     color: var(--ink);
     font-weight: 600;
   }
-  .prompt-block .p-redacted {
-    color: var(--muted);
-    font-style: italic;
-  }
   .prompt-block .p-truncated {
     color: var(--muted);
     font-size: var(--t-1);

@@ -361,7 +361,7 @@ func TestRenderCache_SameGenWritesCoexist(t *testing.T) {
 
 // TestRenderCache_NewerGenerationStorePrunesAllOlder asserts the eager
 // generation sweep: lookups always pass the CURRENT snapshot generation
-// (see handleAPI / handleAPISessionDetail), and generation is a single
+// (see serveAPISection), and generation is a single
 // global monotonic counter, so any entry with an older generation can
 // never be hit again — it is unreachable dead weight. A store at
 // generation G must therefore remove every entry with generation < G,

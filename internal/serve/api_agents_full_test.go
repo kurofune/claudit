@@ -205,38 +205,3 @@ func TestAPIAgentsFull_TurnReturnsUntruncated(t *testing.T) {
 		t.Errorf("full Text len = %d, want %d (untruncated)", len(got.Text), len(bigText))
 	}
 }
-
-// Redaction masks the turn's thinking/text with length-echoing markers.
-func TestAPIAgentsFull_TurnRedact(t *testing.T) {
-	srv, _, _ := turnFixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session=s-think&turn=turn-1&redact=1", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	var got struct{ Thinking, Text string }
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if !strings.HasPrefix(got.Thinking, "[redacted") || !strings.HasPrefix(got.Text, "[redacted") {
-		t.Errorf("Thinking/Text not redacted: %q / %q", got.Thinking, got.Text)
-	}
-}
-
-// Redaction masks input/output content while preserving the structural fields.
-func TestAPIAgentsFull_Redact(t *testing.T) {
-	srv, _, _ := toolFixtureServer(t)
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session=s-tool&tool=toolu_full&redact=1", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	var got struct{ Input, Output, Name string }
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got.Name != "Bash" {
-		t.Errorf("Name = %q, want Bash (structure survives redaction)", got.Name)
-	}
-	if !strings.HasPrefix(got.Input, "[redacted") || !strings.HasPrefix(got.Output, "[redacted") {
-		t.Errorf("Input/Output not redacted: %q / %q", got.Input, got.Output)
-	}
-}

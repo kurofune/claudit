@@ -1,14 +1,12 @@
 package render
 
 import (
-	"context"
 	"encoding/json"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -246,139 +244,6 @@ func TestBuildTrends_UnknownDim(t *testing.T) {
 	}
 }
 
-// TestBuildSessions_ShapeAndKeys: the sessions LIST endpoint omits
-// per-prompt timelines — those are fetched lazily per-session in
-// phase 7. Locking the shape now so the API contract is stable
-// before the SPA ships.
-func TestBuildSessions_ShapeAndKeys(t *testing.T) {
-	timelines, err := buildTimelinesForTest(t)
-	if err != nil {
-		t.Fatalf("build timelines: %v", err)
-	}
-	p := BuildSessions(timelines, len(timelines))
-	got, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal SessionsPayload: %v", err)
-	}
-	wantTopLevel(t, got, []string{"sessions", "total_sessions"})
-
-	// Each session row must carry totals but NOT the full prompts
-	// slice (that's the lazy-fetch payload). Probe one row.
-	var unmarshaled SessionsPayload
-	if err := json.Unmarshal(got, &unmarshaled); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(unmarshaled.Sessions) == 0 {
-		t.Fatal("expected at least one session row from fixture")
-	}
-	// The session list payload must not carry per-prompt drill-down
-	// data — that's what makes the list cheap to fetch.
-	if !sessionsListOmitsPrompts(got) {
-		t.Errorf("SessionsPayload accidentally carries per-prompt data; should be timeline-free")
-	}
-}
-
-// TestBuildSessions_TotalSessionsReconcilesWithOverviewTile captures
-// the guarantee the total_sessions field exists to provide: the
-// sidebar's full session count (SessionsPayload.TotalSessions) must
-// equal the Overview tile's session total (OverviewPayload.Totals.
-// Sessions) for the same aggregator. Before this field, the sidebar
-// rendered the CAPPED len(Sessions) under the same "Sessions" label as
-// the tile's full count — two correct numbers that read as a
-// contradiction. This test locks the two back into agreement and
-// asserts the full count is never less than the (possibly capped)
-// shown count.
-func TestBuildSessions_TotalSessionsReconcilesWithOverviewTile(t *testing.T) {
-	// The reconciliation only holds when the aggregator and the
-	// timeline slice describe the SAME corpus. htmlSetup feeds turns
-	// with no SessionID (which the aggregator does not count as a
-	// session), while buildTimelinesForTest feeds a SessionID-bearing
-	// turn — so we build a fresh aggregator from a matching
-	// SessionID-bearing turn here, mirroring the timeline fixture.
-	prices, err := pricing.LoadDefault()
-	if err != nil {
-		t.Fatalf("LoadDefault: %v", err)
-	}
-	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	a := aggregate.New(prices)
-	a.Add(parse.Turn{
-		Model:     "claude-opus-4-7",
-		CWD:       "/p/x",
-		SessionID: "fixture-session-1",
-		UUID:      "turn-uuid-1",
-		Usage:     parse.Usage{InputTokens: 1_000_000, OutputTokens: 200_000},
-		Timestamp: t0,
-	})
-
-	timelines, err := buildTimelinesForTest(t)
-	if err != nil {
-		t.Fatalf("build timelines: %v", err)
-	}
-	sessions := BuildSessions(timelines, a.Totals().Sessions)
-	overview := BuildOverview(a)
-
-	if got, want := sessions.TotalSessions, overview.Totals.Sessions; got != want {
-		t.Errorf("TotalSessions = %d, want overview tile's %d", got, want)
-	}
-	if sessions.TotalSessions < len(sessions.Sessions) {
-		t.Errorf("TotalSessions (%d) must be >= len(Sessions) (%d): the full window count is never less than the shown count",
-			sessions.TotalSessions, len(sessions.Sessions))
-	}
-}
-
-// TestBuildSessions_CarriesEntrypointAndFirstPrompt: each session row must
-// carry its origin (cli vs sdk-cli) and a short preview of its kickoff prompt
-// so the Sessions list is scannable and splittable without fetching every
-// per-session timeline.
-func TestBuildSessions_CarriesEntrypointAndFirstPrompt(t *testing.T) {
-	prices, err := pricing.LoadDefault()
-	if err != nil {
-		t.Fatalf("LoadDefault: %v", err)
-	}
-	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	user := parse.UserMessage{UUID: "p1", SessionID: "s1", Text: "drive the dungeon monster brain", Timestamp: t0}
-	turn := parse.Turn{
-		Model:      "claude-opus-4-7",
-		CWD:        "/p/x",
-		SessionID:  "s1",
-		UUID:       "a1",
-		ParentUUID: "p1",
-		Entrypoint: "sdk-cli",
-		Usage:      parse.Usage{InputTokens: 1000, OutputTokens: 100},
-		Timestamp:  t0.Add(time.Minute),
-	}
-	timelines, err := aggregate.BuildSessionTimelines(
-		context.Background(),
-		[]parse.Turn{turn}, []parse.UserMessage{user}, nil,
-		prices, aggregate.Filter{}, aggregate.SessionTimelinesOptions{MaxPromptChars: 2000})
-	if err != nil {
-		t.Fatalf("BuildSessionTimelines: %v", err)
-	}
-
-	p := BuildSessions(timelines, len(timelines))
-	if len(p.Sessions) == 0 {
-		t.Fatal("expected at least one session row")
-	}
-	row := p.Sessions[0]
-	if row.Entrypoint != "sdk-cli" {
-		t.Errorf("Entrypoint = %q, want sdk-cli", row.Entrypoint)
-	}
-	if row.FirstPrompt != "drive the dungeon monster brain" {
-		t.Errorf("FirstPrompt = %q, want the kickoff prompt", row.FirstPrompt)
-	}
-
-	// The fields must serialize under the documented JSON keys.
-	got, err := json.Marshal(row)
-	if err != nil {
-		t.Fatalf("marshal row: %v", err)
-	}
-	for _, key := range []string{`"entrypoint":`, `"first_prompt":`} {
-		if !containsKey(got, key) {
-			t.Errorf("session row missing JSON key %s; raw: %s", key, got)
-		}
-	}
-}
-
 // wantTopLevel asserts the JSON object has exactly the given top-
 // level keys — no missing, no extras. Catches both content drift
 // (renamed key) and accidental field bleed (a private struct's
@@ -416,38 +281,4 @@ func diffStringSets(a, b []string) []string {
 		}
 	}
 	return out
-}
-
-// sessionsListOmitsPrompts probes the rendered JSON for the
-// "prompts" key — the per-session timeline payload that the list
-// endpoint MUST NOT carry. Cheap: marshaled output never contains
-// "prompts" as a key when SessionSummary lacks the field.
-func sessionsListOmitsPrompts(raw []byte) bool {
-	return !containsKey(raw, `"prompts":`)
-}
-
-func containsKey(raw []byte, key string) bool {
-	return indexOf(raw, []byte(key)) >= 0
-}
-
-func indexOf(haystack, needle []byte) int {
-	if len(needle) == 0 {
-		return 0
-	}
-	if len(needle) > len(haystack) {
-		return -1
-	}
-	for i := 0; i <= len(haystack)-len(needle); i++ {
-		match := true
-		for j := 0; j < len(needle); j++ {
-			if haystack[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return i
-		}
-	}
-	return -1
 }

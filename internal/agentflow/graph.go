@@ -48,9 +48,8 @@ type AgentSession struct {
 }
 
 // PromptMarker is one user prompt anchored to where its turns begin in the
-// main agent's step timeline. Text is redaction-aware (a "[redacted N chars]"
-// marker when Options.Redact is set); UUID/Timestamp come from the originating
-// parse.UserMessage. An empty UUID marks a run of steps with no resolvable
+// main agent's step timeline. Text is the raw prompt body; UUID/Timestamp
+// come from the originating parse.UserMessage. An empty UUID marks a run of steps with no resolvable
 // originating prompt (orphan turns) — the lens renders no bubble for it.
 type PromptMarker struct {
 	UUID      string    `json:"uuid"`
@@ -118,8 +117,7 @@ type AgentStep struct {
 	GenMs int64                      `json:"gen_ms"`
 	Tools []aggregate.ToolInvocation `json:"tools"`
 	// Thinking is the turn's extended-thinking reasoning; Text is its
-	// narration. Redacted to a length marker when Options.Redact is set.
-	// Omitted from JSON when empty so tool-only turns stay lean.
+	// narration. Omitted from JSON when empty so tool-only turns stay lean.
 	Thinking string `json:"thinking,omitempty"`
 	Text     string `json:"text,omitempty"`
 	// parentUUID is the turn's parentUuid, kept unexported (not serialized) so
@@ -138,13 +136,8 @@ type Options struct {
 	// ActiveWindow marks an agent "running" when its last step falls within
 	// this duration of Now. Zero disables liveness — every agent is "done".
 	ActiveWindow time.Duration
-	// Redact replaces each tool invocation's Input snippet with a
-	// length-echoing "[redacted N chars]" marker so a shared report doesn't
-	// leak command text or sub-agent prompts. Mirrors aggregate's --redact.
-	Redact bool
-	// TopN caps the result to the N most-recently-active sessions, mirroring
-	// the Sessions tab's --sessions cap so a busy corpus doesn't ship
-	// thousands of sessions. Recency (not cost) so a running session is never
+	// TopN caps the result to the N most-recently-active sessions (the
+	// --sessions cap) so a busy corpus doesn't ship thousands of sessions. Recency (not cost) so a running session is never
 	// capped out. 0 means unlimited. Survivors are returned newest-first.
 	TopN int
 }
@@ -237,15 +230,6 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			t.Usage.CacheReadTokens, t.Usage.Speed)
 		n.cost += cost
 		addUsage(&n.tokens, t.Usage)
-		thinking, text := t.Thinking, t.Text
-		if opts.Redact {
-			if thinking != "" {
-				thinking = aggregate.RedactMarker(thinking)
-			}
-			if text != "" {
-				text = aggregate.RedactMarker(text)
-			}
-		}
 		var stepTokens aggregate.Tokens
 		addUsage(&stepTokens, t.Usage)
 		// Model generation span: first→last streamed line of the turn. Zero
@@ -262,9 +246,9 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			Tokens:        stepTokens,
 			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
 			GenMs:         genMs,
-			Tools:         aggregate.DistinctToolInvocations(t.ToolUses, results, opts.Redact, t.Timestamp),
-			Thinking:      thinking,
-			Text:          text,
+			Tools:         aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp),
+			Thinking:      t.Thinking,
+			Text:          t.Text,
 			parentUUID:    t.ParentUUID,
 		})
 	}
@@ -302,7 +286,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
 		})
 		attachSpawnRollups(&as)
-		as.Prompts = segmentPrompts(as.Main, resolver, opts.Redact)
+		as.Prompts = segmentPrompts(as.Main, resolver)
 		out = append(out, as)
 	}
 	// Cap to the N most-recently-active sessions before the display sort, so
@@ -429,9 +413,8 @@ func attachSpawnRollups(as *AgentSession) {
 // PromptMarker per contiguous run of steps sharing an originating user prompt.
 // A new marker starts whenever the resolved prompt UUID changes from the
 // previous step, so every step belongs to exactly one marker and the markers
-// read in conversation order. Text is redacted when redact is set; the empty
-// "" UUID (orphan steps with no resolvable prompt) yields a text-less marker.
-func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver, redact bool) []PromptMarker {
+// read in conversation order. The empty "" UUID (orphan steps with no resolvable prompt) yields a text-less marker.
+func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver) []PromptMarker {
 	if main == nil || len(main.Steps) == 0 {
 		return nil
 	}
@@ -444,13 +427,9 @@ func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver, redact bool) [
 			continue
 		}
 		prev = uuid
-		text := r.Text(uuid)
-		if redact && text != "" {
-			text = aggregate.RedactMarker(text)
-		}
 		markers = append(markers, PromptMarker{
 			UUID:           uuid,
-			Text:           text,
+			Text:           r.Text(uuid),
 			Timestamp:      r.Timestamp(uuid),
 			FirstStepIndex: i,
 		})
