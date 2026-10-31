@@ -156,6 +156,10 @@ func (c *Cache) Refresh() (changed bool, err error) {
 		// can miss writes inside the FS mtime resolution window; size
 		// guards against that.
 		if ok && old.mtime.Equal(mod) && old.size == size {
+			if old.source != i {
+				old.source = i
+				c.files[path] = old
+			}
 			return
 		}
 		toParse = append(toParse, fileJob{src: c.sources[i], path: path})
