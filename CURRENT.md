@@ -1,21 +1,19 @@
 # CURRENT
 
-**Mode:** Steady-state maintenance. No active initiative — both roadmaps
-(`docs/agents-redesign.md`, `docs/agents-audit-roadmap.md`) are fully shipped.
+**Mode:** v2 initiative. Piece 1 (serve-first) shipped as v2.0.0; Piece 2 (honest numbers) is next.
 
-**Goal:** Keep claudit correct against upstream reality: pricing current with
-Anthropic's published rates, the parser current with Claude Code's JSONL schema.
-Ship fixes and small features as they earn their place.
+**Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` whose numbers can be trusted: Piece 2 makes each cost figure say what it actually measures, starting from per-tool-result context-cost attribution.
 
-**Last change:** v1.9.2 (2026-10-24) — Haiku 5.5 added with its >100K-token prompt tier; Sonnet 5.5 cache reads $0.20 → $0.10 from 2026-10-07; rest of the pricing page re-checked, unchanged.
+**Last change:** v2.0.0 (2026-10-31) — report, diff, `--redact` and the static SPA mode removed; bare `claudit` runs serve; Spend replaces Cost/Tokens/Cache; projects grouped by git repo root.
 
 **Assumptions:**
-- Sonnet 5.5 is the first bundled model with rate history (`rates:` until 2026-10-06); Haiku 5.5 is the first with a prompt-length tier (`long_prompt:`). Users on v1.9.1 or earlier price Haiku 5.5 at $0 and over-report Sonnet 5.5 cache reads.
+- Projects key on the session cwd's git repo root (`internal/project/`): linked worktrees and subdirectories roll up into their repo; undecodable scratch dirs and deleted cwds land in `scratch` / `missing` buckets.
+- Old `#cost` / `#tokens` / `#cache` bookmarks redirect to `#spend` (`web/router.js` `REDIRECTS`).
+- Sonnet 5.5 is the first bundled model with rate history (`rates:` until 2026-10-06); Haiku 5.5 is the first with a prompt-length tier (`long_prompt:`).
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** None scheduled. Next trigger is upstream: new Anthropic
-rates, or a Claude Code JSONL schema change.
+**Next checkpoint:** Piece 2's first slice lands — context-cost attribution (in `internal/aggregate/` since claudit-ucr) surfaced in hotspots and the Tools view.
 
 **Stop conditions:**
 - Claude Code changes the JSONL schema → parser catch-up becomes the priority.

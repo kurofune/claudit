@@ -4,6 +4,26 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-31
+
+claudit is now a local daemon plus a TUI: `claudit serve` hosts the live dashboard and the Agents trace view, and `claudit watch` tails a session in the terminal. The one-shot file outputs — HTML, markdown and JSON reports, and diffs — are gone, along with everything that existed only to support them.
+
+**Migration:** run `claudit serve` (or bare `claudit`) instead of `claudit > report.html` or `claudit diff`. Re-bookmark `#cost`, `#tokens` and `#cache` links as `#spend` (`#spend/<tab>/tokens` for token counts); the old hashes still redirect, but bookmarks should name the view that exists. Drop `--redact` from any scripts — it is now an unknown-flag error.
+
+### Removed
+
+- **The `report` and `diff` subcommands.** Bare `claudit` no longer writes a report to stdout, and `claudit report` / `claudit diff` exit 1 with `unknown command`. The HTML, markdown and JSON report renderers and the diff renderer are deleted.
+- **`--redact` and `?redact`.** Redaction existed to make report files safe to share; with no report files it has no purpose. `claudit serve --redact` is an unknown-flag error, and `?redact` in a URL is ignored like any unknown query key.
+- **The `/_claudit/api/sessions`, `/_claudit/api/sessions/{id}/timeline` and `/_claudit/api/cache` routes.** No dashboard view called the first two; the third backed the Cache view.
+- **The Tokens and Cache views.** Tokens merge into the new Spend view behind a Dollars / Tokens toggle; the cache hit ratio stays on the Overview.
+- **The SPA's offline/static mode.** The dashboard always fetches from the running daemon; there is no baked-data fallback.
+
+### Changed
+
+- **Bare `claudit` runs `serve`.** `claudit` and `claudit --port=9000` start the daemon; `claudit help` lists exactly `serve`, `watch` and `version`.
+- **`#cost`, `#tokens` and `#cache` redirect to `#spend`.** `#cost/<tab>` lands on `#spend/<tab>`, `#tokens/<tab>` on `#spend/<tab>/tokens`, and `#cache` on `#spend`. The redirect replaces the history entry, so Back skips it.
+- **Projects are grouped by git repo root.** Every by-project surface — Spend by project, project trends, the `?project=` filter and the Agents view's session labels — keys on the repo a session's cwd belongs to, so a repo's linked worktrees and subdirectories roll up into one project. Claude Code scratch directories that decode to nothing on disk, and deleted cwds with no surviving ancestor in a repo, fall into `scratch` and `missing` buckets.
+
 ## [1.9.2] — 2026-10-24
 
 Pricing refresh against the live pricing page on 2026-10-24: **Claude Haiku 5.5** is added, and the **Sonnet 5.5 cache-read cut** of 2026-10-07 is applied. Every other rate on the page was re-checked and is unchanged.
