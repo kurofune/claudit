@@ -2,6 +2,7 @@ package parse
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -108,16 +109,17 @@ const toolInputMaxChars = 2000
 // input for the high-value tools — the full Bash command, the prompt handed
 // to an Agent/Task subagent, the slash-command line, a WebFetch URL. Unlike
 // extractDetail (which buckets to a coarse key for roll-ups), this preserves
-// the actual input so the Agents view can show what the agent did. Returns
-// "" for tools whose Detail already captures everything useful.
+// the actual input so the Agents view and hotspot examples can show what the
+// agent did: a file tool's path, a search's pattern and scope, and any other
+// tool's input JSON.
 func extractToolInput(name string, raw json.RawMessage) string {
 	return truncateRunes(extractToolInputFull(name, raw), toolInputMaxChars)
 }
 
 // extractToolInputFull is extractToolInput without the length cap — the
 // untruncated representation the drawer's "show full" action reads back from
-// disk. Returns "" for tools whose input we don't surface (same set as the
-// snippet) and for empty/unparseable input.
+// disk. Tools without a dedicated representation fall back to their input
+// JSON on one line; returns "" for empty/unparseable input.
 func extractToolInputFull(name string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -172,10 +174,53 @@ func extractToolInputFull(name string, raw json.RawMessage) string {
 		if in.Prompt != "" {
 			s = in.URL + " — " + in.Prompt
 		}
+	case "Read", "Edit", "Write", "NotebookEdit":
+		var in struct {
+			FilePath     string `json:"file_path"`
+			NotebookPath string `json:"notebook_path"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.FilePath
+		if s == "" {
+			s = in.NotebookPath
+		}
+	case "Grep", "Glob":
+		var in struct {
+			Pattern string `json:"pattern"`
+			Path    string `json:"path"`
+			Glob    string `json:"glob"`
+		}
+		if json.Unmarshal(raw, &in) != nil {
+			return ""
+		}
+		s = in.Pattern
+		if in.Path != "" {
+			s += " in " + in.Path
+		}
+		if in.Glob != "" {
+			s += " (glob " + in.Glob + ")"
+		}
 	default:
-		return ""
+		s = compactJSON(raw)
 	}
 	return strings.TrimSpace(s)
+}
+
+// compactJSON renders a tool's raw input object on one line, "" for an
+// empty object or unparseable input.
+func compactJSON(raw json.RawMessage) string {
+	var buf bytes.Buffer
+	if json.Compact(&buf, raw) != nil {
+		return ""
+	}
+	switch s := buf.String(); s {
+	case "{}", "null", `""`:
+		return ""
+	default:
+		return s
+	}
 }
 
 // ToolUseDetail is the untruncated record for a single tool call, read back

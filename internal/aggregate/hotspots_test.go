@@ -221,3 +221,50 @@ func TestHotspotsSkipsSkillSlashCommandAgent(t *testing.T) {
 		t.Errorf("Hotspots = %+v, want none for Agent/Skill", hs)
 	}
 }
+
+// TestHotspotsExamplesFromParsedJSONL runs real Read and Grep tool_use lines
+// through parse.ParseFile, so the examples carry the inputs the parser
+// extracts rather than hand-filled ones.
+func TestHotspotsExamplesFromParsedJSONL(t *testing.T) {
+	const path = "/p/sess.jsonl"
+	lines := []string{
+		`{"type":"assistant","sessionId":"s","uuid":"a1","timestamp":"2026-05-10T10:00:00Z","message":{"id":"m1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+			`{"type":"tool_use","id":"tu-read","name":"Read","input":{"file_path":"/repo/internal/parse/parse.go","limit":400}},` +
+			`{"type":"tool_use","id":"tu-grep","name":"Grep","input":{"pattern":"func Parse","path":"internal","glob":"*.go","output_mode":"content"}}]}}`,
+		`{"type":"user","sessionId":"s","uuid":"u1","timestamp":"2026-05-10T10:00:01Z","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"tu-read","content":"` + strings.Repeat("r", 4000) + `"},` +
+			`{"type":"tool_result","tool_use_id":"tu-grep","content":"` + strings.Repeat("g", 2000) + `"}]}}`,
+		`{"type":"assistant","sessionId":"s","uuid":"a2","timestamp":"2026-05-10T10:00:02Z","message":{"id":"m2","model":"m","role":"assistant","usage":{"input_tokens":1,"cache_creation_input_tokens":2000,"output_tokens":1}}}`,
+		`{"type":"assistant","sessionId":"s","uuid":"a3","timestamp":"2026-05-10T10:00:03Z","message":{"id":"m3","model":"m","role":"assistant","usage":{"input_tokens":1,"cache_read_input_tokens":2000,"output_tokens":1}}}`,
+	}
+	res, err := parse.ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agg := New(ctxTable())
+	for _, tr := range res.Turns {
+		agg.Add(tr)
+	}
+	agg.AddToolResults(res.ToolResults)
+
+	hs := agg.Hotspots(10)
+	for _, c := range []struct {
+		kind      HotspotKind
+		title     string
+		wantInput string
+	}{
+		{HotspotFileExt, "Read of `.go` files", "/repo/internal/parse/parse.go"},
+		{HotspotGrepGlob, "Grep: `*.go`", "func Parse in internal (glob *.go)"},
+	} {
+		h := findHotspot(hs, c.kind, c.title)
+		if h == nil {
+			t.Fatalf("no %q card in %+v", c.title, hs)
+		}
+		if len(h.Examples) != 1 || h.Examples[0].Input != c.wantInput {
+			t.Errorf("%s examples = %+v, want one with input %q", c.title, h.Examples, c.wantInput)
+		}
+		if h.Examples[0].SessionID != "s" || h.Examples[0].SourceFile != path {
+			t.Errorf("%s example = %+v, want session s in %s", c.title, h.Examples[0], path)
+		}
+	}
+}

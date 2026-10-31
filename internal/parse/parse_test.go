@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -617,9 +618,29 @@ func TestExtractToolUses_CapturesInput(t *testing.T) {
 	if got := turn.ToolUses[1].Input; got != "find all callers of Foo" {
 		t.Errorf("Agent Input = %q, want subagent prompt", got)
 	}
-	// Read has no high-value input snippet — Detail already covers it.
-	if got := turn.ToolUses[2].Input; got != "" {
-		t.Errorf("Read Input = %q, want empty", got)
+	if got := turn.ToolUses[2].Input; got != "/x/y.go" {
+		t.Errorf("Read Input = %q, want the file path", got)
+	}
+}
+
+func TestExtractToolInput_FileSearchAndGenericTools(t *testing.T) {
+	cases := []struct {
+		name, input, want string
+	}{
+		{"Edit", `{"file_path":"/r/a.ts","old_string":"x","new_string":"y"}`, "/r/a.ts"},
+		{"Write", `{"file_path":"/r/b.md","content":"hello"}`, "/r/b.md"},
+		{"NotebookEdit", `{"notebook_path":"/r/n.ipynb","new_source":"1"}`, "/r/n.ipynb"},
+		{"Grep", `{"pattern":"func Parse","path":"internal/parse","glob":"*.go","output_mode":"content"}`, "func Parse in internal/parse (glob *.go)"},
+		{"Grep", `{"pattern":"TODO"}`, "TODO"},
+		{"Glob", `{"pattern":"**/*.go","path":"/r"}`, "**/*.go in /r"},
+		{"mcp__db__query", `{ "sql" : "select 1" }`, `{"sql":"select 1"}`},
+		{"TodoWrite", `{}`, ""},
+		{"Read", `not json`, ""},
+	}
+	for _, c := range cases {
+		if got := extractToolInput(c.name, json.RawMessage(c.input)); got != c.want {
+			t.Errorf("extractToolInput(%s, %s) = %q, want %q", c.name, c.input, got, c.want)
+		}
 	}
 }
 
