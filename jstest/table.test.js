@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rowSearchText, rowPassesFilter, emptyRowText } from '../web/table.js';
+import { rowSearchText, rowPassesFilter, emptyRowText, sortRows } from '../web/table.js';
 
 test('rowSearchText concatenates only string fields, lowercased', () => {
   const r = { Model: 'Claude-Opus', Project: '/p/Foo', CostUSD: 12.5, Turns: 9 };
@@ -40,4 +40,10 @@ test('emptyRowText says no matching rows when the filter hid every row', () => {
 });
 test('emptyRowText falls back to no matching rows without an empty text', () => {
   assert.equal(emptyRowText(0, undefined), 'No matching rows.');
+});
+
+test('sortRows sinks null and undefined to the end in both directions', () => {
+  const rows = [{ k: 'a', v: null }, { k: 'b', v: 2 }, { k: 'c' , v: undefined }, { k: 'd', v: 5 }];
+  assert.deepEqual(sortRows(rows, 'v', 'desc').map(r => r.k), ['d', 'b', 'a', 'c']);
+  assert.deepEqual(sortRows(rows, 'v', 'asc').map(r => r.k), ['b', 'd', 'a', 'c']);
 });

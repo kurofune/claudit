@@ -65,8 +65,8 @@ function filterRows(st, table) {
   return st.rows.filter(r => rowPassesFilter(r, q, minCost));
 }
 
-// sortRows returns a stable-ish sorted shallow copy. null/undefined
-// values sink to the end of an asc sort (top of desc). Mixed numeric
+// sortRows returns a stable sorted shallow copy. null/undefined values
+// (unknown, not zero) sink to the end in both directions. Mixed numeric
 // vs string columns sort by JS .localeCompare on the stringified pair
 // — the legacy code's contract.
 export function sortRows(rows, key, dir) {
@@ -75,8 +75,8 @@ export function sortRows(rows, key, dir) {
   return [...rows].sort((a, b) => {
     const av = a[key], bv = b[key];
     if (av == null && bv == null) return 0;
-    if (av == null) return sign;
-    if (bv == null) return -sign;
+    if (av == null) return 1;
+    if (bv == null) return -1;
     if (typeof av === 'number' && typeof bv === 'number') {
       return sign * (av - bv);
     }
@@ -158,10 +158,11 @@ export function renderTable(table) {
       const tr = document.createElement('tr');
       tr.dataset.cost = r.CostUSD || 0;
       const cells = st.mapper(r);
-      cells.forEach(([html, isNum, heatVal], i) => {
+      cells.forEach(([html, isNum, heatVal, tip], i) => {
         const td = document.createElement('td');
         if (isNum) td.classList.add('num');
         td.innerHTML = html;
+        if (tip) td.title = tip;
         if (heatVal != null) attachHeat(td, heatVal, heatMax[i] || 0);
         tr.appendChild(td);
       });
@@ -207,8 +208,10 @@ function sortButton(th) {
 
 // buildRows initializes per-table state and triggers the first render.
 // Re-calling buildRows() on the same table replaces state — view
-// modules can repaint without leaking old row data. opts.emptyText
-// replaces the filter-miss message when rows is empty.
+// modules can repaint without leaking old row data. The mapper returns
+// one [html, isNum, heatVal, tooltip] tuple per cell; heatVal and
+// tooltip are optional. opts.emptyText replaces the filter-miss message
+// when rows is empty; opts.sortKey/sortDir set the first-paint sort.
 export function buildRows(table, rows, mapper, opts = {}) {
   if (!table) return;
   tableStates.set(table, {
@@ -216,8 +219,8 @@ export function buildRows(table, rows, mapper, opts = {}) {
     emptyText: opts.emptyText,
     pageSize: PAGE_SIZE,
     page: 0,
-    sortKey: null,
-    sortDir: null,
+    sortKey: opts.sortKey || null,
+    sortDir: opts.sortKey ? (opts.sortDir || 'desc') : null,
   });
   // Wire header sort once per table. Re-binding on every buildRows()
   // would stack listeners; the dataset.tableWired sentinel avoids that.
@@ -248,7 +251,8 @@ export function buildRows(table, rows, mapper, opts = {}) {
 // wireViewFilters binds a single view's own .vf-text/.vf-cost inputs
 // (inside `scope`, the element carrying [data-own-filter]). On input it
 // re-renders that scope's paged tables (resetting to page 0), toggles
-// its drill-down `details tbody tr` rows, then calls onApply({q,minCost})
+// its static drill-down `details tbody tr` rows (rows of a buildRows
+// table are already filtered by renderTable), then calls onApply({q,minCost})
 // so the view can re-render any row-derived charts (e.g. Cost's
 // model/project hbars). Idempotent via a dataset.vfWired sentinel so
 // repeated calls across SSE repaints don't stack listeners.
@@ -263,6 +267,8 @@ export function wireViewFilters(scope, onApply) {
       renderTable(table);
     });
     scope.querySelectorAll('details tbody tr').forEach(tr => {
+      const owner = tr.closest('table');
+      if (owner && tableStates.has(owner)) return;
       const cost = parseFloat(tr.dataset.cost || '0');
       const text = tr.textContent.toLowerCase();
       const matches = (!q || text.includes(q)) && (cost >= minCost);
