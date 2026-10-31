@@ -734,3 +734,32 @@ func TestAggregate_ContextCostAttributesReplayedToolResultsOnce(t *testing.T) {
 		})
 	}
 }
+
+// An unpriced (provider, model) pair is reported as provider/model, and the
+// same model name under two providers is two separate warnings.
+func TestCostAt_UnknownProviderModelWarning(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices)
+	codex := turn("gpt-6-astra", 1000, 0, false, "/p/foo", time.Now())
+	codex.Provider = "codex"
+	agg.Add(codex)
+	cc := turn("gpt-6-astra", 10, 0, false, "/p/foo", time.Now())
+	cc.Provider = parse.ProviderClaudeCode
+	agg.Add(cc)
+	priced := turn("claude-sonnet-5", 500, 0, false, "/p/foo", time.Now())
+	priced.Provider = "codex"
+	agg.Add(priced)
+
+	uk := agg.UnknownModels()
+	var names []string
+	for _, u := range uk {
+		names = append(names, u.Name())
+	}
+	want := []string{"codex/gpt-6-astra", "codex/claude-sonnet-5", "claude-code/gpt-6-astra"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("unknown models = %v, want %v", names, want)
+	}
+	if uk[0].Provider != "codex" || uk[0].Model != "gpt-6-astra" {
+		t.Errorf("first warning = %+v, want provider codex, model gpt-6-astra", uk[0])
+	}
+}

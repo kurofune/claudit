@@ -42,3 +42,12 @@ test('warningsHTML says the totals are understated', () => {
   const html = warningsHTML([{ model: 'model-a', turns: 3, tokens: 900 }]);
   assert.match(html, /understated|\$0/i);
 });
+
+test('warningsHTML names each unpriced model as provider/model', () => {
+  const html = warningsHTML([
+    { provider: 'codex', model: 'gpt-6-astra', turns: 4, tokens: 900 },
+    { provider: '<b>', model: 'm', turns: 1, tokens: 1 },
+  ]);
+  assert.match(html, /<code>codex\/gpt-6-astra<\/code>/);
+  assert.doesNotMatch(html, /<b>/);
+});

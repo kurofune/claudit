@@ -243,7 +243,7 @@ func (s *watchState) onEvent(e watch.Event) {
 	switch e.Kind {
 	case parse.LineAssistant:
 		t := e.Turn
-		cost, _ := s.prices.CostAt(t.Model, t.Timestamp,
+		cost, _ := s.prices.CostAt(t.Provider, t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 			t.Usage.CacheReadTokens, t.Usage.Speed)

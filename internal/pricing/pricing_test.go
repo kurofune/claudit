@@ -239,7 +239,7 @@ func TestCostAt_Sonnet55CacheReadCut(t *testing.T) {
 		{"2026-10-06T23:59:59Z", 0.20},
 		{"2026-10-07T00:00:00Z", 0.10},
 	} {
-		cost, known := tab.CostAt("claude-sonnet-5-5", mustTime(t, tc.ts), 0, 0, 0, 0, 1_000_000, "")
+		cost, known := tab.CostAt(ClaudeCode, "claude-sonnet-5-5", mustTime(t, tc.ts), 0, 0, 0, 0, 1_000_000, "")
 		if !known || math.Abs(cost-tc.want) > 1e-9 {
 			t.Errorf("sonnet-5-5 cache read at %s: cost=%v known=%v, want %v", tc.ts, cost, known, tc.want)
 		}
@@ -251,7 +251,7 @@ func TestCostAt_Sonnet55ZeroTimestampUsesCurrentCacheRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cost, known := tab.CostAt("claude-sonnet-5-5", time.Time{}, 0, 0, 0, 0, 1_000_000, "")
+	cost, known := tab.CostAt(ClaudeCode, "claude-sonnet-5-5", time.Time{}, 0, 0, 0, 0, 1_000_000, "")
 	if !known || math.Abs(cost-0.10) > 1e-9 {
 		t.Errorf("sonnet-5-5 cache read at zero ts: cost=%v known=%v, want 0.10", cost, known)
 	}
@@ -374,12 +374,12 @@ func TestCostAt_Sonnet5FlatAcrossTheCancelledCliff(t *testing.T) {
 	// 1M input + 1M output at $2 / $10 = $12, on both sides of the
 	// 2026-09-01 date the increase to $3 / $15 was once scheduled for.
 	for _, ts := range []string{"2026-07-26T00:00:00Z", "2026-09-01T00:00:00Z"} {
-		cost, known := tab.CostAt("claude-sonnet-5", mustTime(t, ts), 1_000_000, 1_000_000, 0, 0, 0, "")
+		cost, known := tab.CostAt(ClaudeCode, "claude-sonnet-5", mustTime(t, ts), 1_000_000, 1_000_000, 0, 0, 0, "")
 		if !known || math.Abs(cost-12.0) > 0.001 {
 			t.Errorf("sonnet-5 at %s: cost=%v known=%v, want 12", ts, cost, known)
 		}
 		// 10M cache reads at $0.20/MTok = $2.
-		cost, _ = tab.CostAt("claude-sonnet-5", mustTime(t, ts), 0, 0, 0, 0, 10_000_000, "")
+		cost, _ = tab.CostAt(ClaudeCode, "claude-sonnet-5", mustTime(t, ts), 0, 0, 0, 0, 10_000_000, "")
 		if math.Abs(cost-2.0) > 0.001 {
 			t.Errorf("sonnet-5 cache read at %s: %v, want 2", ts, cost)
 		}
@@ -388,7 +388,7 @@ func TestCostAt_Sonnet5FlatAcrossTheCancelledCliff(t *testing.T) {
 
 func TestCostAt_UnknownModel(t *testing.T) {
 	tab, _ := LoadDefault()
-	cost, known := tab.CostAt("not-a-real-model", mustTime(t, "2026-07-26T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
+	cost, known := tab.CostAt(ClaudeCode, "not-a-real-model", mustTime(t, "2026-07-26T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if known || cost != 0 {
 		t.Errorf("expected unknown/0, got cost=%v known=%v", cost, known)
 	}
@@ -400,7 +400,7 @@ func TestCost_MatchesCostAtCurrentRate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := tab.CostAt("claude-sonnet-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
+	want, _ := tab.CostAt(ClaudeCode, "claude-sonnet-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
 	got, known := tab.Cost("claude-sonnet-5", 1_000_000, 1_000_000, 0, 0, 0)
 	if !known || math.Abs(got-want) > 0.000001 {
 		t.Errorf("Cost=%v, CostAt(zero)=%v", got, want)
@@ -485,11 +485,11 @@ func TestLoad_UserFileWithRateHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cost, known := tab.CostAt("my-private-model", mustTime(t, "2026-03-15T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
+	cost, known := tab.CostAt(ClaudeCode, "my-private-model", mustTime(t, "2026-03-15T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if !known || math.Abs(cost-10.0) > 0.001 {
 		t.Errorf("in-period: cost=%v known=%v, want 10", cost, known)
 	}
-	cost, _ = tab.CostAt("my-private-model", mustTime(t, "2026-04-01T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
+	cost, _ = tab.CostAt(ClaudeCode, "my-private-model", mustTime(t, "2026-04-01T00:00:00Z"), 1_000_000, 0, 0, 0, 0, "")
 	if math.Abs(cost-20.0) > 0.001 {
 		t.Errorf("post-period: cost=%v, want 20", cost)
 	}
@@ -667,7 +667,7 @@ func TestCostAt_FastRate(t *testing.T) {
 	tab := &Table{Models: map[string]ModelPrice{
 		"claude-opus-5-5": {Rate: Rate{Input: 4, Output: 20}, Fast: &Rate{Input: 8, Output: 40}},
 	}}
-	cost, known := tab.CostAt("claude-opus-5-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
+	cost, known := tab.CostAt(ClaudeCode, "claude-opus-5-5", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
 	if !known || cost != 48 {
 		t.Fatalf("cost=%v known=%v, want $48 known", cost, known)
 	}
@@ -695,7 +695,7 @@ func TestCostAt_SpeedFallbacksAndHistory(t *testing.T) {
 		{"with-fast", "turbo", past, 12},
 		{"with-fast", "fast", past, 48},
 	} {
-		cost, known := tab.CostAt(tc.model, tc.ts, 1_000_000, 1_000_000, 0, 0, 0, tc.speed)
+		cost, known := tab.CostAt(ClaudeCode, tc.model, tc.ts, 1_000_000, 1_000_000, 0, 0, 0, tc.speed)
 		if !known || cost != tc.want {
 			t.Errorf("%+v: cost=%v known=%v", tc, cost, known)
 		}
@@ -724,7 +724,7 @@ func TestDefault_FastRates(t *testing.T) {
 			for i, want := range []float64{tc.want.Input, tc.want.Output, tc.want.CacheWrite5m, tc.want.CacheWrite1h, tc.want.CacheRead} {
 				var tokens [5]int
 				tokens[i] = 1_000_000
-				got, known := tab.CostAt(model, time.Time{}, tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], "fast")
+				got, known := tab.CostAt(ClaudeCode, model, time.Time{}, tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], "fast")
 				if !known || got != want {
 					t.Errorf("%s token field %d: cost=%v known=%v, want %v", model, i, got, known, want)
 				}
@@ -764,7 +764,7 @@ func TestLoad_FastOverlayReplacesModel(t *testing.T) {
 		{"claude-opus-5", "fast", 3},
 		{"claude-opus-4-8", "fast", 93.5},
 	} {
-		cost, known := tab.CostAt(tc.model, time.Time{}, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, tc.speed)
+		cost, known := tab.CostAt(ClaudeCode, tc.model, time.Time{}, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, tc.speed)
 		if !known || math.Abs(cost-tc.want) > 1e-9 {
 			t.Errorf("%+v: cost=%v known=%v", tc, cost, known)
 		}
@@ -815,7 +815,7 @@ func TestCostAt_Haiku55PromptAtThresholdPricesStandard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 40_000, 10_000, 5_000, 5_000, 50_000, "")
+	cost, known := tab.CostAt(ClaudeCode, "claude-haiku-5-5", time.Time{}, 40_000, 10_000, 5_000, 5_000, 50_000, "")
 	if !known || math.Abs(cost-0.011125) > 1e-9 {
 		t.Errorf("cost=%v known=%v, want $0.011125", cost, known)
 	}
@@ -828,7 +828,7 @@ func TestCostAt_Haiku55PromptOverThresholdPricesEveryTokenLong(t *testing.T) {
 	}
 	// 10,001 input + 90,000 cache reads = 100,001 prompt tokens; the 1,000
 	// output tokens pay the long-prompt output rate too.
-	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 10_001, 1_000, 0, 0, 90_000, "")
+	cost, known := tab.CostAt(ClaudeCode, "claude-haiku-5-5", time.Time{}, 10_001, 1_000, 0, 0, 90_000, "")
 	want := (10_001*0.50 + 90_000*0.05 + 1_000*2.50) / 1_000_000
 	if !known || math.Abs(cost-want) > 1e-9 {
 		t.Errorf("cost=%v known=%v, want %v", cost, known, want)
@@ -848,7 +848,7 @@ func TestCostAt_Haiku55CacheWritesCountTowardThreshold(t *testing.T) {
 		{"5m writes cross", 50_001, 0, 50_000*0.50 + 1_000*2.50 + 50_001*0.625},
 		{"1h writes cross", 0, 50_001, 50_000*0.50 + 1_000*2.50 + 50_001*1.00},
 	} {
-		cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 50_000, 1_000, tc.cw5m, tc.cw1h, 0, "")
+		cost, known := tab.CostAt(ClaudeCode, "claude-haiku-5-5", time.Time{}, 50_000, 1_000, tc.cw5m, tc.cw1h, 0, "")
 		want := tc.wantPerMToks / 1_000_000
 		if !known || math.Abs(cost-want) > 1e-9 {
 			t.Errorf("%s: cost=%v known=%v, want %v", tc.name, cost, known, want)
@@ -861,7 +861,7 @@ func TestCostAt_Haiku55OutputDoesNotCountTowardThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cost, known := tab.CostAt("claude-haiku-5-5", time.Time{}, 1_000, 200_000, 0, 0, 0, "")
+	cost, known := tab.CostAt(ClaudeCode, "claude-haiku-5-5", time.Time{}, 1_000, 200_000, 0, 0, 0, "")
 	want := (1_000*0.10 + 200_000*0.50) / 1_000_000
 	if !known || math.Abs(cost-want) > 1e-9 {
 		t.Errorf("cost=%v known=%v, want %v", cost, known, want)
@@ -876,11 +876,11 @@ func TestCostAt_FastWinsOverLongPrompt(t *testing.T) {
 			LongPrompt: &LongPromptRate{ThresholdTokens: 100, Rate: Rate{Input: 3, Output: 6}},
 		},
 	}}
-	cost, known := tab.CostAt("tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
+	cost, known := tab.CostAt(ClaudeCode, "tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast")
 	if !known || cost != 48 {
 		t.Errorf("fast: cost=%v known=%v, want $48", cost, known)
 	}
-	cost, _ = tab.CostAt("tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
+	cost, _ = tab.CostAt(ClaudeCode, "tiered", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
 	if cost != 9 {
 		t.Errorf("standard over threshold: cost=%v, want $9", cost)
 	}
@@ -954,7 +954,7 @@ func TestTable_EffectiveRate(t *testing.T) {
 		{"fast without Fast rate is standard", "plain", may, 5000, "fast", std},
 	}
 	for _, c := range cases {
-		r, ok := tbl.EffectiveRate(c.model, c.ts, c.prompt, c.speed)
+		r, ok := tbl.EffectiveRate(ClaudeCode, c.model, c.ts, c.prompt, c.speed)
 		if !ok || r != c.want {
 			t.Errorf("%s: EffectiveRate = %+v, %v; want %+v, true", c.name, r, ok, c.want)
 		}
@@ -964,13 +964,148 @@ func TestTable_EffectiveRate(t *testing.T) {
 			cc5, cc1, cr int
 			per          float64
 		}{{c.prompt, 0, 0, c.want.CacheWrite5m}, {0, c.prompt, 0, c.want.CacheWrite1h}, {0, 0, c.prompt, c.want.CacheRead}} {
-			got, _ := tbl.CostAt(c.model, c.ts, 0, 0, tok.cc5, tok.cc1, tok.cr, c.speed)
+			got, _ := tbl.CostAt(ClaudeCode, c.model, c.ts, 0, 0, tok.cc5, tok.cc1, tok.cr, c.speed)
 			if want := float64(c.prompt) * tok.per / 1e6; math.Abs(got-want) > 1e-12 {
 				t.Errorf("%s: CostAt(%+v) = %v, want %v", c.name, tok, got, want)
 			}
 		}
 	}
-	if r, ok := tbl.EffectiveRate("nope", time.Time{}, 0, ""); ok || r != (Rate{}) {
+	if r, ok := tbl.EffectiveRate(ClaudeCode, "nope", time.Time{}, 0, ""); ok || r != (Rate{}) {
 		t.Errorf("unknown model = %+v, %v; want zero, false", r, ok)
+	}
+}
+
+func writePrices(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "prices.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The bundled table and a user file in today's bare form both read as
+// provider claude-code: the bare models: map is Claude Code's.
+func TestLoad_BareModelsIsClaudeCode(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tab.Providers[ClaudeCode].Models["claude-opus-4-7"]; !ok {
+		t.Fatalf("bundled claude-opus-4-7 not under providers[%s]: %+v", ClaudeCode, tab.Providers)
+	}
+	if cost, known := tab.CostAt(ClaudeCode, "claude-sonnet-5", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known || math.Abs(cost-2) > 0.001 {
+		t.Errorf("claude-code/claude-sonnet-5 = %v, %v; want 2, true", cost, known)
+	}
+	if _, known := tab.CostAt("codex", "claude-sonnet-5", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); known {
+		t.Error("a Claude Code model priced under provider codex")
+	}
+
+	path := writePrices(t, `models:
+  my-bare-model:
+    input_per_mtok: 7
+`)
+	tab, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost, known := tab.CostAt(ClaudeCode, "my-bare-model", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known || math.Abs(cost-7) > 0.001 {
+		t.Errorf("bare user model = %v, %v; want 7, true under claude-code", cost, known)
+	}
+}
+
+func TestLoad_ProvidersMap(t *testing.T) {
+	path := writePrices(t, `providers:
+  codex:
+    models:
+      gpt-6:
+        input_per_mtok: 3
+        output_per_mtok: 12
+  claude-code:
+    models:
+      my-claude-model:
+        input_per_mtok: 4
+`)
+	tab, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost, known := tab.CostAt("codex", "gpt-6", time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, ""); !known || math.Abs(cost-15) > 0.001 {
+		t.Errorf("codex/gpt-6 = %v, %v; want 15, true", cost, known)
+	}
+	if cost, known := tab.CostAt(ClaudeCode, "my-claude-model", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known || math.Abs(cost-4) > 0.001 {
+		t.Errorf("claude-code/my-claude-model = %v, %v; want 4, true", cost, known)
+	}
+	if _, known := tab.CostAt(ClaudeCode, "gpt-6", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); known {
+		t.Error("a codex model priced under provider claude-code")
+	}
+	if _, known := tab.CostAt(ClaudeCode, "claude-opus-4-7", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known {
+		t.Error("bundled Claude Code model lost after a providers: overlay")
+	}
+}
+
+func TestCostAt_UnknownProviderModel(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pm := range [][2]string{{"codex", "gpt-6-astra"}, {"nope", "claude-opus-4-7"}, {ClaudeCode, "gpt-6-astra"}} {
+		cost, known := tab.CostAt(pm[0], pm[1], time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
+		if known || cost != 0 {
+			t.Errorf("%s/%s: cost=%v known=%v, want 0, false", pm[0], pm[1], cost, known)
+		}
+		if r, ok := tab.EffectiveRate(pm[0], pm[1], time.Time{}, 0, ""); ok || r != (Rate{}) {
+			t.Errorf("%s/%s: EffectiveRate = %+v, %v; want zero, false", pm[0], pm[1], r, ok)
+		}
+	}
+}
+
+func TestLoad_OverlayProviderModel(t *testing.T) {
+	path := writePrices(t, `providers:
+  codex:
+    models:
+      gpt-6:
+        input_per_mtok: 5
+models:
+  claude-sonnet-5:
+    input_per_mtok: 1
+`)
+	tab, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost, known := tab.CostAt("codex", "gpt-6", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known || math.Abs(cost-5) > 0.001 {
+		t.Errorf("added codex/gpt-6 = %v, %v; want 5, true", cost, known)
+	}
+	if cost, _ := tab.CostAt(ClaudeCode, "claude-sonnet-5", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); math.Abs(cost-1) > 0.001 {
+		t.Errorf("bare overlay of claude-sonnet-5 = %v, want 1", cost)
+	}
+
+	// A second user file replaces the codex model the first one added, per
+	// (provider, model): overlay a table that already holds codex/gpt-6.
+	base, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := parseTable([]byte(`providers:
+  codex:
+    models:
+      gpt-6:
+        input_per_mtok: 9
+      gpt-6-mini:
+        input_per_mtok: 0.5
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.overlay(user)
+	if cost, _ := base.CostAt("codex", "gpt-6", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); math.Abs(cost-9) > 0.001 {
+		t.Errorf("replaced codex/gpt-6 = %v, want 9", cost)
+	}
+	if cost, known := base.CostAt("codex", "gpt-6-mini", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); !known || math.Abs(cost-0.5) > 0.001 {
+		t.Errorf("added codex/gpt-6-mini = %v, %v; want 0.5, true", cost, known)
+	}
+	if cost, _ := base.CostAt(ClaudeCode, "claude-sonnet-5", time.Time{}, 1_000_000, 0, 0, 0, 0, ""); math.Abs(cost-1) > 0.001 {
+		t.Errorf("claude-sonnet-5 after codex-only overlay = %v, want 1", cost)
 	}
 }

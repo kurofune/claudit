@@ -75,6 +75,7 @@ type contextTurn struct {
 	sessionID string
 	ts        time.Time
 	endTS     time.Time
+	provider  string
 	model     string
 	usage     parse.Usage
 	toolUses  []parse.ToolUse
@@ -98,6 +99,7 @@ func (a *Aggregator) recordContextTurn(t parse.Turn) {
 		sessionID: t.SessionID,
 		ts:        t.Timestamp,
 		endTS:     t.EndTimestamp,
+		provider:  t.Provider,
 		model:     t.Model,
 		usage:     t.Usage,
 		toolUses:  t.ToolUses,
@@ -208,7 +210,7 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 			}
 			u := c.usage
 			prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
-			rate, _ := a.prices.EffectiveRate(c.model, c.ts, prompt, u.Speed)
+			rate, _ := a.prices.EffectiveRate(c.provider, c.model, c.ts, prompt, u.Speed)
 			a.chargeRereads(out, live, turnRef{file, i}, c, rate.CacheRead)
 
 			cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens

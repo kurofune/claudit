@@ -251,7 +251,7 @@ func (a *Aggregator) cacheWriteCost(c contextTurn) float64 {
 		return 0
 	}
 	prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
-	rate, _ := a.prices.EffectiveRate(c.model, c.ts, prompt, u.Speed)
+	rate, _ := a.prices.EffectiveRate(c.provider, c.model, c.ts, prompt, u.Speed)
 	return (float64(u.CacheCreate5mTokens)*rate.CacheWrite5m + float64(u.CacheCreate1hTokens)*rate.CacheWrite1h) / 1e6
 }
 

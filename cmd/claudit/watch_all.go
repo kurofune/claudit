@@ -236,7 +236,7 @@ func (h *multiHub) handleEvent(te taggedEvent) {
 		}
 		h.state.seenMsg[t.MessageID] = struct{}{}
 	}
-	cost, _ := h.prices.CostAt(t.Model, t.Timestamp,
+	cost, _ := h.prices.CostAt(t.Provider, t.Model, t.Timestamp,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 		t.Usage.CacheReadTokens, t.Usage.Speed)

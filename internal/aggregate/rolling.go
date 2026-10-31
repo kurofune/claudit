@@ -50,7 +50,7 @@ func RollingTotals(turns []parse.Turn, prices *pricing.Table, now time.Time) (ho
 			}
 			seen[t.MessageID] = struct{}{}
 		}
-		cost, _ := prices.CostAt(t.Model, t.Timestamp,
+		cost, _ := prices.CostAt(t.Provider, t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 			t.Usage.CacheReadTokens, t.Usage.Speed)

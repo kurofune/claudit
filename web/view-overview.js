@@ -162,7 +162,7 @@ function trendSectionHTML(data, anomalies) {
 export function warningsHTML(unknownModels) {
   if (!unknownModels || unknownModels.length === 0) return '';
   const items = unknownModels.map(m =>
-    `<li><code>${escHtml(m.model)}</code> — ${fmtNum(m.tokens)} tokens across ${fmtNum(m.turns)} ${m.turns === 1 ? 'turn' : 'turns'}</li>`
+    `<li><code>${escHtml(m.provider ? `${m.provider}/${m.model}` : m.model)}</code> — ${fmtNum(m.tokens)} tokens across ${fmtNum(m.turns)} ${m.turns === 1 ? 'turn' : 'turns'}</li>`
   ).join('');
   return `<div class="warning-card" role="alert"><strong class="danger">Unpriced models:</strong> these turns count as $0, so the totals below are understated. Add them to <code>~/.config/claudit/prices.yaml</code>.<ul class="warning-list">${items}</ul></div>`;
 }

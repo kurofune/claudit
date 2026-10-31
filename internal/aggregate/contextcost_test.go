@@ -282,7 +282,7 @@ func TestContextCostReconciles(t *testing.T) {
 		var realBudget float64
 		for _, tn := range res.Turns {
 			u := tn.Usage
-			r, _ := defaults.EffectiveRate(tn.Model, tn.Timestamp,
+			r, _ := defaults.EffectiveRate(tn.Provider, tn.Model, tn.Timestamp,
 				u.InputTokens+u.CacheCreate5mTokens+u.CacheCreate1hTokens+u.CacheReadTokens, u.Speed)
 			realBudget += (float64(tn.Usage.CacheReadTokens)*r.CacheRead +
 				float64(tn.Usage.CacheCreate5mTokens)*r.CacheWrite5m +
@@ -406,10 +406,10 @@ func TestContextCost_UsesEffectiveRate(t *testing.T) {
 			t.Errorf("%s: ReadCostUSD = %v, want %v", c.name, rows[0].ReadCostUSD, want)
 		}
 		// Reconcile with what CostAt bills those cache tokens on each turn.
-		bIn, _ := tbl.CostAt("m", t0, bu.InputTokens, 0, 0, 0, 0, bu.Speed)
-		bAll, _ := tbl.CostAt("m", t0, bu.InputTokens, 0, bu.CacheCreate5mTokens, 0, 0, bu.Speed)
-		cIn, _ := tbl.CostAt("m", t0, cu.InputTokens, 0, 0, 0, 0, cu.Speed)
-		cAll, _ := tbl.CostAt("m", t0, cu.InputTokens, 0, 0, 0, cu.CacheReadTokens, cu.Speed)
+		bIn, _ := tbl.CostAt(pricing.ClaudeCode, "m", t0, bu.InputTokens, 0, 0, 0, 0, bu.Speed)
+		bAll, _ := tbl.CostAt(pricing.ClaudeCode, "m", t0, bu.InputTokens, 0, bu.CacheCreate5mTokens, 0, 0, bu.Speed)
+		cIn, _ := tbl.CostAt(pricing.ClaudeCode, "m", t0, cu.InputTokens, 0, 0, 0, 0, cu.Speed)
+		cAll, _ := tbl.CostAt(pricing.ClaudeCode, "m", t0, cu.InputTokens, 0, 0, 0, cu.CacheReadTokens, cu.Speed)
 		if !approx(rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn)) {
 			t.Errorf("%s: ContextCostUSD = %v, want CostAt's cache spend %v", c.name, rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn))
 		}

@@ -357,7 +357,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		}
 		a.seenMessageID[t.MessageID] = struct{}{}
 	}
-	cost, known := a.prices.CostAt(t.Model, t.Timestamp,
+	cost, known := a.prices.CostAt(t.Provider, t.Model, t.Timestamp,
 		t.Usage.InputTokens, t.Usage.OutputTokens,
 		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 		t.Usage.CacheReadTokens, t.Usage.Speed)
@@ -369,10 +369,11 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 			t.Usage.CacheCreate5mTokens != 0 || t.Usage.CacheCreate1hTokens != 0 ||
 			t.Usage.CacheReadTokens != 0
 		if nonZero {
-			u, ok := a.unknownModels[t.Model]
+			miss := UnknownModel{Provider: pricing.PriceProvider(t.Provider), Model: t.Model}
+			u, ok := a.unknownModels[miss.Name()]
 			if !ok {
-				u = &UnknownModel{Model: t.Model}
-				a.unknownModels[t.Model] = u
+				u = &miss
+				a.unknownModels[miss.Name()] = u
 			}
 			u.Turns++
 			u.Tokens += int64(t.Usage.InputTokens) + int64(t.Usage.OutputTokens) +
@@ -777,12 +778,18 @@ func (a *Aggregator) AgentInvocations(filterType string) []AgentInvocation {
 // price table costs nothing if it missed three turns and a lot if it missed
 // thirty thousand.
 type UnknownModel struct {
-	Model string `json:"model"`
-	Turns int    `json:"turns"`
+	// Provider and Model are the (provider, model) pair the table lacks; the
+	// warning names it as provider/model, e.g. codex/gpt-6-astra.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Turns    int    `json:"turns"`
 	// Tokens is every bucket summed — input, output, both cache writes, and
 	// cache reads — since all of them would have been billed.
 	Tokens int64 `json:"tokens"`
 }
+
+// Name is the pair as provider/model.
+func (u UnknownModel) Name() string { return u.Provider + "/" + u.Model }
 
 // UnknownModels returns the models we couldn't price, heaviest first by
 // unpriced token volume, ties broken by name for a stable order.
@@ -795,7 +802,7 @@ func (a *Aggregator) UnknownModels() []UnknownModel {
 		if out[i].Tokens != out[j].Tokens {
 			return out[i].Tokens > out[j].Tokens
 		}
-		return out[i].Model < out[j].Model
+		return out[i].Name() < out[j].Name()
 	})
 	return out
 }

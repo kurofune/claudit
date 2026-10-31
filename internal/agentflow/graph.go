@@ -228,7 +228,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		if t.Timestamp.After(n.ended) {
 			n.ended = t.Timestamp
 		}
-		cost, _ := prices.CostAt(t.Model, t.Timestamp,
+		cost, _ := prices.CostAt(t.Provider, t.Model, t.Timestamp,
 			t.Usage.InputTokens, t.Usage.OutputTokens,
 			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
 			t.Usage.CacheReadTokens, t.Usage.Speed)
