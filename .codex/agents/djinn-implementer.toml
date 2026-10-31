@@ -22,7 +22,7 @@ If `bead_id` is missing, stop and report the gap to the orchestrator — do not 
 
 ## Procedure
 
-1. **Read the bead end-to-end.** Run `bd show <bead_id>` and read EVERY field — description (WHAT to build and WHY), `acceptance_criteria` (what DONE looks like, including any Interaction Inventory and Scalability Assumption), `design` (WHERE to look and WHAT patterns to follow), and notes (how this fits the larger plan). If the `design` field references files, READ THOSE FILES before writing any code. Read `.djinn/SCARS.md` — every item there is an implicit acceptance criterion for UI work.
+1. **Read the bead end-to-end.** Run `bd show <bead_id>` and read EVERY field — description (WHAT to build and WHY), `acceptance_criteria` (what DONE looks like, including any Interaction Inventory and Scalability Assumption), `design` (WHERE to look and WHAT patterns to follow), and notes (how this fits the larger plan). If the `design` field references files, READ THOSE FILES before writing any code. For UI work, every UI rule in `AGENTS.md` — the work contract's §4 and any the repo adds outside the djinn block — is an implicit acceptance criterion.
 
 2. **Implement with depth, to every acceptance criterion (§3).** Build the complete feature the acceptance criteria describe — not a skeleton that compiles, not a component that renders but shows no meaningful data. Check each acceptance criterion explicitly: if it says "stats shown as progress bars," build progress bars, not raw numbers; if it says "clickable links that navigate," wire the navigation. The bead is not done until every acceptance criterion is met.
 

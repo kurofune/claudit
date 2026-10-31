@@ -212,11 +212,22 @@ Interactive: `/wish <id>`. Autonomous (`DJINN_SESSION=1`): the summoner drain. N
 - When every criterion already holds at HEAD, commit nothing and report already-done; the harness closes the bead.
 - Commit after each milestone. The harness preserves commits, never an uncommitted tree (failure classes: `classifyIterOutcome`, `internal/djinn/session/iter_beads.go`).
 - Backend code and frontend logic: TDD. In a formula run use `go test -short ./...`, or the repo's `djinn.test_argv` when it sets one; CI owns the `-tags=slow` tier.
-- UI work: every `.djinn/SCARS.md` item is an implicit acceptance criterion.
+- UI work also meets every UI rule the repo's own `AGENTS.md` adds outside the djinn block.
 
 ## 4. Browser-verify web/ changes
 
 Changed `web/` files: walk every acceptance criterion in a browser with the adapter's browser procedure (artifacts in `.playwright-cli/`), at the data volume the Scalability Assumption names, through empty, loading and error states, with no console errors beyond a baseline route's.
+
+Every UI change also meets these rules, each an implicit acceptance criterion:
+
+- Every data view has a meaningful empty state, a visible loading state and a visible error state.
+- Every click action is reachable by keyboard (tab, arrows, enter).
+- The layout stays readable at 3x the tested data volume: no overlap, truncation, clipping or stray horizontal scroll.
+- Tooltips fit their content: wrap, never truncate.
+- No new console errors or warnings.
+- Clickable things look clickable: pointer cursor, hover state or link styling.
+- Build against the store's or API's real data shapes, never invented placeholders.
+- No new accessibility warnings from the build or checker on a file you touched.
 
 ## 5. Review
 
