@@ -213,6 +213,13 @@ type Aggregator struct {
 	// it, byPrompt stays empty and ByPrompt() returns nil.
 	promptIndex *PromptIndex
 	byPrompt    map[string]*promptBucketInternal
+
+	// Context-cost attribution inputs (contextcost.go): counted turns per
+	// session file, tool-result sizes by ToolUseID, and compaction points
+	// per session file.
+	ctxTurns       map[string][]contextTurn
+	ctxResultBytes map[string]int
+	ctxBoundaries  map[string][]time.Time
 }
 
 // New returns an empty aggregator using the given pricing table.
@@ -234,6 +241,9 @@ func New(p *pricing.Table) *Aggregator {
 		unknownModels:     map[string]*UnknownModel{},
 		seenMessageID:     map[string]struct{}{},
 		byPrompt:          map[string]*promptBucketInternal{},
+		ctxTurns:          map[string][]contextTurn{},
+		ctxResultBytes:    map[string]int{},
+		ctxBoundaries:     map[string][]time.Time{},
 	}
 }
 
@@ -363,6 +373,8 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 				int64(t.Usage.CacheReadTokens)
 		}
 	}
+
+	a.recordContextTurn(t)
 
 	a.totals.addUsage(t.Usage)
 	a.totals.CostUSD += cost

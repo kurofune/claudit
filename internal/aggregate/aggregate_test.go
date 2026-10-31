@@ -683,3 +683,54 @@ func TestAggregate_ProjectFilterMatchesResolvedName(t *testing.T) {
 		t.Errorf("?project=pit-2mr InputTokens = %d, want 200 (raw cwd match)", got)
 	}
 }
+
+func TestAggregate_ContextCostAttributesReplayedToolResultsOnce(t *testing.T) {
+	// A fork replays a.jsonl's turns (same message.id, same tool_use ids) into
+	// b.jsonl and both files' tool results reach the aggregator. The result
+	// must be attributed once — 1000 tokens, one session — on either dedup path.
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	orig := []parse.Turn{
+		ctxTurn("a.jsonl", "session-a", "msg_A", "m", t0, parse.Usage{}, parse.ToolUse{ID: "tu-1", Name: "Bash", Detail: "ls"}),
+		ctxTurn("a.jsonl", "session-a", "msg_B", "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 1000}),
+		ctxTurn("a.jsonl", "session-a", "msg_C", "m", t0.Add(2*time.Second), parse.Usage{CacheReadTokens: 5000}),
+	}
+	var replay []parse.Turn
+	for _, tn := range orig {
+		tn.SessionID, tn.SourceFile = "session-b", "b.jsonl"
+		replay = append(replay, tn)
+	}
+	results := []parse.ToolResult{{ToolUseID: "tu-1", OutputBytes: 50}}
+
+	for _, tc := range []struct {
+		name      string
+		replaySet bool
+		order     [][]parse.Turn
+	}{
+		{"first occurrence", false, [][]parse.Turn{orig, replay}},
+		{"replay set, replay added first", true, [][]parse.Turn{replay, orig}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agg := New(ctxTable())
+			if tc.replaySet {
+				agg.WithReplaySet(BuildReplaySet(append(append([]parse.Turn{}, orig...), replay...)))
+			}
+			for _, file := range tc.order {
+				for _, tn := range file {
+					agg.Add(tn)
+				}
+				agg.AddToolResults(results)
+			}
+			tools := agg.ContextCostByTool()
+			if len(tools) != 1 || tools[0].ContextTokens != 1000 || tools[0].RereadTurns != 1 {
+				t.Errorf("ContextCostByTool = %+v, want one Bash row: 1000 tokens, 1 reread", tools)
+			}
+			sessions := agg.ContextCostBySession()
+			if len(sessions) != 1 {
+				t.Fatalf("ContextCostBySession = %+v, want one session", sessions)
+			}
+			if tc.replaySet && sessions[0].SessionID != "session-a" {
+				t.Errorf("credited session = %q, want session-a (canonical file)", sessions[0].SessionID)
+			}
+		})
+	}
+}
