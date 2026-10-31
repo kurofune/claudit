@@ -2,6 +2,7 @@ package agentflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1076,5 +1077,54 @@ func TestBuildAgentGraph_SessionProjectIsResolvedRepo(t *testing.T) {
 	b, _ := json.Marshal(s)
 	if !strings.Contains(string(b), `"project":"the-pit"`) {
 		t.Errorf("payload missing project: %s", b)
+	}
+}
+
+// TestBuildAgentGraph_PathToolsCarryFilePathInput: Read rows reach the Agents
+// payload with the file path as input, not just the extension in detail — so
+// one errored .png Read never makes every later .png Read look like a retry.
+func TestBuildAgentGraph_PathToolsCarryFilePathInput(t *testing.T) {
+	read := func(n int, path string) string {
+		return fmt.Sprintf(`{"type":"assistant","uuid":"a%d","timestamp":"2026-04-10T10:00:0%dZ","sessionId":"s1","message":{"id":"msg_%d","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t%d","name":"Read","input":{"file_path":%q}}]}}`, n, n, n, n, path)
+	}
+	result := func(n int, isErr bool) string {
+		return fmt.Sprintf(`{"type":"user","uuid":"u%d","timestamp":"2026-04-10T10:00:0%dZ","sessionId":"s1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t%d","is_error":%t,"content":"x"}]}}`, n, n, n, isErr)
+	}
+	paths := []string{"/x/a.png", "/x/b.png", "/x/c.png", "/x/d.png"}
+	var lines []string
+	for i, p := range paths {
+		lines = append(lines, read(i+1, p), result(i+1, i == 0))
+	}
+	res, err := parse.ParseFile(strings.NewReader(strings.Join(lines, "\n")+"\n"), "/p/s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prices, _ := pricing.LoadDefault()
+	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks, ToolResults: res.ToolResults}
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Sessions) != 1 || g.Sessions[0].Main == nil {
+		t.Fatalf("expected 1 session with a main agent, got %+v", g.Sessions)
+	}
+	var reads []aggregate.ToolInvocation
+	for _, s := range g.Sessions[0].Main.Steps {
+		for _, tool := range s.Tools {
+			if tool.Name == "Read" {
+				reads = append(reads, tool)
+			}
+		}
+	}
+	if len(reads) != len(paths) {
+		t.Fatalf("Read rows = %d, want %d: %+v", len(reads), len(paths), reads)
+	}
+	for i, p := range paths {
+		if reads[i].Input != p || reads[i].Detail != ".png" {
+			t.Errorf("Read[%d] input/detail = %q/%q, want %q/.png", i, reads[i].Input, reads[i].Detail, p)
+		}
+	}
+	if reads[0].Status != "error" || reads[1].Status != "ok" {
+		t.Errorf("statuses = %q, %q; want error, ok", reads[0].Status, reads[1].Status)
 	}
 }

@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -197,6 +198,29 @@ func TestExtractDetail_Routing(t *testing.T) {
 		got := extractDetail(c.name, []byte(c.raw))
 		if got != c.want {
 			t.Errorf("extractDetail(%q, %q) = %q want %q", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+// Path tools carry the file path as their input, so a per-call key (the
+// Agents view's retry grouping, the per-turn dedup) names the real target
+// rather than the extension bucket extractDetail returns.
+func TestExtractToolInput_PathTools(t *testing.T) {
+	cases := []struct {
+		name, raw, want string
+	}{
+		{"Read", `{"file_path":"/a/b.png"}`, "/a/b.png"},
+		{"Read", `{"file_path":"/a/b.png","offset":10,"limit":20}`, "/a/b.png"},
+		{"Edit", `{"file_path":"/a/c.go","old_string":"x","new_string":"y"}`, "/a/c.go"},
+		{"Write", `{"file_path":"/a/d.html","content":"<p>"}`, "/a/d.html"},
+		{"NotebookEdit", `{"notebook_path":"/a/e.ipynb","new_source":"1"}`, "/a/e.ipynb"},
+	}
+	for _, c := range cases {
+		if got := extractToolInput(c.name, json.RawMessage(c.raw)); got != c.want {
+			t.Errorf("extractToolInput(%s, %s) = %q, want %q", c.name, c.raw, got, c.want)
+		}
+		if got := extractToolInputFull(c.name, json.RawMessage(c.raw)); got != c.want {
+			t.Errorf("extractToolInputFull(%s, %s) = %q, want %q", c.name, c.raw, got, c.want)
 		}
 	}
 }

@@ -212,3 +212,38 @@ func TestDistinctToolInvocations_PopulatesKind(t *testing.T) {
 		}
 	}
 }
+
+// Path tools carry their file path as Input, which is part of the per-turn
+// dedup key: two Reads of different .go files share Detail ".go" but stay two
+// rows of Count 1, and the Tools rollups still count both calls.
+func TestDistinctToolInvocations_PathToolsKeepDistinctFiles(t *testing.T) {
+	line := `{"type":"assistant","uuid":"a","timestamp":"2026-04-10T10:00:00Z","sessionId":"s","message":{"id":"msg_1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+		`{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/x/a.go"}},` +
+		`{"type":"tool_use","id":"r2","name":"Read","input":{"file_path":"/x/b.go"}}` +
+		`]}}`
+	turn, _, _ := parse.ParseLine([]byte(line), "/p/s.jsonl")
+	got := DistinctToolInvocations(turn.ToolUses, nil, time.Time{})
+	if len(got) != 2 {
+		t.Fatalf("rows = %+v, want 2 Read rows", got)
+	}
+	for i, want := range []string{"/x/a.go", "/x/b.go"} {
+		if got[i].Name != "Read" || got[i].Detail != ".go" || got[i].Input != want || got[i].Count != 1 {
+			t.Errorf("row[%d] = %+v, want Read .go %s count 1", i, got[i], want)
+		}
+	}
+
+	a := New(ctxTable())
+	a.Add(turn)
+	byTool, byDetail := a.ToolCallStats()
+	if c := byTool["Read"].Calls; c != 2 {
+		t.Errorf("Tools payload Read calls = %d, want 2", c)
+	}
+	if c := byDetail["Read"][".go"].Calls; c != 2 {
+		t.Errorf("Tools payload Read·.go calls = %d, want 2", c)
+	}
+	for _, b := range a.ByTool() {
+		if b.Name == "Read" && b.Count != 2 {
+			t.Errorf("ByTool Read count = %d, want 2", b.Count)
+		}
+	}
+}

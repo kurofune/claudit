@@ -1535,3 +1535,20 @@ test('sessionTimeRows: skips null / zero-time sessions; null input is empty', ()
     rows: [], overflow: 0, total: { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 },
   });
 });
+
+test('detectSignals: Reads of different .png paths after one errored Read emit no retry-storm', () => {
+  // The path tools carry the file path as input; detail is only the extension.
+  const read = (input, status) => ({ tools: [{ kind: 'read', name: 'Read', detail: '.png', input, status }] });
+  const graph = oneSession({ steps: [
+    read('/x/a.png', 'error'), read('/x/b.png', 'ok'), read('/x/c.png', 'ok'), read('/x/d.png', 'ok'),
+  ] });
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'retry-storm').length, 0);
+});
+
+test('detectSignals: three Reads of one path with the first two errored emit one retry-storm naming the path', () => {
+  const read = status => ({ tools: [{ kind: 'read', name: 'Read', detail: '.png', input: '/x/a.png', status }] });
+  const graph = oneSession({ steps: [read('error'), read('error'), read('ok')] });
+  const storms = detectSignals(graph).filter(s => s.kind === 'retry-storm');
+  assert.equal(storms.length, 1);
+  assert.equal(storms[0].reason, '3 attempts of Read `/x/a.png`, 2 errored — threshold 3');
+});
