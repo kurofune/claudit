@@ -7,9 +7,9 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
-// HotspotForJSON is the same data as aggregate.Hotspot but with the
-// pre-rendered LLM prompt baked in, so the front-end can copy it to the
-// clipboard without re-rendering the template in JS. Used by
+// HotspotForJSON is the same data as aggregate.Hotspot plus the rendered
+// prompt and the change against the previous window, so the front-end
+// copies the prompt without re-rendering the template in JS. Used by
 // OverviewPayload, which /_claudit/api/overview returns.
 type HotspotForJSON struct {
 	Kind       aggregate.HotspotKind `json:"kind"`
@@ -17,38 +17,61 @@ type HotspotForJSON struct {
 	CostUSD    float64               `json:"cost_usd"`
 	PctOfTotal float64               `json:"pct_of_total"`
 	Prompt     string                `json:"prompt"`
-	// PromptKey is the normalized prompt key for prompt_pattern hotspots,
-	// echoed from Hotspot.Context["key"]. Used by the frontend to cross-
-	// link the hotspot to its session in the drill-down view. Empty for
-	// non-prompt hotspot kinds.
-	PromptKey string `json:"prompt_key,omitempty"`
+	Examples   []HotspotExample      `json:"examples"`
+	// PrevCostUSD is this hotspot's cost over the previous window of equal
+	// length, 0 when it had none there. Absent when no previous window was
+	// compared (an unbounded window has no equal-length predecessor).
+	PrevCostUSD *float64 `json:"prev_cost_usd,omitempty"`
+	// TrendPct is 100 × (cost − prev) / prev. Absent when PrevCostUSD is
+	// absent or 0 — the latter is a "new" hotspot.
+	TrendPct *float64 `json:"trend_pct,omitempty"`
 }
 
-// buildHotspotsForJSON resolves the aggregator's top hotspots into
-// the renderable HotspotForJSON shape — same data plus a baked-in
-// LLM prompt and an optional cross-link key. Consumed by BuildOverview.
-func buildHotspotsForJSON(a *aggregate.Aggregator) []HotspotForJSON {
+// HotspotExample is one invocation behind a hotspot card.
+type HotspotExample struct {
+	Input          string  `json:"input"`
+	SessionID      string  `json:"session_id"`
+	SourceFile     string  `json:"source_file"`
+	ContextTokens  int64   `json:"context_tokens"`
+	ContextCostUSD float64 `json:"context_cost_usd"`
+}
+
+// buildHotspotsForJSON resolves a's top hotspots into HotspotForJSON. With
+// a non-nil prev (the aggregator over the previous equal window), each
+// hotspot carries its cost there, joined by (Kind, Title).
+func buildHotspotsForJSON(a, prev *aggregate.Aggregator) []HotspotForJSON {
 	raw := a.Hotspots(10)
+	var prevCosts map[aggregate.HotspotKey]float64
+	if prev != nil {
+		prevCosts = prev.HotspotCosts()
+	}
 	out := make([]HotspotForJSON, 0, len(raw))
 	for _, h := range raw {
 		prompt, err := HotspotPrompt(h)
 		if err != nil {
 			continue
 		}
-		var pk string
-		if h.Kind == aggregate.HotspotPromptPattern && h.Context != nil {
-			if v, ok := h.Context["key"].(string); ok {
-				pk = v
-			}
+		examples := make([]HotspotExample, 0, len(h.Examples))
+		for _, e := range h.Examples {
+			examples = append(examples, HotspotExample(e))
 		}
-		out = append(out, HotspotForJSON{
+		j := HotspotForJSON{
 			Kind:       h.Kind,
 			Title:      h.Title,
 			CostUSD:    h.CostUSD,
 			PctOfTotal: h.PctOfTotal,
 			Prompt:     prompt,
-			PromptKey:  pk,
-		})
+			Examples:   examples,
+		}
+		if prevCosts != nil {
+			pc := prevCosts[aggregate.HotspotKey{Kind: h.Kind, Title: h.Title}]
+			j.PrevCostUSD = &pc
+			if pc > 0 {
+				trend := 100 * (h.CostUSD - pc) / pc
+				j.TrendPct = &trend
+			}
+		}
+		out = append(out, j)
 	}
 	return out
 }
@@ -127,13 +150,14 @@ type TrendsPayload struct {
 }
 
 // BuildOverview rolls the aggregator's landing-tab data into the
-// umbrella struct the SPA fetches in one round trip.
-func BuildOverview(a *aggregate.Aggregator) OverviewPayload {
+// umbrella struct the SPA fetches in one round trip. prev, when non-nil,
+// aggregates the previous window of equal length for the hotspot trend.
+func BuildOverview(a, prev *aggregate.Aggregator) OverviewPayload {
 	return OverviewPayload{
 		Totals:          a.Totals(),
 		OverallHitRatio: a.OverallHitRatio(),
 		TotalTokens:     a.Totals().Total(),
-		Hotspots:        buildHotspotsForJSON(a),
+		Hotspots:        buildHotspotsForJSON(a, prev),
 		TrendTotals:     a.TrendTotals(),
 		Forecast:        a.MonthEndForecast(time.Now()),
 		UnknownModels:   a.UnknownModels(),

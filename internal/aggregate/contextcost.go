@@ -58,9 +58,11 @@ type contextTurn struct {
 	toolUses  []parse.ToolUse
 }
 
-// resultContextCost is one tool result's attributed cost and its keys.
+// resultContextCost is one tool result's attributed cost, its keys, and the
+// evidence a hotspot card shows for it.
 type resultContextCost struct {
 	tool, detail, sessionID string
+	input, sourceFile       string
 	ContextCost
 }
 
@@ -68,6 +70,7 @@ type resultContextCost struct {
 // turns that survived the filter and replay dedup arrive here, so a
 // replayed tool_use is attributed once, on its canonical copy.
 func (a *Aggregator) recordContextTurn(t parse.Turn) {
+	a.invalidateContextCosts()
 	a.ctxTurns[t.SourceFile] = append(a.ctxTurns[t.SourceFile], contextTurn{
 		sessionID: t.SessionID,
 		ts:        t.Timestamp,
@@ -88,6 +91,7 @@ type contextResult struct {
 // the tool_use that produced them by ToolUseID. A ToolUseID seen again (a
 // replayed transcript) keeps its first registration.
 func (a *Aggregator) AddToolResults(results []parse.ToolResult) {
+	a.invalidateContextCosts()
 	for _, r := range results {
 		if r.ToolUseID == "" {
 			continue
@@ -101,6 +105,7 @@ func (a *Aggregator) AddToolResults(results []parse.ToolResult) {
 // AddCompactBoundaries registers compaction points. Results produced before
 // a boundary stop accruing re-read cost on turns after it.
 func (a *Aggregator) AddCompactBoundaries(bs []parse.CompactBoundary) {
+	a.invalidateContextCosts()
 	for _, b := range bs {
 		if b.Timestamp.IsZero() {
 			continue
@@ -111,11 +116,29 @@ func (a *Aggregator) AddCompactBoundaries(bs []parse.CompactBoundary) {
 
 // pendingResult is a tool result waiting for the turn that first carries it.
 type pendingResult struct {
-	tool, detail, sessionID string
-	bytes                   int
+	tool, detail, sessionID, input string
+	bytes                          int
 }
 
-// contextCosts walks each session file's turns in time order. A tool
+func (a *Aggregator) invalidateContextCosts() {
+	a.ctxMu.Lock()
+	a.ctxMemo, a.ctxMemoOK = nil, false
+	a.ctxMu.Unlock()
+}
+
+// contextCosts is computeContextCosts memoized until the next Add or
+// registration, so every ContextCost* accessor and Hotspots share one walk.
+// Callers must treat the returned slice as read-only.
+func (a *Aggregator) contextCosts() []resultContextCost {
+	a.ctxMu.Lock()
+	defer a.ctxMu.Unlock()
+	if !a.ctxMemoOK {
+		a.ctxMemo, a.ctxMemoOK = a.computeContextCosts(), true
+	}
+	return a.ctxMemo
+}
+
+// computeContextCosts walks each session file's turns in time order. A tool
 // result is carried by the first turn after the one that called the tool
 // whose timestamp is not before the result's arrival; a result with no
 // arrival time is carried by the next turn. That carrying turn's
@@ -128,7 +151,7 @@ type pendingResult struct {
 // result's re-reads. A turn's attributed reads are scaled down to its actual
 // CacheReadTokens, so attribution never exceeds the cache spend it explains
 // (an expired cache re-reads less than what is live).
-func (a *Aggregator) contextCosts() []resultContextCost {
+func (a *Aggregator) computeContextCosts() []resultContextCost {
 	var out []resultContextCost
 	for file, turns := range a.ctxTurns {
 		turns = append([]contextTurn(nil), turns...)
@@ -155,7 +178,7 @@ func (a *Aggregator) contextCosts() []resultContextCost {
 				if j >= len(turns) || compactedBetween(from, turns[j].ts) {
 					continue
 				}
-				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, bytes: r.bytes})
+				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, input: tu.Input, bytes: r.bytes})
 			}
 		}
 
@@ -187,9 +210,11 @@ func (a *Aggregator) contextCosts() []resultContextCost {
 				write := float64(n) * writePerTok
 				live = append(live, len(out))
 				out = append(out, resultContextCost{
-					tool:      p.tool,
-					detail:    p.detail,
-					sessionID: p.sessionID,
+					tool:       p.tool,
+					detail:     p.detail,
+					sessionID:  p.sessionID,
+					input:      p.input,
+					sourceFile: file,
 					ContextCost: ContextCost{
 						ContextTokens:  n,
 						WriteCostUSD:   write,
@@ -311,4 +336,82 @@ func (a *Aggregator) ContextCostBySession() []SessionContextCost {
 		return out[i].SessionID < out[j].SessionID
 	})
 	return out
+}
+
+// ContextCostTotal is the context cost summed over every attributed tool
+// result — the denominator of a hotspot's share.
+func (a *Aggregator) ContextCostTotal() ContextCost {
+	var total ContextCost
+	for _, r := range a.contextCosts() {
+		total.add(r.ContextCost)
+	}
+	return total
+}
+
+// ContextExample is one tool invocation behind a pattern: what was run,
+// where, and how much context its result added.
+type ContextExample struct {
+	Input          string
+	SessionID      string
+	SourceFile     string
+	ContextTokens  int64
+	ContextCostUSD float64
+}
+
+// detailEvidence is one (tool, detail) pattern's invocation count and its
+// biggest invocations by context tokens.
+type detailEvidence struct {
+	calls    int
+	examples []ContextExample
+}
+
+type toolDetailKey struct{ tool, detail string }
+
+// contextEvidence returns, per (tool, detail), the invocation count and the
+// top n invocations by ContextTokens (ties: session, then file).
+func (a *Aggregator) contextEvidence(n int) map[toolDetailKey]*detailEvidence {
+	out := map[toolDetailKey]*detailEvidence{}
+	for _, r := range a.contextCosts() {
+		if r.detail == "" {
+			continue
+		}
+		k := toolDetailKey{r.tool, r.detail}
+		ev := out[k]
+		if ev == nil {
+			ev = &detailEvidence{}
+			out[k] = ev
+		}
+		ev.calls++
+		ev.examples = insertTopExample(ev.examples, ContextExample{
+			Input:          r.input,
+			SessionID:      r.sessionID,
+			SourceFile:     r.sourceFile,
+			ContextTokens:  r.ContextTokens,
+			ContextCostUSD: r.ContextCostUSD,
+		}, n)
+	}
+	return out
+}
+
+// insertTopExample keeps top sorted by ContextTokens descending, at most n long.
+func insertTopExample(top []ContextExample, ex ContextExample, n int) []ContextExample {
+	less := func(x, y ContextExample) bool {
+		if x.ContextTokens != y.ContextTokens {
+			return x.ContextTokens > y.ContextTokens
+		}
+		if x.SessionID != y.SessionID {
+			return x.SessionID < y.SessionID
+		}
+		return x.SourceFile < y.SourceFile
+	}
+	if len(top) == n && !less(ex, top[n-1]) {
+		return top
+	}
+	i := sort.Search(len(top), func(i int) bool { return less(ex, top[i]) })
+	if len(top) < n {
+		top = append(top, ContextExample{})
+	}
+	copy(top[i+1:], top[i:])
+	top[i] = ex
+	return top
 }

@@ -3,10 +3,12 @@ package render
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -16,7 +18,7 @@ import (
 // needs to paint the landing tab in one fetch.
 func TestBuildOverview_ShapeAndKeys(t *testing.T) {
 	a := payloadSetup(t)
-	p := BuildOverview(a)
+	p := BuildOverview(a, nil)
 	got, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal OverviewPayload: %v", err)
@@ -43,7 +45,7 @@ func TestBuildOverview_CarriesPeriod(t *testing.T) {
 	}
 	a := aggregate.New(prices).WithPeriod(aggregate.PeriodHour)
 	a.Add(mkTurn("claude-opus-4-7", "/p/x", 1_000_000, 200_000, time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)))
-	if got := BuildOverview(a).Period; got != aggregate.PeriodHour {
+	if got := BuildOverview(a, nil).Period; got != aggregate.PeriodHour {
 		t.Errorf("Period = %q, want hour", got)
 	}
 }
@@ -53,7 +55,7 @@ func TestBuildOverview_CarriesPeriod(t *testing.T) {
 // landing tab's cache stat matches the cache tab exactly.
 func TestBuildOverview_HitRatioMatchesAggregator(t *testing.T) {
 	a := payloadSetup(t)
-	if got, want := BuildOverview(a).OverallHitRatio, a.OverallHitRatio(); got != want {
+	if got, want := BuildOverview(a, nil).OverallHitRatio, a.OverallHitRatio(); got != want {
 		t.Errorf("OverallHitRatio = %v, want %v", got, want)
 	}
 }
@@ -248,4 +250,64 @@ func diffStringSets(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// addContextPattern feeds a one Bash call of pattern whose result the next
+// turn writes as writeTokens of cache, then re-reads once.
+func addContextPattern(a *aggregate.Aggregator, file, pattern string, writeTokens int, ts time.Time) {
+	id := file + pattern
+	a.Add(parse.Turn{SessionID: file, MessageID: id + "-a", Model: "claude-opus-4-7", Timestamp: ts, SourceFile: file,
+		ToolUses: []parse.ToolUse{{ID: id, Name: "Bash", Detail: pattern, Input: pattern + " x"}}})
+	a.Add(parse.Turn{SessionID: file, MessageID: id + "-b", Model: "claude-opus-4-7", Timestamp: ts.Add(time.Second), SourceFile: file,
+		Usage: parse.Usage{CacheCreate5mTokens: writeTokens}})
+	a.Add(parse.Turn{SessionID: file, MessageID: id + "-c", Model: "claude-opus-4-7", Timestamp: ts.Add(2 * time.Second), SourceFile: file,
+		Usage: parse.Usage{CacheReadTokens: writeTokens}})
+	a.AddToolResults([]parse.ToolResult{{ToolUseID: id, OutputBytes: 100}})
+}
+
+// TestBuildOverview_HotspotTrend: each hotspot carries its cost over the
+// previous equal window — up, down, or new when it cost nothing there.
+func TestBuildOverview_HotspotTrend(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	cur, prev := aggregate.New(prices), aggregate.New(prices)
+	addContextPattern(cur, "c1", "go test", 200_000, t0)
+	addContextPattern(cur, "c2", "git log", 50_000, t0)
+	addContextPattern(cur, "c3", "rg", 100_000, t0)
+	addContextPattern(prev, "p1", "go test", 100_000, t0.Add(-7*24*time.Hour))
+	addContextPattern(prev, "p2", "git log", 100_000, t0.Add(-7*24*time.Hour))
+
+	byTitle := map[string]HotspotForJSON{}
+	for _, h := range BuildOverview(cur, prev).Hotspots {
+		byTitle[h.Title] = h
+	}
+	up, down, fresh := byTitle["Bash: `go test`"], byTitle["Bash: `git log`"], byTitle["Bash: `rg`"]
+	if up.TrendPct == nil || up.PrevCostUSD == nil || *up.TrendPct < 99 || *up.TrendPct > 101 {
+		t.Errorf("go test trend = %v (prev %v), want ≈ +100%%", up.TrendPct, up.PrevCostUSD)
+	}
+	if down.TrendPct == nil || *down.TrendPct > -49 || *down.TrendPct < -51 {
+		t.Errorf("git log trend = %v, want ≈ -50%%", down.TrendPct)
+	}
+	if fresh.PrevCostUSD == nil || *fresh.PrevCostUSD != 0 || fresh.TrendPct != nil {
+		t.Errorf("rg prev = %v trend = %v, want prev 0 and no trend (new)", fresh.PrevCostUSD, fresh.TrendPct)
+	}
+
+	raw, err := json.Marshal(up)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"prev_cost_usd"`, `"trend_pct"`, `"examples"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("hotspot JSON %s missing %s", raw, key)
+		}
+	}
+
+	for _, h := range BuildOverview(cur, nil).Hotspots {
+		if h.PrevCostUSD != nil || h.TrendPct != nil {
+			t.Errorf("%s: trend set with no previous window", h.Title)
+		}
+	}
 }

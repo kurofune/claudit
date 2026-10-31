@@ -6,6 +6,7 @@ package aggregate
 import (
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
@@ -220,6 +221,12 @@ type Aggregator struct {
 	ctxTurns      map[string][]contextTurn
 	ctxResults    map[string]contextResult
 	ctxBoundaries map[string][]time.Time
+	// ctxMemo is the attribution walk's result, valid while ctxMemoOK; any
+	// input change clears it. ctxMu guards both because API sections read
+	// one shared Aggregator concurrently.
+	ctxMu     sync.Mutex
+	ctxMemo   []resultContextCost
+	ctxMemoOK bool
 }
 
 // New returns an empty aggregator using the given pricing table.

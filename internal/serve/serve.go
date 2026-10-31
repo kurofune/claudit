@@ -624,6 +624,8 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 	for _, t := range snap.Turns {
 		agg.AddWithSubagent(t, s.subagentLookup)
 	}
+	agg.AddToolResults(snap.ToolResults)
+	agg.AddCompactBoundaries(snap.CompactBoundaries)
 	return agg
 }
 

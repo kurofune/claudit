@@ -1,6 +1,8 @@
 package aggregate
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -8,73 +10,214 @@ import (
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
-func TestHotspots_RanksMixedDimensions(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	agg := New(prices)
-	ts := time.Now()
+func findHotspot(hs []Hotspot, kind HotspotKind, titleSub string) *Hotspot {
+	for i := range hs {
+		if hs[i].Kind == kind && strings.Contains(hs[i].Title, titleSub) {
+			return &hs[i]
+		}
+	}
+	return nil
+}
 
-	// Cheap project with one big Bash pattern
-	for i := 0; i < 100; i++ {
-		agg.Add(turn("claude-opus-4-7", 0, 1000, false, "/p/foo", ts,
-			parse.ToolUse{Name: "Bash", Detail: "git status"}))
+// TestHotspotsRankByContextCost: `git status` runs in the turn that costs
+// the most, but its tiny result is barely re-read; `go test` runs in a
+// cheap turn whose big result every later turn re-reads. Context cost
+// puts `go test` first.
+func TestHotspotsRankByContextCost(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{OutputTokens: 1_000_000},
+		parse.ToolUse{ID: "tu-git", Name: "Bash", Detail: "git status", Input: "git status"}))
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 100},
+		parse.ToolUse{ID: "tu-test", Name: "Bash", Detail: "go test", Input: "go test ./..."}))
+	agg.Add(ctxTurn("f.jsonl", "s", "C", "m", t0.Add(2*time.Second), parse.Usage{CacheCreate5mTokens: 10_000}))
+	for i := 0; i < 5; i++ {
+		agg.Add(ctxTurn("f.jsonl", "s", fmt.Sprintf("R%d", i), "m", t0.Add(time.Duration(3+i)*time.Second),
+			parse.Usage{CacheReadTokens: 10_100}))
 	}
-	// Mid-cost project with a single big subagent invocation
-	bigInv := turn("claude-opus-4-7", 0, 50000, true, "/p/bar", ts)
-	bigInv.SourceFile = "/sub/agent-XXX.jsonl"
-	lookup := func(t parse.Turn) (string, string) {
-		return "general-purpose", "implement the big feature"
+	agg.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "tu-git", OutputBytes: 10},
+		{ToolUseID: "tu-test", OutputBytes: 1000},
+	})
+
+	bash := agg.ByToolDetail()["Bash"]
+	turnCost := map[string]float64{}
+	for _, r := range bash {
+		turnCost[r.Detail] = r.CostUSD
 	}
-	agg.AddWithSubagent(bigInv, lookup)
+	if turnCost["git status"] <= turnCost["go test"] {
+		t.Fatalf("fixture: turn cost git status %v must exceed go test %v", turnCost["git status"], turnCost["go test"])
+	}
 
 	hs := agg.Hotspots(10)
-	if len(hs) == 0 {
-		t.Fatal("expected hotspots")
+	if len(hs) < 2 {
+		t.Fatalf("Hotspots = %+v, want at least two", hs)
 	}
-	// Cost-descending order.
-	for i := 1; i < len(hs); i++ {
-		if hs[i-1].CostUSD < hs[i].CostUSD {
-			t.Errorf("not sorted: %v then %v", hs[i-1].CostUSD, hs[i].CostUSD)
+	if hs[0].Title != "Bash: `go test`" || hs[1].Title != "Bash: `git status`" {
+		t.Errorf("order = %q, %q; want go test then git status", hs[0].Title, hs[1].Title)
+	}
+	ctx := map[string]float64{}
+	for _, r := range agg.ContextCostByToolDetail()["Bash"] {
+		ctx[r.Detail] = r.ContextCostUSD
+	}
+	total := agg.ContextCostTotal().ContextCostUSD
+	for _, h := range hs[:2] {
+		want := ctx[h.Context["pattern"].(string)]
+		if !approx(h.CostUSD, want) {
+			t.Errorf("%s CostUSD = %v, want context cost %v", h.Title, h.CostUSD, want)
 		}
-	}
-	// Should contain at least one of each *actionable* kind we exercised.
-	// Projects are intentionally excluded — they're diagnostic, not actionable.
-	kinds := map[HotspotKind]bool{}
-	for _, h := range hs {
-		kinds[h.Kind] = true
-	}
-	for _, want := range []HotspotKind{HotspotBashPattern, HotspotSubagentType, HotspotInvocation} {
-		if !kinds[want] {
-			t.Errorf("missing kind %s in %v", want, kinds)
+		if !approx(h.PctOfTotal, 100*want/total) {
+			t.Errorf("%s PctOfTotal = %v, want %v", h.Title, h.PctOfTotal, 100*want/total)
 		}
-	}
-	if kinds[HotspotProject] {
-		t.Error("HotspotProject should be excluded from the actionable list")
 	}
 }
 
-func TestHotspots_ExcludesUnknownSubagent(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	agg := New(prices)
-	ts := time.Now()
-	// A sidechain turn with no resolved subagent type → goes to the
-	// "sidechain — unknown subagent" bucket, which must NOT appear as a
-	// hotspot (it isn't actionable).
-	tn := turn("claude-opus-4-7", 0, 100000, true, "/p/foo", ts)
-	tn.SourceFile = "/no-meta/agent-zzz.jsonl"
-	agg.AddWithSubagent(tn, func(parse.Turn) (string, string) { return "", "" })
+// TestHotspotsExamplesRankByContextTokens: a card lists at most five
+// invocations, biggest context first, each naming its input, session and
+// JSONL path.
+func TestHotspotsExamplesRankByContextTokens(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	for i := 0; i < 7; i++ {
+		file := fmt.Sprintf("/p/s%d.jsonl", i)
+		sess := fmt.Sprintf("s%d", i)
+		id := fmt.Sprintf("tu-%d", i)
+		agg.Add(ctxTurn(file, sess, "A"+id, "m", t0, parse.Usage{},
+			parse.ToolUse{ID: id, Name: "Bash", Detail: "wc", Input: fmt.Sprintf("wc -l f%d", i)}))
+		agg.Add(ctxTurn(file, sess, "B"+id, "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 1000 * (i + 1)}))
+		agg.AddToolResults([]parse.ToolResult{{ToolUseID: id, OutputBytes: 100}})
+	}
+	h := findHotspot(agg.Hotspots(10), HotspotBashPattern, "wc")
+	if h == nil {
+		t.Fatal("no wc hotspot")
+	}
+	if len(h.Examples) != 5 {
+		t.Fatalf("examples = %d, want 5", len(h.Examples))
+	}
+	for k, ex := range h.Examples {
+		i := 6 - k
+		if ex.ContextTokens != int64(1000*(i+1)) || ex.SessionID != fmt.Sprintf("s%d", i) ||
+			ex.SourceFile != fmt.Sprintf("/p/s%d.jsonl", i) || ex.Input != fmt.Sprintf("wc -l f%d", i) {
+			t.Errorf("example %d = %+v, want session s%d", k, ex, i)
+		}
+	}
+	if h.Context["calls"] != 7 {
+		t.Errorf("calls = %v, want 7", h.Context["calls"])
+	}
+}
+
+// TestHotspotsRepeatedCacheWrite: a session that keeps re-writing its
+// cache (≥ 1M write tokens, writes > 25% of reads) is a card; one that
+// writes once and reads it back many times is not.
+func TestHotspotsRepeatedCacheWrite(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	// churn: 4 × 300k writes (1.2M), 2M reads → writes are 60% of reads.
+	for i := 0; i < 4; i++ {
+		agg.Add(ctxTurn("/p/churn.jsonl", "churn", fmt.Sprintf("c%d", i), "m", t0.Add(time.Duration(i)*10*time.Minute),
+			parse.Usage{CacheCreate5mTokens: 300_000, CacheReadTokens: 500_000}))
+	}
+	// steady: 1.2M writes, 10M reads → 12%.
+	agg.Add(ctxTurn("/p/steady.jsonl", "steady", "s0", "m", t0, parse.Usage{CacheCreate5mTokens: 1_200_000}))
+	agg.Add(ctxTurn("/p/steady.jsonl", "steady", "s1", "m", t0.Add(time.Minute), parse.Usage{CacheReadTokens: 10_000_000}))
+	// small: 900k writes, no reads — under the volume floor.
+	agg.Add(ctxTurn("/p/small.jsonl", "small", "m0", "m", t0, parse.Usage{CacheCreate5mTokens: 900_000}))
 
 	hs := agg.Hotspots(10)
-	for _, h := range hs {
-		if h.Title == "Subagent type: sidechain — unknown subagent" {
-			t.Errorf("unknown-subagent bucket should be filtered out")
+	h := findHotspot(hs, HotspotRepeatedCacheWrite, "churn")
+	if h == nil {
+		t.Fatalf("no repeated_cache_write card for churn in %+v", hs)
+	}
+	if !strings.Contains(h.Title, "churn") {
+		t.Errorf("title %q does not name the session", h.Title)
+	}
+	if h.Context["write_tokens"] != int64(1_200_000) || h.Context["read_tokens"] != int64(2_000_000) {
+		t.Errorf("context = %+v, want write 1.2M read 2M", h.Context)
+	}
+	if want := 1_200_000 * 6.0 / 1e6; !approx(h.Context["write_cost"].(float64), want) || !approx(h.CostUSD, want) {
+		t.Errorf("write cost = %v / CostUSD %v, want %v", h.Context["write_cost"], h.CostUSD, want)
+	}
+	if len(h.Examples) == 0 || len(h.Examples) > 5 || h.Examples[0].SessionID != "churn" || h.Examples[0].SourceFile != "/p/churn.jsonl" {
+		t.Errorf("examples = %+v, want ≤5 churn turns", h.Examples)
+	}
+	for _, s := range []string{"steady", "small"} {
+		if findHotspot(hs, HotspotRepeatedCacheWrite, s) != nil {
+			t.Errorf("%s should not be a repeated_cache_write card", s)
 		}
 	}
 }
 
-func TestHotspots_ZeroTopReturnsNil(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
+func TestHotspotsAtScale(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
 	agg := New(prices)
+	const sessions, calls = 3000, 100_000
+	perSession := calls / sessions
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	tools := []struct{ name, detail string }{
+		{"Bash", "git status"}, {"Bash", "go test"}, {"Bash", "rg"}, {"Bash", "wc"}, {"Bash", "bd show"},
+		{"Read", ".go"}, {"Read", ".md"}, {"Read", ".js"}, {"Grep", "func "}, {"Glob", "**/*.go"},
+		{"WebFetch", "github.com"}, {"Bash", "ls"}, {"Bash", "cat"},
+	}
+	var results []parse.ToolResult
+	n := 0
+	for s := 0; s < sessions; s++ {
+		file := fmt.Sprintf("/p/s%04d.jsonl", s)
+		sess := fmt.Sprintf("sess-%04d", s)
+		start := t0.Add(time.Duration(s) * 30 * 24 * time.Hour / sessions)
+		k := perSession
+		if s < calls%sessions {
+			k++
+		}
+		for c := 0; c <= k; c++ {
+			ts := start.Add(time.Duration(c) * 20 * time.Second)
+			u := parse.Usage{OutputTokens: 200, CacheCreate5mTokens: 2000, CacheReadTokens: 20_000 + 2000*c}
+			var uses []parse.ToolUse
+			if c < k {
+				tl := tools[(s+c)%len(tools)]
+				id := fmt.Sprintf("tu-%d", n)
+				n++
+				uses = []parse.ToolUse{{ID: id, Name: tl.name, Detail: tl.detail, Input: tl.detail + " arg"}}
+				results = append(results, parse.ToolResult{ToolUseID: id, OutputBytes: 500 + (n%7)*300, Timestamp: ts.Add(time.Second)})
+			}
+			agg.Add(ctxTurn(file, sess, fmt.Sprintf("m-%d-%d", s, c), "claude-opus-4-7", ts, u, uses...))
+		}
+	}
+	agg.AddToolResults(results)
+	if n != calls {
+		t.Fatalf("fixture built %d calls, want %d", n, calls)
+	}
+	start := time.Now()
+	hs := agg.Hotspots(10)
+	t.Logf("Hotspots(10) over %d sessions / %d calls: %v", sessions, calls, time.Since(start))
+	if len(hs) != 10 {
+		t.Fatalf("Hotspots(10) = %d cards, want 10", len(hs))
+	}
+	for _, h := range hs {
+		if len(h.Examples) == 0 || len(h.Examples) > 5 {
+			t.Errorf("%s: %d examples, want 1-5", h.Title, len(h.Examples))
+		}
+	}
+}
+
+func TestHotspotsZeroTopReturnsNil(t *testing.T) {
+	agg := New(ctxTable())
 	if hs := agg.Hotspots(0); hs != nil {
 		t.Errorf("expected nil for top=0, got %v", hs)
+	}
+}
+
+func TestHotspotsSkipsSkillSlashCommandAgent(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{},
+		parse.ToolUse{ID: "a", Name: "Agent", Detail: "general-purpose"},
+		parse.ToolUse{ID: "b", Name: "Skill", Detail: "tdd"}))
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 1000}))
+	agg.AddToolResults([]parse.ToolResult{{ToolUseID: "a", OutputBytes: 10}, {ToolUseID: "b", OutputBytes: 10}})
+	if hs := agg.Hotspots(10); len(hs) != 0 {
+		t.Errorf("Hotspots = %+v, want none for Agent/Skill", hs)
 	}
 }

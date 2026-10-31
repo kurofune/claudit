@@ -69,6 +69,10 @@ type apiSectionSpec struct {
 	// Aggregator). Used by sections like /agents that
 	// derive their own structure from raw turns. Takes precedence over build.
 	buildFromSnapshot func(snap *Snapshot, q Query) (any, error)
+	// buildWithPrev, when set, also receives the aggregator over the
+	// previous window of equal length (nil for an unbounded window).
+	// Takes precedence over build.
+	buildWithPrev func(a, prev *aggregate.Aggregator) (any, error)
 }
 
 // serveAPISection is the shared body of every /_claudit/api/*
@@ -141,7 +145,26 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 			http.Error(w, "aggregate failed", http.StatusInternalServerError)
 			return
 		}
-		payload, err = spec.build(agg)
+		switch {
+		case spec.buildWithPrev != nil:
+			var prev *aggregate.Aggregator
+			if pq, ok := previousWindow(q, now); ok {
+				if prev, aerr = s.sharedAggregateData(r.Context(), snap, pq); aerr != nil {
+					if isClientGone(aerr) {
+						return
+					}
+					s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: aggregate failed",
+						slog.Any("err", aerr),
+						slog.String("section", spec.section),
+						slog.Bool("previous_window", true))
+					http.Error(w, "aggregate failed", http.StatusInternalServerError)
+					return
+				}
+			}
+			payload, err = spec.buildWithPrev(agg, prev)
+		default:
+			payload, err = spec.build(agg)
+		}
 	}
 	if err != nil {
 		// Distinguish "user gave bad input" from "we screwed up":
@@ -291,8 +314,8 @@ func (s *Server) handleAPISnapshot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIOverview(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionOverview,
-		build: func(a *aggregate.Aggregator) (any, error) {
-			return render.BuildOverview(a), nil
+		buildWithPrev: func(a, prev *aggregate.Aggregator) (any, error) {
+			return render.BuildOverview(a, prev), nil
 		},
 	})
 }
@@ -362,4 +385,29 @@ func (s *Server) handleAPITrends(w http.ResponseWriter, r *http.Request) {
 			return p, nil
 		},
 	})
+}
+
+// previousWindow returns q narrowed to the window of equal length just
+// before it: for [since, until) that is [since − (until − since), since).
+// An open until means now. False when q has no since — an unbounded window
+// has no equal-length predecessor. The previous query carries no trend
+// period: only its hotspot costs are read.
+func previousWindow(q Query, now time.Time) (Query, bool) {
+	since, until := q.Filter.Since, q.Filter.Until
+	if since.IsZero() {
+		return Query{}, false
+	}
+	if until.IsZero() {
+		until = now
+	}
+	if !until.After(since) {
+		return Query{}, false
+	}
+	pq := q
+	pq.Filter.Since = since.Add(-until.Sub(since))
+	pq.Filter.Until = since
+	pq.Period = aggregate.PeriodNone
+	pq.TrendFillStart, pq.TrendFillEnd = time.Time{}, time.Time{}
+	pq.rawQuery = fmt.Sprintf("%s|prev:%d:%d", q.rawQuery, pq.Filter.Since.UnixNano(), pq.Filter.Until.UnixNano())
+	return pq, true
 }

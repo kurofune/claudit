@@ -1,235 +1,272 @@
 package aggregate
 
 import (
+	"fmt"
 	"sort"
+	"strconv"
+	"time"
 )
 
-// HotspotKind identifies the dimension a hotspot was found on. Each kind
-// has its own LLM-prompt template in the render package, because the kind
-// of advice that helps differs wildly (a Bash command pattern needs
-// different help than a single huge subagent invocation).
+// HotspotKind identifies what a hotspot card is about. Each kind has its own
+// prompt template in the render package, because the change that shrinks a
+// Bash command's output differs from the one that stops a session
+// re-writing its cache.
 type HotspotKind string
 
 const (
-	HotspotBashPattern   HotspotKind = "bash_pattern"
-	HotspotFileExt       HotspotKind = "file_ext"  // Read/Edit/Write/NotebookEdit by extension
-	HotspotGrepGlob      HotspotKind = "grep_glob" // Grep/Glob patterns
-	HotspotWebHost       HotspotKind = "web_host"
-	HotspotProject       HotspotKind = "project"
-	HotspotSubagentType  HotspotKind = "subagent_type"
-	HotspotInvocation    HotspotKind = "invocation"     // a single subagent run
-	HotspotSkill         HotspotKind = "skill"          // a Skill or SlashCommand
-	HotspotCacheMiss     HotspotKind = "cache_miss"     // low cache hit rate at a project
-	HotspotPromptPattern HotspotKind = "prompt_pattern" // an expensive habitual user prompt
+	HotspotBashPattern HotspotKind = "bash_pattern"
+	HotspotFileExt     HotspotKind = "file_ext"  // Read/Edit/Write/NotebookEdit by extension
+	HotspotGrepGlob    HotspotKind = "grep_glob" // Grep/Glob patterns
+	HotspotWebHost     HotspotKind = "web_host"
+	HotspotToolPattern HotspotKind = "tool_pattern" // any other tool's (tool, detail)
+	// HotspotRepeatedCacheWrite is a session that keeps re-writing its prompt
+	// cache instead of reading it back.
+	HotspotRepeatedCacheWrite HotspotKind = "repeated_cache_write"
 )
 
-// Hotspot is one ranked optimization target. Title is what the renderer
-// shows; Context is the substitution data for the LLM-prompt template.
-type Hotspot struct {
-	Kind       HotspotKind
-	Title      string // human-readable, e.g. "Bash: `bd show`"
-	CostUSD    float64
-	PctOfTotal float64
+// Repeated-cache-write thresholds: a session qualifies once it has written
+// at least repeatedWriteMinTokens cache tokens and those writes exceed
+// repeatedWriteMinShare of its cache reads.
+const (
+	repeatedWriteMinTokens = int64(1_000_000)
+	repeatedWriteMinShare  = 0.25
+	hotspotExamples        = 5
+)
 
-	// Context carries everything the prompt template needs, populated per kind.
-	// Conventional keys (kind-dependent): "tool", "pattern", "calls", "turns",
-	// "project", "dominant_model", "subagent_type", "description", "started",
-	// "skill_key", "ext".
+// Hotspot is one ranked context-cost target. Title is what the renderer
+// shows; Context is the substitution data for the prompt template.
+type Hotspot struct {
+	Kind  HotspotKind
+	Title string // e.g. "Bash: `bd show`"
+	// CostUSD is the hotspot's context cost: for a tool pattern, what its
+	// results cost to write into and re-read from context; for a repeated
+	// cache write, the session's cache-write cost.
+	CostUSD float64
+	// PctOfTotal is CostUSD as a percentage of ContextCostTotal.
+	PctOfTotal float64
+	// Examples are up to five invocations behind the card, biggest context
+	// first.
+	Examples []ContextExample
+
+	// Context carries everything the prompt template needs, per kind.
+	// Tool patterns: "tool", "pattern", "calls", "context_tokens",
+	// "rereads", "write_cost", "read_cost". Repeated cache write:
+	// "session_id", "project", "write_tokens", "read_tokens", "write_cost",
+	// "write_pct_of_read", "turns".
 	Context map[string]any
 }
 
-// Hotspots returns the top-N actionable cost contributors, ranked by cost
-// descending. We mix dimensions deliberately so the user sees a project,
-// a Bash pattern, a subagent type, etc. all in one ranked view.
-//
-// Aggregate-only rows (the by-tool parent buckets, by-model rows, the
-// main vs sidechain split) are deliberately excluded — they're not
-// directly actionable, since cost there is just a roll-up of the more
-// specific hotspots we already include.
+// HotspotKey joins a hotspot across two windows.
+type HotspotKey struct {
+	Kind  HotspotKind
+	Title string
+}
+
+// Hotspots returns the top-N context-cost hotspots, highest first, each
+// with up to five example invocations.
 func (a *Aggregator) Hotspots(top int) []Hotspot {
 	if top <= 0 {
 		return nil
 	}
-	total := a.totals.CostUSD
-	mainCost := a.side.Main.CostUSD + a.side.Sidechain.CostUSD
-	_ = mainCost // total already includes both; kept for clarity
-
-	var cands []Hotspot
-
-	// (Tool, pattern) hotspots from the per-tool drill-down.
-	// Skip Skill/SlashCommand/Agent — those have their own dimensions.
-	skipTool := map[string]bool{"Skill": true, "SlashCommand": true, "Agent": true}
-	for tool, rows := range a.byToolDetail {
-		if skipTool[tool] {
-			continue
+	cands := a.hotspotCandidates()
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].CostUSD != cands[j].CostUSD {
+			return cands[i].CostUSD > cands[j].CostUSD
 		}
-		dominant := dominantModelOverall(a) // we don't track per-bucket model; use overall
-		for _, r := range rows {
-			kind, title := classifyDetail(tool, r.Detail)
-			cands = append(cands, Hotspot{
-				Kind:    kind,
-				Title:   title,
-				CostUSD: r.CostUSD,
-				Context: map[string]any{
-					"tool":           tool,
-					"pattern":        r.Detail,
-					"calls":          r.Count,
-					"turns":          r.TurnCount,
-					"output_tokens":  r.OutputTokens,
-					"dominant_model": dominant,
-				},
-			})
-		}
-	}
-
-	// Project-level rows are deliberately excluded from hotspots — they're
-	// diagnostic ("$3k went here"), not directly actionable. The full
-	// by-project section in the report still surfaces them. The HotspotProject
-	// kind and its prompt template are kept for callers that want to opt in.
-
-	// Subagent-type hotspots.
-	for _, sb := range a.BySubagent() {
-		// "sidechain — unknown subagent" is an artifact, not actionable.
-		if sb.Type == "sidechain — unknown subagent" {
-			continue
-		}
-		cands = append(cands, Hotspot{
-			Kind:    HotspotSubagentType,
-			Title:   "Subagent type: " + sb.Type,
-			CostUSD: sb.CostUSD,
-			Context: map[string]any{
-				"subagent_type": sb.Type,
-				"turns":         sb.Turns,
-				"output_tokens": sb.OutputTokens,
-				"cache_read":    sb.CacheReadTokens,
-			},
-		})
-	}
-
-	// Top single subagent invocations — only the very biggest are worth
-	// pulling into the headline list as "this one run cost $X."
-	invs := a.AgentInvocations("")
-	for i, inv := range invs {
-		if i >= 5 {
-			break
-		}
-		desc := inv.Description
-		if desc == "" {
-			desc = "(no description)"
-		}
-		cands = append(cands, Hotspot{
-			Kind:    HotspotInvocation,
-			Title:   "Invocation: " + desc,
-			CostUSD: inv.CostUSD,
-			Context: map[string]any{
-				"subagent_type": inv.SubagentType,
-				"description":   inv.Description,
-				"turns":         inv.Turns,
-				"project":       inv.Project,
-				"started":       inv.First.UTC().Format("2006-01-02 15:04 UTC"),
-				"source_file":   inv.SourceFile,
-			},
-		})
-	}
-
-	// Cache-miss hotspots: projects w/ poor hit ratio AND non-trivial
-	// miss volume. Ranked by "wasteable cost" — the row's spend weighted
-	// by (1 − hit_ratio), an estimate of dollars that went to fresh
-	// upload/cache-create instead of cheap cache reads.
-	const cacheHotspotMinMiss = int64(1_000_000)
-	const cacheHotspotMaxRatio = 0.85
-	for i, r := range a.CacheByProject() {
-		if i >= 5 {
-			break
-		}
-		if r.Miss < cacheHotspotMinMiss || r.HitRatio >= cacheHotspotMaxRatio {
-			continue
-		}
-		wasteable := r.CostUSD * (1 - r.HitRatio)
-		cands = append(cands, Hotspot{
-			Kind:    HotspotCacheMiss,
-			Title:   "Cache miss: " + r.Key,
-			CostUSD: wasteable,
-			Context: map[string]any{
-				"key":             r.Key,
-				"hit_ratio_pct":   100 * r.HitRatio,
-				"miss_tokens":     r.Miss,
-				"cache_read":      r.CacheReadTokens,
-				"input_tokens":    r.InputTokens,
-				"cache_create_5m": r.CacheCreate5mTokens,
-				"cache_create_1h": r.CacheCreate1hTokens,
-				"turns":           r.Turns,
-				"row_cost":        r.CostUSD,
-			},
-		})
-	}
-
-	// Top expensive prompts. Habitual user asks are often the highest-
-	// leverage thing to restructure — usually invisible because they're
-	// hidden inside the agent's intent rather than tool output.
-	prompts := a.ByPrompt()
-	for i, p := range prompts {
-		if i >= 5 {
-			break
-		}
-		// Skip the orphan bucket — there's nothing for the LLM to
-		// reformulate, and it would drown out real prompts.
-		if p.Key == noPromptKey {
-			continue
-		}
-		title := p.Sample
-		if len(title) > 80 {
-			title = title[:80] + "…"
-		}
-		cands = append(cands, Hotspot{
-			Kind:    HotspotPromptPattern,
-			Title:   "Prompt: " + title,
-			CostUSD: p.CostUSD,
-			Context: map[string]any{
-				"sample":      p.Sample,
-				"key":         p.Key,
-				"invocations": p.Invocations,
-				"sessions":    p.Sessions,
-				"turns":       p.TurnCount,
-			},
-		})
-	}
-
-	// Skills + slash commands.
-	for _, s := range a.BySkill() {
-		cands = append(cands, Hotspot{
-			Kind:    HotspotSkill,
-			Title:   s.Key,
-			CostUSD: s.CostUSD,
-			Context: map[string]any{
-				"skill_key":     s.Key,
-				"calls":         s.Count,
-				"turns":         s.TurnCount,
-				"output_tokens": s.OutputTokens,
-			},
-		})
-	}
-
-	// Sort descending by cost; populate PctOfTotal; cap.
-	sort.Slice(cands, func(i, j int) bool { return cands[i].CostUSD > cands[j].CostUSD })
+		return cands[i].Title < cands[j].Title
+	})
 	if len(cands) > top {
 		cands = cands[:top]
 	}
+	total := a.ContextCostTotal().ContextCostUSD
+	evidence := a.contextEvidence(hotspotExamples)
 	for i := range cands {
+		h := &cands[i]
 		if total > 0 {
-			cands[i].PctOfTotal = 100 * cands[i].CostUSD / total
+			h.PctOfTotal = 100 * h.CostUSD / total
+		}
+		switch h.Kind {
+		case HotspotRepeatedCacheWrite:
+			h.Examples = a.cacheWriteExamples(h.Context["session_id"].(string), hotspotExamples)
+		default:
+			if ev := evidence[toolDetailKey{h.Context["tool"].(string), h.Context["pattern"].(string)}]; ev != nil {
+				h.Examples = ev.examples
+				h.Context["calls"] = ev.calls
+			}
 		}
 	}
 	return cands
 }
 
-// classifyDetail picks a Hotspot kind from (tool, detail) so the renderer
-// can pick the right prompt template. Falls back to HotspotBashPattern
-// for unknown tools.
+// HotspotCosts returns every hotspot candidate's cost by key, uncapped, so
+// a later window can show each card's change against this one.
+func (a *Aggregator) HotspotCosts() map[HotspotKey]float64 {
+	out := map[HotspotKey]float64{}
+	for _, h := range a.hotspotCandidates() {
+		out[HotspotKey{h.Kind, h.Title}] = h.CostUSD
+	}
+	return out
+}
+
+// skipHotspotTool lists tools with no output-shrinking change to ask for:
+// a Skill or slash command's cost is its instructions, an Agent's is its
+// own session.
+var skipHotspotTool = map[string]bool{"Skill": true, "SlashCommand": true, "Agent": true}
+
+// hotspotCandidates is every hotspot without examples or share.
+func (a *Aggregator) hotspotCandidates() []Hotspot {
+	var cands []Hotspot
+	for tool, rows := range a.ContextCostByToolDetail() {
+		if skipHotspotTool[tool] {
+			continue
+		}
+		for _, r := range rows {
+			if r.ContextCostUSD <= 0 {
+				continue
+			}
+			kind, title := classifyDetail(tool, r.Detail)
+			cands = append(cands, Hotspot{
+				Kind:    kind,
+				Title:   title,
+				CostUSD: r.ContextCostUSD,
+				Context: map[string]any{
+					"tool":           tool,
+					"pattern":        r.Detail,
+					"context_tokens": r.ContextTokens,
+					"rereads":        r.RereadTurns,
+					"write_cost":     r.WriteCostUSD,
+					"read_cost":      r.ReadCostUSD,
+				},
+			})
+		}
+	}
+	return append(cands, a.repeatedCacheWrites()...)
+}
+
+// sessionCache is one session's cache traffic over its counted turns.
+type sessionCache struct {
+	write, read int64
+	writeCost   float64
+	turns       int
+}
+
+// repeatedCacheWrites returns a card per session whose cache writes are at
+// least repeatedWriteMinTokens and exceed repeatedWriteMinShare of its
+// cache reads — a cache that keeps being rebuilt instead of re-read.
+func (a *Aggregator) repeatedCacheWrites() []Hotspot {
+	bySession := map[string]*sessionCache{}
+	for _, turns := range a.ctxTurns {
+		for _, c := range turns {
+			if c.sessionID == "" {
+				continue
+			}
+			sc := bySession[c.sessionID]
+			if sc == nil {
+				sc = &sessionCache{}
+				bySession[c.sessionID] = sc
+			}
+			sc.write += int64(c.usage.CacheCreate5mTokens + c.usage.CacheCreate1hTokens)
+			sc.read += int64(c.usage.CacheReadTokens)
+			sc.writeCost += a.cacheWriteCost(c)
+			sc.turns++
+		}
+	}
+	var out []Hotspot
+	for id, sc := range bySession {
+		if sc.write < repeatedWriteMinTokens || float64(sc.write) <= repeatedWriteMinShare*float64(sc.read) {
+			continue
+		}
+		var project string
+		if sb := a.bySession[id]; sb != nil {
+			project = sb.Project
+		}
+		pctOfRead := 0.0
+		if sc.read > 0 {
+			pctOfRead = 100 * float64(sc.write) / float64(sc.read)
+		}
+		out = append(out, Hotspot{
+			Kind:    HotspotRepeatedCacheWrite,
+			Title:   "Repeated cache writes: session " + id,
+			CostUSD: sc.writeCost,
+			Context: map[string]any{
+				"session_id":        id,
+				"project":           project,
+				"write_tokens":      sc.write,
+				"read_tokens":       sc.read,
+				"write_cost":        sc.writeCost,
+				"write_pct_of_read": pctOfRead,
+				"turns":             sc.turns,
+			},
+		})
+	}
+	return out
+}
+
+// cacheWriteCost prices c's cache-creation tokens at its effective rate.
+func (a *Aggregator) cacheWriteCost(c contextTurn) float64 {
+	u := c.usage
+	if u.CacheCreate5mTokens == 0 && u.CacheCreate1hTokens == 0 {
+		return 0
+	}
+	prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
+	rate, _ := a.prices.EffectiveRate(c.model, c.ts, prompt, u.Speed)
+	return (float64(u.CacheCreate5mTokens)*rate.CacheWrite5m + float64(u.CacheCreate1hTokens)*rate.CacheWrite1h) / 1e6
+}
+
+// cacheWriteExamples returns session's n biggest cache-writing turns, each
+// described with how long after the previous turn it came — a gap past
+// the cache TTL is why a prefix gets written again.
+func (a *Aggregator) cacheWriteExamples(session string, n int) []ContextExample {
+	var top []ContextExample
+	for file, turns := range a.ctxTurns {
+		turns = append([]contextTurn(nil), turns...)
+		sort.SliceStable(turns, func(i, j int) bool { return turns[i].ts.Before(turns[j].ts) })
+		for i, c := range turns {
+			if c.sessionID != session {
+				continue
+			}
+			w := int64(c.usage.CacheCreate5mTokens + c.usage.CacheCreate1hTokens)
+			if w == 0 {
+				continue
+			}
+			when := "at session start"
+			if i > 0 && !c.ts.IsZero() && !turns[i-1].ts.IsZero() {
+				when = c.ts.Sub(turns[i-1].ts).Round(time.Second).String() + " after the previous turn"
+			}
+			top = insertTopExample(top, ContextExample{
+				Input:          fmt.Sprintf("turn at %s wrote %s cache tokens, %s", c.ts.UTC().Format("2006-01-02 15:04:05 UTC"), groupThousands(w), when),
+				SessionID:      session,
+				SourceFile:     file,
+				ContextTokens:  w,
+				ContextCostUSD: a.cacheWriteCost(c),
+			}, n)
+		}
+	}
+	return top
+}
+
+// groupThousands renders n with comma thousands separators.
+func groupThousands(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := s[0] == '-'
+	if neg {
+		s = s[1:]
+	}
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		return "-" + s
+	}
+	return s
+}
+
+// classifyDetail picks a Hotspot kind and title from (tool, detail) so the
+// renderer can pick the right prompt template.
 func classifyDetail(tool, detail string) (HotspotKind, string) {
 	switch tool {
 	case "Bash", "Monitor":
-		return HotspotBashPattern, "Bash pattern: `" + detail + "`"
+		return HotspotBashPattern, tool + ": `" + detail + "`"
 	case "Read", "Edit", "Write", "NotebookEdit":
 		return HotspotFileExt, tool + " of `" + detail + "` files"
 	case "Grep", "Glob":
@@ -237,21 +274,5 @@ func classifyDetail(tool, detail string) (HotspotKind, string) {
 	case "WebFetch":
 		return HotspotWebHost, "WebFetch: " + detail
 	}
-	return HotspotBashPattern, tool + ": `" + detail + "`"
-}
-
-// dominantModelOverall returns the single-most-expensive model, used as
-// "context" for tool-pattern hotspots since we don't track per-bucket
-// model. Best-effort — the prompt should be useful even if this is
-// slightly off for a specific bucket.
-func dominantModelOverall(a *Aggregator) string {
-	var best string
-	var bestCost float64
-	for _, m := range a.byModel {
-		if m.CostUSD > bestCost {
-			bestCost = m.CostUSD
-			best = m.Model
-		}
-	}
-	return best
+	return HotspotToolPattern, tool + ": `" + detail + "`"
 }
