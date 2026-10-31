@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -413,4 +414,100 @@ func TestCache_SecondSourceTurnsReachSnapshot(t *testing.T) {
 	if one.FileCount != 2 || len(one.Turns) != 2 {
 		t.Errorf("LoadConcurrent FileCount=%d turns=%d, want 2 and 2", one.FileCount, len(one.Turns))
 	}
+}
+
+// flakySource yields whichever of its paths exist on disk, in order, until
+// it reaches failAt files, then returns err. A negative failAt never fails.
+type flakySource struct {
+	paths  []string
+	failAt int
+	err    error
+}
+
+func (f *flakySource) Name() string { return "flaky" }
+
+func (f *flakySource) Walk(_ time.Time, fn func(path string, mod time.Time, size int64)) error {
+	for n, p := range f.paths {
+		if n == f.failAt {
+			return f.err
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		fn(p, info.ModTime(), info.Size())
+	}
+	if f.failAt >= len(f.paths) {
+		return f.err
+	}
+	return nil
+}
+
+func (f *flakySource) ParseFile(r io.Reader, path string) (parse.Result, error) {
+	return fakeSource{}.ParseFile(r, path)
+}
+
+func TestCache_FailedWalkKeepsCachedFiles(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.log")
+	b := filepath.Join(dir, "b.log")
+	for _, p := range []string{a, b} {
+		if err := os.WriteFile(p, []byte(filepath.Base(p)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ccDir := t.TempDir()
+	writeJSONL(t, filepath.Join(ccDir, "s.jsonl"), mkAssistantLine("a1", "", time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)))
+	src := &flakySource{paths: []string{a, b}, failAt: -1}
+	c := New(provider.NewClaudeCode(ccDir), src)
+
+	want := func(step string, turns, files int) {
+		t.Helper()
+		snap := c.Snapshot()
+		if len(snap.Turns) != turns || snap.FileCount != files {
+			t.Errorf("%s: turns=%d files=%d, want %d/%d", step, len(snap.Turns), snap.FileCount, turns, files)
+		}
+	}
+
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	want("initial load", 3, 3)
+	gen := c.Snapshot().Generation
+
+	src.failAt, src.err = 0, errors.New("root unreadable")
+	if changed, err := c.Refresh(); err == nil || changed {
+		t.Errorf("walk failing before any file: changed=%v err=%v, want unchanged with an error", changed, err)
+	}
+	want("walk failing before any file", 3, 3)
+	if c.Snapshot().Generation != gen {
+		t.Error("failed walk published a new generation")
+	}
+
+	src.failAt = 1
+	if changed, err := c.Refresh(); err == nil || changed {
+		t.Errorf("partial walk: changed=%v err=%v, want unchanged with an error", changed, err)
+	}
+	want("partial walk", 3, 3)
+
+	if err := os.Remove(b); err != nil {
+		t.Fatal(err)
+	}
+	src.failAt = 0
+	if _, err := c.Refresh(); err == nil {
+		t.Error("failed walk after a deletion returned no error")
+	}
+	want("failed walk after a deletion", 3, 3)
+
+	src.failAt, src.err = -1, nil
+	if changed, err := c.Refresh(); err != nil || !changed {
+		t.Errorf("recovered walk: changed=%v err=%v, want changed with no error", changed, err)
+	}
+	want("recovered walk drops the deleted file", 2, 2)
+
+	src.paths = nil
+	if changed, err := c.Refresh(); err != nil || !changed {
+		t.Errorf("successful empty walk: changed=%v err=%v, want changed with no error", changed, err)
+	}
+	want("successful empty walk drops the source's files", 1, 1)
 }

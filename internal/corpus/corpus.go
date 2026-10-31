@@ -50,6 +50,8 @@ type fileEntry struct {
 	toolResults []parse.ToolResult
 	compacts    []parse.CompactBoundary
 	malformed   int
+	// source indexes Cache.sources: the Source that yielded the path.
+	source int
 }
 
 // Snapshot is an immutable view of the parsed corpus at one moment.
@@ -142,8 +144,10 @@ func (c *Cache) Refresh() (changed bool, err error) {
 	var toParse []fileJob
 	mods := map[string]time.Time{}
 	sizes := map[string]int64{}
-	walkErr := walkSources(c.sources, time.Time{}, func(src provider.Source, path string, mod time.Time, size int64) {
+	owners := map[string]int{}
+	failed, walkErr := walkSources(c.sources, time.Time{}, func(i int, path string, mod time.Time, size int64) {
 		seen[path] = struct{}{}
+		owners[path] = i
 		mods[path] = mod
 		sizes[path] = size
 		old, ok := c.files[path]
@@ -154,7 +158,7 @@ func (c *Cache) Refresh() (changed bool, err error) {
 		if ok && old.mtime.Equal(mod) && old.size == size {
 			return
 		}
-		toParse = append(toParse, fileJob{src: src, path: path})
+		toParse = append(toParse, fileJob{src: c.sources[i], path: path})
 	})
 
 	// Pass 2: parse the changed set concurrently and fold the results
@@ -170,6 +174,7 @@ func (c *Cache) Refresh() (changed bool, err error) {
 				malformed:   pr.malformed,
 				mtime:       mods[pr.path],
 				size:        sizes[pr.path],
+				source:      owners[pr.path],
 			}
 			// On a parse error we still persist whatever we managed to
 			// read plus the new (mtime, size) so we don't re-parse the
@@ -180,8 +185,10 @@ func (c *Cache) Refresh() (changed bool, err error) {
 	}
 
 	// Drop entries for files that disappeared (session deleted, rotated).
-	for path := range c.files {
-		if _, ok := seen[path]; !ok {
+	// A Source whose walk failed may have stopped before yielding files
+	// that still exist, so its unseen entries stay until a walk succeeds.
+	for path, e := range c.files {
+		if _, ok := seen[path]; !ok && !failed[e.source] {
 			delete(c.files, path)
 			changed = true
 		}
@@ -331,8 +338,8 @@ func LoadConcurrent(sources []provider.Source, earliest time.Time) (*Snapshot, e
 	defer debug.SetGCPercent(debug.SetGCPercent(200))
 
 	var jobs []fileJob
-	walkErr := walkSources(sources, earliest, func(src provider.Source, path string, _ time.Time, _ int64) {
-		jobs = append(jobs, fileJob{src: src, path: path})
+	_, walkErr := walkSources(sources, earliest, func(i int, path string, _ time.Time, _ int64) {
+		jobs = append(jobs, fileJob{src: sources[i], path: path})
 	})
 	if walkErr != nil {
 		return nil, walkErr
@@ -374,25 +381,29 @@ type fileJob struct {
 }
 
 // walkSources walks every Source in order and hands fn each file with
-// the Source that owns it. A path an earlier Source already yielded is
-// skipped, so overlapping roots never count a file twice. Walk errors
-// are joined; one failing Source does not stop the others.
-func walkSources(sources []provider.Source, earliest time.Time, fn func(src provider.Source, path string, mod time.Time, size int64)) error {
+// the index of the Source that owns it. A path an earlier Source already
+// yielded is skipped, so overlapping roots never count a file twice.
+// Walk errors are joined; one failing Source does not stop the others.
+// failed[i] reports whether sources[i]'s walk returned an error, so its
+// enumeration may be incomplete.
+func walkSources(sources []provider.Source, earliest time.Time, fn func(i int, path string, mod time.Time, size int64)) (failed []bool, err error) {
 	owner := map[string]struct{}{}
+	failed = make([]bool, len(sources))
 	var errs []error
-	for _, src := range sources {
+	for i, src := range sources {
 		err := src.Walk(earliest, func(path string, mod time.Time, size int64) {
 			if _, dup := owner[path]; dup {
 				return
 			}
 			owner[path] = struct{}{}
-			fn(src, path, mod, size)
+			fn(i, path, mod, size)
 		})
 		if err != nil {
+			failed[i] = true
 			errs = append(errs, fmt.Errorf("%s: %w", src.Name(), err))
 		}
 	}
-	return errors.Join(errs...)
+	return failed, errors.Join(errs...)
 }
 
 // parseFiles fans parsing of jobs out across GOMAXPROCS workers and
