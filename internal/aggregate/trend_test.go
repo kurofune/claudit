@@ -243,7 +243,7 @@ func TestTrend_ByModelAndProject(t *testing.T) {
 	}
 
 	bp := agg.TrendByProject()
-	if len(bp["/p/a"]) != 2 {
-		t.Errorf("/p/a daily series: %d", len(bp["/p/a"]))
+	if len(bp["a"]) != 2 {
+		t.Errorf("/p/a (project a) daily series: %d", len(bp["a"]))
 	}
 }

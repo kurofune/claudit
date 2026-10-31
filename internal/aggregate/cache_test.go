@@ -100,8 +100,9 @@ func TestCacheBySession_BucketingAndRanking(t *testing.T) {
 	if rows[1].Key != "sess-A" {
 		t.Errorf("rank[1] should be sess-A, got %s", rows[1].Key)
 	}
-	// Subtitle carries the project.
-	if rows[0].Subtitle != "/p/foo" {
+	// Subtitle carries the resolved project name (/p/foo is gone on disk, so
+	// it lands in the missing bucket named after its basename).
+	if rows[0].Subtitle != "foo" {
 		t.Errorf("subtitle: %s", rows[0].Subtitle)
 	}
 	// Hit ratios are reasonable.
@@ -126,8 +127,8 @@ func TestCacheByProject_RankingByMiss(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("want 2 rows, got %d", len(rows))
 	}
-	if rows[0].Key != "/p/big-miss" {
-		t.Errorf("rank[0] should be /p/big-miss, got %s", rows[0].Key)
+	if rows[0].Key != "big-miss" {
+		t.Errorf("rank[0] should be big-miss, got %s", rows[0].Key)
 	}
 	if rows[0].Miss != 1_000_000 {
 		t.Errorf("big-miss miss tokens: %d", rows[0].Miss)

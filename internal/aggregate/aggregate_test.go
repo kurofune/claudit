@@ -3,12 +3,15 @@ package aggregate
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/project"
 )
 
 func TestAggregate_CountsCoalescedMessageOnce(t *testing.T) {
@@ -556,5 +559,127 @@ func TestAggregate_FastTurnFromJSONL(t *testing.T) {
 	agg.Add(res.Turns[0])
 	if got := agg.Totals().CostUSD; got != 48 {
 		t.Errorf("total=$%v, want $48", got)
+	}
+}
+
+// repoWithWorktree lays out a main checkout <tmp>/a/the-pit (a .git dir)
+// and a linked worktree <tmp>/b/pit-2mr.1 whose .git file points at
+// the-pit/.git/worktrees/pit-2mr.1 — the layout `git worktree add` writes.
+// The worktree path deliberately omits "the-pit" so a raw-cwd substring
+// match cannot select it.
+func repoWithWorktree(t *testing.T) (main, worktree string) {
+	t.Helper()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main = filepath.Join(base, "a", "the-pit")
+	worktree = filepath.Join(base, "b", "pit-2mr.1")
+	gitdir := filepath.Join(main, ".git", "worktrees", "pit-2mr.1")
+	for _, d := range []string{gitdir, worktree} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return main, worktree
+}
+
+func TestAggregate_RepoAndWorktreeShareOneProject(t *testing.T) {
+	main, wt := repoWithWorktree(t)
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithResolver(project.NewResolver()).WithPeriod(PeriodDay)
+	ts := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+
+	a := turn("claude-opus-4-7", 100, 0, false, main, ts)
+	a.SessionID = "s-main"
+	b := turn("claude-opus-4-7", 200, 0, true, wt, ts)
+	b.SessionID = "s-wt"
+	b.SourceFile = "/x/s-wt/subagents/agent-1.jsonl"
+	agg.Add(a)
+	agg.Add(b)
+
+	rows := agg.ByProject()
+	if len(rows) != 1 {
+		t.Fatalf("ByProject rows = %+v, want one row for the repo and its worktree", rows)
+	}
+	got := rows[0]
+	if got.Project != "the-pit" || got.Root != main {
+		t.Errorf("row = {Project:%q Root:%q}, want {the-pit %q}", got.Project, got.Root, main)
+	}
+	if got.InputTokens != 300 || got.Sessions != 2 || got.Turns != 2 {
+		t.Errorf("row totals = in %d sessions %d turns %d, want 300/2/2", got.InputTokens, got.Sessions, got.Turns)
+	}
+	if got.DominantModel != "claude-opus-4-7" {
+		t.Errorf("DominantModel = %q", got.DominantModel)
+	}
+	if tp := agg.TrendByProject(); len(tp) != 1 || tp["the-pit"] == nil {
+		t.Errorf("TrendByProject keys = %v, want only the-pit", keysOf(tp))
+	}
+	if len(agg.bySession) != 2 {
+		t.Fatalf("bySession = %d sessions, want 2", len(agg.bySession))
+	}
+	for id, s := range agg.bySession {
+		if s.Project != "the-pit" {
+			t.Errorf("session %s Project = %q, want the-pit", id, s.Project)
+		}
+	}
+	inv := agg.AgentInvocations("")
+	if len(inv) != 1 || inv[0].Project != "the-pit" {
+		t.Errorf("AgentInvocations = %+v, want one with Project the-pit", inv)
+	}
+}
+
+func keysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func TestAggregate_ProjectFilterMatchesResolvedName(t *testing.T) {
+	main, wt := repoWithWorktree(t)
+	other := filepath.Join(filepath.Dir(filepath.Dir(main)), "c", "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	turns := []parse.Turn{
+		turn("claude-opus-4-7", 100, 0, false, main, ts),
+		turn("claude-opus-4-7", 200, 0, false, wt, ts),
+		turn("claude-opus-4-7", 999, 0, false, other, ts),
+	}
+
+	for _, sub := range []string{"the-pit", "THE-PIT"} {
+		prices, _ := pricing.LoadDefault()
+		agg := New(prices).WithResolver(project.NewResolver()).WithFilter(Filter{ProjectSubstring: sub})
+		for _, tn := range turns {
+			agg.Add(tn)
+		}
+		if got := agg.Totals().InputTokens; got != 300 {
+			t.Errorf("?project=%s InputTokens = %d, want 300 (main checkout + worktree, not other)", sub, got)
+		}
+		var matched []string
+		for _, tn := range turns {
+			if MatchesFilter(tn, Filter{ProjectSubstring: sub}) {
+				matched = append(matched, tn.CWD)
+			}
+		}
+		if len(matched) != 2 {
+			t.Errorf("MatchesFilter(?project=%s) matched %v, want main + worktree", sub, matched)
+		}
+	}
+
+	// The raw cwd still matches: a substring of the worktree's own path.
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithResolver(project.NewResolver()).WithFilter(Filter{ProjectSubstring: "PIT-2MR"})
+	for _, tn := range turns {
+		agg.Add(tn)
+	}
+	if got := agg.Totals().InputTokens; got != 200 {
+		t.Errorf("?project=pit-2mr InputTokens = %d, want 200 (raw cwd match)", got)
 	}
 }

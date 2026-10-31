@@ -10,12 +10,27 @@ import (
 
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/project"
 )
 
 // Filter narrows which turns are counted.
 type Filter struct {
 	Since, Until     time.Time // zero means open-ended
-	ProjectSubstring string    // case-insensitive substring of cwd
+	ProjectSubstring string    // case-insensitive substring of the resolved project name or the raw cwd
+}
+
+// matchesProject reports whether the turn's raw cwd or its resolved project
+// name contains sub, case-insensitively — so ?project=the-pit selects the
+// main checkout and every linked worktree of it.
+func matchesProject(cwd string, r *project.Resolver, sub string) bool {
+	if sub == "" {
+		return true
+	}
+	sub = strings.ToLower(sub)
+	if strings.Contains(strings.ToLower(cwd), sub) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.Resolve(cwd).Name), sub)
 }
 
 // Tokens is the canonical token-count tuple we render in every section.
@@ -55,7 +70,8 @@ type ModelBucket struct {
 
 // ProjectBucket is one row in the by-project section.
 type ProjectBucket struct {
-	Project string // best-effort decoded path
+	Project string // resolved project name (project.Project.Name)
+	Root    string // the directory it stands for; "" for scratch/missing buckets
 	Tokens
 	CostUSD       float64
 	Sessions      int
@@ -121,7 +137,7 @@ type AgentInvocation struct {
 	SourceFile   string    // the agent-<id>.jsonl path
 	SubagentType string    // from sibling .meta.json (or "" if missing)
 	Description  string    // from sibling .meta.json (or "" if missing)
-	Project      string    // cwd of the launching session
+	Project      string    // resolved project name of the launching session's cwd
 	First, Last  time.Time // turn timestamp range
 	Tokens
 	CostUSD float64
@@ -130,8 +146,9 @@ type AgentInvocation struct {
 
 // Aggregator accumulates per-turn data.
 type Aggregator struct {
-	prices *pricing.Table
-	filter Filter
+	prices   *pricing.Table
+	filter   Filter
+	resolver *project.Resolver
 
 	totals       Totals
 	byModel      map[string]*ModelBucket
@@ -202,6 +219,7 @@ type Aggregator struct {
 func New(p *pricing.Table) *Aggregator {
 	return &Aggregator{
 		prices:            p,
+		resolver:          project.Default,
 		byModel:           map[string]*ModelBucket{},
 		byProject:         map[string]*ProjectBucket{},
 		byTool:            map[string]*ToolBucket{},
@@ -222,6 +240,13 @@ func New(p *pricing.Table) *Aggregator {
 // WithFilter sets a filter and returns the aggregator (chainable).
 func (a *Aggregator) WithFilter(f Filter) *Aggregator {
 	a.filter = f
+	return a
+}
+
+// WithResolver swaps the cwd → project resolver (tests point one at temp
+// dirs). Must be set before Add() runs.
+func (a *Aggregator) WithResolver(r *project.Resolver) *Aggregator {
+	a.resolver = r
 	return a
 }
 
@@ -281,12 +306,7 @@ func (a *Aggregator) match(t parse.Turn) bool {
 	if !a.filter.Until.IsZero() && !t.Timestamp.Before(a.filter.Until) {
 		return false
 	}
-	if a.filter.ProjectSubstring != "" {
-		if !strings.Contains(strings.ToLower(t.CWD), strings.ToLower(a.filter.ProjectSubstring)) {
-			return false
-		}
-	}
-	return true
+	return matchesProject(t.CWD, a.resolver, a.filter.ProjectSubstring)
 }
 
 // SubagentLookup is called per sidechain turn to resolve subagent
@@ -383,14 +403,13 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 		addTrend(m, bucket, cost, t.Usage)
 	}
 
-	// By project. Use cwd; fall back to "(unknown)".
-	proj := t.CWD
-	if proj == "" {
-		proj = "(unknown)"
-	}
+	// By project, keyed on the resolved project name so a repo's worktrees
+	// and subdirectories share one row.
+	resolved := a.resolver.Resolve(t.CWD)
+	proj := resolved.Name
 	pb := a.byProject[proj]
 	if pb == nil {
-		pb = &ProjectBucket{Project: proj}
+		pb = &ProjectBucket{Project: proj, Root: resolved.Root}
 		a.byProject[proj] = pb
 		a.projectModelTurns[proj] = map[string]int{}
 		a.projectSession[proj] = map[string]struct{}{}
@@ -522,7 +541,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 					SourceFile:   t.SourceFile,
 					SubagentType: subType,
 					Description:  desc,
-					Project:      t.CWD,
+					Project:      proj,
 					First:        t.Timestamp,
 					Last:         t.Timestamp,
 				}

@@ -1,10 +1,10 @@
 package aggregate
 
 import (
-	"strings"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/project"
 )
 
 // ToolInvocation is one distinct tool call surfaced on a turn row. Detail
@@ -80,9 +80,9 @@ type SpawnRollup struct {
 
 // MatchesFilter is the since/until/project test the rolled-up sections use
 // (Aggregator.match), exported so other packages (e.g. agentflow) filter turns
-// identically. It runs without an Aggregator reference, so it duplicates that
-// logic; if the two diverge the Agents view silently disagrees with the
-// rolled-up sections, so keep them in lockstep.
+// identically. It runs without an Aggregator reference, so it resolves
+// projects through project.Default; the project test itself is the shared
+// matchesProject, so the Agents view and the rolled-up sections agree.
 func MatchesFilter(t parse.Turn, f Filter) bool {
 	if !f.Since.IsZero() && t.Timestamp.Before(f.Since) {
 		return false
@@ -90,12 +90,7 @@ func MatchesFilter(t parse.Turn, f Filter) bool {
 	if !f.Until.IsZero() && !t.Timestamp.Before(f.Until) {
 		return false
 	}
-	if f.ProjectSubstring != "" {
-		if !strings.Contains(strings.ToLower(t.CWD), strings.ToLower(f.ProjectSubstring)) {
-			return false
-		}
-	}
-	return true
+	return matchesProject(t.CWD, project.Default, f.ProjectSubstring)
 }
 
 // DistinctToolInvocations returns (Name, Detail) pairs in first-occurrence
