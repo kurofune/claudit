@@ -183,3 +183,53 @@ func TestResolve_Memoized(t *testing.T) {
 	}
 	assertProject(t, r.Resolve(root), first)
 }
+
+func TestResolve_MissingWorktreeFoldsIntoKnownRepo(t *testing.T) {
+	base := realDir(t, t.TempDir())
+	pit := newRepo(t, filepath.Join(base, "Projects"), "the-pit")
+	djinn := newRepo(t, filepath.Join(base, "Projects"), "djinn")
+	r := NewResolver()
+	r.Resolve(pit)
+	r.Resolve(djinn)
+
+	cases := map[string]Project{
+		// wt-new sibling worktree, since removed; cwd was a subdir of it.
+		filepath.Join(base, "Projects", "the-pit-pit-2mr.1", "web"): {Root: pit, Name: "the-pit", Kind: KindRepo},
+		// summoner worktree: summoner-<repo>-<bead> under a removed tmp dir.
+		filepath.Join(base, "T", "summoner-worktrees-9", "summoner-djinn-sv28x"): {Root: djinn, Name: "djinn", Kind: KindRepo},
+		// No known repo name inside the path: stays a missing bucket.
+		filepath.Join(base, "T", "eval-123", "work"): {Name: "work", Kind: KindMissing},
+	}
+	for cwd, want := range cases {
+		assertProject(t, r.Resolve(cwd), want)
+	}
+}
+
+func TestResolve_MissingPrefersLongestKnownName(t *testing.T) {
+	base := realDir(t, t.TempDir())
+	newRepo(t, base, "the-pit")
+	tools := newRepo(t, filepath.Join(base, "x"), "the-pit-tools")
+	r := NewResolver()
+	r.Prime([]string{filepath.Join(base, "the-pit"), tools})
+	assertProject(t, r.Resolve(filepath.Join(base, "the-pit-tools-wt")),
+		Project{Root: tools, Name: "the-pit-tools", Kind: KindRepo})
+}
+
+func TestResolve_MissingIsOrderIndependent(t *testing.T) {
+	base := realDir(t, t.TempDir())
+	pit := newRepo(t, base, "the-pit")
+	gone := filepath.Join(base, "the-pit-9hw-v3-tri")
+	want := Project{Root: pit, Name: "the-pit", Kind: KindRepo}
+
+	// Resolved before the repo is known, then again after: the cached
+	// missing answer must not stick once a matching repo is learned.
+	r := NewResolver()
+	assertProject(t, r.Resolve(gone), Project{Name: "the-pit-9hw-v3-tri", Kind: KindMissing})
+	r.Resolve(pit)
+	assertProject(t, r.Resolve(gone), want)
+
+	// Prime resolves existing cwds before missing ones, whatever the order.
+	r2 := NewResolver()
+	r2.Prime([]string{gone, pit})
+	assertProject(t, r2.Resolve(gone), want)
+}

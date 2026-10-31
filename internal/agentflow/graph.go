@@ -13,6 +13,7 @@ import (
 	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/project"
 )
 
 // AgentGraph is the top-level payload: every session in the (filtered)
@@ -26,6 +27,9 @@ type AgentGraph struct {
 type AgentSession struct {
 	SessionID string `json:"session_id"`
 	CWD       string `json:"cwd"`
+	// Project is the cwd's resolved project name (project.Project.Name): the
+	// git repo a worktree or subdirectory belongs to, or a fallback bucket.
+	Project string `json:"project"`
 	// Entrypoint is the session origin lifted from its turns: "cli" for an
 	// interactive session, "sdk-cli" for a headless/SDK run. Lets the Agents
 	// view badge headless runs. Constant across a session; first non-empty wins.
@@ -188,6 +192,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	// the canonical occurrence, so skip the replays here or the per-session and
 	// per-agent figures would inflate above the deduped headline.
 	replays := aggregate.BuildReplaySet(snap.Turns)
+	aggregate.PrimeProjects(project.Default, snap.Turns)
 
 	for _, t := range snap.Turns {
 		if !aggregate.MatchesFilter(t, f) {
@@ -261,7 +266,12 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 
 	out := make([]AgentSession, 0, len(sessions))
 	for _, s := range sessions {
-		as := AgentSession{SessionID: s.sessionID, CWD: s.cwd, Entrypoint: s.entrypoint}
+		as := AgentSession{
+			SessionID:  s.sessionID,
+			CWD:        s.cwd,
+			Project:    project.Default.Resolve(s.cwd).Name,
+			Entrypoint: s.entrypoint,
+		}
 		for _, n := range s.nodes {
 			// Roll node spans/cost up to the session.
 			if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {

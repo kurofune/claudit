@@ -1041,3 +1041,40 @@ func TestBuildAgentGraph_SessionsSortedNewestFirst(t *testing.T) {
 		t.Errorf("Sessions[1] = %q, want %q", g.Sessions[1].SessionID, "early")
 	}
 }
+
+// TestBuildAgentGraph_SessionProjectIsResolvedRepo: a session run in a linked
+// worktree is labeled with the main repo's name, beside its raw cwd, so the
+// Agents view groups it with the main checkout.
+func TestBuildAgentGraph_SessionProjectIsResolvedRepo(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(base, "the-pit")
+	gitdir := filepath.Join(main, ".git", "worktrees", "wt")
+	wt := filepath.Join(base, "wt", "sub")
+	for _, d := range []string{gitdir, wt} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(base, "wt", ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prices, _ := pricing.LoadDefault()
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC))
+	turn.CWD = wt
+	g, err := BuildAgentGraph(&corpus.Snapshot{Turns: []parse.Turn{turn}}, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := g.Sessions[0]
+	if s.Project != "the-pit" || s.CWD != wt {
+		t.Errorf("session {Project:%q CWD:%q}, want {the-pit %q}", s.Project, s.CWD, wt)
+	}
+	b, _ := json.Marshal(s)
+	if !strings.Contains(string(b), `"project":"the-pit"`) {
+		t.Errorf("payload missing project: %s", b)
+	}
+}

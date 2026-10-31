@@ -23,6 +23,7 @@ import (
 
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/project"
 )
 
 // Options configures the server. Bind defaults to loopback only; do
@@ -594,6 +595,8 @@ func (s *Server) promptData(snap *Snapshot) (*aggregate.PromptIndex, aggregate.R
 		return m.idx, m.replays
 	}
 	s.promptIndexBuildN.Add(1)
+	// Once per generation, so by-project rows don't depend on turn order.
+	aggregate.PrimeProjects(project.Default, snap.Turns)
 	m := &promptMemo{
 		generation: snap.Generation,
 		idx:        aggregate.BuildPromptIndex(snap.Turns, snap.Users, snap.Links),
