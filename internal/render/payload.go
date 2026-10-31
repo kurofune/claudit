@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
@@ -116,12 +117,66 @@ type CostPayload struct {
 	ByPrompt     []aggregate.PromptBucket  `json:"by_prompt"`
 }
 
-// ToolsPayload backs /_claudit/api/tools — the parent ToolBucket
-// rows plus the per-tool drill-down map (Bash · `git status`, Read ·
-// `.go`, etc.).
+// ToolsPayload backs /_claudit/api/tools — one row per tool plus the
+// per-tool drill-down map of (tool, pattern) rows (Bash · `git status`,
+// Read · `.go`, etc.), each list highest context cost first.
 type ToolsPayload struct {
-	ByTool       []aggregate.ToolBucket              `json:"by_tool"`
-	ByToolDetail map[string][]aggregate.DetailBucket `json:"by_tool_detail"`
+	ByTool       []ToolRow            `json:"by_tool"`
+	ByToolDetail map[string][]ToolRow `json:"by_tool_detail"`
+}
+
+// ToolRow is one tool's, or one (tool, pattern)'s, calls joined to their
+// results (aggregate.ToolCallStats) and the context cost their results
+// went on to incur (aggregate.ContextCost). Pattern is empty on a by_tool
+// row.
+type ToolRow struct {
+	Tool             string  `json:"tool"`
+	Pattern          string  `json:"pattern,omitempty"`
+	Calls            int     `json:"calls"`
+	Results          int     `json:"results"`
+	ErrorCount       int     `json:"error_count"`
+	ErrorRate        float64 `json:"error_rate"`
+	TimedCalls       int     `json:"timed_calls"`
+	DurationMedianMs int64   `json:"duration_median_ms"`
+	DurationP95Ms    int64   `json:"duration_p95_ms"`
+	ContextTokens    int64   `json:"context_tokens"`
+	RereadTurns      int     `json:"reread_turns"`
+	ContextWriteUSD  float64 `json:"context_write_usd"`
+	ContextReadUSD   float64 `json:"context_read_usd"`
+	ContextCostUSD   float64 `json:"context_cost_usd"`
+}
+
+func toolRow(tool, pattern string, s aggregate.ToolCallStats, c aggregate.ContextCost) ToolRow {
+	return ToolRow{
+		Tool:             tool,
+		Pattern:          pattern,
+		Calls:            s.Calls,
+		Results:          s.Results,
+		ErrorCount:       s.ErrorCount,
+		ErrorRate:        s.ErrorRate,
+		TimedCalls:       s.TimedCalls,
+		DurationMedianMs: s.DurationMedianMs,
+		DurationP95Ms:    s.DurationP95Ms,
+		ContextTokens:    c.ContextTokens,
+		RereadTurns:      c.RereadTurns,
+		ContextWriteUSD:  c.WriteCostUSD,
+		ContextReadUSD:   c.ReadCostUSD,
+		ContextCostUSD:   c.ContextCostUSD,
+	}
+}
+
+// sortToolRows orders rows by context cost descending, then tool, then
+// pattern, so equal-cost rows keep a stable order across requests.
+func sortToolRows(rows []ToolRow) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].ContextCostUSD != rows[j].ContextCostUSD {
+			return rows[i].ContextCostUSD > rows[j].ContextCostUSD
+		}
+		if rows[i].Tool != rows[j].Tool {
+			return rows[i].Tool < rows[j].Tool
+		}
+		return rows[i].Pattern < rows[j].Pattern
+	})
 }
 
 // SubagentsPayload backs /_claudit/api/subagents — the subagent-type
@@ -180,12 +235,39 @@ func BuildCost(a *aggregate.Aggregator) CostPayload {
 	}
 }
 
-// BuildTools rolls the aggregator into the Tools-tab payload.
+// BuildTools rolls the aggregator into the Tools-tab payload: every called
+// tool and pattern, with its context cost joined on (tool) or (tool,
+// pattern). A row whose results added no context carries zero cost.
 func BuildTools(a *aggregate.Aggregator) ToolsPayload {
-	return ToolsPayload{
-		ByTool:       a.ByTool(),
-		ByToolDetail: a.ByToolDetail(),
+	toolStats, detailStats := a.ToolCallStats()
+
+	toolCost := map[string]aggregate.ContextCost{}
+	for _, c := range a.ContextCostByTool() {
+		toolCost[c.Tool] = c.ContextCost
 	}
+	detailCost := map[[2]string]aggregate.ContextCost{}
+	for tool, rows := range a.ContextCostByToolDetail() {
+		for _, c := range rows {
+			detailCost[[2]string{tool, c.Detail}] = c.ContextCost
+		}
+	}
+
+	byTool := make([]ToolRow, 0, len(toolStats))
+	for tool, s := range toolStats {
+		byTool = append(byTool, toolRow(tool, "", s, toolCost[tool]))
+	}
+	sortToolRows(byTool)
+
+	byDetail := make(map[string][]ToolRow, len(detailStats))
+	for tool, patterns := range detailStats {
+		rows := make([]ToolRow, 0, len(patterns))
+		for pattern, s := range patterns {
+			rows = append(rows, toolRow(tool, pattern, s, detailCost[[2]string{tool, pattern}]))
+		}
+		sortToolRows(rows)
+		byDetail[tool] = rows
+	}
+	return ToolsPayload{ByTool: byTool, ByToolDetail: byDetail}
 }
 
 // BuildSubagents rolls the aggregator into the Subagents-tab payload.

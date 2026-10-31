@@ -53,6 +53,7 @@ type SessionContextCost struct {
 type contextTurn struct {
 	sessionID string
 	ts        time.Time
+	endTS     time.Time
 	model     string
 	usage     parse.Usage
 	toolUses  []parse.ToolUse
@@ -74,22 +75,17 @@ func (a *Aggregator) recordContextTurn(t parse.Turn) {
 	a.ctxTurns[t.SourceFile] = append(a.ctxTurns[t.SourceFile], contextTurn{
 		sessionID: t.SessionID,
 		ts:        t.Timestamp,
+		endTS:     t.EndTimestamp,
 		model:     t.Model,
 		usage:     t.Usage,
 		toolUses:  t.ToolUses,
 	})
 }
 
-// contextResult is a registered tool result: its size and the moment it
-// arrived (zero when its line carried no timestamp).
-type contextResult struct {
-	bytes   int
-	arrived time.Time
-}
-
-// AddToolResults registers tool results so ContextCost* can join them to
-// the tool_use that produced them by ToolUseID. A ToolUseID seen again (a
-// replayed transcript) keeps its first registration.
+// AddToolResults registers tool results so ContextCost* and ToolCallStats
+// can join them to the tool_use that produced them by ToolUseID. A
+// ToolUseID seen again (a replayed transcript) keeps its first
+// registration. The content snippet is dropped: nothing here reads it.
 func (a *Aggregator) AddToolResults(results []parse.ToolResult) {
 	a.invalidateContextCosts()
 	for _, r := range results {
@@ -97,7 +93,8 @@ func (a *Aggregator) AddToolResults(results []parse.ToolResult) {
 			continue
 		}
 		if _, ok := a.ctxResults[r.ToolUseID]; !ok {
-			a.ctxResults[r.ToolUseID] = contextResult{bytes: r.OutputBytes, arrived: r.Timestamp}
+			r.Content = ""
+			a.ctxResults[r.ToolUseID] = r
 		}
 	}
 }
@@ -166,19 +163,19 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 		carried := make([][]pendingResult, len(turns))
 		for i, c := range turns {
 			for _, tu := range c.toolUses {
-				r, ok := a.ctxResults[tu.ID]
+				r, ok := JoinToolResult(tu, a.ctxResults)
 				if !ok {
 					continue
 				}
 				j, from := i+1, c.ts.Add(time.Nanosecond)
-				if !r.arrived.IsZero() {
-					j = i + 1 + sort.Search(len(turns)-i-1, func(k int) bool { return !turns[i+1+k].ts.Before(r.arrived) })
-					from = r.arrived
+				if !r.Timestamp.IsZero() {
+					j = i + 1 + sort.Search(len(turns)-i-1, func(k int) bool { return !turns[i+1+k].ts.Before(r.Timestamp) })
+					from = r.Timestamp
 				}
 				if j >= len(turns) || compactedBetween(from, turns[j].ts) {
 					continue
 				}
-				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, input: tu.Input, bytes: r.bytes})
+				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, input: tu.Input, bytes: r.OutputBytes})
 			}
 		}
 

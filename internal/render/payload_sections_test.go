@@ -103,6 +103,96 @@ func TestBuildTools_ShapeAndKeys(t *testing.T) {
 	})
 }
 
+// TestBuildTools_RowFields: one turn calls Bash three times — `go test`
+// twice (one errors) and `git status` once — and all three results arrive
+// timed, 100/200/300ms after the turn's last line. The next turn writes
+// their 5,000 bytes-split cache tokens; the one after re-reads them. Every
+// field on by_tool and by_tool_detail rows is asserted through the JSON the
+// SPA reads.
+func TestBuildTools_RowFields(t *testing.T) {
+	prices := &pricing.Table{Models: map[string]pricing.ModelPrice{
+		"m": {Rate: pricing.Rate{CacheRead: 1, CacheWrite5m: 4}},
+	}}
+	t0 := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	end := t0.Add(time.Second)
+	a := aggregate.New(prices)
+	a.Add(parse.Turn{SessionID: "s", MessageID: "t1", Model: "m", Timestamp: t0, EndTimestamp: end, SourceFile: "f",
+		ToolUses: []parse.ToolUse{
+			{ID: "b1", Name: "Bash", Detail: "go test"},
+			{ID: "b2", Name: "Bash", Detail: "go test"},
+			{ID: "b3", Name: "Bash", Detail: "git status"},
+		}})
+	a.Add(parse.Turn{SessionID: "s", MessageID: "t2", Model: "m", Timestamp: t0.Add(2 * time.Second), SourceFile: "f",
+		Usage: parse.Usage{CacheCreate5mTokens: 5000}})
+	a.Add(parse.Turn{SessionID: "s", MessageID: "t3", Model: "m", Timestamp: t0.Add(3 * time.Second), SourceFile: "f",
+		Usage: parse.Usage{CacheReadTokens: 5000}})
+	a.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "b1", IsError: true, OutputBytes: 300, Timestamp: end.Add(300 * time.Millisecond)},
+		{ToolUseID: "b2", OutputBytes: 100, Timestamp: end.Add(100 * time.Millisecond)},
+		{ToolUseID: "b3", OutputBytes: 100, Timestamp: end.Add(200 * time.Millisecond)},
+	})
+
+	raw, err := json.Marshal(BuildTools(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		ByTool       []map[string]any            `json:"by_tool"`
+		ByToolDetail map[string][]map[string]any `json:"by_tool_detail"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ByTool) != 1 {
+		t.Fatalf("by_tool = %v, want one Bash row", got.ByTool)
+	}
+	assertRow(t, "Bash", got.ByTool[0], map[string]any{
+		"tool": "Bash", "calls": 3.0, "results": 3.0, "error_count": 1.0, "error_rate": 1.0 / 3,
+		"timed_calls": 3.0, "duration_median_ms": 200.0, "duration_p95_ms": 300.0,
+		"context_tokens": 5000.0, "reread_turns": 3.0,
+		"context_write_usd": 0.02, "context_read_usd": 0.005, "context_cost_usd": 0.025,
+	})
+	detail := got.ByToolDetail["Bash"]
+	if len(detail) != 2 {
+		t.Fatalf("by_tool_detail[Bash] = %v, want two patterns", detail)
+	}
+	assertRow(t, "Bash·go test", detail[0], map[string]any{
+		"tool": "Bash", "pattern": "go test", "calls": 2.0, "results": 2.0, "error_count": 1.0, "error_rate": 0.5,
+		"timed_calls": 2.0, "duration_median_ms": 100.0, "duration_p95_ms": 300.0,
+		"context_tokens": 4000.0, "reread_turns": 2.0,
+		"context_write_usd": 0.016, "context_read_usd": 0.004, "context_cost_usd": 0.02,
+	})
+	assertRow(t, "Bash·git status", detail[1], map[string]any{
+		"tool": "Bash", "pattern": "git status", "calls": 1.0, "results": 1.0, "error_count": 0.0, "error_rate": 0.0,
+		"timed_calls": 1.0, "duration_median_ms": 200.0, "duration_p95_ms": 200.0,
+		"context_tokens": 1000.0, "reread_turns": 1.0,
+		"context_write_usd": 0.004, "context_read_usd": 0.001, "context_cost_usd": 0.005,
+	})
+}
+
+func assertRow(t *testing.T, label string, row, want map[string]any) {
+	t.Helper()
+	for k, w := range want {
+		g, ok := row[k]
+		if !ok {
+			t.Errorf("%s: missing %q in %v", label, k, row)
+			continue
+		}
+		if wf, isNum := w.(float64); isNum {
+			if gf, _ := g.(float64); gf-wf > 1e-9 || wf-gf > 1e-9 {
+				t.Errorf("%s: %s = %v, want %v", label, k, g, w)
+			}
+			continue
+		}
+		if g != w {
+			t.Errorf("%s: %s = %v, want %v", label, k, g, w)
+		}
+	}
+	if len(row) != len(want) {
+		t.Errorf("%s: row has %d fields, test asserts %d: %v", label, len(row), len(want), row)
+	}
+}
+
 // TestBuildSubagents_ShapeAndKeys: subagents tab has the type
 // roll-up plus the per-invocation rows AND the main/sidechain split
 // the "Main vs sidechain" subtab consumes — the legacy SSR'd inline

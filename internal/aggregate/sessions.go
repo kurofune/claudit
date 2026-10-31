@@ -121,8 +121,7 @@ func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 			continue
 		}
 		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: u.Input, StartedAt: startedAt, Count: 1}
-		// Join the outcome from the matching tool_result (by tool_use id).
-		if res, ok := results[u.ID]; ok && u.ID != "" {
+		if res, ok := JoinToolResult(u, results); ok {
 			if res.IsError {
 				inv.Status = "error"
 			} else {
@@ -144,6 +143,16 @@ func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 		out = append(out, inv)
 	}
 	return out
+}
+
+// JoinToolResult is the one tool_use → tool_result join: the result whose
+// ToolUseID is u's id. A call without an id (older transcripts) never joins.
+func JoinToolResult(u parse.ToolUse, results map[string]parse.ToolResult) (parse.ToolResult, bool) {
+	if u.ID == "" {
+		return parse.ToolResult{}, false
+	}
+	r, ok := results[u.ID]
+	return r, ok
 }
 
 // toolDetailFor picks the most identifying sub-key for a tool call. The

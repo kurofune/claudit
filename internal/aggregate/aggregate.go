@@ -219,7 +219,7 @@ type Aggregator struct {
 	// session file, tool-result sizes and arrival times by ToolUseID, and
 	// compaction points per session file.
 	ctxTurns      map[string][]contextTurn
-	ctxResults    map[string]contextResult
+	ctxResults    map[string]parse.ToolResult
 	ctxBoundaries map[string][]time.Time
 	// ctxMemo is the attribution walk's result, valid while ctxMemoOK; any
 	// input change clears it. ctxMu guards both because API sections read
@@ -249,7 +249,7 @@ func New(p *pricing.Table) *Aggregator {
 		seenMessageID:     map[string]struct{}{},
 		byPrompt:          map[string]*promptBucketInternal{},
 		ctxTurns:          map[string][]contextTurn{},
-		ctxResults:        map[string]contextResult{},
+		ctxResults:        map[string]parse.ToolResult{},
 		ctxBoundaries:     map[string][]time.Time{},
 	}
 }
