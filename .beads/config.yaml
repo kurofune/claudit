@@ -69,3 +69,7 @@ sync.remote: "git+https://github.com/kurofune/claudit.git"
 dolt:
     auto-commit: "on"
     auto-start: true
+agent:
+    profile: team-maintainer
+
+no-git-ops: false
