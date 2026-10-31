@@ -52,6 +52,13 @@ export function rowPassesFilter(r, q, minCost) {
   return true;
 }
 
+// emptyRowText is the message for a table with nothing to show: the
+// view's emptyText when the table holds no rows at all, else the
+// filter-miss message.
+export function emptyRowText(rowCount, emptyText) {
+  return rowCount === 0 && emptyText ? emptyText : 'No matching rows.';
+}
+
 function filterRows(st, table) {
   const scope = table ? table.closest('[data-own-filter]') : null;
   const { q, minCost } = getFilterParams(scope);
@@ -145,7 +152,7 @@ export function renderTable(table) {
 
   if (totalRows === 0) {
     const colCount = table.querySelectorAll('thead th').length;
-    tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-state-row">No matching rows.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-state-row">${emptyRowText(st.rows.length, st.emptyText)}</td></tr>`;
   } else {
     pageRows.forEach(r => {
       const tr = document.createElement('tr');
@@ -184,11 +191,13 @@ export function renderTable(table) {
 
 // buildRows initializes per-table state and triggers the first render.
 // Re-calling buildRows() on the same table replaces state — view
-// modules can repaint without leaking old row data.
-export function buildRows(table, rows, mapper) {
+// modules can repaint without leaking old row data. opts.emptyText
+// replaces the filter-miss message when rows is empty.
+export function buildRows(table, rows, mapper, opts = {}) {
   if (!table) return;
   tableStates.set(table, {
     rows, mapper,
+    emptyText: opts.emptyText,
     pageSize: PAGE_SIZE,
     page: 0,
     sortKey: null,

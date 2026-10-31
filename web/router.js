@@ -1,18 +1,61 @@
-// Hash-based router preserving the legacy URL contract:
-//   #overview              → Overview tab
-//   #cost                  → Cost tab (root)
-//   #cost/model            → Cost tab, model subview
+// Hash-based router. The URL contract:
+//   #overview                  → Overview
+//   #spend/<tab>               → Spend, <tab>, Dollars
+//   #spend/<tab>/tokens        → Spend, <tab>, Tokens
+//   #tools, #agents/<lens>     → Tools, Agents
 //
-// The fat HTML used the same shape, so old bookmarks keep working
-// when the cutover phase flips / to the SPA.
+// Retired views (#cost, #tokens, #cache) redirect through REDIRECTS so
+// old bookmarks land on the Spend view.
 
-const KNOWN_VIEWS = new Set(['overview', 'cost', 'tokens', 'cache', 'tools', 'agents']);
+const KNOWN_VIEWS = new Set(['overview', 'spend', 'tools', 'agents']);
 
-export function parseHash() {
-  const raw = (window.location.hash || '#overview').slice(1);
-  const [head, ...rest] = raw.split('/');
+export const SPEND_DEFAULT_TAB = 'model';
+const TOKENS_SUFFIX = 'tokens';
+
+// spendHash is the canonical hash for a Spend tab + unit. Tokens mode
+// always names a tab so the unit segment is unambiguous.
+export function spendHash(tab, unit) {
+  if (unit === 'tokens') return `#spend/${tab || SPEND_DEFAULT_TAB}/${TOKENS_SUFFIX}`;
+  return tab ? `#spend/${tab}` : '#spend';
+}
+
+// REDIRECTS maps a retired view to its Spend equivalent. keepTab carries
+// the old sub-path over as the Spend tab; unit picks the Spend unit.
+export const REDIRECTS = [
+  { from: 'cost', unit: 'dollars', keepTab: true },
+  { from: 'tokens', unit: 'tokens', keepTab: true },
+  { from: 'cache', unit: 'dollars', keepTab: false },
+];
+
+function splitHash(raw) {
+  const s = raw == null ? '' : String(raw);
+  const body = s.startsWith('#') ? s.slice(1) : s;
+  const [head, ...rest] = body.split('/');
+  return { head, rest };
+}
+
+// redirectHash returns the hash a retired-view hash should be replaced
+// with, or null when the hash is current.
+export function redirectHash(raw) {
+  const { head, rest } = splitHash(raw);
+  const rule = REDIRECTS.find(r => r.from === head);
+  if (!rule) return null;
+  const tab = rule.keepTab ? (rest[0] || '') : '';
+  return spendHash(tab, rule.unit);
+}
+
+// parseHash reads a route from raw (a hash string, '#' optional), or
+// from window.location.hash when raw is omitted.
+export function parseHash(raw) {
+  const src = raw === undefined ? window.location.hash : raw;
+  const { head, rest } = splitHash(src || '#overview');
   const view = KNOWN_VIEWS.has(head) ? head : 'overview';
-  return { view, sub: rest.join('/') };
+  let unit = 'dollars';
+  if (view === 'spend' && rest.length > 1 && rest[rest.length - 1] === TOKENS_SUFFIX) {
+    rest.pop();
+    unit = 'tokens';
+  }
+  return { view, sub: rest.join('/'), unit };
 }
 
 // activate sets the is-active class on the matching .view + .nav-item.
@@ -28,10 +71,15 @@ export function activate(route) {
   return route;
 }
 
-// onChange wires a listener to hashchange + the initial load. Callback
-// fires with the parsed route each time.
+// onChange wires a listener to hashchange + the initial load. A retired
+// hash is rewritten in place (history.replaceState, so Back skips it)
+// before the callback fires with the parsed route.
 export function onChange(callback) {
-  const fire = () => callback(parseHash());
+  const fire = () => {
+    const to = redirectHash(window.location.hash);
+    if (to) history.replaceState(history.state, '', to);
+    callback(parseHash());
+  };
   window.addEventListener('hashchange', fire);
   fire();
 }

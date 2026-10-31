@@ -13,7 +13,7 @@ const skel = (variant) => `<span class="skeleton ${variant}"></span>`;
 export const skelPill = () => skel('skel-pill');
 export const skelLine = (cls = '') => `<span class="skeleton skel-line ${cls}"></span>`;
 
-// Nav-metric (sidebar) — narrow shimmer pill. Used for all six
+// Nav-metric (sidebar) — narrow shimmer pill. Used for all four
 // #nav-metric-* spans at boot.
 export function navMetricSkeleton() {
   return skelPill();
@@ -44,8 +44,7 @@ export function overviewSkeleton() {
     </div>`;
 }
 
-// Bar-list skeleton — used wherever .hbar-list is empty (Cost by-model,
-// Cost by-project, Tools by-tool).
+// Bar-list skeleton — used by Tools' by-tool .hbar-list.
 export function hbarListSkeleton(n = 6) {
   const bars = [];
   for (let i = 0; i < n; i++) bars.push(skel('skel-bar'));
@@ -65,11 +64,6 @@ export function tableBodySkeleton(colSpan, n = 6) {
 // Stacked-bar skeleton — single 32px shimmer matching .stacked.
 export function stackedSkeleton() {
   return skel('skel-stacked');
-}
-
-// Summary band skeleton — used by Cache's #cache-summary.
-export function summaryBandSkeleton() {
-  return skel('skel-summary');
 }
 
 // Session list skeleton — N session-card-shaped blocks.
@@ -95,7 +89,6 @@ const SKEL_ATTR = 'data-skel';
 export function paintNavSkeletons(includeOverview) {
   const ids = [
     'nav-metric-cost',
-    'nav-metric-cache',
     'nav-metric-tools',
     'nav-metric-agents',
   ];

@@ -41,7 +41,6 @@ export const fetchSnapshot = () => getJSON('/snapshot');
 export const fetchOverview = () => getJSON('/overview');
 export const fetchCost = () => getJSON('/cost');
 export const fetchTokens = () => getJSON('/tokens');
-export const fetchCache = () => getJSON('/cache');
 export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');
 export const fetchAnomalies = () => getJSON('/anomalies');

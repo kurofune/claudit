@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rowSearchText, rowPassesFilter } from '../web/table.js';
+import { rowSearchText, rowPassesFilter, emptyRowText } from '../web/table.js';
 
 test('rowSearchText concatenates only string fields, lowercased', () => {
   const r = { Model: 'Claude-Opus', Project: '/p/Foo', CostUSD: 12.5, Turns: 9 };
@@ -31,4 +31,13 @@ test('rowPassesFilter requires BOTH the query and the min cost to pass', () => {
   assert.equal(rowPassesFilter(r, 'opus', 1), false);
   assert.equal(rowPassesFilter(r, 'sonnet', 0), false);
   assert.equal(rowPassesFilter(r, 'opus', 0.5), true);
+});
+test('emptyRowText names the empty window when the table has no rows at all', () => {
+  assert.equal(emptyRowText(0, 'No spend in this window'), 'No spend in this window');
+});
+test('emptyRowText says no matching rows when the filter hid every row', () => {
+  assert.equal(emptyRowText(5, 'No spend in this window'), 'No matching rows.');
+});
+test('emptyRowText falls back to no matching rows without an empty text', () => {
+  assert.equal(emptyRowText(0, undefined), 'No matching rows.');
 });

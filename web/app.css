@@ -440,7 +440,7 @@
   .view-head .meta { color: var(--muted); font-size: var(--t-2);
                      font-variant-numeric: tabular-nums; }
 
-  /* Sub-tabs within a view (Cost/Cache/Tools/Subagents). One row of
+  /* Sub-tabs within a view (Spend/Tools/Agents). One row of
      anchor-tabs with an underline on the active item. Hash route is
      `#view/subview`. */
   .subtabs {
@@ -472,6 +472,17 @@
   .subtab.is-active .subtab-count { color: var(--ink-2); }
   .subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
                           border-radius: 2px; }
+
+  /* Unit toggle (Spend: Dollars | Tokens) — a radiogroup drawn as a
+     compact .subtabs strip at the right of the view head, so the checked
+     unit reads with the same underline as the active tab. */
+  .spend-head { flex-wrap: wrap; }
+  .unit-toggle { display: inline-flex; flex-wrap: nowrap; margin: 0 0 0 auto;
+                 align-self: flex-end; }
+  .unit-toggle .subtab { padding: var(--s-1) var(--s-3); font-size: var(--t-2); }
+  .unit-toggle .subtab[aria-checked="true"] { color: var(--ink);
+                                              border-bottom-color: var(--accent); }
+  .spend-pane .tok-trend-chart { margin-bottom: var(--s-4); }
 
   /* Sub-views — only the active one renders. */
   .subview { display: none; }
@@ -940,11 +951,6 @@
   /* Reserve enough min-width on project-bearing columns so the table's
      auto-layout doesn't squeeze them when other columns get greedy. */
   th[data-key="Project"], th[data-key="Subtitle"] {
-    min-width: clamp(280px, 30vw, 460px);
-  }
-  /* For cache-project, the project path lives under the generic "Key"
-     column header. Same min-width treatment via a class on the table. */
-  table[data-table="cache-project"] th[data-key="Key"] {
     min-width: clamp(280px, 30vw, 460px);
   }
   details.tool-drill summary code {
@@ -1796,7 +1802,6 @@
   .skel-row      { display: block; height: 38px; border-radius: var(--r-sm); }
   .skel-row-sm   { display: block; height: 28px; border-radius: var(--r-sm); }
   .skel-chart    { display: block; height: 220px; border-radius: var(--r-lg); }
-  .skel-summary  { display: block; height: 28px; border-radius: var(--r-md); flex: 1 1 100%; min-width: 0; }
   .skel-hotspot  { display: block; height: 44px; border-radius: var(--r-lg); }
   .skel-card     { display: block; height: 52px; border-radius: var(--r-lg); }
 

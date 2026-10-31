@@ -61,16 +61,6 @@
       <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/>
       <path d="M12 18V6"/>
     </symbol>
-    <symbol id="icon-tokens" viewBox="0 0 24 24">
-      <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-      <polyline points="2 12 12 17 22 12"/>
-      <polyline points="2 17 12 22 22 17"/>
-    </symbol>
-    <symbol id="icon-cache" viewBox="0 0 24 24">
-      <ellipse cx="12" cy="5" rx="9" ry="3"/>
-      <path d="M3 5v14a9 3 0 0 0 18 0V5"/>
-      <path d="M3 12a9 3 0 0 0 18 0"/>
-    </symbol>
     <symbol id="icon-tools" viewBox="0 0 24 24">
       <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
     </symbol>
@@ -128,17 +118,9 @@
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-overview"/></svg>Overview</span>
         <span class="nav-metric" id="nav-metric-overview">—</span>
       </a>
-      <a class="nav-item" href="#cost" data-view="cost">
-        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Cost</span>
+      <a class="nav-item" href="#spend" data-view="spend">
+        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cost"/></svg>Spend</span>
         <span class="nav-metric" id="nav-metric-cost">—</span>
-      </a>
-      <a class="nav-item" href="#tokens" data-view="tokens">
-        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tokens"/></svg>Tokens</span>
-        <span class="nav-metric" id="nav-metric-tokens">—</span>
-      </a>
-      <a class="nav-item" href="#cache" data-view="cache">
-        <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-cache"/></svg>Cache</span>
-        <span class="nav-metric" id="nav-metric-cache">—</span>
       </a>
       <a class="nav-item" href="#tools" data-view="tools">
         <span class="nav-label"><svg class="icon" aria-hidden="true"><use href="#icon-tools"/></svg>Tools</span>
@@ -165,14 +147,8 @@
       <!-- Filled at runtime by web/views/overview.js -->
     </section>
 
-    <section class="view" id="view-cost" data-view="cost" data-own-filter>
-      <!-- Filled at runtime by web/view-cost.js -->
-    </section>
-    <section class="view" id="view-tokens" data-view="tokens" data-own-filter>
-      <!-- Filled at runtime by web/view-tokens.js -->
-    </section>
-    <section class="view" id="view-cache" data-view="cache" data-own-filter>
-      <!-- Filled at runtime by web/view-cache.js -->
+    <section class="view" id="view-spend" data-view="spend" data-own-filter>
+      <!-- Filled at runtime by web/view-spend.js -->
     </section>
     <section class="view" id="view-tools" data-view="tools" data-own-filter>
       <!-- Filled at runtime by web/view-tools.js -->

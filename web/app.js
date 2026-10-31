@@ -1,16 +1,13 @@
 // SPA entry point. Wires the hash router, paints the active view,
 // and subscribes to /events for the data-changed reload nudge.
 //
-// Phase 6 lands the Cost / Cache / Tools / Subagents painters next to
-// Overview; each view module owns its own fetch + render lifecycle
-// and is a no-op on subsequent route changes within the same view
-// (just toggles the subview class).
+// Each view module (Overview, Spend, Tools, Agents) owns its own fetch +
+// render lifecycle and is a no-op on subsequent route changes within the
+// same view (just toggles the subview class).
 
 import { onChange, activate, parseHash } from './router.js';
 import { paint as paintOverview } from './view-overview.js';
-import { paint as paintCost, paintNav as paintNavCost } from './view-cost.js';
-import { paint as paintTokens, paintNav as paintNavTokens } from './view-tokens.js';
-import { paint as paintCache, paintNav as paintNavCache } from './view-cache.js';
+import { paint as paintSpend, paintNav as paintNavSpend } from './view-spend.js';
 import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
@@ -21,9 +18,7 @@ import { init as initTooltips } from './tooltip.js';
 
 const VIEW_PAINTERS = {
   overview: paintOverview,
-  cost: paintCost,
-  tokens: paintTokens,
-  cache: paintCache,
+  spend: paintSpend,
   tools: paintTools,
   agents: paintAgents,
 };
@@ -62,7 +57,7 @@ initThemes();
 // later view re-renders, so the ~150 native call sites upgrade automatically.
 initTooltips();
 
-// Sidebar metric prefetch — fires the five non-overview sections in
+// Sidebar metric prefetch — fires the three non-overview sections in
 // parallel at startup so their nav-metric dashes resolve before the
 // user clicks each tab. Each paintNav() short-circuits if its full
 // paint() has already run (e.g. via deep link), and falls back to
@@ -76,17 +71,11 @@ initTooltips();
 // paint(), which only fires when Overview is the active route — skeleton
 // them only if we're starting on Overview, otherwise leave them as "—".
 paintNavSkeletons(parseHash().view === 'overview');
-// Pills fed by the five paintNavs below — nav-metric-overview and
+// Pills fed by the three paintNavs below — nav-metric-overview and
 // date-range are owned by view-overview.js and reset there on error.
-const NAV_SKEL_IDS = [
-  'nav-metric-cost', 'nav-metric-tokens',
-  'nav-metric-cache', 'nav-metric-tools',
-  'nav-metric-agents',
-];
+const NAV_SKEL_IDS = ['nav-metric-cost', 'nav-metric-tools', 'nav-metric-agents'];
 Promise.all([
-  paintNavCost(),
-  paintNavTokens(),
-  paintNavCache(),
+  paintNavSpend(),
   paintNavTools(),
   paintNavAgents(),
 ])
