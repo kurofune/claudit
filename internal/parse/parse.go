@@ -24,7 +24,15 @@ type Usage struct {
 	CacheCreate5mTokens int
 	CacheCreate1hTokens int
 	CacheReadTokens     int
+	// ReasoningOutputTokens is the share of OutputTokens a provider reports
+	// as reasoning. Claude Code logs carry no such split, so its turns
+	// leave it at 0.
+	ReasoningOutputTokens int
 }
+
+// ProviderClaudeCode is the Provider of every turn read from a Claude Code
+// session log.
+const ProviderClaudeCode = "claude-code"
 
 // ToolUse is one tool_use entry inside an assistant turn.
 type ToolUse struct {
@@ -78,6 +86,10 @@ type ToolResult struct {
 
 // Turn is one assistant message — the only event type that costs money.
 type Turn struct {
+	// Provider names the agent tool that wrote the log this turn came from
+	// (ProviderClaudeCode for Claude Code). Prices are looked up per
+	// (Provider, Model).
+	Provider  string
 	SessionID string
 	// MessageID is `message.id` — the wire id shared by every JSONL line of
 	// one streamed assistant turn (Claude Code writes one line per content
@@ -293,6 +305,7 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 		thinking = truncateRunes(thinking, turnTextMaxChars)
 		text = truncateRunes(text, turnTextMaxChars)
 		return Turn{
+			Provider:   ProviderClaudeCode,
 			SessionID:  raw.SessionID,
 			MessageID:  msg.ID,
 			UUID:       raw.UUID,

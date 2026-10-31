@@ -920,3 +920,30 @@ func TestCoalescer_PreservesUsageSpeed(t *testing.T) {
 		}
 	}
 }
+
+func TestParseFile_SetsProviderClaudeCode(t *testing.T) {
+	for _, path := range []string{"testdata/main_session.jsonl", "testdata/sidechain_session.jsonl"} {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := ParseFile(f, path)
+		if cerr := f.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v", path, err)
+		}
+		if len(res.Turns) == 0 {
+			t.Fatalf("%s: no turns parsed", path)
+		}
+		for i, turn := range res.Turns {
+			if turn.Provider != "claude-code" {
+				t.Errorf("%s turn %d: Provider = %q, want claude-code", path, i, turn.Provider)
+			}
+			if turn.Usage.ReasoningOutputTokens != 0 {
+				t.Errorf("%s turn %d: ReasoningOutputTokens = %d, want 0", path, i, turn.Usage.ReasoningOutputTokens)
+			}
+		}
+	}
+}
