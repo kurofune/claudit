@@ -877,6 +877,11 @@
                         font-size: 0.9em; }
   th.sorted-asc::after  { content: " ▲"; color: var(--accent); }
   th.sorted-desc::after { content: " ▼"; color: var(--accent); }
+  th .th-sort { background: none; border: 0; margin: 0; padding: 0;
+                font: inherit; color: inherit; letter-spacing: inherit;
+                text-align: inherit; white-space: inherit; cursor: pointer; }
+  th .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+                              border-radius: 2px; }
   td.num, th.num { text-align: right; }
   td code { font-size: var(--t-2); }
   /* Heat overlay as a CSS gradient on the cell background. Text sits

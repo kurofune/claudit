@@ -181,12 +181,28 @@ export function renderTable(table) {
   pager.style.display = totalRows > st.pageSize ? '' : 'none';
 
   // Sort indicators on header cells.
-  table.querySelectorAll('thead th').forEach(h =>
-    h.classList.remove('sorted-asc', 'sorted-desc'));
+  table.querySelectorAll('thead th').forEach(h => {
+    h.classList.remove('sorted-asc', 'sorted-desc');
+    if (h.dataset.key) h.setAttribute('aria-sort', 'none');
+  });
   if (st.sortKey) {
     const th = table.querySelector(`thead th[data-key="${st.sortKey}"]`);
-    if (th) th.classList.add(st.sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    if (th) {
+      th.classList.add(st.sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+      th.setAttribute('aria-sort', st.sortDir === 'asc' ? 'ascending' : 'descending');
+    }
   }
+}
+
+// sortButton moves a sortable header's content into a <button> so the
+// sort is reachable by Tab and fires on Enter/Space like any button;
+// the click still bubbles to the header's listener.
+function sortButton(th) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'th-sort';
+  while (th.firstChild) btn.appendChild(th.firstChild);
+  th.appendChild(btn);
 }
 
 // buildRows initializes per-table state and triggers the first render.
@@ -207,6 +223,7 @@ export function buildRows(table, rows, mapper, opts = {}) {
   // would stack listeners; the dataset.tableWired sentinel avoids that.
   if (!table.dataset.tableWired) {
     table.querySelectorAll('thead th[data-key]').forEach(th => {
+      sortButton(th);
       th.addEventListener('click', () => {
         const st = tableStates.get(table);
         if (!st) return;
