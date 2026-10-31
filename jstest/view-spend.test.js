@@ -30,10 +30,12 @@ const COST = {
     { Key: 'write tests', Sample: 'write tests', Invocations: 4, Sessions: 3, TurnCount: 30, ...tok(1, 2, 3, 4), CostUSD: 2 },
   ],
 };
-const tokRow = (label, input, output, cw, cr, cost) => {
+const tokRow = (label, input, output, cw, cr, pct, cost) => {
   const total = input + output + cw + cr;
-  return { label, input, output, cache_write: cw, cache_read: cr, total, pct: 0, cost_usd: cost };
+  return { label, input, output, cache_write: cw, cache_read: cr, total, pct, cost_usd: cost };
 };
+// Every token category carries a distinct value per row, so a cell
+// dropped, duplicated or shifted into a neighbour's column shows up.
 const TOKENS = {
   total: 1_250_000,
   composition: [],
@@ -42,15 +44,15 @@ const TOKENS = {
     { time: '2026-10-02T00:00:00Z', cost_usd: 6, turns: 60, sessions: 4, hit_ratio: 0.9, ...tok(300, 8000, 1100, 500100) },
   ],
   by_model: [
-    { model: 'claude-haiku-4-5', input: 400, output: 9000, cache_write: 100, cache_read: 100, total: 9600, pct: 0.8, cost_usd: 3 },
+    { model: 'claude-haiku-4-5', input: 400, output: 9000, cache_write: 100, cache_read: 200, total: 9700, pct: 0.8, cost_usd: 3 },
     { model: 'claude-opus-4-7', input: 100, output: 5000, cache_write: 2000, cache_read: 900000, total: 907100, pct: 99.2, cost_usd: 7 },
   ],
-  by_project: [tokRow('/work/small', 1, 1, 1, 1, 1), tokRow('/work/big', 10, 10, 10, 10, 9)],
-  by_subagent: [tokRow('reviewer', 5, 5, 5, 5, 1), tokRow('Explore', 50, 50, 50, 50, 2)],
-  by_skill: [tokRow('skill:tdd', 2, 2, 2, 2, 1), tokRow('command:/review', 20, 20, 20, 20, 1)],
+  by_project: [tokRow('/work/small', 11, 12, 13, 14, 1, 1), tokRow('/work/big', 1100, 1200, 1300, 1400, 99, 9)],
+  by_subagent: [tokRow('reviewer', 5, 6, 7, 8, 9.1, 1), tokRow('Explore', 50, 60, 70, 80, 90.9, 2)],
+  by_skill: [tokRow('skill:tdd', 2, 3, 4, 5, 9.1, 1), tokRow('command:/review', 20, 30, 40, 50, 90.9, 1)],
   by_prompt: [
-    { ...tokRow('write tests', 3, 3, 3, 3, 1), sample: 'write tests' },
-    { ...tokRow('fix the build', 30, 30, 30, 30, 4), sample: 'fix the build' },
+    { ...tokRow('write tests', 3, 4, 5, 6, 9.1, 1), sample: 'write tests' },
+    { ...tokRow('fix the build', 30, 40, 50, 60, 90.9, 4), sample: 'fix the build' },
   ],
   period: 'day',
 };
@@ -86,24 +88,56 @@ const unitBtn = (root, u) => root.querySelector(`.unit-opt[data-unit="${u}"]`);
 const pane = (root, t) => root.querySelector(`.spend-pane[data-pane="${t}"]`);
 const heads = table => table.querySelectorAll('thead th').map(th => th.textContent.trim());
 const firstCol = table => table.querySelectorAll('tbody tr').map(tr => tr.children[0].textContent.trim());
+const cells = table => table.querySelectorAll('tbody tr').map(tr => tr.children.map(td => td.textContent.trim()));
 const tablesIn = (root, t) => pane(root, t).querySelectorAll('table[data-table]').map(x => x.dataset.table);
 const navMetric = doc => doc.getElementById('nav-metric-cost').textContent;
 
 const TOK_HEADS = ['Input', 'Output', 'Cache write', 'Cache read', 'Total', '%'];
+// rows are the full rendered text of every body row, cell by cell, in
+// column order — label, then each numeric column as the user reads it.
 const PANES = {
   dollars: {
-    model: { tables: ['model'], heads: ['Model', 'Cost', '%', 'Turns', 'Output tokens', 'Cache read tokens'], rows: ['claude-opus-4-7', 'claude-haiku-4-5'] },
-    project: { tables: ['project'], heads: ['Project', 'Cost', '%', 'Sessions', 'Turns', 'Dominant model'], rows: ['/work/alpha', '/work/beta'] },
-    subagents: { tables: ['mainside', 'subagent', 'invocation'], heads: ['Bucket', 'Cost', '%', 'Turns', 'Cache read'], rows: ['Subagent data unavailable'] },
-    skill: { tables: ['skill'], heads: ['Key', 'Calls', 'Turns', 'Cost', 'Output tokens'], rows: ['command:/review', 'skill:tdd'] },
-    prompt: { tables: ['prompt'], heads: ['Snippet', 'Invocations', 'Sessions', 'Turns', 'Cost', '%'], rows: ['fix the build', 'write tests'] },
+    model: { tables: ['model'], heads: ['Model', 'Cost', '%', 'Turns', 'Output tokens', 'Cache read tokens'], rows: [
+      ['claude-opus-4-7', '$7.00', '70.0%', '30', '5,000', '900,000'],
+      ['claude-haiku-4-5', '$3.00', '30.0%', '80', '9,000', '100'],
+    ] },
+    project: { tables: ['project'], heads: ['Project', 'Cost', '%', 'Sessions', 'Turns', 'Dominant model'], rows: [
+      ['/work/alpha', '$6.00', '60.0%', '2', '20', 'claude-opus-4-7'],
+      ['/work/beta', '$4.00', '40.0%', '9', '90', 'claude-haiku-4-5'],
+    ] },
+    subagents: { tables: ['mainside', 'subagent', 'invocation'], heads: ['Bucket', 'Cost', '%', 'Turns', 'Cache read'], rows: [
+      ['Subagent data unavailable'],
+    ] },
+    skill: { tables: ['skill'], heads: ['Key', 'Calls', 'Turns', 'Cost', 'Output tokens'], rows: [
+      ['command:/review', '2', '12', '$2.00', '300'],
+      ['skill:tdd', '7', '40', '$1.00', '900'],
+    ] },
+    prompt: { tables: ['prompt'], heads: ['Snippet', 'Invocations', 'Sessions', 'Turns', 'Cost', '%'], rows: [
+      ['fix the build', '1', '1', '9', '$5.00', '50.0%'],
+      ['write tests', '4', '3', '30', '$2.00', '20.0%'],
+    ] },
   },
   tokens: {
-    model: { tables: ['tokmodel'], heads: ['Model', ...TOK_HEADS], rows: ['claude-haiku-4-5', 'claude-opus-4-7'] },
-    project: { tables: ['tokproject'], heads: ['Project', ...TOK_HEADS], rows: ['/work/small', '/work/big'] },
-    subagents: { tables: ['toksubagent'], heads: ['Subagent', ...TOK_HEADS], rows: ['reviewer', 'Explore'] },
-    skill: { tables: ['tokskill'], heads: ['Key', ...TOK_HEADS], rows: ['skill:tdd', 'command:/review'] },
-    prompt: { tables: ['tokprompt'], heads: ['Snippet', ...TOK_HEADS], rows: ['write tests', 'fix the build'] },
+    model: { tables: ['tokmodel'], heads: ['Model', ...TOK_HEADS], rows: [
+      ['claude-haiku-4-5', '400', '9,000', '100', '200', '9,700', '0.8%'],
+      ['claude-opus-4-7', '100', '5,000', '2,000', '900,000', '907,100', '99.2%'],
+    ] },
+    project: { tables: ['tokproject'], heads: ['Project', ...TOK_HEADS], rows: [
+      ['/work/small', '11', '12', '13', '14', '50', '1.0%'],
+      ['/work/big', '1,100', '1,200', '1,300', '1,400', '5,000', '99.0%'],
+    ] },
+    subagents: { tables: ['toksubagent'], heads: ['Subagent', ...TOK_HEADS], rows: [
+      ['reviewer', '5', '6', '7', '8', '26', '9.1%'],
+      ['Explore', '50', '60', '70', '80', '260', '90.9%'],
+    ] },
+    skill: { tables: ['tokskill'], heads: ['Key', ...TOK_HEADS], rows: [
+      ['skill:tdd', '2', '3', '4', '5', '14', '9.1%'],
+      ['command:/review', '20', '30', '40', '50', '140', '90.9%'],
+    ] },
+    prompt: { tables: ['tokprompt'], heads: ['Snippet', ...TOK_HEADS], rows: [
+      ['write tests', '3', '4', '5', '6', '18', '9.1%'],
+      ['fix the build', '30', '40', '50', '60', '180', '90.9%'],
+    ] },
   },
 };
 
@@ -117,7 +151,7 @@ function assertUnit(root, doc, unit) {
     assert.deepEqual(tablesIn(root, t), want.tables, `${unit}/${t} tables`);
     const table = pane(root, t).querySelector(`table[data-table="${want.tables[0]}"]`);
     assert.deepEqual(heads(table), want.heads, `${unit}/${t} columns`);
-    assert.deepEqual(firstCol(table), want.rows, `${unit}/${t} rows`);
+    assert.deepEqual(cells(table), want.rows, `${unit}/${t} rows`);
   }
   assert.equal(navMetric(doc), unit === 'tokens' ? fmtCompact(TOKENS.total) : 'claude-opus-4-7 · $7.00');
 }
