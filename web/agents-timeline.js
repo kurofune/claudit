@@ -564,7 +564,7 @@ function timelineRowHTML(r, tl, selAgentKey, seen, next, agent, maxSegCost = 0, 
   const sigHTML = sigPips.map((p, i) => {
     const px = pipBaseX - i * 9;
     const d = `M ${px.toFixed(1)} ${(pipCy - 4).toFixed(1)} L ${(px - 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} L ${(px + 4).toFixed(1)} ${(pipCy + 3.5).toFixed(1)} Z`;
-    return `<path class="tl-sig-pip sig-${p.tier}" data-ref="${escHtml(p.ref)}" d="${d}"><title>${escHtml(p.summary)}</title></path>`;
+    return `<path class="tl-sig-pip sig-${p.tier}" data-ref="${escHtml(p.ref)}" d="${d}"><title>${escHtml(p.reason ? `${p.summary}\n${p.reason}` : p.summary)}</title></path>`;
   }).join('');
   const moreHTML = sigOverflow > 0
     ? `<text class="tl-sig-more" data-goto-insights role="button" tabindex="0" x="${(pipBaseX - sigPips.length * 9).toFixed(1)}" y="${(pipCy + 3).toFixed(1)}" text-anchor="end">+${sigOverflow}<title>${sigOverflow} more signal${sigOverflow === 1 ? '' : 's'} — open Insights → Signals</title></text>`

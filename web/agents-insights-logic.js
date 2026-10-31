@@ -19,7 +19,17 @@ import { agentTimeRollup, sessionTimeRollup } from './agents-timeline-logic.js';
  * @property {string} tier      'high'|'med'|'low'
  * @property {string} ref       refKey (sid#ai / sid#ai.si / sid#ai.si:ti)
  * @property {string} summary
+ * @property {string} reason    the measured value against the threshold that fired
  */
+
+/** @param {number} ms */
+const fmtMs = ms => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`);
+/** @param {number} ms */
+const fmtMin = ms => `${(ms / 60000).toFixed(1)} min`;
+/** @param {number} x */
+const pct = x => `${Math.round(x * 100)}%`;
+/** @param {string} s @param {number} max */
+const clip = (s, max) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 // toolMix aggregates an array of agent nodes (already scoped by the caller —
 // whole graph, one session, or one agent) into per-kind tool totals for the
@@ -448,35 +458,46 @@ export function sessionTimeRows(sessions, opts = {}) {
   return { rows: rows.slice(0, topN), overflow: Math.max(0, rows.length - topN), total };
 }
 
+// retryTarget is what a call was aimed at: its input (the Bash command, the
+// file path) when it has one, else its detail. Two Reads of different .go files
+// share a detail but are not repeats of each other.
+/** @param {Partial<ToolInvocation>} tool */
+function retryTarget(tool) {
+  return tool.input || tool.detail || '';
+}
+
 // detectRetries finds repeated tool calls where an earlier attempt errored,
 // returning a Map from each retry's agent-relative coord ("si:ti") to
-// { attempt, ofRef } — attempt is the 1-based ordinal of the call within its
-// group, ofRef the coord of the group's first call. Tool calls are grouped by
-// (kind, name, detail) and walked in step-then-tool order (steps are already
-// chronological). A call is a retry only when some earlier call in its group
-// had status "error", so a clean repeat (ok → ok) is never flagged. Coords are
-// the suffix of the full tool refKey, composable via `${sid}#${ai}.${coord}`.
+// { attempt, ofRef, errors } — attempt is the 1-based ordinal of the call within
+// its group, ofRef the coord of the group's first call, errors how many calls in
+// the group up to and including this one had status "error". Tool calls are
+// grouped by (kind, name, retryTarget) and walked in step-then-tool order (steps
+// are already chronological). A call is a retry only when some earlier call in
+// its group had status "error", so a clean repeat (ok → ok) is never flagged.
+// Coords are the suffix of the full tool refKey, composable via
+// `${sid}#${ai}.${coord}`.
 /**
  * @param {AgentNode|null|undefined} agent
- * @returns {Map<string, {attempt: number, ofRef: string}>}
+ * @returns {Map<string, {attempt: number, ofRef: string, errors: number}>}
  */
 export function detectRetries(agent) {
   const out = new Map();
-  const groups = new Map(); // groupKey -> { firstRef, count, sawError }
+  const groups = new Map(); // groupKey -> { firstRef, count, errors }
   const steps = (agent && agent.steps) || [];
   steps.forEach((step, si) => {
     (step.tools || []).forEach((tool, ti) => {
       if (!tool) return;
       const coord = `${si}:${ti}`;
-      const groupKey = `${tool.kind || ''}\u0000${tool.name || ''}\u0000${tool.detail || ''}`;
+      const groupKey = `${tool.kind || ''}\u0000${tool.name || ''}\u0000${retryTarget(tool)}`;
       let g = groups.get(groupKey);
       if (!g) {
-        g = { firstRef: coord, count: 0, sawError: false };
+        g = { firstRef: coord, count: 0, errors: 0 };
         groups.set(groupKey, g);
       }
       g.count += 1;
-      if (g.sawError) out.set(coord, { attempt: g.count, ofRef: g.firstRef });
-      if (tool.status === 'error') g.sawError = true;
+      const sawError = g.errors > 0;
+      if (tool.status === 'error') g.errors += 1;
+      if (sawError) out.set(coord, { attempt: g.count, ofRef: g.firstRef, errors: g.errors });
     });
   });
   return out;
@@ -484,20 +505,22 @@ export function detectRetries(agent) {
 
 // detectSignals is the single entry point for Phase 3 anomaly detection: it runs
 // the pure detectors over the whole graph and returns their findings sorted
-// worst-first. Each signal is { kind, severity, tier, ref, summary }: severity is
+// worst-first. Each signal is { kind, severity, tier, ref, summary, reason }: severity is
 // a [0,1] "badness" magnitude (the cross-kind sort key), tier ('high'|'med'|'low')
 // is the detector's own banding for pip styling, ref is a refKey (sid#ai /
 // sid#ai.si / sid#ai.si:ti) so the existing select()/filter machinery can land on
-// it, and summary is a self-contained sentence for the panel/tooltip.
+// it, summary is a self-contained sentence for the panel, and reason states the
+// measured value against the threshold that fired, so a reader can judge it.
 /**
  * @param {AgentGraph|null|undefined} graph
- * @param {{whaleShare?: number, retryStormMin?: number, slowToolMin?: number,
+ * @param {{whaleShare?: number, whaleMinUSD?: number, retryStormMin?: number, slowToolMin?: number,
  *   slowMultiple?: number, errorCascadeMin?: number, idleStallMs?: number,
  *   nowMs?: number}} [opts]
  * @returns {Signal[]}
  */
 export function detectSignals(graph, opts = {}) {
   const whaleShare = opts.whaleShare > 0 ? opts.whaleShare : 0.2;
+  const whaleMinUSD = opts.whaleMinUSD > 0 ? opts.whaleMinUSD : 0.5;
   const retryStormMin = opts.retryStormMin > 0 ? opts.retryStormMin : 3;
   const slowToolMin = opts.slowToolMin > 0 ? opts.slowToolMin : 5;
   const slowMultiple = opts.slowMultiple > 0 ? opts.slowMultiple : 3;
@@ -512,7 +535,7 @@ export function detectSignals(graph, opts = {}) {
     const sid = (session && session.session_id) || '';
     const agents = flattenSession(session);
     signals.push(...retryStormSignals(agents, sid, retryStormMin));
-    signals.push(...costWhaleSignals(agents, sid, whaleShare));
+    signals.push(...costWhaleSignals(agents, sid, whaleShare, whaleMinUSD));
     signals.push(...slowToolSignals(agents, sid, slowToolMin, slowMultiple));
     signals.push(...errorCascadeSignals(agents, sid, errorCascadeMin));
     signals.push(...idleStallSignals(agents, sid, idleStallMs, nowMs));
@@ -530,12 +553,12 @@ export function detectSignals(graph, opts = {}) {
 function retryStormSignals(agents, sid, retryStormMin) {
   const out = [];
   agents.forEach((a, ai) => {
-    const groups = new Map(); // ofRef -> { maxAttempt, worstCoord }
-    for (const [coord, { attempt, ofRef }] of detectRetries(a)) {
+    const groups = new Map(); // ofRef -> { maxAttempt, worstCoord, errors }
+    for (const [coord, { attempt, ofRef, errors }] of detectRetries(a)) {
       const g = groups.get(ofRef);
-      if (!g || attempt > g.maxAttempt) groups.set(ofRef, { maxAttempt: attempt, worstCoord: coord });
+      if (!g || attempt > g.maxAttempt) groups.set(ofRef, { maxAttempt: attempt, worstCoord: coord, errors });
     }
-    for (const { maxAttempt, worstCoord } of groups.values()) {
+    for (const { maxAttempt, worstCoord, errors } of groups.values()) {
       if (maxAttempt < retryStormMin) continue;
       const severity = Math.max(0, Math.min(1, (maxAttempt - 1) / 5));
       const tier = maxAttempt >= 5 ? 'high' : maxAttempt >= 4 ? 'med' : 'low';
@@ -546,7 +569,10 @@ function retryStormSignals(agents, sid, retryStormMin) {
       const summary = tool.detail
         ? `${name} retried ${maxAttempt}× (${tool.detail})`
         : `${name} retried ${maxAttempt}×`;
-      out.push({ kind: 'retry-storm', severity, tier, ref: `${sid}#${ai}.${worstCoord}`, summary });
+      const target = retryTarget(tool);
+      const of = target ? `${name} \`${clip(target, 80)}\`` : name;
+      const reason = `${maxAttempt} attempts of ${of}, ${errors} errored — threshold ${retryStormMin}`;
+      out.push({ kind: 'retry-storm', severity, tier, ref: `${sid}#${ai}.${worstCoord}`, summary, reason });
     }
   });
   return out;
@@ -602,7 +628,10 @@ function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
     const summary = overP95
       ? `${t.name} took ${secs}s — ${(t.dur / p95).toFixed(1)}× the session p95`
       : `${t.name} took ${secs}s — ${(t.dur / km).toFixed(1)}× the typical ${t.kind}`;
-    out.push({ kind: 'slow-tool', severity, tier, ref: `${sid}#${t.ai}.${t.si}:${t.ti}`, summary });
+    const reason = overP95
+      ? `${t.name} ${fmtMs(t.dur)} vs session p95 ${fmtMs(p95)} — threshold: above p95`
+      : `${t.name} ${fmtMs(t.dur)} vs ${t.kind} median ${fmtMs(km)} — threshold ${slowMultiple}× the kind median`;
+    out.push({ kind: 'slow-tool', severity, tier, ref: `${sid}#${t.ai}.${t.si}:${t.ti}`, summary, reason });
   }
   return out;
 }
@@ -621,7 +650,8 @@ function errorCascadeSignals(agents, sid, errorCascadeMin) {
         const severity = Math.max(0, Math.min(1, (run.len - 1) / 5));
         const tier = run.len >= 5 ? 'high' : run.len >= 4 ? 'med' : 'low';
         const summary = `${run.len} tools errored back-to-back, starting with ${run.startName}`;
-        out.push({ kind: 'error-cascade', severity, tier, ref: `${sid}#${ai}.${run.startCoord}`, summary });
+        const reason = `${run.len} consecutive tool errors starting with ${run.startName} — threshold ${errorCascadeMin}`;
+        out.push({ kind: 'error-cascade', severity, tier, ref: `${sid}#${ai}.${run.startCoord}`, summary, reason });
       }
       run = null;
     };
@@ -641,13 +671,19 @@ function errorCascadeSignals(agents, sid, errorCascadeMin) {
   return out;
 }
 
-// idleStallSignals: per agent, flag a gap longer than idleStallMs between one
-// step's END (its last tool's ended_at, or its own timestamp when tool-less) and
-// the next step's START — wall-clock the agent spent idle, not working (a single
-// long-running tool is NOT a stall, since the gap is measured from when it
-// finished). When nowMs is provided, the tail from the final step's end to "now"
-// is also checked, catching a run that stalled and never resumed. ref is the step
-// that ends the idle (the resuming step, or the last step for a trailing stall).
+// idleStallSignals: per agent, flag a gap longer than idleStallMs that the agent
+// spent idle with work in hand — never a gap it was entitled to.
+//   - Between turns: from one step's END (its last tool's ended_at, or its own
+//     timestamp) to the next step's START, only when that step called a tool —
+//     the agent owed the next turn. A gap after a text-only turn is the user's
+//     turn to speak, not a stall. A single long-running tool is NOT a stall,
+//     since the gap is measured from when it finished.
+//   - Trailing (only when nowMs is provided): from the final step's end to
+//     "now", only when the agent shows unfinished work — its last step has a
+//     tool with no joined result, or its status is "running". A finished agent
+//     whose last tools all resolved is done, however long ago.
+// ref is the step that ends the idle (the resuming step, or the last step for
+// a trailing stall).
 /**
  * @param {AgentNode[]} agents @param {string} sid
  * @param {number} idleStallMs @param {number|null} nowMs
@@ -665,7 +701,8 @@ function idleStallSignals(agents, sid, idleStallMs, nowMs) {
     return end;
   };
   const out = [];
-  const emit = (ai, si, gap, trailing) => {
+  /** @param {number} ai @param {number} si @param {number} gap @param {boolean} trailing @param {string} evidence */
+  const emit = (ai, si, gap, trailing, evidence) => {
     const mult = gap / idleStallMs;
     const severity = Math.max(0, Math.min(1, (mult - 1) / 9));
     const tier = mult >= 5 ? 'high' : mult >= 2 ? 'med' : 'low';
@@ -673,31 +710,51 @@ function idleStallSignals(agents, sid, idleStallMs, nowMs) {
     const summary = trailing
       ? `Idle ${mins} min after the last activity`
       : `Idle ${mins} min between turns`;
-    out.push({ kind: 'idle-stall', severity, tier, ref: `${sid}#${ai}.${si}`, summary });
+    const reason = trailing
+      ? `idle ${fmtMin(gap)} after the last activity, ${evidence} — threshold ${fmtMin(idleStallMs)}`
+      : `idle ${fmtMin(gap)} between turns after ${evidence} returned — threshold ${fmtMin(idleStallMs)}`;
+    out.push({ kind: 'idle-stall', severity, tier, ref: `${sid}#${ai}.${si}`, summary, reason });
+  };
+  /** @param {AgentStep|null|undefined} step */
+  const lastToolName = (step) => {
+    const tools = ((step && step.tools) || []).filter(Boolean);
+    const t = tools[tools.length - 1];
+    return t ? (t.name || t.kind || 'tool') : '';
   };
   agents.forEach((a, ai) => {
     const steps = a.steps || [];
-    let prevEnd = NaN, prevEndSi = -1;
+    let prevEnd = NaN, prevEndSi = -1, prevTool = '';
     steps.forEach((step, si) => {
       const start = parseTime(step && step.timestamp);
-      if (!Number.isNaN(prevEnd) && !Number.isNaN(start) && start - prevEnd > idleStallMs) {
-        emit(ai, si, start - prevEnd, false);
+      if (prevTool && !Number.isNaN(prevEnd) && !Number.isNaN(start) && start - prevEnd > idleStallMs) {
+        emit(ai, si, start - prevEnd, false, prevTool);
       }
       const end = stepEnd(step);
-      if (!Number.isNaN(end)) { prevEnd = end; prevEndSi = si; }
+      if (!Number.isNaN(end)) { prevEnd = end; prevEndSi = si; prevTool = lastToolName(step); }
     });
-    if (nowMs != null && !Number.isNaN(prevEnd) && nowMs - prevEnd > idleStallMs) {
-      emit(ai, prevEndSi, nowMs - prevEnd, true);
-    }
+    if (nowMs == null || Number.isNaN(prevEnd) || nowMs - prevEnd <= idleStallMs) return;
+    const last = steps[steps.length - 1];
+    const pending = ((last && last.tools) || []).find(t => t && !t.status);
+    let evidence = '';
+    if (pending) evidence = `${pending.name || pending.kind || 'tool'} has no result`;
+    else if (a.status === 'running') evidence = 'agent still running';
+    if (evidence) emit(ai, prevEndSi, nowMs - prevEnd, true, evidence);
   });
   return out;
 }
 
-// costWhaleSignals: per session, flag each turn whose cost is at least whaleShare
-// of the session's total step cost. severity is the share itself; ref is the
-// turn (sid#ai.si). Shares are normalized within the session, never the graph.
-/** @param {AgentNode[]} agents @param {string} sid @param {number} whaleShare @returns {Signal[]} */
-function costWhaleSignals(agents, sid, whaleShare) {
+// costWhaleSignals: per session, flag each turn that costs at least whaleMinUSD
+// AND at least whaleShare of the session's total step cost. The dollar floor
+// keeps a cheap session from flagging a fraction of a cent; the share keeps an
+// expensive session from flagging every ordinary turn. severity is the share
+// itself; ref is the turn (sid#ai.si). Shares are normalized within the
+// session, never the graph.
+/**
+ * @param {AgentNode[]} agents @param {string} sid
+ * @param {number} whaleShare @param {number} whaleMinUSD
+ * @returns {Signal[]}
+ */
+function costWhaleSignals(agents, sid, whaleShare, whaleMinUSD) {
   let total = 0;
   for (const a of agents) for (const step of (a.steps || [])) total += (step && step.cost_usd) || 0;
   if (total <= 0) return [];
@@ -706,10 +763,11 @@ function costWhaleSignals(agents, sid, whaleShare) {
     (a.steps || []).forEach((step, si) => {
       const cost = (step && step.cost_usd) || 0;
       const share = cost / total;
-      if (share < whaleShare) return;
+      if (cost < whaleMinUSD || share < whaleShare) return;
       const tier = share >= 0.5 ? 'high' : share >= 0.3 ? 'med' : 'low';
-      const summary = `Turn cost $${cost.toFixed(2)} — ${Math.round(share * 100)}% of session spend`;
-      out.push({ kind: 'cost-whale', severity: share, tier, ref: `${sid}#${ai}.${si}`, summary });
+      const summary = `Turn cost $${cost.toFixed(2)} — ${pct(share)} of session spend`;
+      const reason = `turn $${cost.toFixed(2)} is ${pct(share)} of session $${total.toFixed(2)} — floor $${whaleMinUSD.toFixed(2)}, share ${pct(whaleShare)}`;
+      out.push({ kind: 'cost-whale', severity: share, tier, ref: `${sid}#${ai}.${si}`, summary, reason });
     });
   });
   return out;
@@ -724,12 +782,12 @@ function costWhaleSignals(agents, sid, whaleShare) {
 // silently dropped — the Insights → Signals panel holds the full list). Malformed
 // or cross-session refs are skipped, and each pip's tier is normalized to
 // high|med|low so the renderer always has a color class. Returns
-// Map<agentIndex, { pips: [{ ref, tier, summary, kind }], overflow }>.
+// Map<agentIndex, { pips: [{ ref, tier, summary, reason, kind }], overflow }>.
 /**
  * @param {Signal[]|null|undefined} signals
  * @param {string|null|undefined} sessionId
  * @param {number} [cap]
- * @returns {Map<number, {pips: {ref: string, tier: string, summary: string, kind: string}[], overflow: number}>}
+ * @returns {Map<number, {pips: {ref: string, tier: string, summary: string, reason: string, kind: string}[], overflow: number}>}
  */
 export function signalPipsByAgent(signals, sessionId, cap = 3) {
   const byAgent = new Map();
@@ -742,7 +800,7 @@ export function signalPipsByAgent(signals, sessionId, cap = 3) {
     if (!e) { e = { pips: [], overflow: 0 }; byAgent.set(p.agentIndex, e); }
     if (e.pips.length < lim) {
       const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
-      e.pips.push({ ref: s.ref, tier, summary: s.summary, kind: s.kind });
+      e.pips.push({ ref: s.ref, tier, summary: s.summary, reason: s.reason || '', kind: s.kind });
     } else {
       e.overflow += 1;
     }

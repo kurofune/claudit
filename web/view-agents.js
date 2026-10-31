@@ -1097,7 +1097,8 @@ function renderTimePanel(scope, agents) {
 // (the cross-kind sort key), so rows render in that order verbatim — NOT
 // re-sorted by tier. Each row carries a tier-colored pip (high/med/low — the
 // detector's own banding, for pip color only), the self-contained summary
-// sentence (rendered as-is — no fmt* re-formatting), and the kind. Every row is
+// sentence (rendered as-is — no fmt* re-formatting), and the kind; its tooltip
+// carries the signal's reason (measured value vs threshold). Every row is
 // click-through: data-ref holds the refKey, so the shared data-ref delegate (the
 // same one every lens uses) lands selection on that agent/step/tool — no bespoke
 // handler. Pure render; in the static report detectSignals ran without nowMs, so
@@ -1106,7 +1107,7 @@ const SIG_CAP = 50;
 function renderSignalsPanel(signals) {
   const head = `<header class="ins-panel-head"><h3 class="ins-panel-title">Signals</h3></header>`;
   if (!signals || signals.length === 0) {
-    return `<section class="ins-panel">${head}<div class="ins-empty ins-sig-clean">No anomalies detected — nothing flagged in this window.</div></section>`;
+    return `<section class="ins-panel">${head}<div class="ins-empty ins-sig-clean">No signals in this window</div></section>`;
   }
   // A heavy window can flag thousands of anomalies; rendering them all is a dead
   // DOM. Cap the list at the SIG_CAP worst (the array is already severity-sorted)
@@ -1115,7 +1116,8 @@ function renderSignalsPanel(signals) {
   const overflow = signals.length - shown.length;
   const rows = shown.map(s => {
     const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
-    return `<div class="ins-sig-row sig-${tier} is-clickable" role="button" tabindex="0" data-ref="${escHtml(s.ref)}" title="Jump to this ${escHtml(s.kind)}">
+    const tip = `${s.reason ? `${s.reason}\n` : ''}Click to jump to this ${s.kind} on the Timeline`;
+    return `<div class="ins-sig-row sig-${tier} is-clickable" role="button" tabindex="0" data-ref="${escHtml(s.ref)}" title="${escHtml(tip)}">
         <span class="ins-sig-pip" aria-hidden="true"></span>
         <span class="ins-sig-summary">${escHtml(s.summary)}</span>
         <span class="ins-sig-kind">${escHtml(s.kind)}</span>

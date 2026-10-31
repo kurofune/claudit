@@ -36,7 +36,7 @@ test('detectRetries: an errored call followed by the same call marks the retry a
   };
   const got = detectRetries(agent);
   assert.equal(got.has('0:0'), false); // the first attempt is not itself a retry
-  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0' });
+  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0', errors: 1 });
 });
 
 test('detectRetries: a successful call followed by the same call is not a retry', () => {
@@ -58,11 +58,11 @@ test('detectRetries: a chain of two errors then a repeat marks attempts 2 and 3,
     ],
   };
   const got = detectRetries(agent);
-  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0' });
-  assert.deepEqual(got.get('2:0'), { attempt: 3, ofRef: '0:0' });
+  assert.deepEqual(got.get('1:0'), { attempt: 2, ofRef: '0:0', errors: 2 });
+  assert.deepEqual(got.get('2:0'), { attempt: 3, ofRef: '0:0', errors: 2 });
 });
 
-test('detectRetries: calls with a different (kind,name,detail) key are not grouped', () => {
+test('detectRetries: calls with a different (kind,name,input-or-detail) key are not grouped', () => {
   const agent = {
     steps: [{
       tools: [
@@ -89,7 +89,7 @@ test('detectSignals: a turn costing >= the whale share of session total emits a 
   const graph = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ cost_usd: 0.10 }, { cost_usd: 0.90 }] },
+      main: { kind: 'main', steps: [{ cost_usd: 1.00 }, { cost_usd: 9.00 }] },
       children: [],
     }],
   };
@@ -104,11 +104,12 @@ test('detectSignals: turns below the whale share are excluded even alongside a w
   const graph = {
     sessions: [{
       session_id: 's1',
-      // six 0.05 turns (share 0.05 each) sit below 0.2; only the 0.70 turn is a whale.
+      // six $0.50 turns (share 0.05 each, at the floor) sit below 0.2; only the
+      // $7.00 turn is a whale.
       main: { kind: 'main', steps: [
-        { cost_usd: 0.05 }, { cost_usd: 0.05 }, { cost_usd: 0.05 },
-        { cost_usd: 0.05 }, { cost_usd: 0.05 }, { cost_usd: 0.05 },
-        { cost_usd: 0.70 },
+        { cost_usd: 0.50 }, { cost_usd: 0.50 }, { cost_usd: 0.50 },
+        { cost_usd: 0.50 }, { cost_usd: 0.50 }, { cost_usd: 0.50 },
+        { cost_usd: 7.00 },
       ] },
       children: [],
     }],
@@ -122,7 +123,7 @@ test('detectSignals: cost-whale tier is high/med/low by share band', () => {
   const graph = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ cost_usd: 0.5 }, { cost_usd: 0.3 }, { cost_usd: 0.2 }] },
+      main: { kind: 'main', steps: [{ cost_usd: 5 }, { cost_usd: 3 }, { cost_usd: 2 }] },
       children: [],
     }],
   };
@@ -135,10 +136,10 @@ test('detectSignals: cost-whale tier is high/med/low by share band', () => {
 test('detectSignals: whale share is per-session, not against the whole-graph total', () => {
   const graph = {
     sessions: [
-      // Session A is tiny: each 0.1 turn is half of A's 0.2 total (a whale).
-      // Against the graph total (10.2) these would be ~1% and vanish.
-      { session_id: 'sA', main: { kind: 'main', steps: [{ cost_usd: 0.1 }, { cost_usd: 0.1 }] }, children: [] },
-      { session_id: 'sB', main: { kind: 'main', steps: [{ cost_usd: 10.0 }] }, children: [] },
+      // Session A is small: each $1 turn is half of A's $2 total (a whale).
+      // Against the graph total ($102) these would be ~1% and vanish.
+      { session_id: 'sA', main: { kind: 'main', steps: [{ cost_usd: 1 }, { cost_usd: 1 }] }, children: [] },
+      { session_id: 'sB', main: { kind: 'main', steps: [{ cost_usd: 100 }] }, children: [] },
     ],
   };
   const byRef = new Map(detectSignals(graph).map(s => [s.ref, s]));
@@ -206,10 +207,10 @@ test('detectSignals: signals are sorted worst-first by severity across mixed kin
     sessions: [{
       session_id: 'sX',
       main: { kind: 'main', steps: [
-        { cost_usd: 0.1, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // 0:0 retry seed
+        { cost_usd: 1.0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] }, // 0:0 retry seed
         { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'error' }] },    // 1:0
         { cost_usd: 0, tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', status: 'ok' }] },       // 2:0 -> storm sev 0.4
-        { cost_usd: 0.9 },                                                                                // 3 -> whale sev 0.9
+        { cost_usd: 9.0 },                                                                                // 3 -> whale sev 0.9
       ] },
       children: [],
     }],
@@ -225,12 +226,12 @@ test('detectSignals: cost-whale summary names the turn cost and its share', () =
   const graph = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ cost_usd: 0.10 }, { cost_usd: 0.90 }] },
+      main: { kind: 'main', steps: [{ cost_usd: 1.00 }, { cost_usd: 9.00 }] },
       children: [],
     }],
   };
   const whale = detectSignals(graph).find(s => s.kind === 'cost-whale');
-  assert.equal(whale.summary, 'Turn cost $0.90 — 90% of session spend');
+  assert.equal(whale.summary, 'Turn cost $9.00 — 90% of session spend');
 });
 
 test('detectSignals: retry-storm summary names the tool, attempt count, and detail', () => {
@@ -423,13 +424,13 @@ test('detectSignals: error-cascade summary names the run length and the first to
 });
 
 test('detectSignals: a gap over idleStallMs between two steps emits an idle-stall at the later step', () => {
-  // Step 0 ends at t=0 (no tools); step 1 starts 10 min later — well over the
+  // Step 0's Bash returns at t=0; step 1 starts 10 min later — well over the
   // 2-min default. The stall is refed at the resuming step (main step 1).
   const graph = {
     sessions: [{
       session_id: 's1',
       main: { kind: 'main', steps: [
-        { timestamp: 0 },
+        { timestamp: 0, tools: [{ kind: 'exec', name: 'Bash', status: 'ok', started_at: 0, ended_at: 0 }] },
         { timestamp: 600000 },
       ] },
       children: [],
@@ -448,7 +449,7 @@ test('detectSignals: with opts.nowMs, a dangling final step idle past the thresh
   const graph = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      main: { kind: 'main', status: 'running', steps: [{ timestamp: 0 }] },
       children: [],
     }],
   };
@@ -463,7 +464,7 @@ test('detectSignals: without opts.nowMs, a dangling final step yields no trailin
   const graph = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      main: { kind: 'main', status: 'running', steps: [{ timestamp: 0 }] },
       children: [],
     }],
   };
@@ -474,7 +475,7 @@ test('detectSignals: idle-stall summary names the idle minutes', () => {
   const interStep = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ timestamp: 0 }, { timestamp: 600000 }] },
+      main: { kind: 'main', steps: [{ timestamp: 0, tools: [{ kind: 'exec', name: 'Bash', status: 'ok', started_at: 0, ended_at: 0 }] }, { timestamp: 600000 }] },
       children: [],
     }],
   };
@@ -484,7 +485,7 @@ test('detectSignals: idle-stall summary names the idle minutes', () => {
   const trailing = {
     sessions: [{
       session_id: 's1',
-      main: { kind: 'main', steps: [{ timestamp: 0 }] },
+      main: { kind: 'main', status: 'running', steps: [{ timestamp: 0 }] },
       children: [],
     }],
   };
@@ -540,6 +541,215 @@ test('detectSignals: a successful tool breaks the run so two short error runs ar
   assert.equal(detectSignals(graph).filter(s => s.kind === 'error-cascade').length, 0);
 });
 
+// ── detectSignals calibration — evidence, not shapes ─────────────────
+// Each detector needs evidence beyond its shape: cost-whale an absolute dollar
+// floor, retry-storm an earlier error on the SAME input, idle-stall unfinished
+// work. Every Signal carries a `reason` naming the measured value and threshold.
+
+const oneSession = (main, extra = {}) =>
+  ({ sessions: [{ session_id: 's1', main: { kind: 'main', ...main }, children: [], ...extra }] });
+
+test('detectSignals: a turn below the whale dollar floor is no cost-whale even at a dominant share', () => {
+  // The session totals $0.001; the $0.0005 turns are each 50% of it.
+  const graph = oneSession({ steps: [{ cost_usd: 0.0005 }, { cost_usd: 0.0004 }, { cost_usd: 0.0001 }] });
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'cost-whale').length, 0);
+});
+
+test('detectSignals: opts.whaleMinUSD moves the cost-whale floor', () => {
+  const graph = oneSession({ steps: [{ cost_usd: 0.30 }, { cost_usd: 0.10 }] });
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'cost-whale').length, 0); // default $0.50
+  const whales = detectSignals(graph, { whaleMinUSD: 0.25 }).filter(s => s.kind === 'cost-whale');
+  assert.deepEqual(whales.map(s => s.ref), ['s1#0.0']);
+});
+
+test('detectSignals: a turn at the floor with share >= whaleShare is a cost-whale', () => {
+  const graph = oneSession({ steps: [{ cost_usd: 0.50 }, { cost_usd: 0.50 }] });
+  const whales = detectSignals(graph).filter(s => s.kind === 'cost-whale');
+  assert.equal(whales.length, 2);
+  assert.equal(whales[0].tier, 'high'); // share 0.5
+});
+
+test('detectSignals: cost-whale reason names the turn cost, share, session total, floor and share threshold', () => {
+  const graph = oneSession({ steps: [{ cost_usd: 3.20 }, { cost_usd: 4.60 }] });
+  const whale = detectSignals(graph).find(s => s.ref === 's1#0.0');
+  assert.equal(whale.reason, 'turn $3.20 is 41% of session $7.80 — floor $0.50, share 20%');
+});
+
+test('detectRetries: groups on tool.input when non-empty, so same-detail calls with different inputs are distinct', () => {
+  // Same kind/name/detail ("*.go"), different file inputs: not repeats of each other.
+  const agent = {
+    steps: [
+      { tools: [{ kind: 'read', name: 'Read', detail: 'go', input: 'a.go', status: 'error' }] },
+      { tools: [{ kind: 'read', name: 'Read', detail: 'go', input: 'b.go', status: 'ok' }] },
+      { tools: [{ kind: 'read', name: 'Read', detail: 'go', input: 'c.go', status: 'ok' }] },
+      { tools: [{ kind: 'read', name: 'Read', detail: 'go', input: 'd.go', status: 'ok' }] },
+    ],
+  };
+  assert.equal(detectRetries(agent).size, 0);
+});
+
+test('detectSignals: three successful Read calls with different inputs produce no retry-storm', () => {
+  const read = input => ({ tools: [{ kind: 'read', name: 'Read', detail: 'go', input, status: 'ok' }] });
+  const graph = oneSession({ steps: [read('a.go'), read('b.go'), read('c.go')] });
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'retry-storm').length, 0);
+});
+
+test('detectSignals: three identical Bash inputs with the first two errored produce one retry-storm with its reason', () => {
+  const bash = status => ({ tools: [{ kind: 'exec', name: 'Bash', detail: 'go', input: 'go test ./...', status }] });
+  const graph = oneSession({ steps: [bash('error'), bash('error'), bash('ok')] });
+  const storms = detectSignals(graph).filter(s => s.kind === 'retry-storm');
+  assert.equal(storms.length, 1);
+  assert.equal(storms[0].ref, 's1#0.2:0');
+  assert.equal(storms[0].reason, '3 attempts of Bash `go test ./...`, 2 errored — threshold 3');
+});
+
+test('detectSignals: retry-storm reason falls back to tool.detail when input is empty', () => {
+  const bash = status => ({ tools: [{ kind: 'exec', name: 'Bash', detail: 'go test', input: '', status }] });
+  const graph = oneSession({ steps: [bash('error'), bash('ok'), bash('ok')] });
+  const storm = detectSignals(graph).find(s => s.kind === 'retry-storm');
+  assert.equal(storm.reason, '3 attempts of Bash `go test`, 1 errored — threshold 3');
+});
+
+test('detectSignals: a trailing gap after a tool with no result emits an idle-stall naming that tool', () => {
+  // status "done" — the pending Read alone is the evidence of unfinished work.
+  const graph = oneSession({ status: 'done', steps: [
+    { timestamp: 0, tools: [{ kind: 'read', name: 'Read', started_at: 0 }] },
+  ] });
+  const stalls = detectSignals(graph, { nowMs: 252000 }).filter(s => s.kind === 'idle-stall');
+  assert.equal(stalls.length, 1);
+  assert.equal(stalls[0].ref, 's1#0.0');
+  assert.equal(stalls[0].reason, 'idle 4.2 min after the last activity, Read has no result — threshold 2.0 min');
+});
+
+test('detectSignals: a trailing gap on a running agent emits an idle-stall even with every tool resolved', () => {
+  const graph = oneSession({ status: 'running', steps: [
+    { timestamp: 0, tools: [{ kind: 'exec', name: 'Bash', status: 'ok', started_at: 0, ended_at: 0 }] },
+  ] });
+  const stalls = detectSignals(graph, { nowMs: 252000 }).filter(s => s.kind === 'idle-stall');
+  assert.equal(stalls.length, 1);
+  assert.equal(stalls[0].reason, 'idle 4.2 min after the last activity, agent still running — threshold 2.0 min');
+});
+
+test('detectSignals: the same trailing gap on a done agent whose last tools all have a status emits no idle-stall', () => {
+  const graph = oneSession({ status: 'done', steps: [
+    { timestamp: 0, tools: [
+      { kind: 'exec', name: 'Bash', status: 'ok', started_at: 0, ended_at: 0 },
+      { kind: 'read', name: 'Read', status: 'error', started_at: 0, ended_at: 0 },
+    ] },
+  ] });
+  assert.equal(detectSignals(graph, { nowMs: 252000 }).filter(s => s.kind === 'idle-stall').length, 0);
+});
+
+test('detectSignals: a gap after a text-only turn is the user’s turn, not an idle-stall', () => {
+  // The main agent answered without calling a tool; the 10-min gap is the
+  // operator reading, not the agent stalling.
+  const graph = oneSession({ steps: [{ timestamp: 0 }, { timestamp: 600000 }] });
+  assert.equal(detectSignals(graph).filter(s => s.kind === 'idle-stall').length, 0);
+});
+
+test('detectSignals: an inter-turn idle-stall reason names the gap, the tool it followed, and the threshold', () => {
+  const graph = oneSession({ steps: [
+    { timestamp: 0, tools: [{ kind: 'exec', name: 'Bash', status: 'ok', started_at: 0, ended_at: 0 }] },
+    { timestamp: 600000 },
+  ] });
+  const stall = detectSignals(graph).find(s => s.kind === 'idle-stall');
+  assert.equal(stall.reason, 'idle 10.0 min between turns after Bash returned — threshold 2.0 min');
+});
+
+test('detectSignals: slow-tool reason names the duration and the threshold it crossed', () => {
+  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
+  const overP95 = oneSession({ steps: [
+    { tools: [fast(), fast(), fast(), fast(), fast()] },
+    { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
+  ] });
+  assert.equal(detectSignals(overP95).find(s => s.kind === 'slow-tool').reason,
+    'Bash 5.0s vs session p95 3.8s — threshold: above p95');
+
+  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
+  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
+  const overKind = oneSession({ steps: [
+    { tools: [exec(), exec(), exec(), exec(), exec()] },
+    { tools: [read(10), read(10), read(50), read(10), read(10)] },
+  ] });
+  assert.equal(detectSignals(overKind).find(s => s.kind === 'slow-tool').reason,
+    'Read 50ms vs read median 10ms — threshold 3× the kind median');
+});
+
+test('detectSignals: error-cascade reason names the run length, the first tool, and the threshold', () => {
+  const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
+  const graph = oneSession({ steps: [{ tools: [err(), err(), err()] }] });
+  assert.equal(detectSignals(graph).find(s => s.kind === 'error-cascade').reason,
+    '3 consecutive tool errors starting with Bash — threshold 3');
+});
+
+test('detectSignals: every emitted signal carries a non-empty reason', () => {
+  const err = () => ({ kind: 'exec', name: 'Bash', input: 'make', status: 'error' });
+  const fast = () => ({ kind: 'read', name: 'Read', status: 'ok', started_at: 0, ended_at: 100 });
+  const graph = oneSession({ status: 'running', steps: [
+    { timestamp: 0, cost_usd: 5, tools: [err(), err(), err()] },
+    { timestamp: 1000, cost_usd: 1, tools: [fast(), fast(), fast(), fast(), fast(),
+      { kind: 'read', name: 'Read', status: 'ok', started_at: 0, ended_at: 9000 }] },
+  ] });
+  const signals = detectSignals(graph, { nowMs: 10 * 60000 });
+  assert.deepEqual([...new Set(signals.map(s => s.kind))].sort(),
+    ['cost-whale', 'error-cascade', 'idle-stall', 'retry-storm', 'slow-tool']);
+  for (const s of signals) assert.ok(typeof s.reason === 'string' && s.reason.length > 0, s.kind);
+});
+
+// ── Named session fixtures ───────────────────────────────────────────
+// Four sessions, one per outcome, each asserting the exact set of signal
+// kinds it yields. Times are epoch ms; "now" sits 10 min past the last step,
+// so a trailing gap is always past the 2-min idle threshold.
+const T = 60000;
+const NOW = 20 * T;
+const tool = (name, input, status, at) =>
+  ({ kind: name === 'Bash' ? 'exec' : 'read', name, detail: '', input, ...(status ? { status } : {}), started_at: at, ...(status ? { ended_at: at + 200 } : {}) });
+const FIXTURES = {
+  // A tidy run: cheap turns, every tool resolved, no gaps, agent done.
+  clean: oneSession({ status: 'done', steps: [
+    { timestamp: 0, cost_usd: 0.04, tools: [tool('Read', 'a.go', 'ok', 0)] },
+    { timestamp: 1000, cost_usd: 0.05, tools: [tool('Read', 'b.go', 'ok', 1000)] },
+    { timestamp: 2000, cost_usd: 0.03, tools: [tool('Bash', 'go test ./...', 'ok', 2000)] },
+    { timestamp: 3000, cost_usd: 0.02 },
+  ] }),
+  // The same command failing three times running: a cascade and a storm.
+  failed: oneSession({ status: 'done', steps: [
+    { timestamp: 0, cost_usd: 0.04, tools: [tool('Bash', 'go test ./...', 'error', 0)] },
+    { timestamp: 1000, cost_usd: 0.04, tools: [tool('Bash', 'go test ./...', 'error', 1000)] },
+    { timestamp: 2000, cost_usd: 0.04, tools: [tool('Bash', 'go test ./...', 'error', 2000)] },
+    { timestamp: 3000, cost_usd: 0.02 },
+  ] }),
+  // One failure, fixed on the next attempt: below every threshold.
+  recovered: oneSession({ status: 'done', steps: [
+    { timestamp: 0, cost_usd: 0.04, tools: [tool('Bash', 'go test ./...', 'error', 0)] },
+    { timestamp: 1000, cost_usd: 0.04, tools: [tool('Bash', 'go test ./...', 'ok', 1000)] },
+    { timestamp: 2000, cost_usd: 0.02 },
+  ] }),
+  // The last Read never got a result and nothing has happened since.
+  incomplete: oneSession({ status: 'done', steps: [
+    { timestamp: 0, cost_usd: 0.04, tools: [tool('Read', 'a.go', 'ok', 0)] },
+    { timestamp: 1000, cost_usd: 0.04, tools: [tool('Read', 'b.go', undefined, 1000)] },
+  ] }),
+};
+
+for (const [name, want] of Object.entries({
+  clean: [],
+  failed: ['error-cascade', 'retry-storm'],
+  recovered: [],
+  incomplete: ['idle-stall'],
+})) {
+  test(`detectSignals fixture "${name}" yields exactly [${want.join(', ')}]`, () => {
+    const kinds = [...new Set(detectSignals(FIXTURES[name], { nowMs: NOW }).map(s => s.kind))].sort();
+    assert.deepEqual(kinds, want);
+  });
+}
+
+test('signalPipsByAgent: pips carry the signal reason for the gutter tooltip', () => {
+  const byAgent = signalPipsByAgent(
+    [{ ref: 's1#0.1', tier: 'high', summary: 'whale', reason: 'turn $1.00 is 50% of session $2.00 — floor $0.50, share 20%', kind: 'cost-whale' }], 's1');
+  assert.equal(byAgent.get(0).pips[0].reason, 'turn $1.00 is 50% of session $2.00 — floor $0.50, share 20%');
+});
+
 // ── signalPipsByAgent (Phase 3d — Timeline gutter pips) ──────────────
 // signalPipsByAgent buckets detectSignals output into per-agent pip lists for
 // the ONE session the Timeline plots. Returns Map<agentIndex, { pips, overflow }>.
@@ -549,25 +759,25 @@ test('signalPipsByAgent: returns an empty Map for non-array signals or a falsy s
   assert.equal(signalPipsByAgent([{ ref: 's1#0', tier: 'high', summary: 'x', kind: 'cost-whale' }], '').size, 0);
 });
 
-test('signalPipsByAgent: groups signals by agent index, preserving worst-first input order, with {ref, tier, summary, kind} pips', () => {
+test('signalPipsByAgent: groups signals by agent index, preserving worst-first input order, with {ref, tier, summary, reason, kind} pips', () => {
   // detectSignals returns severity-sorted; the bucketer must keep that order so
   // the kept pips per agent are the worst. Agent 0 gets two (in order), agent 2 one.
   const signals = [
-    { ref: 's1#0.3', tier: 'high', summary: 'whale', kind: 'cost-whale' },
-    { ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', kind: 'slow-tool' },
-    { ref: 's1#0.5', tier: 'low', summary: 'retry', kind: 'retry-storm' },
+    { ref: 's1#0.3', tier: 'high', summary: 'whale', reason: 'r-whale', kind: 'cost-whale' },
+    { ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', reason: 'r-slow', kind: 'slow-tool' },
+    { ref: 's1#0.5', tier: 'low', summary: 'retry', reason: 'r-retry', kind: 'retry-storm' },
   ];
   const byAgent = signalPipsByAgent(signals, 's1');
   assert.deepEqual([...byAgent.keys()].sort(), [0, 2]);
   assert.deepEqual(byAgent.get(0), {
     pips: [
-      { ref: 's1#0.3', tier: 'high', summary: 'whale', kind: 'cost-whale' },
-      { ref: 's1#0.5', tier: 'low', summary: 'retry', kind: 'retry-storm' },
+      { ref: 's1#0.3', tier: 'high', summary: 'whale', reason: 'r-whale', kind: 'cost-whale' },
+      { ref: 's1#0.5', tier: 'low', summary: 'retry', reason: 'r-retry', kind: 'retry-storm' },
     ],
     overflow: 0,
   });
   assert.deepEqual(byAgent.get(2), {
-    pips: [{ ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', kind: 'slow-tool' }],
+    pips: [{ ref: 's1#2.1:0', tier: 'med', summary: 'slow Bash', reason: 'r-slow', kind: 'slow-tool' }],
     overflow: 0,
   });
 });
