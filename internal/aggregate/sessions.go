@@ -93,22 +93,6 @@ func MatchesFilter(t parse.Turn, f Filter) bool {
 	return matchesProject(t.CWD, project.Default, f.ProjectSubstring)
 }
 
-// PrimeProjects resolves every distinct cwd in turns through r before an
-// aggregation pass, so a removed worktree folds into its repo whatever order
-// the turns arrive in (see project.Resolver.Prime).
-func PrimeProjects(r *project.Resolver, turns []parse.Turn) {
-	seen := map[string]struct{}{}
-	cwds := []string{}
-	for _, t := range turns {
-		if _, ok := seen[t.CWD]; ok {
-			continue
-		}
-		seen[t.CWD] = struct{}{}
-		cwds = append(cwds, t.CWD)
-	}
-	r.Prime(cwds)
-}
-
 // DistinctToolInvocations returns (Name, Detail) pairs in first-occurrence
 // order, deduped by (Name, Detail). A turn that runs `git status` three
 // times collapses to one pill, but `git status` then `go test` keeps both

@@ -184,52 +184,35 @@ func TestResolve_Memoized(t *testing.T) {
 	assertProject(t, r.Resolve(root), first)
 }
 
-func TestResolve_MissingWorktreeFoldsIntoKnownRepo(t *testing.T) {
+// A missing path whose name resembles a live repo's carries no filesystem
+// link to it, so it stays a missing bucket whether the look-alike repo was
+// resolved before it, after it, or not at all.
+func TestResolve_MissingIgnoresSimilarlyNamedRepos(t *testing.T) {
 	base := realDir(t, t.TempDir())
-	pit := newRepo(t, filepath.Join(base, "Projects"), "the-pit")
-	djinn := newRepo(t, filepath.Join(base, "Projects"), "djinn")
-	r := NewResolver()
-	r.Resolve(pit)
-	r.Resolve(djinn)
-
+	projects := filepath.Join(base, "Projects")
 	cases := map[string]Project{
-		// wt-new sibling worktree, since removed; cwd was a subdir of it.
-		filepath.Join(base, "Projects", "the-pit-pit-2mr.1", "web"): {Root: pit, Name: "the-pit", Kind: KindRepo},
-		// summoner worktree: summoner-<repo>-<bead> under a removed tmp dir.
-		filepath.Join(base, "T", "summoner-worktrees-9", "summoner-djinn-sv28x"): {Root: djinn, Name: "djinn", Kind: KindRepo},
-		// No known repo name inside the path: stays a missing bucket.
-		filepath.Join(base, "T", "eval-123", "work"): {Name: "work", Kind: KindMissing},
+		filepath.Join(projects, "the-pit-notes"):                                 {Name: "the-pit-notes", Kind: KindMissing},
+		filepath.Join(projects, "the-pit-pit-2mr.1", "web"):                      {Name: "web", Kind: KindMissing},
+		filepath.Join(base, "T", "summoner-worktrees-9", "summoner-djinn-sv28x"): {Name: "summoner-djinn-sv28x", Kind: KindMissing},
 	}
+	r := NewResolver()
 	for cwd, want := range cases {
 		assertProject(t, r.Resolve(cwd), want)
 	}
-}
 
-func TestResolve_MissingPrefersLongestKnownName(t *testing.T) {
-	base := realDir(t, t.TempDir())
-	newRepo(t, base, "the-pit")
-	tools := newRepo(t, filepath.Join(base, "x"), "the-pit-tools")
-	r := NewResolver()
-	r.Prime([]string{filepath.Join(base, "the-pit"), tools})
-	assertProject(t, r.Resolve(filepath.Join(base, "the-pit-tools-wt")),
-		Project{Root: tools, Name: "the-pit-tools", Kind: KindRepo})
-}
+	pit := newRepo(t, projects, "the-pit")
+	djinn := newRepo(t, projects, "djinn")
+	assertProject(t, r.Resolve(pit), Project{Root: pit, Name: "the-pit", Kind: KindRepo})
+	assertProject(t, r.Resolve(djinn), Project{Root: djinn, Name: "djinn", Kind: KindRepo})
+	for cwd, want := range cases {
+		assertProject(t, r.Resolve(cwd), want)
+	}
 
-func TestResolve_MissingIsOrderIndependent(t *testing.T) {
-	base := realDir(t, t.TempDir())
-	pit := newRepo(t, base, "the-pit")
-	gone := filepath.Join(base, "the-pit-9hw-v3-tri")
-	want := Project{Root: pit, Name: "the-pit", Kind: KindRepo}
-
-	// Resolved before the repo is known, then again after: the cached
-	// missing answer must not stick once a matching repo is learned.
-	r := NewResolver()
-	assertProject(t, r.Resolve(gone), Project{Name: "the-pit-9hw-v3-tri", Kind: KindMissing})
-	r.Resolve(pit)
-	assertProject(t, r.Resolve(gone), want)
-
-	// Prime resolves existing cwds before missing ones, whatever the order.
-	r2 := NewResolver()
-	r2.Prime([]string{gone, pit})
-	assertProject(t, r2.Resolve(gone), want)
+	// A fresh Resolver that sees the live repos first answers the same.
+	fresh := NewResolver()
+	fresh.Resolve(pit)
+	fresh.Resolve(djinn)
+	for cwd, want := range cases {
+		assertProject(t, fresh.Resolve(cwd), want)
+	}
 }

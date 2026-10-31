@@ -192,7 +192,6 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	// the canonical occurrence, so skip the replays here or the per-session and
 	// per-agent figures would inflate above the deduped headline.
 	replays := aggregate.BuildReplaySet(snap.Turns)
-	aggregate.PrimeProjects(project.Default, snap.Turns)
 
 	for _, t := range snap.Turns {
 		if !aggregate.MatchesFilter(t, f) {

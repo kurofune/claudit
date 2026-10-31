@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 // Kind classifies how a cwd resolved.
@@ -39,31 +38,10 @@ var scratchRe = regexp.MustCompile(`^/(?:private/)?tmp/claude-[0-9]+/([^/]+)(?:/
 
 // Resolver resolves and memoizes cwds for the process lifetime. Safe for
 // concurrent use.
-//
-// A cwd that no longer exists (a removed worktree, most often) carries no
-// on-disk link to its repo, only its name: the-pit-pit-2mr.1,
-// summoner-djinn-sv28x. So the Resolver learns the name of every repo it
-// resolves from a live path and folds a missing cwd into the longest known
-// repo name found as a hyphen-delimited run in its missing path segments.
-// Those answers depend on what has been learned, so they are re-derived when
-// a new repo name arrives; Prime resolves a whole corpus so the outcome does
-// not depend on the order its cwds arrive in.
 type Resolver struct {
 	base    string
-	byCWD   sync.Map // cwd -> entry
+	byCWD   sync.Map // cwd -> Project
 	decoded sync.Map // encoded scratch segment -> decoded dir ("" when undecodable)
-
-	mu      sync.Mutex
-	known   map[string]string // repo Name -> Root, learned from live paths
-	version atomic.Uint64     // bumped whenever known changes
-}
-
-type entry struct {
-	p Project
-	// guessed marks an answer for a missing path, which depends on the known
-	// repo names as of version.
-	guessed bool
-	version uint64
 }
 
 // Option configures a Resolver.
@@ -77,7 +55,7 @@ func WithBase(base string) Option {
 
 // NewResolver returns an empty Resolver.
 func NewResolver(opts ...Option) *Resolver {
-	r := &Resolver{base: string(filepath.Separator), known: map[string]string{}}
+	r := &Resolver{base: string(filepath.Separator)}
 	for _, o := range opts {
 		o(r)
 	}
@@ -91,107 +69,41 @@ var Default = NewResolver()
 // Resolve maps cwd to its Project, memoized per cwd.
 func (r *Resolver) Resolve(cwd string) Project {
 	if v, ok := r.byCWD.Load(cwd); ok {
-		e := v.(entry)
-		if !e.guessed || e.version == r.version.Load() {
-			return e.p
-		}
+		return v.(Project)
 	}
-	version := r.version.Load()
-	p, guessed := r.resolve(cwd)
-	r.byCWD.Store(cwd, entry{p: p, guessed: guessed, version: version})
-	if p.Kind == KindRepo && !guessed {
-		r.learn(p)
-	}
+	p := r.resolve(cwd)
+	r.byCWD.Store(cwd, p)
 	return p
 }
 
-// Prime resolves every cwd twice: the first pass learns each live repo's
-// name, the second re-derives any missing cwd resolved before a repo it
-// matches was known. Afterwards Resolve answers for these cwds are the same
-// whatever order they were passed in.
-func (r *Resolver) Prime(cwds []string) {
-	for range 2 {
-		for _, c := range cwds {
-			r.Resolve(c)
-		}
-	}
-}
-
-func (r *Resolver) resolve(cwd string) (Project, bool) {
+func (r *Resolver) resolve(cwd string) Project {
 	if cwd == "" {
-		return Project{Name: "(unknown)", Kind: KindPlain}, false
+		return Project{Name: "(unknown)", Kind: KindPlain}
 	}
 	if m := scratchRe.FindStringSubmatch(cwd); m != nil {
 		dir := r.decodeScratch(m[1])
 		if dir == "" {
-			return Project{Name: "scratch", Kind: KindScratch}, false
+			return Project{Name: "scratch", Kind: KindScratch}
 		}
-		return r.resolveDir(dir)
+		return resolveDir(dir)
 	}
-	return r.resolveDir(cwd)
+	return resolveDir(cwd)
 }
 
-// resolveDir resolves a real path: the repo holding it, else the directory
-// itself when it exists, else (for a missing path) the known repo its name
-// carries, else a missing bucket named after it. The bool reports a missing
-// path, whose answer depends on the known repo names.
-func (r *Resolver) resolveDir(cwd string) (Project, bool) {
+// resolveDir resolves a real path: the repo holding its nearest existing
+// ancestor, else the directory itself when it exists, else a missing bucket
+// named after it. A missing path joins a repo only on filesystem evidence; a
+// name that merely resembles a repo's is not evidence.
+func resolveDir(cwd string) Project {
 	cwd = filepath.Clean(cwd)
 	existing, missing := nearestExisting(cwd)
 	if root, ok := repoRoot(existing); ok {
-		return Project{Root: root, Name: filepath.Base(root), Kind: KindRepo}, missing
+		return Project{Root: root, Name: filepath.Base(root), Kind: KindRepo}
 	}
-	if !missing {
-		return Project{Root: cwd, Name: filepath.Base(cwd), Kind: KindPlain}, false
+	if missing {
+		return Project{Name: filepath.Base(cwd), Kind: KindMissing}
 	}
-	rel, err := filepath.Rel(existing, cwd)
-	if err == nil {
-		if name, root := r.matchKnown(strings.Split(rel, string(filepath.Separator))); name != "" {
-			return Project{Root: root, Name: name, Kind: KindRepo}, true
-		}
-	}
-	return Project{Name: filepath.Base(cwd), Kind: KindMissing}, true
-}
-
-// learn records a live repo's name. Two repos sharing a basename keep the
-// lexically smallest root so the choice does not depend on arrival order.
-func (r *Resolver) learn(p Project) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if cur, ok := r.known[p.Name]; ok && cur <= p.Root {
-		return
-	}
-	r.known[p.Name] = p.Root
-	r.version.Add(1)
-}
-
-// matchKnown returns the longest known repo name that appears as a
-// hyphen-delimited run in a segment, checking segments top-down so the
-// removed worktree directory itself wins over the subdirectories under it.
-func (r *Resolver) matchKnown(segments []string) (name, root string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, seg := range segments {
-		for n := range r.known {
-			if !hasHyphenRun(seg, n) {
-				continue
-			}
-			if len(n) > len(name) || len(n) == len(name) && n < name {
-				name = n
-			}
-		}
-		if name != "" {
-			return name, r.known[name]
-		}
-	}
-	return "", ""
-}
-
-func hasHyphenRun(seg, name string) bool {
-	return seg == name ||
-		strings.HasPrefix(seg, name+"-") ||
-		strings.HasSuffix(seg, "-"+name) ||
-		strings.Contains(seg, "-"+name+"-")
+	return Project{Root: cwd, Name: filepath.Base(cwd), Kind: KindPlain}
 }
 
 // nearestExisting walks up from path to the first directory that exists,
