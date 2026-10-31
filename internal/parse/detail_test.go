@@ -100,6 +100,26 @@ func TestBashPatternNeverReturnsShellKeyword(t *testing.T) {
 	}
 }
 
+// TestBashPatternDropsHeredocBodies: a heredoc's body and terminator are
+// data, not commands — `cat > f <<'EOF' … EOF` is a `cat`, never an `EOF`.
+func TestBashPatternDropsHeredocBodies(t *testing.T) {
+	cases := map[string]string{
+		"cat > f.txt <<'EOF'\nhello; world\nEOF":                    "cat",
+		"python3 - <<EOF\nimport sys\nprint(1)\nEOF":                "python3",
+		"git commit -F - <<'MSG'\nfeat: x\nMSG\ngit push":           "git push",
+		"cat <<-\"END\"\n\tdo stuff\n\tEND":                         "cat",
+		"cat <<A <<B\na\nA\nb\nB":                                   "cat",
+		"grep -c x <<< \"$v\"":                                      "grep",
+		"cat > a <<'EOF'\nx\nEOF\ncat > b <<'EOF'\ny\nEOF\ngo test": "go test",
+		"cat <<'EOF'\nunterminated body\nls":                        "cat",
+	}
+	for in, want := range cases {
+		if got := bashPattern(in); got != want {
+			t.Errorf("bashPattern(%q) = %q want %q", in, got, want)
+		}
+	}
+}
+
 func TestFileExt(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/x/y/z.go", ".go"},

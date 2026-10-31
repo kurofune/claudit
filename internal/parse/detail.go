@@ -397,21 +397,59 @@ func toolResultRows(raw json.RawMessage) int {
 
 // bashPattern collapses a shell command to its "shape" so similar invocations
 // bucket together. Strategy:
-//  1. Split on "&&", "||", ";" and newlines, and take the LAST segment that
+//  1. Drop heredoc bodies — they are data, not commands.
+//  2. Split on "&&", "||", ";" and newlines, and take the LAST segment that
 //     names a program — `cd foo && git status` buckets as "git status", and
 //     `for f in *.go; do wc -l "$f"; done` as "wc", never "done".
-//  2. Strip leading env vars (FOO=bar), `sudo`, `time`/`exec`, shell
+//  3. Strip leading env vars (FOO=bar), `sudo`, `time`/`exec`, shell
 //     keywords that precede a command (do, then, if, …) and case labels.
-//  3. Take the program name. If it's a known multi-command tool, also take
+//  4. Take the program name. If it's a known multi-command tool, also take
 //     the next non-flag token ("git status", "npm install").
 func bashPattern(cmd string) string {
-	segs := shellSegments(cmd)
+	segs := shellSegments(stripHeredocs(cmd))
 	for i := len(segs) - 1; i >= 0; i-- {
 		if p := segmentPattern(segs[i]); p != "" {
 			return p
 		}
 	}
 	return ""
+}
+
+// heredocOp matches a heredoc redirection and captures its delimiter word:
+// <<EOF, <<'EOF', <<"EOF", <<-EOF. A here-string (<<<) has no body.
+var heredocOp = regexp.MustCompile(`(?:^|[^<])<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// stripHeredocs removes every heredoc body and terminator line from cmd,
+// keeping the lines that carry commands. An unterminated body runs to the
+// end of cmd.
+func stripHeredocs(cmd string) string {
+	if !strings.Contains(cmd, "<<") {
+		return cmd
+	}
+	lines := strings.Split(cmd, "\n")
+	kept := lines[:0:0]
+	type pending struct {
+		word      string
+		stripTabs bool
+	}
+	var bodies []pending
+	for _, ln := range lines {
+		if len(bodies) > 0 {
+			end := ln
+			if bodies[0].stripTabs {
+				end = strings.TrimLeft(end, "\t")
+			}
+			if strings.TrimRight(end, " \t\r") == bodies[0].word {
+				bodies = bodies[1:]
+			}
+			continue
+		}
+		kept = append(kept, ln)
+		for _, m := range heredocOp.FindAllStringSubmatch(ln, -1) {
+			bodies = append(bodies, pending{word: m[3], stripTabs: m[1] == "-"})
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // shellSegments splits cmd on the list operators && || ; and newlines
