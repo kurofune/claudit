@@ -307,3 +307,24 @@ func TestLoadConcurrent_MtimePreFilterSkipsOldFiles(t *testing.T) {
 		t.Errorf("turns = %d, want 1 (old file should be mtime-skipped)", got)
 	}
 }
+
+func TestSnapshotsCarryCompactBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	compact := `{"type":"user","sessionId":"s1","uuid":"c1","parentUuid":"a1","timestamp":"2026-05-01T11:00:00Z","cwd":"/p","message":{"role":"user","content":"This session is being continued from a previous conversation."},"isCompactSummary":true}`
+	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)), compact)
+
+	c := New(dir)
+	if _, err := c.Refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if got := c.Snapshot().CompactBoundaries; len(got) != 1 || got[0].SessionID != "s1" {
+		t.Errorf("Cache snapshot CompactBoundaries = %+v, want one for s1", got)
+	}
+	snap, err := LoadConcurrent(dir, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.CompactBoundaries; len(got) != 1 || got[0].SessionID != "s1" {
+		t.Errorf("LoadConcurrent CompactBoundaries = %+v, want one for s1", got)
+	}
+}

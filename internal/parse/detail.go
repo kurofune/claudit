@@ -397,51 +397,87 @@ func toolResultRows(raw json.RawMessage) int {
 
 // bashPattern collapses a shell command to its "shape" so similar invocations
 // bucket together. Strategy:
-//  1. If the command has "&&", "||", or ";", take the LAST segment — `cd foo
-//     && git status` should bucket as "git status", not "cd".
-//  2. Strip leading env vars (FOO=bar) and `sudo`.
+//  1. Split on "&&", "||", ";" and newlines, and take the LAST segment that
+//     names a program — `cd foo && git status` buckets as "git status", and
+//     `for f in *.go; do wc -l "$f"; done` as "wc", never "done".
+//  2. Strip leading env vars (FOO=bar), `sudo`, `time`/`exec`, shell
+//     keywords that precede a command (do, then, if, …) and case labels.
 //  3. Take the program name. If it's a known multi-command tool, also take
 //     the next non-flag token ("git status", "npm install").
 func bashPattern(cmd string) string {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
-		return ""
-	}
-	// Walk to the rightmost segment separated by && || ;
-	// (rough — doesn't handle quoted separators, fine for bucketing).
-	for _, sep := range []string{"&&", "||", ";"} {
-		if i := strings.LastIndex(cmd, sep); i >= 0 {
-			cmd = strings.TrimSpace(cmd[i+len(sep):])
+	segs := shellSegments(cmd)
+	for i := len(segs) - 1; i >= 0; i-- {
+		if p := segmentPattern(segs[i]); p != "" {
+			return p
 		}
 	}
+	return ""
+}
+
+// shellSegments splits cmd on the list operators && || ; and newlines
+// (rough — doesn't handle quoted separators, fine for bucketing).
+func shellSegments(cmd string) []string {
+	var segs []string
+	start := 0
+	for i := 0; i < len(cmd); i++ {
+		n := 0
+		switch {
+		case strings.HasPrefix(cmd[i:], "&&"), strings.HasPrefix(cmd[i:], "||"):
+			n = 2
+		case cmd[i] == ';', cmd[i] == '\n':
+			n = 1
+		default:
+			continue
+		}
+		segs = append(segs, cmd[start:i])
+		start = i + n
+		i += n - 1
+	}
+	return append(segs, cmd[start:])
+}
+
+// leadingKeywords precede the command they introduce: `do wc -l`,
+// `then go build`, `if grep -q`.
+var leadingKeywords = map[string]bool{
+	"do": true, "then": true, "else": true, "elif": true,
+	"if": true, "while": true, "until": true, "{": true, "!": true,
+}
+
+// headerKeywords open or close a compound command without naming one:
+// `for f in *.go`, `done`, `fi`, `esac`, `}`.
+var headerKeywords = map[string]bool{
+	"for": true, "select": true, "in": true, "function": true,
+	"done": true, "fi": true, "esac": true, "}": true,
+}
+
+// segmentPattern is one list segment's pattern, or "" when the segment
+// names no program.
+func segmentPattern(seg string) string {
 	// Tokenize on whitespace (rough — quoted args bleed but we only need
 	// the first 1-2 tokens, and those are almost never quoted).
-	toks := strings.Fields(cmd)
-	// Strip leading FOO=bar env vars and `sudo`.
+	toks := strings.Fields(seg)
+strip:
 	for len(toks) > 0 {
 		t := toks[0]
-		if t == "sudo" {
+		switch {
+		case t == "sudo" || leadingKeywords[t]:
 			toks = toks[1:]
-			continue
-		}
-		if eq := strings.Index(t, "="); eq > 0 && !strings.ContainsAny(t[:eq], "/.-") {
+		case t == "case":
+			toks = afterIn(toks)
+		case isCaseLabel(t):
 			toks = toks[1:]
-			continue
+		case (t == "time" || t == "exec") && len(toks) > 1:
+			toks = toks[1:]
+		case isEnvAssign(t):
+			toks = toks[1:]
+		default:
+			break strip
 		}
-		break
 	}
-	if len(toks) == 0 {
+	if len(toks) == 0 || headerKeywords[toks[0]] {
 		return ""
 	}
 	prog := filepath.Base(toks[0])
-	// Strip a leading time/builtin wrapper.
-	if prog == "time" || prog == "exec" {
-		toks = toks[1:]
-		if len(toks) == 0 {
-			return prog
-		}
-		prog = filepath.Base(toks[0])
-	}
 	if !multiCommand[prog] || len(toks) < 2 {
 		return prog
 	}
@@ -451,6 +487,26 @@ func bashPattern(cmd string) string {
 		return prog
 	}
 	return prog + " " + sub
+}
+
+// afterIn drops a `case WORD in` header, leaving the first arm.
+func afterIn(toks []string) []string {
+	for i, t := range toks {
+		if t == "in" {
+			return toks[i+1:]
+		}
+	}
+	return nil
+}
+
+// isCaseLabel matches a case arm's pattern: `a)`, `*.go)`, `(x)`.
+func isCaseLabel(t string) bool {
+	return len(t) > 1 && strings.HasSuffix(t, ")") && !strings.Contains(t, "$(")
+}
+
+func isEnvAssign(t string) bool {
+	eq := strings.Index(t, "=")
+	return eq > 0 && !strings.ContainsAny(t[:eq], "/.-")
 }
 
 // multiCommand is the set of tools where the next non-flag token is a real

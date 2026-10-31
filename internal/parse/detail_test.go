@@ -1,6 +1,10 @@
 package parse
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestBashPattern(t *testing.T) {
 	cases := []struct {
@@ -34,6 +38,65 @@ func TestBashPattern(t *testing.T) {
 		if got := bashPattern(c.in); got != c.want {
 			t.Errorf("bashPattern(%q) = %q want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestBashPatternNeverReturnsShellKeyword: compound commands end in a
+// keyword (`done`, `fi`, `esac`) or open with one (`for`, `if`, `do`), and
+// none of those names a program.
+func TestBashPatternNeverReturnsShellKeyword(t *testing.T) {
+	if got := bashPattern(`for f in *.go; do wc -l "$f"; done`); got != "wc" {
+		t.Errorf("for-loop pattern = %q, want wc", got)
+	}
+	shapes := []string{
+		"%s",
+		"%s x",
+		"%s; ls",
+		"ls; %s",
+		"ls && %s",
+		"%s && %s",
+		"%s; %s; %s",
+		"x=1 %s",
+		"sudo %s",
+		"time %s",
+		"cd /tmp && %s",
+		"%s\n%s",
+	}
+	cases := map[string]string{
+		`for f in *.go; do wc -l "$f"; done`:              "wc",
+		`while true; do sleep 1; done`:                    "sleep",
+		`until git pull; do sleep 5; done`:                "sleep",
+		`if [ -f go.mod ]; then go build; fi`:             "go build",
+		`if grep -q x f; then echo y; else echo n; fi`:    "echo",
+		`case $1 in a) echo a;; esac`:                     "echo",
+		`for f in a b; do`:                                "",
+		`{ ls; }`:                                         "ls",
+		`if true; then :; elif false; then make test; fi`: "make test",
+		"for f in *.go\ndo\n  gofmt -l \"$f\"\ndone":      "gofmt",
+	}
+	for in, want := range cases {
+		if got := bashPattern(in); got != want {
+			t.Errorf("bashPattern(%q) = %q want %q", in, got, want)
+		}
+	}
+	keywords := []string{"done", "do", "then", "fi", "for", "while", "until", "esac", "case", "if", "else", "elif", "in", "{", "}"}
+	for _, kw := range keywords {
+		t.Run(kw, func(t *testing.T) {
+			for _, shape := range shapes {
+				n := strings.Count(shape, "%s")
+				args := make([]any, n)
+				for i := range args {
+					args[i] = kw
+				}
+				in := fmt.Sprintf(shape, args...)
+				got := bashPattern(in)
+				for _, k := range keywords {
+					if got == k || strings.HasPrefix(got, k+" ") {
+						t.Errorf("bashPattern(%q) = %q, a shell keyword", in, got)
+					}
+				}
+			}
+		})
 	}
 }
 

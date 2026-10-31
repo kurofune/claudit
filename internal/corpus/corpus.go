@@ -48,6 +48,7 @@ type fileEntry struct {
 	users       []parse.UserMessage
 	links       []parse.ParentLink
 	toolResults []parse.ToolResult
+	compacts    []parse.CompactBoundary
 	malformed   int
 }
 
@@ -59,10 +60,12 @@ type Snapshot struct {
 	Users       []parse.UserMessage
 	Links       []parse.ParentLink
 	ToolResults []parse.ToolResult
-	Generation  int64
-	LastUpdate  time.Time
-	FileCount   int
-	Malformed   int
+	// CompactBoundaries are every file's compaction points.
+	CompactBoundaries []parse.CompactBoundary
+	Generation        int64
+	LastUpdate        time.Time
+	FileCount         int
+	Malformed         int
 	// FileErrors holds non-fatal per-file open/parse errors. Populated
 	// by LoadConcurrent (the one-shot path surfaces them as a warning);
 	// the polled Cache leaves it nil since the daemon tolerates broken
@@ -166,6 +169,7 @@ func (c *Cache) Refresh() (changed bool, err error) {
 				users:       pr.users,
 				links:       pr.links,
 				toolResults: pr.toolResults,
+				compacts:    pr.compacts,
 				malformed:   pr.malformed,
 				mtime:       mods[pr.path],
 				size:        sizes[pr.path],
@@ -220,6 +224,7 @@ func (c *Cache) publishSnapshot() {
 		snap.Users = append(snap.Users, e.users...)
 		snap.Links = append(snap.Links, e.links...)
 		snap.ToolResults = append(snap.ToolResults, e.toolResults...)
+		snap.CompactBoundaries = append(snap.CompactBoundaries, e.compacts...)
 	}
 	c.snapshot.Store(snap)
 	c.notifySubscribers(snap.Generation)
@@ -343,6 +348,7 @@ func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
 		snap.Users = append(snap.Users, pr.users...)
 		snap.Links = append(snap.Links, pr.links...)
 		snap.ToolResults = append(snap.ToolResults, pr.toolResults...)
+		snap.CompactBoundaries = append(snap.CompactBoundaries, pr.compacts...)
 		snap.Malformed += pr.malformed
 		if pr.err != nil {
 			snap.FileErrors = append(snap.FileErrors, pr.err)
@@ -359,6 +365,7 @@ type parseResult struct {
 	users       []parse.UserMessage
 	links       []parse.ParentLink
 	toolResults []parse.ToolResult
+	compacts    []parse.CompactBoundary
 	malformed   int
 	err         error
 }
@@ -422,6 +429,7 @@ func parseOne(path string) parseResult {
 	pr.users = r.UserMessages
 	pr.links = r.ParentLinks
 	pr.toolResults = r.ToolResults
+	pr.compacts = r.CompactBoundaries
 	pr.malformed = r.Malformed
 	if perr != nil {
 		pr.err = fmt.Errorf("parse %s: %w", path, perr)
