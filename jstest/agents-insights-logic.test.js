@@ -656,6 +656,15 @@ test('detectSignals: an inter-turn idle-stall reason names the gap, the tool it 
   assert.equal(stall.reason, 'idle 10.0 min between turns after Bash returned — threshold 2.0 min');
 });
 
+test('detectSignals: an inter-turn idle-stall after a tool with no joined result says so, not "returned"', () => {
+  const graph = oneSession({ steps: [
+    { timestamp: 0, tools: [{ kind: 'read', name: 'Read', started_at: 0 }] },
+    { timestamp: 600000 },
+  ] });
+  const stall = detectSignals(graph).find(s => s.kind === 'idle-stall');
+  assert.equal(stall.reason, 'idle 10.0 min between turns after Read, which has no result — threshold 2.0 min');
+});
+
 test('detectSignals: slow-tool reason names the duration and the threshold it crossed', () => {
   const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
   const overP95 = oneSession({ steps: [

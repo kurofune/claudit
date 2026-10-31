@@ -712,25 +712,28 @@ function idleStallSignals(agents, sid, idleStallMs, nowMs) {
       : `Idle ${mins} min between turns`;
     const reason = trailing
       ? `idle ${fmtMin(gap)} after the last activity, ${evidence} — threshold ${fmtMin(idleStallMs)}`
-      : `idle ${fmtMin(gap)} between turns after ${evidence} returned — threshold ${fmtMin(idleStallMs)}`;
+      : `idle ${fmtMin(gap)} between turns after ${evidence} — threshold ${fmtMin(idleStallMs)}`;
     out.push({ kind: 'idle-stall', severity, tier, ref: `${sid}#${ai}.${si}`, summary, reason });
   };
   /** @param {AgentStep|null|undefined} step */
-  const lastToolName = (step) => {
+  const lastToolEvidence = (step) => {
     const tools = ((step && step.tools) || []).filter(Boolean);
     const t = tools[tools.length - 1];
-    return t ? (t.name || t.kind || 'tool') : '';
+    if (!t) return '';
+    const name = t.name || t.kind || 'tool';
+    const joined = !!t.status || !Number.isNaN(parseTime(t.ended_at));
+    return joined ? `${name} returned` : `${name}, which has no result`;
   };
   agents.forEach((a, ai) => {
     const steps = a.steps || [];
-    let prevEnd = NaN, prevEndSi = -1, prevTool = '';
+    let prevEnd = NaN, prevEndSi = -1, prevEvidence = '';
     steps.forEach((step, si) => {
       const start = parseTime(step && step.timestamp);
-      if (prevTool && !Number.isNaN(prevEnd) && !Number.isNaN(start) && start - prevEnd > idleStallMs) {
-        emit(ai, si, start - prevEnd, false, prevTool);
+      if (prevEvidence && !Number.isNaN(prevEnd) && !Number.isNaN(start) && start - prevEnd > idleStallMs) {
+        emit(ai, si, start - prevEnd, false, prevEvidence);
       }
       const end = stepEnd(step);
-      if (!Number.isNaN(end)) { prevEnd = end; prevEndSi = si; prevTool = lastToolName(step); }
+      if (!Number.isNaN(end)) { prevEnd = end; prevEndSi = si; prevEvidence = lastToolEvidence(step); }
     });
     if (nowMs == null || Number.isNaN(prevEnd) || nowMs - prevEnd <= idleStallMs) return;
     const last = steps[steps.length - 1];
