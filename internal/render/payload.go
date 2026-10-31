@@ -89,17 +89,6 @@ type CostPayload struct {
 	ByPrompt     []aggregate.PromptBucket  `json:"by_prompt"`
 }
 
-// CachePayload backs /_claudit/api/cache — the four cache-efficiency
-// drill-downs plus the headline overall hit ratio.
-type CachePayload struct {
-	OverallHitRatio   float64              `json:"overall_hit_ratio"`
-	TotalMiss         int64                `json:"total_miss"`
-	CacheByProject    []aggregate.CacheRow `json:"cache_by_project"`
-	CacheBySession    []aggregate.CacheRow `json:"cache_by_session"`
-	CacheBySubagent   []aggregate.CacheRow `json:"cache_by_subagent"`
-	CacheByInvocation []aggregate.CacheRow `json:"cache_by_invocation"`
-}
-
 // ToolsPayload backs /_claudit/api/tools — the parent ToolBucket
 // rows plus the per-tool drill-down map (Bash · `git status`, Read ·
 // `.go`, etc.).
@@ -160,18 +149,6 @@ func BuildCost(a *aggregate.Aggregator) CostPayload {
 		ByProject:    a.ByProject(),
 		BySkill:      a.BySkill(),
 		ByPrompt:     a.ByPrompt(),
-	}
-}
-
-// BuildCache rolls the aggregator into the Cache-tab payload.
-func BuildCache(a *aggregate.Aggregator) CachePayload {
-	return CachePayload{
-		OverallHitRatio:   a.OverallHitRatio(),
-		TotalMiss:         a.Totals().MissTokens(),
-		CacheByProject:    a.CacheByProject(),
-		CacheBySession:    a.CacheBySession(),
-		CacheBySubagent:   a.CacheBySubagent(),
-		CacheByInvocation: a.CacheByInvocation(),
 	}
 }
 

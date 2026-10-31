@@ -86,39 +86,6 @@ func TestBuildCost_TotalCostMatchesAggregator(t *testing.T) {
 	}
 }
 
-// TestBuildCache_ShapeAndKeys: cache tab covers the four
-// cache-efficiency dimensions plus the headline overall ratio.
-func TestBuildCache_ShapeAndKeys(t *testing.T) {
-	a := payloadSetup(t)
-	p := BuildCache(a)
-	got, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal CachePayload: %v", err)
-	}
-	wantTopLevel(t, got, []string{
-		"overall_hit_ratio",
-		"cache_by_project",
-		"cache_by_session",
-		"cache_by_subagent",
-		"cache_by_invocation",
-		"total_miss",
-	})
-}
-
-// TestBuildCache_TotalMissMatchesProjectSum proves the shipped TotalMiss
-// is byte-equivalent to the JS reduce it replaces: Σ over cache_by_project
-// rows of .Miss. These are int64 sums, so they must be EXACTLY equal.
-func TestBuildCache_TotalMissMatchesProjectSum(t *testing.T) {
-	a := payloadSetup(t)
-	var want int64
-	for _, row := range a.CacheByProject() {
-		want += row.Miss
-	}
-	if got := BuildCache(a).TotalMiss; got != want {
-		t.Errorf("TotalMiss = %d, want Σ CacheByProject().Miss = %d", got, want)
-	}
-}
-
 // TestBuildTools_ShapeAndKeys: tools tab has the parent buckets plus
 // the per-tool drill-down map.
 func TestBuildTools_ShapeAndKeys(t *testing.T) {

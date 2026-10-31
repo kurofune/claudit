@@ -175,11 +175,6 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 			wantKeys: []string{"by_model", "by_project", "by_skill", "by_prompt", "total_cost_usd"},
 		},
 		{
-			name:     "cache",
-			path:     "/_claudit/api/cache",
-			wantKeys: []string{"overall_hit_ratio", "cache_by_project", "cache_by_session", "cache_by_subagent", "cache_by_invocation", "total_miss"},
-		},
-		{
 			name:     "tokens",
 			path:     "/_claudit/api/tokens",
 			wantKeys: []string{"total", "composition", "trend", "by_model", "by_project", "by_subagent", "by_skill", "by_prompt", "period"},
@@ -231,7 +226,6 @@ func TestAPISections_EtagRevalidation(t *testing.T) {
 	endpoints := []string{
 		"/_claudit/api/overview",
 		"/_claudit/api/cost",
-		"/_claudit/api/cache",
 		"/_claudit/api/tokens",
 		"/_claudit/api/tools",
 		"/_claudit/api/subagents",
@@ -447,14 +441,16 @@ func TestAPITrends_DimsCoverPlanTable(t *testing.T) {
 	}
 }
 
-// TestRoutes_RemovedEndpoints404 pins the session-list and per-session
-// timeline routes as gone: no SPA module fetches them, and serving them
-// would re-run the per-session timeline pass on demand.
+// TestRoutes_RemovedEndpoints404 pins removed routes as gone: no SPA
+// module fetches them. The session-list and per-session timeline routes
+// would re-run the per-session timeline pass on demand; /cache backed the
+// Cache view, which the Spend view replaced.
 func TestRoutes_RemovedEndpoints404(t *testing.T) {
 	srv := fixtureServer(t)
 	for _, target := range []string{
 		"/_claudit/api/sessions",
 		"/_claudit/api/sessions/abc/timeline",
+		"/_claudit/api/cache",
 	} {
 		t.Run(target, func(t *testing.T) {
 			w := doAPI(t, srv, http.MethodGet, target, nil)
