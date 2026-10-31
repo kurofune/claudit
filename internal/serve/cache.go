@@ -1,9 +1,12 @@
 package serve
 
-import "github.com/kurofune/claudit/internal/corpus"
+import (
+	"github.com/kurofune/claudit/internal/corpus"
+	"github.com/kurofune/claudit/internal/provider"
+)
 
 // The data layer lives in internal/corpus now — one loader shared by
-// report, diff, serve, and watch. These aliases keep the serve package's
+// serve and watch. These aliases keep the serve package's
 // existing call sites (NewCache/Cache/Snapshot/hostInfo) unchanged while
 // the implementation lives in one place.
 type (
@@ -15,6 +18,6 @@ type (
 	hostInfo = corpus.HostInfo
 )
 
-// NewCache returns a cache rooted at the given projects root. Thin
+// NewCache returns a cache over the Claude Code projects root. Thin
 // wrapper over corpus.New so existing serve call sites keep working.
-func NewCache(root string) *Cache { return corpus.New(root) }
+func NewCache(root string) *Cache { return corpus.New(provider.NewClaudeCode(root)) }

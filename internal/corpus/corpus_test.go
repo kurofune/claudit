@@ -2,10 +2,15 @@ package corpus
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/provider"
 )
 
 // mkAssistantLine matches the schema used elsewhere so these fixtures
@@ -31,7 +36,7 @@ func writeJSONL(t *testing.T, path string, lines ...string) {
 
 func TestCache_SnapshotCarriesToolResults(t *testing.T) {
 	dir := t.TempDir()
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	// An assistant turn with a tool_use, then the user turn carrying its
@@ -55,7 +60,7 @@ func TestCache_SnapshotCarriesToolResults(t *testing.T) {
 
 func TestCache_RefreshDetectsAddedFile(t *testing.T) {
 	dir := t.TempDir()
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 
 	changed, err := c.Refresh()
 	if err != nil {
@@ -92,7 +97,7 @@ func TestCache_RefreshSkipsUnchanged(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", t0))
 
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +121,7 @@ func TestCache_RefreshDetectsAppend(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, path, mkAssistantLine("a1", "", t0))
 
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +161,7 @@ func TestCache_RefreshDropsRemovedFile(t *testing.T) {
 	writeJSONL(t, a, mkAssistantLine("a1", "", t0))
 	writeJSONL(t, b, mkAssistantLine("b1", "", t0))
 
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +191,7 @@ func TestCache_RecursiveWalk(t *testing.T) {
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(nested, "s.jsonl"), mkAssistantLine("a1", "", t0))
 
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +201,7 @@ func TestCache_RecursiveWalk(t *testing.T) {
 }
 
 func TestCache_HostInfo(t *testing.T) {
-	c := New(t.TempDir())
+	c := New(provider.NewClaudeCode(t.TempDir()))
 	hi := c.HostInfo()
 	if hi.Root == "" || hi.GoOS == "" || hi.NumCPU < 1 {
 		t.Errorf("hostInfo looks empty: %+v", hi)
@@ -216,7 +221,7 @@ func TestCache_ConcurrentColdLoadCountsAllTurns(t *testing.T) {
 			mkAssistantLine(fmt.Sprintf("b%d", i), "", t0.Add(time.Minute)),
 		)
 	}
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +242,7 @@ func TestLoadConcurrent_AllFiles(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "a.jsonl"), mkAssistantLine("a1", "", t0))
 	writeJSONL(t, filepath.Join(dir, "b.jsonl"), mkAssistantLine("b1", "", t0))
 
-	snap, err := LoadConcurrent(dir, time.Time{})
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +272,7 @@ func TestLoadConcurrent_SurfacesFileErrors(t *testing.T) {
 		t.Skip("file permissions not enforced here (Windows or root); cannot simulate an unreadable file")
 	}
 
-	snap, err := LoadConcurrent(dir, time.Time{})
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, time.Time{})
 	if err != nil {
 		t.Fatalf("walk should not fail on a per-file open error: %v", err)
 	}
@@ -299,7 +304,7 @@ func TestLoadConcurrent_MtimePreFilterSkipsOldFiles(t *testing.T) {
 
 	// earliest = 30 days ago → old file (mtime -60d) must be skipped.
 	earliest := time.Now().AddDate(0, 0, -30)
-	snap, err := LoadConcurrent(dir, earliest)
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, earliest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,18 +318,99 @@ func TestSnapshotsCarryCompactBoundaries(t *testing.T) {
 	compact := `{"type":"user","sessionId":"s1","uuid":"c1","parentUuid":"a1","timestamp":"2026-05-01T11:00:00Z","cwd":"/p","message":{"role":"user","content":"This session is being continued from a previous conversation."},"isCompactSummary":true}`
 	writeJSONL(t, filepath.Join(dir, "s.jsonl"), mkAssistantLine("a1", "", time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)), compact)
 
-	c := New(dir)
+	c := New(provider.NewClaudeCode(dir))
 	if _, err := c.Refresh(); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 	if got := c.Snapshot().CompactBoundaries; len(got) != 1 || got[0].SessionID != "s1" {
 		t.Errorf("Cache snapshot CompactBoundaries = %+v, want one for s1", got)
 	}
-	snap, err := LoadConcurrent(dir, time.Time{})
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := snap.CompactBoundaries; len(got) != 1 || got[0].SessionID != "s1" {
 		t.Errorf("LoadConcurrent CompactBoundaries = %+v, want one for s1", got)
+	}
+}
+
+// fakeSource is a second provider: it yields one file of its own and parses
+// it into one turn tagged Provider "fake", without reading the bytes as
+// Claude Code JSONL.
+type fakeSource struct{ path string }
+
+func (f fakeSource) Name() string { return "fake" }
+
+func (f fakeSource) Walk(earliest time.Time, fn func(path string, mod time.Time, size int64)) error {
+	info, err := os.Stat(f.path)
+	if err != nil {
+		return err
+	}
+	if earliest.IsZero() || !info.ModTime().Before(earliest) {
+		fn(f.path, info.ModTime(), info.Size())
+	}
+	return nil
+}
+
+func (f fakeSource) ParseFile(r io.Reader, path string) (parse.Result, error) {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return parse.Result{}, err
+	}
+	return parse.Result{Turns: []parse.Turn{{
+		Provider:   "fake",
+		SessionID:  strings.TrimSpace(string(b)),
+		Model:      "fake-model",
+		SourceFile: path,
+	}}}, nil
+}
+
+func TestCache_SecondSourceTurnsReachSnapshot(t *testing.T) {
+	ccDir := t.TempDir()
+	writeJSONL(t, filepath.Join(ccDir, "s.jsonl"), mkAssistantLine("a1", "", time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)))
+	fakePath := filepath.Join(t.TempDir(), "rollout.log")
+	if err := os.WriteFile(fakePath, []byte("fake-session\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New(provider.NewClaudeCode(ccDir), fakeSource{path: fakePath})
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	snap := c.Snapshot()
+	if snap.FileCount != 2 {
+		t.Errorf("FileCount = %d, want 2 (one per source)", snap.FileCount)
+	}
+	providers := map[string]parse.Turn{}
+	for _, tn := range snap.Turns {
+		providers[tn.Provider] = tn
+	}
+	fake, ok := providers["fake"]
+	if !ok {
+		t.Fatalf("no fake turn in snapshot: %+v", snap.Turns)
+	}
+	if fake.SessionID != "fake-session" || fake.SourceFile != fakePath {
+		t.Errorf("fake turn = %+v, want session fake-session from %s", fake, fakePath)
+	}
+	if _, ok := providers[parse.ProviderClaudeCode]; !ok {
+		t.Errorf("claude-code turn missing beside the fake one: %+v", snap.Turns)
+	}
+
+	// An unchanged second source is not re-parsed into a new generation.
+	gen := snap.Generation
+	if changed, err := c.Refresh(); err != nil || changed {
+		t.Errorf("second Refresh changed=%v err=%v, want no change", changed, err)
+	}
+	if c.Snapshot().Generation != gen {
+		t.Error("generation advanced with nothing changed")
+	}
+
+	// LoadConcurrent reads both sources too.
+	one, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(ccDir), fakeSource{path: fakePath}}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.FileCount != 2 || len(one.Turns) != 2 {
+		t.Errorf("LoadConcurrent FileCount=%d turns=%d, want 2 and 2", one.FileCount, len(one.Turns))
 	}
 }

@@ -1,11 +1,11 @@
 // Package corpus is the single data-loading layer shared by every
-// claudit command. It walks a projects root, parses the session JSONL
-// files into the per-turn surface the aggregator consumes, and hands
-// back an immutable Snapshot.
+// claudit command. It walks each provider.Source, parses its log files
+// into the per-turn surface the aggregator consumes, and hands back an
+// immutable Snapshot.
 //
 // Two access patterns sit on the same internals:
 //
-//   - One-shot consumers (report, diff) call LoadConcurrent once. It
+//   - One-shot consumers call LoadConcurrent once. It
 //     fans parsing out across GOMAXPROCS workers and honors an optional
 //     mtime pre-filter so a date-windowed query skips files that can't
 //     contain an in-window turn.
@@ -22,10 +22,9 @@ package corpus
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -35,6 +34,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/provider"
 )
 
 // fileEntry is what the cache remembers for one JSONL path: when we
@@ -73,11 +73,11 @@ type Snapshot struct {
 	FileErrors []error
 }
 
-// Cache walks a projects root and keeps a parsed in-memory copy current
+// Cache walks its Sources and keeps a parsed in-memory copy current
 // via polling. Safe for concurrent reads via Snapshot(); only one
 // Refresh() should run at a time (the poller guarantees this).
 type Cache struct {
-	root string
+	sources []provider.Source
 
 	mu    sync.Mutex // guards files map during Refresh
 	files map[string]fileEntry
@@ -97,15 +97,15 @@ type Cache struct {
 	nextSubID uint64
 }
 
-// New returns an empty cache rooted at the given projects root. Call
+// New returns an empty cache over sources. Call
 // Refresh once synchronously before serving traffic so the first read
 // has real data. RunPoller does call Refresh on entry, but it must be
 // launched in a goroutine, so the listener can race ahead of the first
 // refresh — prime it synchronously when that matters.
-func New(root string) *Cache {
+func New(sources ...provider.Source) *Cache {
 	c := &Cache{
-		root:  root,
-		files: map[string]fileEntry{},
+		sources: sources,
+		files:   map[string]fileEntry{},
 	}
 	// Publish an empty snapshot so readers don't hit a nil pointer
 	// before the first refresh completes.
@@ -119,10 +119,7 @@ func (c *Cache) Snapshot() *Snapshot {
 	return c.snapshot.Load()
 }
 
-// Root returns the projects root this cache walks.
-func (c *Cache) Root() string { return c.root }
-
-// Refresh walks the root, re-parses files whose (mtime, size) changed
+// Refresh walks every Source, re-parses files whose (mtime, size) changed
 // since the last refresh, drops entries for files that no longer exist,
 // and (if anything changed) publishes a new Snapshot with an
 // incremented generation. Returns whether anything changed plus any
@@ -142,22 +139,22 @@ func (c *Cache) Refresh() (changed bool, err error) {
 	// Pass 1: stat-only walk. Collect the live file set and the subset
 	// whose (mtime, size) differs from what we have cached.
 	seen := map[string]struct{}{}
-	var toParse []string
+	var toParse []fileJob
 	mods := map[string]time.Time{}
 	sizes := map[string]int64{}
-	walkErr := walkJSONL(c.root, time.Time{}, func(path string, mod time.Time, size int64) {
+	walkErr := walkSources(c.sources, time.Time{}, func(src provider.Source, path string, mod time.Time, size int64) {
 		seen[path] = struct{}{}
 		mods[path] = mod
 		sizes[path] = size
 		old, ok := c.files[path]
 		// (mtime, size) is a good-enough change signal for append-only
-		// session JSONLs: any new turn changes both. A pure mtime check
+		// session logs: any new turn changes both. A pure mtime check
 		// can miss writes inside the FS mtime resolution window; size
 		// guards against that.
 		if ok && old.mtime.Equal(mod) && old.size == size {
 			return
 		}
-		toParse = append(toParse, path)
+		toParse = append(toParse, fileJob{src: src, path: path})
 	})
 
 	// Pass 2: parse the changed set concurrently and fold the results
@@ -314,14 +311,14 @@ func (c *Cache) RunPoller(ctx context.Context, interval time.Duration, onErr fun
 	}
 }
 
-// LoadConcurrent walks root once and parses every JSONL concurrently,
+// LoadConcurrent walks every Source once and parses each file concurrently,
 // returning an immutable Snapshot. When earliest is non-zero, files
 // whose mtime predates it are skipped before opening — the mtime
 // pre-filter that makes date-windowed report/diff queries cheap.
 //
 // This is the one-shot entry point; it shares the walk and concurrent
 // parse with Cache but keeps no state and never polls.
-func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
+func LoadConcurrent(sources []provider.Source, earliest time.Time) (*Snapshot, error) {
 	// The concurrent parse allocates heavily (every line decodes into
 	// short-lived intermediate structs), so the default GC pace fires
 	// often and steals cycles from the parse workers — it measurably
@@ -333,17 +330,17 @@ func LoadConcurrent(root string, earliest time.Time) (*Snapshot, error) {
 	// default steady-state memory profile.
 	defer debug.SetGCPercent(debug.SetGCPercent(200))
 
-	var paths []string
-	walkErr := walkJSONL(root, earliest, func(path string, _ time.Time, _ int64) {
-		paths = append(paths, path)
+	var jobs []fileJob
+	walkErr := walkSources(sources, earliest, func(src provider.Source, path string, _ time.Time, _ int64) {
+		jobs = append(jobs, fileJob{src: src, path: path})
 	})
 	if walkErr != nil {
 		return nil, walkErr
 	}
-	sort.Strings(paths)
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].path < jobs[j].path })
 
-	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(paths)}
-	for _, pr := range parseFiles(paths) {
+	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(jobs)}
+	for _, pr := range parseFiles(jobs) {
 		snap.Turns = append(snap.Turns, pr.turns...)
 		snap.Users = append(snap.Users, pr.users...)
 		snap.Links = append(snap.Links, pr.links...)
@@ -370,11 +367,39 @@ type parseResult struct {
 	err         error
 }
 
-// parseFiles fans parsing of paths out across GOMAXPROCS workers and
-// returns one parseResult per input path (in arbitrary order). A parse
+// fileJob is one file to parse and the Source whose parser reads it.
+type fileJob struct {
+	src  provider.Source
+	path string
+}
+
+// walkSources walks every Source in order and hands fn each file with
+// the Source that owns it. A path an earlier Source already yielded is
+// skipped, so overlapping roots never count a file twice. Walk errors
+// are joined; one failing Source does not stop the others.
+func walkSources(sources []provider.Source, earliest time.Time, fn func(src provider.Source, path string, mod time.Time, size int64)) error {
+	owner := map[string]struct{}{}
+	var errs []error
+	for _, src := range sources {
+		err := src.Walk(earliest, func(path string, mod time.Time, size int64) {
+			if _, dup := owner[path]; dup {
+				return
+			}
+			owner[path] = struct{}{}
+			fn(src, path, mod, size)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", src.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// parseFiles fans parsing of jobs out across GOMAXPROCS workers and
+// returns one parseResult per job (in arbitrary order). A parse
 // error is attached to its result but still carries whatever turns were
 // read before the error — a corrupt line shouldn't discard the file.
-func parseFiles(paths []string) []parseResult {
+func parseFiles(paths []fileJob) []parseResult {
 	workers := runtime.GOMAXPROCS(0)
 	if workers < 1 {
 		workers = 1
@@ -382,15 +407,15 @@ func parseFiles(paths []string) []parseResult {
 	if workers > len(paths) {
 		workers = len(paths)
 	}
-	jobs := make(chan string, workers*2)
+	jobs := make(chan fileJob, workers*2)
 	results := make(chan parseResult, len(paths))
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for path := range jobs {
-				results <- parseOne(path)
+			for job := range jobs {
+				results <- parseOne(job)
 			}
 		}()
 	}
@@ -412,16 +437,18 @@ func parseFiles(paths []string) []parseResult {
 	return out
 }
 
-// parseOne opens path and runs the standard parser. The close error is
-// surfaced iff parsing succeeded — a parse error tells the caller more.
-func parseOne(path string) parseResult {
+// parseOne opens the job's file and runs its Source's parser. The close
+// error is surfaced iff parsing succeeded — a parse error tells the caller
+// more.
+func parseOne(job fileJob) parseResult {
+	path := job.path
 	pr := parseResult{path: path}
 	f, err := os.Open(path)
 	if err != nil {
 		pr.err = fmt.Errorf("open %s: %w", path, err)
 		return pr
 	}
-	r, perr := parse.ParseFile(f, path)
+	r, perr := job.src.ParseFile(f, path)
 	if cerr := f.Close(); cerr != nil && perr == nil {
 		perr = cerr
 	}
@@ -437,31 +464,6 @@ func parseOne(path string) parseResult {
 	return pr
 }
 
-// walkJSONL invokes fn for every .jsonl file under root. When earliest
-// is non-zero, files whose mtime predates it are skipped. Tolerates
-// per-entry walk errors so a transient FS hiccup mid-walk doesn't abort
-// the whole scan.
-func walkJSONL(root string, earliest time.Time, fn func(path string, mod time.Time, size int64)) error {
-	filter := !earliest.IsZero()
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		if filter && info.ModTime().Before(earliest) {
-			return nil
-		}
-		fn(path, info.ModTime(), info.Size())
-		return nil
-	})
-}
-
 // HostInfo is a small struct of cache vitals for diagnostic endpoints.
 type HostInfo struct {
 	Root       string `json:"root"`
@@ -474,10 +476,17 @@ type HostInfo struct {
 }
 
 // HostInfo returns the cache vitals used by serve's /snapshot endpoint.
+// Root lists the root of every Source that has one, comma-separated.
 func (c *Cache) HostInfo() HostInfo {
 	hn, _ := os.Hostname()
+	var roots []string
+	for _, src := range c.sources {
+		if r, ok := src.(interface{ Root() string }); ok {
+			roots = append(roots, r.Root())
+		}
+	}
 	return HostInfo{
-		Root:       c.root,
+		Root:       strings.Join(roots, ", "),
 		Hostname:   hn,
 		GoOS:       runtime.GOOS,
 		GoArch:     runtime.GOARCH,

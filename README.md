@@ -99,7 +99,18 @@ models:
     cache_write_1h_per_mtok: 30.00
 ```
 
-Override the path with `--prices=path/to/file.yaml`. Models that appear in your sessions but are missing from both the bundle and your overlay show up in the report's `unknown_models` block with zero attributed cost — and claudit prints the turn count and token volume behind each one on stderr, so you can tell whether the gap is worth fixing. Add them to your YAML to get them priced.
+Prices are keyed by provider, then model. The bare top-level `models:` map above is Claude Code's; to price another provider's models, list them under `providers:` — an entry replaces the bundled one for that (provider, model) pair, or adds it:
+
+```yaml
+providers:
+  codex:
+    models:
+      gpt-6:
+        input_per_mtok: 1.25
+        output_per_mtok: 10.00
+```
+
+`providers: {claude-code: {models: …}}` is the same as the bare form. Override the path with `--prices=path/to/file.yaml`. Models that appear in your sessions but are missing from both the bundle and your overlay show up in the report's `unknown_models` block, named `provider/model` (e.g. `claude-code/claude-future-9`), with zero attributed cost — and claudit prints the turn count and token volume behind each one on stderr, so you can tell whether the gap is worth fixing. Add them to your YAML to get them priced.
 
 ### Fast-mode rates
 

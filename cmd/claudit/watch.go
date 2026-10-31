@@ -17,6 +17,7 @@ import (
 	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/internal/provider"
 	"github.com/kurofune/claudit/internal/stat"
 	"github.com/kurofune/claudit/internal/watch"
 )
@@ -108,7 +109,7 @@ func runWatch(args []string) error {
 	p := newPainter(os.Stdout)
 	var cache *corpus.Cache
 	if *rolling {
-		cache = corpus.New(*root)
+		cache = corpus.New(provider.NewClaudeCode(*root))
 		// Prime synchronously so the first frame already shows real
 		// totals; the poller's own initial refresh is then a cheap no-op.
 		if _, scanErr := cache.Refresh(); scanErr != nil {
