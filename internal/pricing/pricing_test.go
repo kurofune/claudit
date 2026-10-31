@@ -920,3 +920,21 @@ func TestLoad_UserFileWithLongPromptTier(t *testing.T) {
 		t.Errorf("long_prompt = %+v, want %+v", *p.LongPrompt, want)
 	}
 }
+
+func TestTable_RateAt(t *testing.T) {
+	tbl := &Table{Models: map[string]ModelPrice{
+		"m": {
+			Rate:  Rate{CacheRead: 2},
+			Rates: []RatePeriod{{Until: mustTime(t, "2026-04-30T00:00:00Z"), Rate: Rate{CacheRead: 1}}},
+		},
+	}}
+	if r, ok := tbl.RateAt("m", mustTime(t, "2026-04-29T12:00:00Z")); !ok || r.CacheRead != 1 {
+		t.Errorf("April rate = %+v, %v; want CacheRead 1, true", r, ok)
+	}
+	if r, ok := tbl.RateAt("m", mustTime(t, "2026-05-01T12:00:00Z")); !ok || r.CacheRead != 2 {
+		t.Errorf("May rate = %+v, %v; want CacheRead 2, true", r, ok)
+	}
+	if r, ok := tbl.RateAt("nope", time.Time{}); ok || r != (Rate{}) {
+		t.Errorf("unknown model = %+v, %v; want zero, false", r, ok)
+	}
+}

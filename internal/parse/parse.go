@@ -137,6 +137,15 @@ type ParentLink struct {
 	UUID, ParentUUID string
 }
 
+// CompactBoundary marks a context compaction: Claude Code writes the
+// compaction summary as a user line carrying `isCompactSummary: true`, and
+// every tool result produced before it leaves the model's context there.
+type CompactBoundary struct {
+	SessionID  string
+	SourceFile string
+	Timestamp  time.Time
+}
+
 // Result is what ParseFile returns.
 type Result struct {
 	Turns        []Turn
@@ -149,7 +158,9 @@ type Result struct {
 	// has both fields, including non-content message types. The chain
 	// walk needs these to bridge over hooks and snapshots.
 	ParentLinks []ParentLink
-	Malformed   int // count of lines we couldn't decode
+	// CompactBoundaries are this file's compaction points, in file order.
+	CompactBoundaries []CompactBoundary
+	Malformed         int // count of lines we couldn't decode
 }
 
 // rawLine is the wire format. Only the fields we care about.
@@ -164,6 +175,8 @@ type rawLine struct {
 	Entrypoint string          `json:"entrypoint"`
 	Message    json.RawMessage `json:"message"`
 	IsMeta     bool            `json:"isMeta"`
+	// IsCompactSummary flags the user line holding a compaction summary.
+	IsCompactSummary bool `json:"isCompactSummary"`
 	// ToolUseResult is the line's top-level structured tool outcome (a sibling
 	// of `message`, NOT inside the content blocks). Shape varies by tool —
 	// structuredPatch for Edit/Write, results/matches for searches — so it's
@@ -365,6 +378,14 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 		// Tool results ride in user turns that classifyRaw filters out, so
 		// pull them off the same raw line (keyed by tool_use_id).
 		res.ToolResults = append(res.ToolResults, toolResultsFromRaw(&raw, path)...)
+		if raw.Type == "user" && raw.IsCompactSummary {
+			ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+			res.CompactBoundaries = append(res.CompactBoundaries, CompactBoundary{
+				SessionID:  raw.SessionID,
+				SourceFile: path,
+				Timestamp:  ts,
+			})
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return res, err

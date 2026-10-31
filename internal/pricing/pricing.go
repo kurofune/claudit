@@ -96,6 +96,16 @@ type Table struct {
 	Models map[string]ModelPrice `yaml:"models"`
 }
 
+// RateAt returns model's standard date-effective rate at ts (see
+// ModelPrice.RateAt). Unknown models return the zero Rate and false.
+func (t *Table) RateAt(model string, ts time.Time) (Rate, bool) {
+	p, ok := t.Models[model]
+	if !ok {
+		return Rate{}, false
+	}
+	return p.RateAt(ts), true
+}
+
 // CostAt returns total USD for the given token counts, priced at the rate in
 // effect for ts. Unknown models return cost=0 and known=false so the caller
 // can warn. Only speed "fast" selects the optional Fast rate; every other
