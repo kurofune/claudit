@@ -483,11 +483,12 @@ const numCells = r => [
 function fillTokens(d) {
   const tok = d.tokens || {};
   const opts = { emptyText: EMPTY_TEXT };
-  const paint = (name, rows, labelCell) =>
-    buildRows(table(name), withCost(rows || []), r => [labelCell(r), ...numCells(r)], opts);
+  const paintTok = (name, rows, labelCell) =>
+    buildRows(tableEl(name), withCost(rows || []), r => [labelCell(r), ...numCells(r)], opts);
 
   const trend = tok.trend || [];
-  const chart = trend.length ? tokensStackedChart(trend, tok.period || 'day') : '';
+  // An empty window still ships zero-filled trend buckets; draw nothing.
+  const chart = (tok.total || 0) > 0 && trend.length ? tokensStackedChart(trend, tok.period || 'day') : '';
   container.querySelectorAll('.tok-trend-chart').forEach(el => { el.innerHTML = chart; });
   wireChartInteractivity(container);
 

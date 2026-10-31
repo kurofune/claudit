@@ -279,7 +279,7 @@ function wantedSub(sub) {
   return SUBS.includes(sub) ? sub : 'feed';
 }
 
-// activateSub toggles the active lens tab + subview, like view-tokens.js.
+// activateSub toggles the active lens tab + subview, like view-spend.js.
 function activateSub(container, sub) {
   container.querySelectorAll('.subtab[data-subtab]').forEach(t =>
     t.classList.toggle('is-active', t.dataset.subtab === sub));

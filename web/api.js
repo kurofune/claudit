@@ -17,10 +17,17 @@
 
 const apiBase = '/_claudit/api';
 
+// apiURL appends the page's query string to an API path, joining with
+// '&' when the path already carries its own query (e.g. /trends?dim=).
+/** @param {string} path @param {string} search */
+export function apiURL(path, search) {
+  if (!search) return apiBase + path;
+  return apiBase + path + (path.includes('?') ? '&' + search.slice(1) : search);
+}
+
 /** @param {string} path */
 function withSearch(path) {
-  const search = window.location.search || '';
-  return apiBase + path + search;
+  return apiURL(path, window.location.search || '');
 }
 
 /** @param {string} path @returns {Promise<any>} */
