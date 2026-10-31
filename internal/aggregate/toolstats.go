@@ -71,15 +71,15 @@ func nearestRank(sorted []int64, p float64) int64 {
 // detail) pattern over every counted call. Calls whose tool_use carried no
 // Detail appear only in the per-tool map, as in ByToolDetail.
 func (a *Aggregator) ToolCallStats() (map[string]ToolCallStats, map[string]map[string]ToolCallStats) {
-	byTool := map[string]*callAccum{}
-	byDetail := map[toolDetailKey]*callAccum{}
-	accum := func(m map[toolDetailKey]*callAccum, k toolDetailKey) *callAccum {
-		c := m[k]
+	// One map for both levels: a tool's own row is keyed with detail "".
+	acc := map[toolDetailKey]*callAccum{}
+	add := func(k toolDetailKey, ms int64, joined, timed, isErr bool) {
+		c := acc[k]
 		if c == nil {
 			c = &callAccum{}
-			m[k] = c
+			acc[k] = c
 		}
-		return c
+		c.add(ms, joined, timed, isErr)
 	}
 	for _, turns := range a.ctxTurns {
 		for _, t := range turns {
@@ -94,30 +94,24 @@ func (a *Aggregator) ToolCallStats() (map[string]ToolCallStats, map[string]map[s
 				if timed {
 					ms = max(r.Timestamp.Sub(end), time.Duration(0)).Milliseconds()
 				}
-				tc := byTool[tu.Name]
-				if tc == nil {
-					tc = &callAccum{}
-					byTool[tu.Name] = tc
-				}
-				tc.add(ms, joined, timed, r.IsError)
+				add(toolDetailKey{tu.Name, ""}, ms, joined, timed, r.IsError)
 				if tu.Detail != "" {
-					accum(byDetail, toolDetailKey{tu.Name, tu.Detail}).add(ms, joined, timed, r.IsError)
+					add(toolDetailKey{tu.Name, tu.Detail}, ms, joined, timed, r.IsError)
 				}
 			}
 		}
 	}
-	tools := make(map[string]ToolCallStats, len(byTool))
-	for name, c := range byTool {
-		tools[name] = c.stats()
-	}
+	tools := map[string]ToolCallStats{}
 	details := map[string]map[string]ToolCallStats{}
-	for k, c := range byDetail {
-		m := details[k.tool]
-		if m == nil {
-			m = map[string]ToolCallStats{}
-			details[k.tool] = m
+	for k, c := range acc {
+		if k.detail == "" {
+			tools[k.tool] = c.stats()
+			continue
 		}
-		m[k.detail] = c.stats()
+		if details[k.tool] == nil {
+			details[k.tool] = map[string]ToolCallStats{}
+		}
+		details[k.tool][k.detail] = c.stats()
 	}
 	return tools, details
 }
