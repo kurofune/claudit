@@ -77,6 +77,13 @@ func (a *Aggregator) recordContextTurn(t parse.Turn) {
 	})
 }
 
+// contextResult is a registered tool result: its size and the moment it
+// arrived (zero when its line carried no timestamp).
+type contextResult struct {
+	bytes   int
+	arrived time.Time
+}
+
 // AddToolResults registers tool results so ContextCost* can join them to
 // the tool_use that produced them by ToolUseID. A ToolUseID seen again (a
 // replayed transcript) keeps its first registration.
@@ -85,8 +92,8 @@ func (a *Aggregator) AddToolResults(results []parse.ToolResult) {
 		if r.ToolUseID == "" {
 			continue
 		}
-		if _, ok := a.ctxResultBytes[r.ToolUseID]; !ok {
-			a.ctxResultBytes[r.ToolUseID] = r.OutputBytes
+		if _, ok := a.ctxResults[r.ToolUseID]; !ok {
+			a.ctxResults[r.ToolUseID] = contextResult{bytes: r.OutputBytes, arrived: r.Timestamp}
 		}
 	}
 }
@@ -102,13 +109,25 @@ func (a *Aggregator) AddCompactBoundaries(bs []parse.CompactBoundary) {
 	}
 }
 
-// contextCosts walks each session file's turns in time order. A result of
-// turn A's tool_use is attributed on the next turn B: B's cache-creation
-// tokens split across A's results by OutputBytes, written at B's cache-write
-// rates in B's 5m/1h proportion. Each later turn re-reads every live result
-// at its own cache-read rate. A turn's attributed reads are scaled down to
-// its actual CacheReadTokens, so attribution never exceeds the cache spend
-// it explains (an expired cache re-reads less than what is live).
+// pendingResult is a tool result waiting for the turn that first carries it.
+type pendingResult struct {
+	tool, detail, sessionID string
+	bytes                   int
+}
+
+// contextCosts walks each session file's turns in time order. A tool
+// result is carried by the first turn after the one that called the tool
+// whose timestamp is not before the result's arrival; a result with no
+// arrival time is carried by the next turn. That carrying turn's
+// cache-creation tokens split across the results it carries by OutputBytes,
+// written at its effective cache-write rates in its 5m/1h proportion. A
+// compaction boundary between a result's arrival (or, lacking one, its
+// calling turn) and its carrying turn drops the result: it never reached a
+// cache write. Each later turn re-reads every live result at its own
+// effective cache-read rate, and a compaction boundary ends every live
+// result's re-reads. A turn's attributed reads are scaled down to its actual
+// CacheReadTokens, so attribution never exceeds the cache spend it explains
+// (an expired cache re-reads less than what is live).
 func (a *Aggregator) contextCosts() []resultContextCost {
 	var out []resultContextCost
 	for file, turns := range a.ctxTurns {
@@ -116,51 +135,61 @@ func (a *Aggregator) contextCosts() []resultContextCost {
 		sort.SliceStable(turns, func(i, j int) bool { return turns[i].ts.Before(turns[j].ts) })
 		bounds := append([]time.Time(nil), a.ctxBoundaries[file]...)
 		sort.Slice(bounds, func(i, j int) bool { return bounds[i].Before(bounds[j]) })
+		compactedBetween := func(from, to time.Time) bool {
+			k := sort.Search(len(bounds), func(k int) bool { return !bounds[k].Before(from) })
+			return k < len(bounds) && !bounds[k].After(to)
+		}
 
-		var live []int // indexes into out
-		bi := 0
+		carried := make([][]pendingResult, len(turns))
 		for i, c := range turns {
-			compacted := false
-			for bi < len(bounds) && !bounds[bi].After(c.ts) {
-				compacted = compacted || i > 0
-				bi++
-			}
-			if i == 0 {
-				continue
-			}
-			if compacted {
-				live = nil
-				continue
-			}
-			rate, _ := a.prices.RateAt(c.model, c.ts)
-			a.chargeRereads(out, live, c, rate.CacheRead)
-
-			cc := c.usage.CacheCreate5mTokens + c.usage.CacheCreate1hTokens
-			writePerTok := 0.0
-			if cc > 0 {
-				writePerTok = (float64(c.usage.CacheCreate5mTokens)*rate.CacheWrite5m +
-					float64(c.usage.CacheCreate1hTokens)*rate.CacheWrite1h) / float64(cc) / 1e6
-			}
-			prev := turns[i-1]
-			totalBytes := 0
-			for _, tu := range prev.toolUses {
-				totalBytes += a.ctxResultBytes[tu.ID]
-			}
-			for _, tu := range prev.toolUses {
-				bytes, ok := a.ctxResultBytes[tu.ID]
+			for _, tu := range c.toolUses {
+				r, ok := a.ctxResults[tu.ID]
 				if !ok {
 					continue
 				}
+				j, from := i+1, c.ts.Add(time.Nanosecond)
+				if !r.arrived.IsZero() {
+					j = i + 1 + sort.Search(len(turns)-i-1, func(k int) bool { return !turns[i+1+k].ts.Before(r.arrived) })
+					from = r.arrived
+				}
+				if j >= len(turns) || compactedBetween(from, turns[j].ts) {
+					continue
+				}
+				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, bytes: r.bytes})
+			}
+		}
+
+		var live []int // indexes into out
+		for i, c := range turns {
+			if i > 0 && compactedBetween(turns[i-1].ts.Add(time.Nanosecond), c.ts) {
+				live = nil
+			}
+			u := c.usage
+			prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
+			rate, _ := a.prices.EffectiveRate(c.model, c.ts, prompt, u.Speed)
+			a.chargeRereads(out, live, c, rate.CacheRead)
+
+			cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens
+			writePerTok := 0.0
+			if cc > 0 {
+				writePerTok = (float64(u.CacheCreate5mTokens)*rate.CacheWrite5m +
+					float64(u.CacheCreate1hTokens)*rate.CacheWrite1h) / float64(cc) / 1e6
+			}
+			totalBytes := 0
+			for _, p := range carried[i] {
+				totalBytes += p.bytes
+			}
+			for _, p := range carried[i] {
 				var n int64
 				if totalBytes > 0 {
-					n = int64(cc) * int64(bytes) / int64(totalBytes)
+					n = int64(cc) * int64(p.bytes) / int64(totalBytes)
 				}
 				write := float64(n) * writePerTok
 				live = append(live, len(out))
 				out = append(out, resultContextCost{
-					tool:      tu.Name,
-					detail:    tu.Detail,
-					sessionID: prev.sessionID,
+					tool:      p.tool,
+					detail:    p.detail,
+					sessionID: p.sessionID,
 					ContextCost: ContextCost{
 						ContextTokens:  n,
 						WriteCostUSD:   write,

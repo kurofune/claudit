@@ -281,7 +281,9 @@ func TestContextCostReconciles(t *testing.T) {
 		feed(dflt, res, true)
 		var realBudget float64
 		for _, tn := range res.Turns {
-			r, _ := defaults.RateAt(tn.Model, tn.Timestamp)
+			u := tn.Usage
+			r, _ := defaults.EffectiveRate(tn.Model, tn.Timestamp,
+				u.InputTokens+u.CacheCreate5mTokens+u.CacheCreate1hTokens+u.CacheReadTokens, u.Speed)
 			realBudget += (float64(tn.Usage.CacheReadTokens)*r.CacheRead +
 				float64(tn.Usage.CacheCreate5mTokens)*r.CacheWrite5m +
 				float64(tn.Usage.CacheCreate1hTokens)*r.CacheWrite1h) / 1e6
@@ -296,5 +298,120 @@ func TestContextCostReconciles(t *testing.T) {
 	}
 	if attributed == 0 {
 		t.Error("no fixture attributed any context cost; the reconciliation is vacuous")
+	}
+}
+
+func TestContextCost_StaggeredResultsAttributeOnTheTurnAfterArrival(t *testing.T) {
+	// A calls two tools; only tu-1's result is back before B. tu-2's result
+	// arrives between B and C, so C's cache write carries it, and B's
+	// carries tu-1 alone.
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{},
+		parse.ToolUse{ID: "tu-1", Name: "Bash", Detail: "ls"},
+		parse.ToolUse{ID: "tu-2", Name: "Read", Detail: ".go"}))
+	agg.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "tu-1", OutputBytes: 900, Timestamp: t0.Add(1 * time.Second)},
+		{ToolUseID: "tu-2", OutputBytes: 100, Timestamp: t0.Add(3 * time.Second)},
+	})
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(2*time.Second), parse.Usage{CacheCreate5mTokens: 1000}))
+	agg.Add(ctxTurn("f.jsonl", "s", "C", "m", t0.Add(4*time.Second), parse.Usage{CacheCreate5mTokens: 500, CacheReadTokens: 5000}))
+	agg.Add(ctxTurn("f.jsonl", "s", "D", "m", t0.Add(5*time.Second), parse.Usage{CacheReadTokens: 5000}))
+
+	rows := agg.ContextCostByTool()
+	bash, read := findCtxTool(rows, "Bash"), findCtxTool(rows, "Read")
+	if bash == nil || read == nil {
+		t.Fatalf("ContextCostByTool = %+v, want Bash and Read rows", rows)
+	}
+	if bash.ContextTokens != 1000 || bash.RereadTurns != 2 {
+		t.Errorf("Bash = %+v, want all 1000 of B's tokens, re-read by C and D", bash.ContextCost)
+	}
+	if want := 1000*6.0/1e6 + 2*1000*2.0/1e6; !approx(bash.ContextCostUSD, want) {
+		t.Errorf("Bash ContextCostUSD = %v, want %v", bash.ContextCostUSD, want)
+	}
+	if read.ContextTokens != 500 || read.RereadTurns != 1 {
+		t.Errorf("Read = %+v, want C's 500 tokens, re-read by D only", read.ContextCost)
+	}
+	if want := 500*6.0/1e6 + 500*2.0/1e6; !approx(read.ContextCostUSD, want) {
+		t.Errorf("Read ContextCostUSD = %v, want %v", read.ContextCostUSD, want)
+	}
+	checkSum(t, "Bash", bash.ContextCost)
+	checkSum(t, "Read", read.ContextCost)
+}
+
+func TestContextCost_ResultArrivingBeforeCompactionIsDropped(t *testing.T) {
+	// tu-1's result arrives, then the session compacts before B: B's cache
+	// write is the summary, not the result. tu-2's result arrives after the
+	// boundary, so B carries it.
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{},
+		parse.ToolUse{ID: "tu-1", Name: "Bash"},
+		parse.ToolUse{ID: "tu-2", Name: "Read"}))
+	agg.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "tu-1", OutputBytes: 900, Timestamp: t0.Add(1 * time.Second)},
+		{ToolUseID: "tu-2", OutputBytes: 100, Timestamp: t0.Add(3 * time.Second)},
+	})
+	agg.AddCompactBoundaries([]parse.CompactBoundary{{SourceFile: "f.jsonl", Timestamp: t0.Add(2 * time.Second)}})
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(4*time.Second), parse.Usage{CacheCreate5mTokens: 1000}))
+
+	rows := agg.ContextCostByTool()
+	if b := findCtxTool(rows, "Bash"); b != nil {
+		t.Errorf("Bash = %+v, want no row (compacted away before B)", b)
+	}
+	if r := findCtxTool(rows, "Read"); r == nil || r.ContextTokens != 1000 {
+		t.Errorf("Read = %+v, want all of B's 1000 tokens", r)
+	}
+}
+
+func TestContextCost_UsesEffectiveRate(t *testing.T) {
+	// Each case: A calls a tool, B carries its 1000-token result, C re-reads
+	// it. B and C run at the case's speed and prompt size; the attributed
+	// write and read must use the rate CostAt would pick for that turn.
+	std := pricing.Rate{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite5m: 6, CacheWrite1h: 10}
+	fast := pricing.Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12, CacheWrite1h: 20}
+	long := pricing.Rate{Input: 7, Output: 30, CacheRead: 0.7, CacheWrite5m: 9, CacheWrite1h: 14}
+	tbl := &pricing.Table{Models: map[string]pricing.ModelPrice{
+		"m": {Rate: std, Fast: &fast, LongPrompt: &pricing.LongPromptRate{ThresholdTokens: 10_000, Rate: long}},
+	}}
+	cases := []struct {
+		name  string
+		speed string
+		input int // pushes the prompt past the threshold when large
+		want  pricing.Rate
+	}{
+		{"standard", "", 0, std},
+		{"fast", "fast", 0, fast},
+		{"long prompt", "standard", 20_000, long},
+		{"fast over long prompt", "fast", 20_000, fast},
+	}
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	for _, c := range cases {
+		agg := New(tbl)
+		agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{}, parse.ToolUse{ID: "tu-1", Name: "Bash"}))
+		agg.AddToolResults([]parse.ToolResult{{ToolUseID: "tu-1", OutputBytes: 10}})
+		bu := parse.Usage{Speed: c.speed, InputTokens: c.input, CacheCreate5mTokens: 1000}
+		cu := parse.Usage{Speed: c.speed, InputTokens: c.input, CacheReadTokens: 1000}
+		agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(time.Second), bu))
+		agg.Add(ctxTurn("f.jsonl", "s", "C", "m", t0.Add(2*time.Second), cu))
+
+		rows := agg.ContextCostByTool()
+		if len(rows) != 1 {
+			t.Fatalf("%s: rows = %+v, want 1", c.name, rows)
+		}
+		if want := 1000 * c.want.CacheWrite5m / 1e6; !approx(rows[0].WriteCostUSD, want) {
+			t.Errorf("%s: WriteCostUSD = %v, want %v", c.name, rows[0].WriteCostUSD, want)
+		}
+		if want := 1000 * c.want.CacheRead / 1e6; !approx(rows[0].ReadCostUSD, want) {
+			t.Errorf("%s: ReadCostUSD = %v, want %v", c.name, rows[0].ReadCostUSD, want)
+		}
+		// Reconcile with what CostAt bills those cache tokens on each turn.
+		bIn, _ := tbl.CostAt("m", t0, bu.InputTokens, 0, 0, 0, 0, bu.Speed)
+		bAll, _ := tbl.CostAt("m", t0, bu.InputTokens, 0, bu.CacheCreate5mTokens, 0, 0, bu.Speed)
+		cIn, _ := tbl.CostAt("m", t0, cu.InputTokens, 0, 0, 0, 0, cu.Speed)
+		cAll, _ := tbl.CostAt("m", t0, cu.InputTokens, 0, 0, 0, cu.CacheReadTokens, cu.Speed)
+		if !approx(rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn)) {
+			t.Errorf("%s: ContextCostUSD = %v, want CostAt's cache spend %v", c.name, rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn))
+		}
 	}
 }

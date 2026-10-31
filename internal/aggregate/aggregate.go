@@ -215,11 +215,11 @@ type Aggregator struct {
 	byPrompt    map[string]*promptBucketInternal
 
 	// Context-cost attribution inputs (contextcost.go): counted turns per
-	// session file, tool-result sizes by ToolUseID, and compaction points
-	// per session file.
-	ctxTurns       map[string][]contextTurn
-	ctxResultBytes map[string]int
-	ctxBoundaries  map[string][]time.Time
+	// session file, tool-result sizes and arrival times by ToolUseID, and
+	// compaction points per session file.
+	ctxTurns      map[string][]contextTurn
+	ctxResults    map[string]contextResult
+	ctxBoundaries map[string][]time.Time
 }
 
 // New returns an empty aggregator using the given pricing table.
@@ -242,7 +242,7 @@ func New(p *pricing.Table) *Aggregator {
 		seenMessageID:     map[string]struct{}{},
 		byPrompt:          map[string]*promptBucketInternal{},
 		ctxTurns:          map[string][]contextTurn{},
-		ctxResultBytes:    map[string]int{},
+		ctxResults:        map[string]contextResult{},
 		ctxBoundaries:     map[string][]time.Time{},
 	}
 }

@@ -96,35 +96,35 @@ type Table struct {
 	Models map[string]ModelPrice `yaml:"models"`
 }
 
-// RateAt returns model's standard date-effective rate at ts (see
-// ModelPrice.RateAt). Unknown models return the zero Rate and false.
-func (t *Table) RateAt(model string, ts time.Time) (Rate, bool) {
+// EffectiveRate returns the rate that prices a turn of model at ts whose
+// prompt (input plus cache reads and writes) is prompt tokens, at speed.
+// Only speed "fast" selects the optional Fast rate; every other speed, or a
+// missing Fast rate, uses standard date-effective pricing, unless the prompt
+// exceeds the model's LongPrompt threshold — then the tier's rate prices the
+// whole turn. Fast wins over LongPrompt. A zero ts selects the model's
+// current rate — see ModelPrice.RateAt. Unknown models return the zero Rate
+// and false.
+func (t *Table) EffectiveRate(model string, ts time.Time, prompt int, speed string) (Rate, bool) {
 	p, ok := t.Models[model]
 	if !ok {
 		return Rate{}, false
 	}
+	switch {
+	case speed == "fast" && p.Fast != nil:
+		return *p.Fast, true
+	case p.LongPrompt != nil && prompt > p.LongPrompt.ThresholdTokens:
+		return p.LongPrompt.Rate, true
+	}
 	return p.RateAt(ts), true
 }
 
-// CostAt returns total USD for the given token counts, priced at the rate in
-// effect for ts. Unknown models return cost=0 and known=false so the caller
-// can warn. Only speed "fast" selects the optional Fast rate; every other
-// speed, or a missing Fast rate, uses standard date-effective pricing,
-// unless the prompt exceeds the model's LongPrompt threshold — then the
-// tier's rate prices the whole turn. Fast wins over LongPrompt.
-// A zero ts prices at the model's current rate — see RateAt.
+// CostAt returns total USD for the given token counts, priced at the
+// EffectiveRate for the turn. Unknown models return cost=0 and known=false
+// so the caller can warn.
 func (t *Table) CostAt(model string, ts time.Time, in, out, cacheCreate5m, cacheCreate1h, cacheRead int, speed string) (cost float64, known bool) {
-	p, ok := t.Models[model]
+	r, ok := t.EffectiveRate(model, ts, in+cacheCreate5m+cacheCreate1h+cacheRead, speed)
 	if !ok {
 		return 0, false
-	}
-	r := p.RateAt(ts)
-	prompt := in + cacheCreate5m + cacheCreate1h + cacheRead
-	switch {
-	case speed == "fast" && p.Fast != nil:
-		r = *p.Fast
-	case p.LongPrompt != nil && prompt > p.LongPrompt.ThresholdTokens:
-		r = p.LongPrompt.Rate
 	}
 	const m = 1_000_000.0
 	cost = float64(in)*r.Input/m +

@@ -921,20 +921,56 @@ func TestLoad_UserFileWithLongPromptTier(t *testing.T) {
 	}
 }
 
-func TestTable_RateAt(t *testing.T) {
+func TestTable_EffectiveRate(t *testing.T) {
+	std := Rate{Input: 5, Output: 25, CacheRead: 2, CacheWrite5m: 6, CacheWrite1h: 10}
+	old := Rate{Input: 5, Output: 25, CacheRead: 1, CacheWrite5m: 4, CacheWrite1h: 8}
+	fast := Rate{Input: 10, Output: 50, CacheRead: 4, CacheWrite5m: 12, CacheWrite1h: 20}
+	long := Rate{Input: 7, Output: 30, CacheRead: 3, CacheWrite5m: 9, CacheWrite1h: 14}
 	tbl := &Table{Models: map[string]ModelPrice{
 		"m": {
-			Rate:  Rate{CacheRead: 2},
-			Rates: []RatePeriod{{Until: mustTime(t, "2026-04-30T00:00:00Z"), Rate: Rate{CacheRead: 1}}},
+			Rate:       std,
+			Rates:      []RatePeriod{{Until: mustTime(t, "2026-04-30T00:00:00Z"), Rate: old}},
+			Fast:       &fast,
+			LongPrompt: &LongPromptRate{ThresholdTokens: 1000, Rate: long},
 		},
+		"plain": {Rate: std},
 	}}
-	if r, ok := tbl.RateAt("m", mustTime(t, "2026-04-29T12:00:00Z")); !ok || r.CacheRead != 1 {
-		t.Errorf("April rate = %+v, %v; want CacheRead 1, true", r, ok)
+	apr, may := mustTime(t, "2026-04-29T12:00:00Z"), mustTime(t, "2026-05-01T12:00:00Z")
+	cases := []struct {
+		name   string
+		model  string
+		ts     time.Time
+		prompt int
+		speed  string
+		want   Rate
+	}{
+		{"standard, old period", "m", apr, 10, "", old},
+		{"standard, current period", "m", may, 10, "standard", std},
+		{"at threshold stays standard", "m", may, 1000, "", std},
+		{"long prompt", "m", may, 1001, "", long},
+		{"long prompt ignores period", "m", apr, 1001, "", long},
+		{"fast", "m", may, 10, "fast", fast},
+		{"fast wins over long prompt", "m", may, 5000, "fast", fast},
+		{"fast without Fast rate is standard", "plain", may, 5000, "fast", std},
 	}
-	if r, ok := tbl.RateAt("m", mustTime(t, "2026-05-01T12:00:00Z")); !ok || r.CacheRead != 2 {
-		t.Errorf("May rate = %+v, %v; want CacheRead 2, true", r, ok)
+	for _, c := range cases {
+		r, ok := tbl.EffectiveRate(c.model, c.ts, c.prompt, c.speed)
+		if !ok || r != c.want {
+			t.Errorf("%s: EffectiveRate = %+v, %v; want %+v, true", c.name, r, ok, c.want)
+		}
+		// CostAt prices at exactly this rate: put the whole prompt in one
+		// cache bucket at a time and compare.
+		for _, tok := range []struct {
+			cc5, cc1, cr int
+			per          float64
+		}{{c.prompt, 0, 0, c.want.CacheWrite5m}, {0, c.prompt, 0, c.want.CacheWrite1h}, {0, 0, c.prompt, c.want.CacheRead}} {
+			got, _ := tbl.CostAt(c.model, c.ts, 0, 0, tok.cc5, tok.cc1, tok.cr, c.speed)
+			if want := float64(c.prompt) * tok.per / 1e6; math.Abs(got-want) > 1e-12 {
+				t.Errorf("%s: CostAt(%+v) = %v, want %v", c.name, tok, got, want)
+			}
+		}
 	}
-	if r, ok := tbl.RateAt("nope", time.Time{}); ok || r != (Rate{}) {
+	if r, ok := tbl.EffectiveRate("nope", time.Time{}, 0, ""); ok || r != (Rate{}) {
 		t.Errorf("unknown model = %+v, %v; want zero, false", r, ok)
 	}
 }
