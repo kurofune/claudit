@@ -11,7 +11,7 @@ import {
 } from './agents-logic.js';
 import {
   lastGraph, selectedRef, fullCache, fullTurnCache,
-  labelIcon, kindBadge, isServeMode, shortModel,
+  labelIcon, kindBadge, shortModel,
 } from './agents-shared.js';
 
 // ── shared detail drawer ────────────────────────────────────────────────────
@@ -148,10 +148,8 @@ function drSection(label, content, pre) {
 }
 
 // drIOSection renders a tool's Input/Output as a <pre>, with a "show full"
-// affordance when the snippet was truncated (looksTruncated). In serve mode
-// that's a button that loads the untruncated content from disk; in static
-// mode there's no disk, so it degrades to a clear "snippet only" label rather
-// than a dead button.
+// affordance when the snippet was truncated (looksTruncated): a button that
+// loads the untruncated content from disk.
 function drIOSection(label, content, field, p) {
   const empty = content == null || content === '';
   if (empty) {
@@ -159,18 +157,15 @@ function drIOSection(label, content, field, p) {
   }
   let affordance = '';
   if (p.type === 'tool' && p.toolId && looksTruncated(content)) {
-    affordance = isServeMode()
-      ? `<button type="button" class="dr-full-btn" data-loadfull="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-tool="${escHtml(p.toolId)}">show full</button>`
-      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
+    affordance = `<button type="button" class="dr-full-btn" data-loadfull="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-tool="${escHtml(p.toolId)}">show full</button>`;
   }
   return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
 }
 
 // drTurnSection renders a turn's Reasoning/Message as a <pre>, with the same
 // "show full" affordance drIOSection gives tool I/O: when the snippet was
-// truncated (looksTruncated) and the turn has a uuid to fetch by, serve mode
-// gets a button that loads the untruncated content from disk; static mode
-// degrades to a "snippet only" label rather than a dead button.
+// truncated (looksTruncated) and the turn has a uuid to fetch by, a button
+// loads the untruncated content from disk.
 function drTurnSection(label, content, field, p) {
   const empty = content == null || content === '';
   if (empty) {
@@ -178,9 +173,7 @@ function drTurnSection(label, content, field, p) {
   }
   let affordance = '';
   if (p.turnUuid && looksTruncated(content)) {
-    affordance = isServeMode()
-      ? `<button type="button" class="dr-full-btn" data-loadfullturn="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-turn="${escHtml(p.turnUuid)}">show full</button>`
-      : `<span class="dr-full-note" title="Run claudit serve to load the full content">snippet only</span>`;
+    affordance = `<button type="button" class="dr-full-btn" data-loadfullturn="${escHtml(field)}" data-session="${escHtml(p.sessionId)}" data-turn="${escHtml(p.turnUuid)}">show full</button>`;
   }
   return `<section class="dr-sec"><h4 class="dr-sec-h">${escHtml(label)}${affordance}</h4><pre class="dr-pre">${escHtml(content)}</pre></section>`;
 }

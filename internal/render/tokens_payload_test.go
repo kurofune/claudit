@@ -14,7 +14,7 @@ import (
 // grand total, the category composition breakdown, the per-period
 // token trend, and the by-model table.
 func TestBuildTokens_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildTokens(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestBuildTokens_CarriesPeriod(t *testing.T) {
 // must partition the grand total exactly, and (when non-empty) their
 // percentages must add up to ~100.
 func TestBuildTokens_CompositionSumsToGrandTotal(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildTokens(a)
 
 	var sumTokens int64
@@ -168,7 +168,7 @@ func TestBuildTokens_CompositionSumsToGrandTotal(t *testing.T) {
 // Total equals the bucket's Total(), and summing all rows' per-category
 // counts reconstructs the corpus totals (by-model partitions the data).
 func TestBuildTokens_ByModelMatchesAggregator(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildTokens(a)
 
 	buckets := a.ByModel()

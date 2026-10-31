@@ -17,7 +17,7 @@ import (
 // `GET /_claudit/api/overview` and must include everything a SPA
 // needs to paint the landing tab in one fetch.
 func TestBuildOverview_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildOverview(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -54,7 +54,7 @@ func TestBuildOverview_CarriesPeriod(t *testing.T) {
 // cache hit ratio must equal the aggregator's OverallHitRatio() so the
 // landing tab's cache stat matches the cache tab exactly.
 func TestBuildOverview_HitRatioMatchesAggregator(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	if got, want := BuildOverview(a).OverallHitRatio, a.OverallHitRatio(); got != want {
 		t.Errorf("OverallHitRatio = %v, want %v", got, want)
 	}
@@ -63,7 +63,7 @@ func TestBuildOverview_HitRatioMatchesAggregator(t *testing.T) {
 // TestBuildCost_ShapeAndKeys: cost tab covers by_model, by_project,
 // by_skill, by_prompt — every "where did the money go" lens.
 func TestBuildCost_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildCost(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestBuildCost_ShapeAndKeys(t *testing.T) {
 // total must equal the aggregator's Totals().CostUSD exactly so JS can
 // read it directly instead of re-summing per-row costs.
 func TestBuildCost_TotalCostMatchesAggregator(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	if got, want := BuildCost(a).TotalCostUSD, a.Totals().CostUSD; got != want {
 		t.Errorf("TotalCostUSD = %v, want %v", got, want)
 	}
@@ -91,7 +91,7 @@ func TestBuildCost_TotalCostMatchesAggregator(t *testing.T) {
 // TestBuildCache_ShapeAndKeys: cache tab covers the four
 // cache-efficiency dimensions plus the headline overall ratio.
 func TestBuildCache_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildCache(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestBuildCache_ShapeAndKeys(t *testing.T) {
 // is byte-equivalent to the JS reduce it replaces: Σ over cache_by_project
 // rows of .Miss. These are int64 sums, so they must be EXACTLY equal.
 func TestBuildCache_TotalMissMatchesProjectSum(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	var want int64
 	for _, row := range a.CacheByProject() {
 		want += row.Miss
@@ -124,7 +124,7 @@ func TestBuildCache_TotalMissMatchesProjectSum(t *testing.T) {
 // TestBuildTools_ShapeAndKeys: tools tab has the parent buckets plus
 // the per-tool drill-down map.
 func TestBuildTools_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildTools(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestBuildTools_ShapeAndKeys(t *testing.T) {
 // Subagents tab is the only consumer, so they ride alongside the rest
 // of the subagents data here.
 func TestBuildSubagents_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildSubagents(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestBuildSubagents_ShapeAndKeys(t *testing.T) {
 // is byte-identical to the `main.cost + side.cost` it replaces — NOT
 // a.Totals().CostUSD, which sums in a different order.
 func TestBuildSubagents_MainSideCostIsMainPlusSide(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildSubagents(a)
 	if got, want := p.MainSideCost, p.Main.Cost+p.Sidechain.Cost; got != want {
 		t.Errorf("MainSideCost = %v, want Main.Cost+Sidechain.Cost = %v", got, want)
@@ -175,7 +175,7 @@ func TestBuildSubagents_MainSideCostIsMainPlusSide(t *testing.T) {
 // SidechainTotals() exactly — the SPA's mainside table reads cost,
 // turns, and tokens.CacheReadTokens directly.
 func TestBuildSubagents_MainSidechainMatchesAggregator(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildSubagents(a)
 
 	mainTok, mainCost, mainTurns := a.MainTotals()
@@ -205,7 +205,7 @@ func TestBuildSubagents_MainSidechainMatchesAggregator(t *testing.T) {
 // wrapper over Aggregator.Anomalies() — a single top-level array
 // under "anomalies" so the SPA can swap the cached payload by key.
 func TestBuildAnomalies_ShapeAndKeys(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	p := BuildAnomalies(a)
 	got, err := json.Marshal(p)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestBuildAnomalies_ShapeAndKeys(t *testing.T) {
 // single fetch per chart without parsing branch-by-dim. Totals are
 // served by /overview so they are intentionally not a ?dim value.
 func TestBuildTrends_Dim(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	cases := []string{"model", "project", "session", "tool", "subagent"}
 	for _, dim := range cases {
 		t.Run(dim, func(t *testing.T) {
@@ -240,7 +240,7 @@ func TestBuildTrends_Dim(t *testing.T) {
 // returning an empty series — a typo'd ?dim should surface as a
 // 400 at the handler, not as a misleading empty chart.
 func TestBuildTrends_UnknownDim(t *testing.T) {
-	a := htmlSetup(t)
+	a := payloadSetup(t)
 	if _, err := BuildTrends(a, "bogus"); err == nil {
 		t.Fatalf("expected error for unknown dim, got nil")
 	}

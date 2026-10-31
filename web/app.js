@@ -45,20 +45,11 @@ onChange(async (route) => {
 // <details> open, no recent user input) and then reloads. After
 // TOAST_AFTER_MS of unsafe-to-reload pile-up it surfaces the toast as
 // the manual-reload fallback.
-//
-// Offline / static-report mode: when window.__claudit_static_data is
-// set, there is no server to push generation events from — skip the
-// EventSource so we don't fire spurious connection-failure noise.
-if (!window.__claudit_static_data) {
-  startSSE({
-    toastEl: document.getElementById('reload-toast'),
-    btnEl: document.getElementById('reload-toast-btn'),
-  });
-}
+startSSE({
+  toastEl: document.getElementById('reload-toast'),
+  btnEl: document.getElementById('reload-toast-btn'),
+});
 
-// Date-range picker — serve-mode only. The static report renders
-// #date-range as a plain div (no button), so wireDatePicker() no-ops
-// there.
 wireDatePicker();
 
 // Theme picker — gear icon next to the version footer. The chosen

@@ -48,7 +48,7 @@ func TestThemeCatalogParity(t *testing.T) {
 	}
 
 	// Every non-auto slug must back a real stylesheet in the embed,
-	// otherwise loadInheritedTheme silently drops to the system default.
+	// otherwise picking it in the SPA loads no stylesheet.
 	for _, s := range goNonAuto {
 		if _, err := fs.ReadFile(webassets.WebFS, "web/theme-"+s+".css"); err != nil {
 			t.Errorf("catalog slug %q has no web/theme-%s.css in the embed: %v", s, s, err)

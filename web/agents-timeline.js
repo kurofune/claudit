@@ -20,7 +20,7 @@ import {
   tlMinPxPerMs, setTlMinPxPerMs, prevTimelineKeys, setPrevTimelineKeys,
   timelinePinned, jumpFlashRef, filterMatchSet, dimNodes,
   captureState, restoreState, convSidebarWidth,
-  colorSlot, originBadgeHTML, isServeMode, kindFamily, cssEsc,
+  colorSlot, originBadgeHTML, kindFamily, cssEsc,
   clockTime, shortId, clip,
 } from './agents-shared.js';
 
@@ -278,7 +278,7 @@ const TL_PBAND_CHARS = 60;
 let tlSigCache = null; // { session, byAgent }
 function timelineSignalPips(session, sid) {
   if (tlSigCache && tlSigCache.session === session) return tlSigCache.byAgent;
-  const nowMs = isServeMode() ? Date.now() : undefined;
+  const nowMs = Date.now();
   const byAgent = signalPipsByAgent(detectSignals({ sessions: [session] }, { nowMs }), sid, TL_SIG_CAP);
   tlSigCache = { session, byAgent };
   return byAgent;

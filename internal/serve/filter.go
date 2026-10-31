@@ -11,9 +11,8 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
-// Query is the parsed view of a request's URL query string. Mirrors
-// the `claudit report` flags that are meaningful in HTML mode, plus
-// per-request overrides for view caps. Sentinel `-1` on int fields
+// Query is the parsed view of a request's URL query string: the
+// filter and bucket period, plus per-request overrides for view caps. Sentinel `-1` on int fields
 // means "URL did not set this; let applyDefaults decide."
 type Query struct {
 	Filter aggregate.Filter

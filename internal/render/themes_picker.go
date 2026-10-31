@@ -1,27 +1,12 @@
 package render
 
-// Inherited-theme bridge between `claudit serve` and the standalone
-// `claudit report` / `claudit diff` exports.
-//
-// The SPA's picker writes the selected slug to ~/.config/claudit/theme
-// (via the POST /api/theme endpoint added in internal/serve). When the
-// CLI later renders a static report or diff, loadInheritedTheme()
-// reads that file, validates the slug, and returns the matching
-// theme-{slug}.css contents. The static templates inline that single
-// stylesheet under :root[data-theme="{slug}"] and stamp the same
-// attribute onto <html>, so the export looks exactly like serve did
-// when the user last chose a theme. No picker UI in the static files;
-// the slug is the one source of truth and serve is the only place to
-// change it.
+// Theme catalog and the persisted theme path. The SPA's picker writes the
+// selected slug to ~/.config/claudit/theme via POST /api/theme
+// (internal/serve), which validates it with ValidThemeSlug.
 
 import (
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-
-	webassets "github.com/kurofune/claudit"
 )
 
 // themeCatalogEntry mirrors one row of THEMES in web/themes.js. The
@@ -79,31 +64,4 @@ func InheritedThemePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "claudit", "theme"), nil
-}
-
-// loadInheritedTheme reads ~/.config/claudit/theme and returns the
-// validated slug + the contents of the matching web/theme-{slug}.css.
-// All three return values are zero when the file is absent, empty, or
-// holds an unknown slug — callers treat that as "no inherited theme,
-// fall back to the OS prefers-color-scheme default."
-func loadInheritedTheme() (slug, css string) {
-	path, err := InheritedThemePath()
-	if err != nil {
-		return "", ""
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", "" // missing file is the common, expected case
-	}
-	candidate := strings.TrimSpace(string(raw))
-	if !ValidThemeSlug(candidate) {
-		return "", ""
-	}
-	b, err := fs.ReadFile(webassets.WebFS, "web/theme-"+candidate+".css")
-	if err != nil {
-		// File was valid against the catalog but missing from the
-		// embed — should be impossible, but don't crash the report.
-		return "", ""
-	}
-	return candidate, fmt.Sprintf("/* inherited theme: %s */\n%s", candidate, string(b))
 }

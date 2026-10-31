@@ -13,10 +13,26 @@ import (
 // is still available via the per-session timeline endpoint.
 const firstPromptPreviewChars = 200
 
+// HotspotForJSON is the same data as aggregate.Hotspot but with the
+// pre-rendered LLM prompt baked in, so the front-end can copy it to the
+// clipboard without re-rendering the template in JS. Used by
+// OverviewPayload, which /_claudit/api/overview returns.
+type HotspotForJSON struct {
+	Kind       aggregate.HotspotKind `json:"kind"`
+	Title      string                `json:"title"`
+	CostUSD    float64               `json:"cost_usd"`
+	PctOfTotal float64               `json:"pct_of_total"`
+	Prompt     string                `json:"prompt"`
+	// PromptKey is the normalized prompt key for prompt_pattern hotspots,
+	// echoed from Hotspot.Context["key"]. Used by the frontend to cross-
+	// link the hotspot to its session in the drill-down view. Empty for
+	// non-prompt hotspot kinds.
+	PromptKey string `json:"prompt_key,omitempty"`
+}
+
 // buildHotspotsForJSON resolves the aggregator's top hotspots into
 // the renderable HotspotForJSON shape — same data plus a baked-in
-// LLM prompt and an optional cross-link key. Consumed by BuildOverview
-// (which both the API and the static report share).
+// LLM prompt and an optional cross-link key. Consumed by BuildOverview.
 func buildHotspotsForJSON(a *aggregate.Aggregator) []HotspotForJSON {
 	raw := a.Hotspots(10)
 	out := make([]HotspotForJSON, 0, len(raw))

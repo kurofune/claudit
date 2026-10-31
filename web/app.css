@@ -2207,7 +2207,6 @@
   }
   .dr-full-btn:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 14%, transparent); }
   .dr-full-btn:disabled { opacity: 0.6; cursor: default; }
-  .dr-full-note { margin-left: auto; color: var(--ink-2); font-weight: 400; text-transform: none; letter-spacing: 0; font-style: italic; }
   .dr-pre {
     margin: 0; padding: var(--s-2); background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--r-sm); white-space: pre-wrap; word-break: break-word;

@@ -25,14 +25,6 @@ export function originBadgeHTML(session) {
     : '';
 }
 
-// isServeMode is true when a live claudit server is backing the page. The
-// static HTML report inlines its data into window.__claudit_static_data and
-// has no disk to read at view time, so the drawer's "show full" affordance
-// (which fetches untruncated tool I/O from disk) is serve-only.
-export function isServeMode() {
-  return !(typeof window !== 'undefined' && window.__claudit_static_data);
-}
-
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
 // is the ONE selection shared across every lens — a refKey string

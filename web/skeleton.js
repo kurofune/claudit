@@ -89,10 +89,9 @@ const SKEL_ATTR = 'data-skel';
 // skeleton it only when Overview is the initial route — otherwise it
 // would shimmer indefinitely until the user clicks Overview.
 //
-// #date-range is deliberately NOT skeletoned: in serve mode the date
-// picker paints it synchronously from the URL on wire, and in static
-// mode the inlined data fills it instantly — there is no async gap to
-// cover, and a shimmer would only clobber the already-correct label.
+// #date-range is deliberately NOT skeletoned: the date picker paints it
+// synchronously from the URL on wire — there is no async gap to cover,
+// and a shimmer would only clobber the already-correct label.
 export function paintNavSkeletons(includeOverview) {
   const ids = [
     'nav-metric-cost',

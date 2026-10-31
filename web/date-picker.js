@@ -6,12 +6,6 @@
 // The user-facing End is INCLUSIVE; the server's `until` is exclusive
 // (matches the report CLI). We translate at the boundary: +1 day on
 // Apply, -1 day when seeding from the URL.
-//
-// Offline / static-report mode: the static template renders
-// #date-range as a plain <div> (no button), so wireDatePicker()'s
-// initial querySelector returns null and the module no-ops. The
-// SPA bundle is shared between serve and static modes; the markup
-// difference is what gates the behavior.
 
 // UTC math dodges local-timezone DST surprises — claudit treats
 // date-only values as UTC midnight throughout.
@@ -56,7 +50,7 @@ export function urlToRange(search, now = new Date()) {
 
 export function wireDatePicker() {
   const btn = document.getElementById('date-range-button');
-  if (!btn) return; // static-report mode, or markup not yet rendered
+  if (!btn) return;
 
   let popover = null;
 

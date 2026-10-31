@@ -54,7 +54,7 @@ func runServe(args []string) error {
 		ew.Println("text and CWD paths, has no authentication, and is meant for single-user")
 		ew.Println("localhost use only. Exposing it to other hosts is at your own risk.")
 		ew.Println()
-		ew.Println("Filter via URL query params (same names as `claudit report` flags):")
+		ew.Println("Filter via URL query params:")
 		ew.Println("  /?project=myrepo&last=7d")
 		ew.Println("  /?since=2026-05-01&until=2026-05-15&by=week")
 		ew.Println()

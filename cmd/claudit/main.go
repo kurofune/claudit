@@ -4,51 +4,69 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "claudit:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	args := os.Args[1:]
-	if len(args) > 0 {
-		switch args[0] {
-		case "help", "-h", "--help":
-			if _, err := fmt.Fprint(os.Stdout, topLevelUsage); err != nil {
-				return err
-			}
-			return nil
-		case "version", "--version":
-			fmt.Println(versionString())
-			return nil
-		case "report":
-			return runReport(args[1:])
-		case "diff":
-			return runDiff(args[1:])
-		case "watch":
-			return runWatch(args[1:])
-		case "serve":
-			return runServe(args[1:])
-		}
+func run(args []string) error {
+	cmd, rest, err := dispatch(args)
+	if err != nil {
+		return err
 	}
-	return runReport(args)
+	switch cmd {
+	case "help":
+		_, err := fmt.Fprint(os.Stdout, topLevelUsage)
+		return err
+	case "version":
+		fmt.Println(versionString())
+		return nil
+	case "watch":
+		return runWatch(rest)
+	default:
+		return runServe(rest)
+	}
+}
+
+// dispatch maps argv (without the program name) to a command and the
+// arguments that command receives. No arguments, or leading flags, run serve.
+func dispatch(args []string) (cmd string, rest []string, err error) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") && !isTopLevelFlag(args[0]) {
+		return "serve", args, nil
+	}
+	switch args[0] {
+	case "help", "-h", "--help":
+		return "help", args[1:], nil
+	case "version", "--version":
+		return "version", args[1:], nil
+	case "watch", "serve":
+		return args[0], args[1:], nil
+	}
+	return "", nil, fmt.Errorf("unknown command %q", args[0])
+}
+
+func isTopLevelFlag(arg string) bool {
+	switch arg {
+	case "-h", "--help", "--version":
+		return true
+	}
+	return false
 }
 
 const topLevelUsage = `claudit — audit Claude Code session JSONL files for token & cost spend.
 
 Usage:
   claudit <command> [flags]
-  claudit [flags]              (alias for "claudit report")
+  claudit [flags]              (alias for "claudit serve")
 
 Commands:
-  report   Generate a cost/usage report (HTML by default; --json or unset --html for markdown).
-  diff     Compare two date ranges and report top movers (HTML by default; --json or unset --html for markdown).
+  serve    Run a local web daemon that serves a live-updating dashboard (filters via URL query).
   watch    Tail a live session and print running cost.
-  serve    Run a local web daemon that serves a live-updating report (filters via URL query).
   version  Print the installed claudit version and exit (also: --version).
 
 Run "claudit <command> --help" for command-specific flags.

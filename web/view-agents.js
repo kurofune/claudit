@@ -46,7 +46,7 @@ import {
   setPlayheadT, setTlMinPxPerMs, setTimelineSid,
   setFilterSpec, setFilterBarBuilt, setHitIndex,
   openAgentBodies, TREE_PAGE, treeLimit, setTreeLimit, coreHooks,
-  labelIcon, originBadgeHTML, isServeMode, colorSlot, convSidebarWidth,
+  labelIcon, originBadgeHTML, colorSlot, convSidebarWidth,
   startConvResize, startTimelineResize, kindFamily, kindBadge,
   captureState, restoreState, clockTime, shortId,
 } from './agents-shared.js';
@@ -961,11 +961,8 @@ function renderInsights(sessions) {
     // real cross-session refKeys, so the panel surfaces every flagged anomaly in
     // the window and click-through jumps to it wherever it lives; re-scoping it
     // would mean a synthetic sub-graph whose renumbered agent indices break those
-    // refs. nowMs is the live clock in serve mode and ABSENT in the static report
-    // (where the page can't know the wall-clock), keeping the static-safe
-    // contract — idle-stall's trailing-gap check degrades cleanly when omitted.
-    const nowMs = isServeMode() ? Date.now() : undefined;
-    panel = renderSignalsPanel(detectSignals(lastGraph, { nowMs }));
+    // refs. nowMs is the live clock idle-stall's trailing-gap check reads.
+    panel = renderSignalsPanel(detectSignals(lastGraph, { nowMs: Date.now() }));
   } else if (tab.key === 'time') {
     // Time needs the SCOPE, not just the flat agent list: at graph scope it
     // rolls up per SESSION (top-N by total) so a wide window stays legible.
@@ -1032,10 +1029,9 @@ function renderToolMixPanel(agents) {
 // filter has no time-bucket dimension to land on. Honest-only — turns without
 // a measured gen_ms contribute no idle, so totals can undershoot wall-clock.
 // Pure render from the scoped slice (no scrub / SSE); nowMs is the live clock
-// in serve mode and absent in the static report (a running agent's open turn
-// then simply contributes only its gen time).
+// a running agent's open turn is measured against.
 function renderTimePanel(scope, agents) {
-  const nowMs = isServeMode() ? Date.now() : undefined;
+  const nowMs = Date.now();
   const graphScoped = scope === 'graph';
   const data = graphScoped
     ? sessionTimeRows((lastGraph && lastGraph.sessions) || [], { nowMs })

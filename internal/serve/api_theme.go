@@ -1,13 +1,10 @@
 package serve
 
 // handleAPITheme persists the SPA picker's chosen theme to
-// ~/.config/claudit/theme so the standalone `claudit report` /
-// `claudit diff` commands can pick it up. POST body is JSON
-// {"slug":"<theme-slug>"}; the slug is validated against
-// render.ValidThemeSlug before any file I/O. The empty-slug case
-// (user reverted to Auto) removes the file rather than persisting
-// the "auto" sentinel — exports then fall back to the OS
-// prefers-color-scheme default.
+// ~/.config/claudit/theme. POST body is JSON {"slug":"<theme-slug>"};
+// the slug is validated against render.ValidThemeSlug before any file
+// I/O. The empty-slug case (user reverted to Auto) removes the file
+// rather than persisting the "auto" sentinel.
 //
 // This is the *only* write path on the daemon. Loopback-only by
 // default (serve binds 127.0.0.1) keeps the attack surface low; a

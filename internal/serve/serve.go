@@ -36,7 +36,7 @@ type Options struct {
 	// Defaults applied when the URL query doesn't pin them. These
 	// narrow the served report into the "operational dashboard"
 	// shape: last week's data, top sessions. The full archive view
-	// of `claudit report` is one click away via ?scope=all.
+	// is one click away via ?scope=all.
 	DefaultLast        time.Duration // 0 disables the default time window
 	DefaultHotspots    int
 	DefaultSessionsTop int

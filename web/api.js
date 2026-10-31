@@ -12,15 +12,6 @@
 // must-revalidate` header from the server is what triggers a
 // revalidation on each call; a 304 returns the cached body without
 // re-decoding the JSON payload.
-//
-// Offline / static-report mode (Phase 9): when the page sets
-// window.__claudit_static_data (a section-keyed snapshot the static
-// HTML report inlines), getJSON routes the call to the inline blob
-// instead of issuing a fetch. That makes a downloaded report fully
-// interactive without a server. Filter querystrings are ignored
-// offline — the static blob was already built with whatever filter
-// the report-author chose; client-side re-filtering across the wire
-// has no meaning when there is no wire.
 
 /** @import { AgentGraph, ToolUseDetail, TurnTextDetail } from './api-types.js' */
 
@@ -32,48 +23,8 @@ function withSearch(path) {
   return apiBase + path + search;
 }
 
-// offlineLookup routes an /_claudit/api/<...> path to its inlined
-// payload in window.__claudit_static_data. Returns the payload, or
-// throws if the path is unknown — same failure shape getJSON
-// produces for an HTTP error, so callers don't need to branch on
-// online/offline.
-/** @param {string} path @returns {any} */
-function offlineLookup(path) {
-  // window.__claudit_static_data is an ad-hoc global the static report
-  // stamps on window; cast keeps the checker off the untyped property.
-  const data = /** @type {any} */ (window).__claudit_static_data;
-  // Strip a trailing querystring before pattern-matching — offline
-  // mode ignores filter params (the inline blob is pre-filtered).
-  const q = path.indexOf('?');
-  const bare = q >= 0 ? path.slice(0, q) : path;
-
-  switch (bare) {
-    case '/snapshot':  return data.snapshot;
-    case '/overview':  return data.overview;
-    case '/cost':      return data.cost;
-    case '/tokens':    return data.tokens;
-    case '/cache':     return data.cache;
-    case '/tools':     return data.tools;
-    case '/subagents': return data.subagents;
-    case '/anomalies': return data.anomalies;
-    case '/agents':    return data.agents;
-  }
-  // /trends?dim=X — the dim is in the original querystring, parsed
-  // here from `path` rather than location.search so a caller that
-  // builds a synthetic URL still resolves to the right series.
-  if (bare === '/trends' && q >= 0) {
-    const params = new URLSearchParams(path.slice(q));
-    const dim = params.get('dim');
-    if (dim && data.trends && data.trends[dim]) return data.trends[dim];
-  }
-  throw new Error('offline: no inline payload for ' + path);
-}
-
 /** @param {string} path @returns {Promise<any>} */
 async function getJSON(path) {
-  if (typeof window !== 'undefined' && /** @type {any} */ (window).__claudit_static_data) {
-    return offlineLookup(path);
-  }
   const url = withSearch(path);
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' },
@@ -97,9 +48,7 @@ export const fetchAnomalies = () => getJSON('/anomalies');
 /** @returns {Promise<AgentGraph>} */
 export const fetchAgents = () => getJSON('/agents');
 // fetchAgentToolFull pulls the untruncated input/output for one tool_use back
-// from disk (the drawer's "show full" action). Serve-mode only — in static
-// mode offlineLookup has no inline payload for this and throws; the drawer
-// guards on serve mode so it never calls this offline.
+// from disk (the drawer's "show full" action).
 /**
  * @param {string} sessionId
  * @param {string} toolId
