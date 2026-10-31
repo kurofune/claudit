@@ -16,7 +16,9 @@ Never write beads by hand and never call `bd create` directly.
    change. `/create-bead` takes it as the `touches` key in args mode. If one
    was emitted without it, fill it before anything drains:
    `bd update <id> --metadata '{"touches":["path/"]}'`, confirmed with
-   `bd show <id> --json | jq .metadata.touches`.
+   `bd show <id> --json | jq .metadata.touches`. A path under `.djinn/seats/`
+   is never in `touches`: route that change to the seat as a duty, or edit it
+   attended on main yourself.
 4. **A direct operator ask is its own approval.** File it and never add the
    `proposed` label to it. Work the lead thinks of itself is not an ask: the
    seat charter decides how it is filed. Read the `## Self-approval` section

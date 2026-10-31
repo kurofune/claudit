@@ -236,6 +236,8 @@ Adjacent work is out of scope: file it through `/create-bead`, stating why it ma
 
 Workers never edit `CONTEXT_MAP.md`: the gardener seat maintains it, and a landing that changes it is deferred.
 
+Workers never edit `.djinn/seats/`: only `djinn seat run` writes a seat's files, and a landing that changes one is deferred; a seat-file change is that seat's duty or the lead's attended edit.
+
 ## 8. Commit, then push git and Dolt together
 
 Interactive: after `bd close`, run `bd dolt push` with the `git push` (repos without Dolt auto-commit run `bd dolt commit` first), so code and bead state land together. Under `DJINN_SESSION=1` the harness pushes both (`commitClose`); never push by hand.
