@@ -1116,7 +1116,7 @@ function renderSignalsPanel(signals) {
   const overflow = signals.length - shown.length;
   const rows = shown.map(s => {
     const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
-    const tip = `${s.reason ? `${s.reason}\n` : ''}Click to jump to this ${s.kind} on the Timeline`;
+    const tip = `${s.reason ? `${s.reason} · ` : ''}click to jump to this ${s.kind} on the Timeline`;
     return `<div class="ins-sig-row sig-${tier} is-clickable" role="button" tabindex="0" data-ref="${escHtml(s.ref)}" title="${escHtml(tip)}">
         <span class="ins-sig-pip" aria-hidden="true"></span>
         <span class="ins-sig-summary">${escHtml(s.summary)}</span>
