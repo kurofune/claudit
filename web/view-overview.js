@@ -75,7 +75,7 @@ function hotspotCard(h, idx) {
       <span class="hotspot-kind">${escHtml(kindLabel(h.kind))}</span>
       <h3 class="h-title" id="${anchorID}-title">${escHtml(h.title)}</h3>
       <span class="h-cost" title="Context cost: writing this output into context and re-reading it on later turns">${escHtml(fmtMoney(h.cost_usd))}</span>
-      <span class="h-pct">${(h.pct_of_total || 0).toFixed(1)}% of context cost</span>
+      <span class="h-pct">${(h.pct_of_total || 0).toFixed(1)}% of ${escHtml(h.pct_basis || 'context cost')}</span>
       ${trendHTML}
       <a class="anchor-link" href="#overview/${anchorID}" title="Copy link to this hotspot" aria-label="Copy link to hotspot ${rank}">#</a>
     </header>

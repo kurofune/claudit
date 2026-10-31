@@ -42,8 +42,11 @@ type Hotspot struct {
 	// results cost to write into and re-read from context; for a repeated
 	// cache write, the session's cache-write cost.
 	CostUSD float64
-	// PctOfTotal is CostUSD as a percentage of ContextCostTotal.
+	// PctOfTotal is CostUSD as a percentage of the window total PctBasis
+	// names: ContextCostTotal for a tool pattern, every session's
+	// cache-write cost for a repeated cache write.
 	PctOfTotal float64
+	PctBasis   string
 	// Examples are up to five invocations behind the card, biggest context
 	// first.
 	Examples []ContextExample
@@ -55,6 +58,12 @@ type Hotspot struct {
 	// "write_pct_of_read", "turns".
 	Context map[string]any
 }
+
+// PctBasis values: what a hotspot's PctOfTotal is a share of.
+const (
+	PctOfContextCost    = "context cost"
+	PctOfCacheWriteCost = "cache-write cost"
+)
 
 // HotspotKey joins a hotspot across two windows.
 type HotspotKey struct {
@@ -68,7 +77,8 @@ func (a *Aggregator) Hotspots(top int) []Hotspot {
 	if top <= 0 {
 		return nil
 	}
-	cands := a.hotspotCandidates()
+	caches := a.sessionCaches()
+	cands := append(a.toolHotspots(), repeatedCacheWrites(caches, a.bySession)...)
 	sort.SliceStable(cands, func(i, j int) bool {
 		if cands[i].CostUSD != cands[j].CostUSD {
 			return cands[i].CostUSD > cands[j].CostUSD
@@ -78,10 +88,20 @@ func (a *Aggregator) Hotspots(top int) []Hotspot {
 	if len(cands) > top {
 		cands = cands[:top]
 	}
-	total := a.ContextCostTotal().ContextCostUSD
+	contextTotal := a.ContextCostTotal().ContextCostUSD
+	var cacheWriteTotal float64
+	for _, sc := range caches {
+		cacheWriteTotal += sc.writeCost
+	}
 	evidence := a.contextEvidence(hotspotExamples)
 	for i := range cands {
 		h := &cands[i]
+		total := contextTotal
+		h.PctBasis = PctOfContextCost
+		if h.Kind == HotspotRepeatedCacheWrite {
+			total = cacheWriteTotal
+			h.PctBasis = PctOfCacheWriteCost
+		}
 		if total > 0 {
 			h.PctOfTotal = 100 * h.CostUSD / total
 		}
@@ -98,12 +118,19 @@ func (a *Aggregator) Hotspots(top int) []Hotspot {
 	return cands
 }
 
-// HotspotCosts returns every hotspot candidate's cost by key, uncapped, so
-// a later window can show each card's change against this one.
+// HotspotCosts returns, by key and uncapped, the cost of everything that
+// could be a hotspot card in another window, so that window can show each
+// card's change against this one. A session's cache-write cost is included
+// whether or not it crosses the repeated-cache-write thresholds here.
 func (a *Aggregator) HotspotCosts() map[HotspotKey]float64 {
 	out := map[HotspotKey]float64{}
-	for _, h := range a.hotspotCandidates() {
+	for _, h := range a.toolHotspots() {
 		out[HotspotKey{h.Kind, h.Title}] = h.CostUSD
+	}
+	for id, sc := range a.sessionCaches() {
+		if sc.writeCost > 0 {
+			out[HotspotKey{HotspotRepeatedCacheWrite, repeatedCacheWriteTitle(id)}] = sc.writeCost
+		}
 	}
 	return out
 }
@@ -113,8 +140,8 @@ func (a *Aggregator) HotspotCosts() map[HotspotKey]float64 {
 // own session.
 var skipHotspotTool = map[string]bool{"Skill": true, "SlashCommand": true, "Agent": true}
 
-// hotspotCandidates is every hotspot without examples or share.
-func (a *Aggregator) hotspotCandidates() []Hotspot {
+// toolHotspots is every tool-pattern hotspot without examples or share.
+func (a *Aggregator) toolHotspots() []Hotspot {
 	var cands []Hotspot
 	for tool, rows := range a.ContextCostByToolDetail() {
 		if skipHotspotTool[tool] {
@@ -140,7 +167,7 @@ func (a *Aggregator) hotspotCandidates() []Hotspot {
 			})
 		}
 	}
-	return append(cands, a.repeatedCacheWrites()...)
+	return cands
 }
 
 // sessionCache is one session's cache traffic over its counted turns.
@@ -150,10 +177,8 @@ type sessionCache struct {
 	turns       int
 }
 
-// repeatedCacheWrites returns a card per session whose cache writes are at
-// least repeatedWriteMinTokens and exceed repeatedWriteMinShare of its
-// cache reads — a cache that keeps being rebuilt instead of re-read.
-func (a *Aggregator) repeatedCacheWrites() []Hotspot {
+// sessionCaches returns each session's cache traffic over its counted turns.
+func (a *Aggregator) sessionCaches() map[string]*sessionCache {
 	bySession := map[string]*sessionCache{}
 	for _, turns := range a.ctxTurns {
 		for _, c := range turns {
@@ -171,13 +196,30 @@ func (a *Aggregator) repeatedCacheWrites() []Hotspot {
 			sc.turns++
 		}
 	}
+	return bySession
+}
+
+// repeated reports whether sc's cache writes are at least
+// repeatedWriteMinTokens and exceed repeatedWriteMinShare of its cache
+// reads — a cache that keeps being rebuilt instead of re-read.
+func (sc *sessionCache) repeated() bool {
+	return sc.write >= repeatedWriteMinTokens && float64(sc.write) > repeatedWriteMinShare*float64(sc.read)
+}
+
+func repeatedCacheWriteTitle(session string) string {
+	return "Repeated cache writes: session " + session
+}
+
+// repeatedCacheWrites returns a card per session in caches whose writes are
+// repeated.
+func repeatedCacheWrites(caches map[string]*sessionCache, sessions map[string]*SessionBucket) []Hotspot {
 	var out []Hotspot
-	for id, sc := range bySession {
-		if sc.write < repeatedWriteMinTokens || float64(sc.write) <= repeatedWriteMinShare*float64(sc.read) {
+	for id, sc := range caches {
+		if !sc.repeated() {
 			continue
 		}
 		var project string
-		if sb := a.bySession[id]; sb != nil {
+		if sb := sessions[id]; sb != nil {
 			project = sb.Project
 		}
 		pctOfRead := 0.0
@@ -186,7 +228,7 @@ func (a *Aggregator) repeatedCacheWrites() []Hotspot {
 		}
 		out = append(out, Hotspot{
 			Kind:    HotspotRepeatedCacheWrite,
-			Title:   "Repeated cache writes: session " + id,
+			Title:   repeatedCacheWriteTitle(id),
 			CostUSD: sc.writeCost,
 			Context: map[string]any{
 				"session_id":        id,

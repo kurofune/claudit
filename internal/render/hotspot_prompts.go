@@ -99,7 +99,7 @@ Make that one change in this repository, then reply with the change and the evid
 	parse(aggregate.HotspotRepeatedCacheWrite, `## Evidence
 
 - Session {{.session_id}}{{if .project}} in project {{.project}}{{end}} wrote {{num .write_tokens}} prompt-cache tokens and read back {{num .read_tokens}} ({{pct .write_pct_of_read}}% as many writes as reads) over {{num .turns}} turn(s).
-- Cache-write cost: ${{money .write_cost}} ({{pct .pct}}% of all context cost in the window).
+- Cache-write cost: ${{money .write_cost}} ({{pct .pct}}% of all cache-write cost in the window).
 
 A healthy session writes its prefix once and reads it back. Writes this large mean the cached prefix kept being rebuilt: a gap between turns longer than the cache lifetime, or content early in the prompt (CLAUDE.md, hook output, tool list) that changed mid-session.
 

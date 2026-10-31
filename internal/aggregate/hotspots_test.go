@@ -268,3 +268,52 @@ func TestHotspotsExamplesFromParsedJSONL(t *testing.T) {
 		}
 	}
 }
+
+// TestHotspotsCacheWritePctBasis: a repeated-cache-write card's share is of
+// every session's cache-write cost, so it stays within 0–100% whether the
+// window has no attributed tool results or only a tiny one; tool-pattern
+// cards keep their share of context cost.
+func TestHotspotsCacheWritePctBasis(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	build := func(withTool bool) []Hotspot {
+		agg := New(ctxTable())
+		// churn: 1.2M writes; other: 600k writes; both priced at $6/M.
+		for i := 0; i < 4; i++ {
+			agg.Add(ctxTurn("/p/churn.jsonl", "churn", fmt.Sprintf("c%d", i), "m", t0.Add(time.Duration(i)*10*time.Minute),
+				parse.Usage{CacheCreate5mTokens: 300_000}))
+		}
+		agg.Add(ctxTurn("/p/other.jsonl", "other", "o0", "m", t0, parse.Usage{CacheCreate5mTokens: 600_000}))
+		if withTool {
+			agg.Add(ctxTurn("/p/tool.jsonl", "tool", "t0", "m", t0, parse.Usage{},
+				parse.ToolUse{ID: "tu", Name: "Bash", Detail: "ls", Input: "ls"}))
+			agg.Add(ctxTurn("/p/tool.jsonl", "tool", "t1", "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 100}))
+			agg.AddToolResults([]parse.ToolResult{{ToolUseID: "tu", OutputBytes: 40}})
+		}
+		return agg.Hotspots(10)
+	}
+	for _, withTool := range []bool{false, true} {
+		hs := build(withTool)
+		h := findHotspot(hs, HotspotRepeatedCacheWrite, "churn")
+		if h == nil {
+			t.Fatalf("withTool=%v: no churn card in %+v", withTool, hs)
+		}
+		// 1.2M of the 1.8M (+100 with the tool turn) cache-write tokens.
+		wantTotal := 1_800_000.0
+		if withTool {
+			wantTotal += 100
+		}
+		if want := 100 * 1_200_000 / wantTotal; !approx(h.PctOfTotal, want) || h.PctBasis != PctOfCacheWriteCost {
+			t.Errorf("withTool=%v: churn pct = %v basis %q, want %v of %q", withTool, h.PctOfTotal, h.PctBasis, want, PctOfCacheWriteCost)
+		}
+		if !withTool {
+			continue
+		}
+		ls := findHotspot(hs, HotspotBashPattern, "ls")
+		if ls == nil {
+			t.Fatalf("no ls card in %+v", hs)
+		}
+		if !approx(ls.PctOfTotal, 100) || ls.PctBasis != PctOfContextCost {
+			t.Errorf("ls pct = %v basis %q, want 100 of %q", ls.PctOfTotal, ls.PctBasis, PctOfContextCost)
+		}
+	}
+}

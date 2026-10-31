@@ -311,3 +311,36 @@ func TestBuildOverview_HotspotTrend(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildOverview_CacheWriteTrendAcrossThreshold: a session under the
+// repeated-cache-write floor in the previous window still supplies that
+// window's cost, so crossing the floor reads as a rise, not "new".
+func TestBuildOverview_CacheWriteTrendAcrossThreshold(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	cur, prev := aggregate.New(prices), aggregate.New(prices)
+	prev.Add(parse.Turn{SessionID: "s", MessageID: "p", Model: "claude-opus-4-7", Timestamp: t0.Add(-7 * 24 * time.Hour), SourceFile: "/p/s.jsonl",
+		Usage: parse.Usage{CacheCreate5mTokens: 900_000}})
+	cur.Add(parse.Turn{SessionID: "s", MessageID: "c", Model: "claude-opus-4-7", Timestamp: t0, SourceFile: "/p/s.jsonl",
+		Usage: parse.Usage{CacheCreate5mTokens: 1_200_000}})
+
+	var h *HotspotForJSON
+	for _, x := range BuildOverview(cur, prev).Hotspots {
+		if x.Kind == aggregate.HotspotRepeatedCacheWrite {
+			x := x
+			h = &x
+		}
+	}
+	if h == nil {
+		t.Fatal("no repeated_cache_write card")
+	}
+	if h.PrevCostUSD == nil || *h.PrevCostUSD <= 0 {
+		t.Fatalf("prev_cost_usd = %v, want the previous window's write cost", h.PrevCostUSD)
+	}
+	if h.TrendPct == nil || *h.TrendPct < 33 || *h.TrendPct > 34 {
+		t.Errorf("trend_pct = %v, want ≈ +33%%", h.TrendPct)
+	}
+}

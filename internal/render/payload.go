@@ -16,8 +16,11 @@ type HotspotForJSON struct {
 	Title      string                `json:"title"`
 	CostUSD    float64               `json:"cost_usd"`
 	PctOfTotal float64               `json:"pct_of_total"`
-	Prompt     string                `json:"prompt"`
-	Examples   []HotspotExample      `json:"examples"`
+	// PctBasis names the window total PctOfTotal is a share of:
+	// "context cost" or "cache-write cost".
+	PctBasis string           `json:"pct_basis"`
+	Prompt   string           `json:"prompt"`
+	Examples []HotspotExample `json:"examples"`
 	// PrevCostUSD is this hotspot's cost over the previous window of equal
 	// length, 0 when it had none there. Absent when no previous window was
 	// compared (an unbounded window has no equal-length predecessor).
@@ -60,6 +63,7 @@ func buildHotspotsForJSON(a, prev *aggregate.Aggregator) []HotspotForJSON {
 			Title:      h.Title,
 			CostUSD:    h.CostUSD,
 			PctOfTotal: h.PctOfTotal,
+			PctBasis:   h.PctBasis,
 			Prompt:     prompt,
 			Examples:   examples,
 		}
