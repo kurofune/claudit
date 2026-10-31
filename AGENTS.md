@@ -6,7 +6,7 @@ Go CLI that audits Claude Code sessions from the `.jsonl` logs under `~/.claude/
 
 ### Issue tracker
 
-Issues are beads in the local bd DB; author via `/create-bead`. See `docs/agents/issue-tracker.md`.
+Issues are beads in the local bd DB; author via `/create-bead`.
 
 ### Triage labels
 
