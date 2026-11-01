@@ -5,9 +5,8 @@
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
 // model response — one Turn), the response_item assistant messages, tool
-// calls and their
-// outputs, and event_msg token_count (plan-usage readings). Every other
-// record type is skipped.
+// calls and their outputs, and event_msg token_count (plan-usage readings).
+// Every other record type is skipped.
 package codex
 
 import (
