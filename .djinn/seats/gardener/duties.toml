@@ -403,8 +403,8 @@ the workarounds the seats keep repeating, and propose one fix for each.
      slug being the repo root's absolute path with every character outside
      A-Z, a-z and 0-9 replaced by `-`:
      `printf '%s' "$PWD" | sed 's#[^A-Za-z0-9]#-#g'`
-     (/Users/nathangross/Projects/djinn gives
-     `-Users-nathangross-Projects-djinn`). Read MEMORY.md and every *.md
+     (/home/dev/src/app gives
+     `-home-dev-src-app`). Read MEMORY.md and every *.md
      there.
    - Codex: read every *.md under `$HOME/.codex/memories/`.
    - Apply step 5's four kinds to both stores.
