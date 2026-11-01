@@ -168,41 +168,48 @@ type nodeAccum struct {
 	ended      time.Time
 	cost       float64
 	tokens     aggregate.Tokens
-	steps      []AgentStep
+	// turns are the agent's counted turns in snapshot order, each with its
+	// cost; steps is built from them only by the callers that ship steps.
+	turns []turnRef
+	steps []AgentStep
 }
 
-// BuildAgentGraph groups a snapshot's turns into per-session agent trees.
+// turnRef is one counted turn of an agent and its priced cost.
+type turnRef struct {
+	t    *parse.Turn
+	cost float64
+}
+
+// sessionAccum is one session's agents while the snapshot is grouped.
+type sessionAccum struct {
+	sessionID  string
+	cwd        string
+	entrypoint string
+	provider   string
+	// nodes keyed by SourceFile — one agent per file.
+	nodes map[string]*nodeAccum
+}
+
+// collected is a snapshot grouped into sessions. OutsideFilter and Replays
+// count the turns the filter excluded and the replays skipped, for the
+// sessions collected.
+type collected struct {
+	sessions      map[string]*sessionAccum
+	outsideFilter int
+	replays       int
+}
+
+// collectSessions groups a snapshot's turns into sessions and agents: the
+// filter, replay skip, thread-root fold and per-turn cost every Sessions
+// payload shares. A non-empty only keeps just that session.
+//
 // A Claude Code sub-agent's JSONL carries its parent's sessionId and is
 // classified by parse.IsSubagentFile; a Codex sub-agent rollout carries its
 // own thread id and a ParentLink to the spawning thread, and threadRoots
 // folds it into the root session. The individual agents are distinguished by
 // SourceFile.
-func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts Options) (AgentGraph, error) {
-	if snap == nil || len(snap.Turns) == 0 {
-		return AgentGraph{}, nil
-	}
-
-	type sessionAccum struct {
-		sessionID  string
-		cwd        string
-		entrypoint string
-		provider   string
-		// nodes keyed by SourceFile — one agent per file.
-		nodes map[string]*nodeAccum
-	}
-	sessions := map[string]*sessionAccum{}
-
-	// Index tool results by tool_use id so each step's tool calls can be
-	// joined to their outcome (status + output). Built once over the whole
-	// snapshot; ids are unique per session file so cross-file collision is
-	// not a concern in practice.
-	results := make(map[string]parse.ToolResult, len(snap.ToolResults))
-	for _, r := range snap.ToolResults {
-		if r.ToolUseID != "" {
-			results[r.ToolUseID] = r
-		}
-	}
-
+func collectSessions(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, only string) collected {
+	c := collected{sessions: map[string]*sessionAccum{}}
 	// A resumed/forked session replays the original's turns verbatim (same
 	// message.id, different file/sessionId). Their cost/tokens were counted on
 	// the canonical occurrence, so skip the replays here or the per-session and
@@ -210,21 +217,27 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	replays := aggregate.BuildReplaySet(snap.Turns)
 	roots := threadRoots(snap)
 
-	for _, t := range snap.Turns {
-		if !aggregate.MatchesFilter(t, f) {
-			continue
-		}
-		if replays.IsReplay(t) {
-			continue
-		}
+	for i := range snap.Turns {
+		t := &snap.Turns[i]
 		sessionID := t.SessionID
 		if root, ok := roots[t.SessionID]; ok {
 			sessionID = root
 		}
-		s, ok := sessions[sessionID]
+		if only != "" && sessionID != only {
+			continue
+		}
+		if !aggregate.MatchesFilter(*t, f) {
+			c.outsideFilter++
+			continue
+		}
+		if replays.IsReplay(*t) {
+			c.replays++
+			continue
+		}
+		s, ok := c.sessions[sessionID]
 		if !ok {
 			s = &sessionAccum{sessionID: sessionID, nodes: map[string]*nodeAccum{}}
-			sessions[sessionID] = s
+			c.sessions[sessionID] = s
 		}
 		if s.cwd == "" && t.CWD != "" {
 			s.cwd = t.CWD
@@ -258,6 +271,30 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			t.Usage.CacheReadTokens, t.Usage.Speed)
 		n.cost += cost
 		addUsage(&n.tokens, t.Usage)
+		n.turns = append(n.turns, turnRef{t: t, cost: cost})
+	}
+	return c
+}
+
+// toolResults indexes a snapshot's tool results by tool_use id so each
+// step's tool calls can be joined to their outcome (status + output). Ids
+// are unique per session file so cross-file collision is not a concern in
+// practice.
+func toolResults(snap *corpus.Snapshot) map[string]parse.ToolResult {
+	results := make(map[string]parse.ToolResult, len(snap.ToolResults))
+	for _, r := range snap.ToolResults {
+		if r.ToolUseID != "" {
+			results[r.ToolUseID] = r
+		}
+	}
+	return results
+}
+
+// buildSteps turns an agent's counted turns into its AgentSteps.
+func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes int) {
+	n.steps = make([]AgentStep, 0, len(n.turns))
+	for _, r := range n.turns {
+		t := r.t
 		var stepTokens aggregate.Tokens
 		addUsage(&stepTokens, t.Usage)
 		// Model generation span: first→last streamed line of the turn. Zero
@@ -270,16 +307,25 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			UUID:          t.UUID,
 			Timestamp:     t.Timestamp,
 			Model:         t.Model,
-			CostUSD:       cost,
+			CostUSD:       r.cost,
 			Tokens:        stepTokens,
 			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
 			GenMs:         genMs,
-			Tools:         capToolSnippets(aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp), opts.SnippetRunes),
+			Tools:         capToolSnippets(aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp), snippetRunes),
 			Thinking:      t.Thinking,
 			Text:          t.Text,
 			parentUUID:    t.ParentUUID,
 		})
 	}
+}
+
+// BuildAgentGraph groups a snapshot's turns into per-session agent trees.
+func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts Options) (AgentGraph, error) {
+	if snap == nil || len(snap.Turns) == 0 {
+		return AgentGraph{}, nil
+	}
+	c := collectSessions(snap, prices, f, "")
+	results := toolResults(snap)
 
 	// Resolver for prompt segmentation (the Conversation lens): maps each main
 	// step's parentUuid back to the user prompt that originated it. Built once
@@ -287,55 +333,9 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	// lookups don't collide.
 	resolver := aggregate.NewPromptResolver(snap.Turns, snap.Users, snap.Links)
 
-	out := make([]AgentSession, 0, len(sessions))
-	for _, s := range sessions {
-		as := AgentSession{
-			SessionID:  s.sessionID,
-			CWD:        s.cwd,
-			Project:    project.Default.Resolve(s.cwd).Name,
-			Entrypoint: s.entrypoint,
-			Provider:   s.provider,
-		}
-		var ordinary []*nodeAccum
-		for _, n := range s.nodes {
-			// Roll node spans/cost up to the session.
-			if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
-				as.StartedAt = n.started
-			}
-			if n.ended.After(as.EndedAt) {
-				as.EndedAt = n.ended
-			}
-			as.CostUSD += n.cost
-			if !n.subagent {
-				ordinary = append(ordinary, n)
-				continue
-			}
-			node := finalizeNode(n, opts)
-			as.ErrorCount += node.ErrorCount
-			as.Children = append(as.Children, node)
-		}
-		// Several ordinary rollouts can share one session id (a Codex
-		// guardian_review rollout carries its user session's id). One is Main;
-		// the others stay visible as kind "main" children so every node the
-		// session cost sums is displayed.
-		sortMainFirst(ordinary, s.sessionID)
-		for i, n := range ordinary {
-			node := finalizeNode(n, opts)
-			as.ErrorCount += node.ErrorCount
-			if i == 0 {
-				as.Main = &node
-			} else {
-				as.Children = append(as.Children, node)
-			}
-		}
-		// Children ordered by start time so the swimlane reads left-to-right
-		// in spawn order; map iteration above is non-deterministic.
-		sort.SliceStable(as.Children, func(i, j int) bool {
-			return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
-		})
-		attachSpawnRollups(&as)
-		as.Prompts = segmentPrompts(as.Main, resolver)
-		out = append(out, as)
+	out := make([]AgentSession, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		out = append(out, assembleSession(s, results, resolver, opts))
 	}
 	// Cap to the N most-recently-active sessions before the display sort, so
 	// a busy corpus (thousands of sessions in the window) ships only what
@@ -361,6 +361,59 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		return out[i].SessionID < out[j].SessionID
 	})
 	return AgentGraph{Sessions: out}, nil
+}
+
+// assembleSession finalizes one collected session into its agent tree:
+// steps, main agent, children in start order, spawn rollups and prompts.
+func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, resolver *aggregate.PromptResolver, opts Options) AgentSession {
+	as := AgentSession{
+		SessionID:  s.sessionID,
+		CWD:        s.cwd,
+		Project:    project.Default.Resolve(s.cwd).Name,
+		Entrypoint: s.entrypoint,
+		Provider:   s.provider,
+	}
+	var ordinary []*nodeAccum
+	for _, n := range s.nodes {
+		buildSteps(n, results, opts.SnippetRunes)
+		// Roll node spans/cost up to the session.
+		if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
+			as.StartedAt = n.started
+		}
+		if n.ended.After(as.EndedAt) {
+			as.EndedAt = n.ended
+		}
+		as.CostUSD += n.cost
+		if !n.subagent {
+			ordinary = append(ordinary, n)
+			continue
+		}
+		node := finalizeNode(n, opts)
+		as.ErrorCount += node.ErrorCount
+		as.Children = append(as.Children, node)
+	}
+	// Several ordinary rollouts can share one session id (a Codex
+	// guardian_review rollout carries its user session's id). One is Main;
+	// the others stay visible as kind "main" children so every node the
+	// session cost sums is displayed.
+	sortMainFirst(ordinary, s.sessionID)
+	for i, n := range ordinary {
+		node := finalizeNode(n, opts)
+		as.ErrorCount += node.ErrorCount
+		if i == 0 {
+			as.Main = &node
+		} else {
+			as.Children = append(as.Children, node)
+		}
+	}
+	// Children ordered by start time so the swimlane reads left-to-right
+	// in spawn order; map iteration above is non-deterministic.
+	sort.SliceStable(as.Children, func(i, j int) bool {
+		return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
+	})
+	attachSpawnRollups(&as)
+	as.Prompts = segmentPrompts(as.Main, resolver)
+	return as
 }
 
 // capToolSnippets applies Options.SnippetRunes to a step's freshly built
