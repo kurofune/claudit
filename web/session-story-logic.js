@@ -9,16 +9,17 @@ export const PAGE_TURNS = 200;
 export const IDLE_MS = 5 * 60 * 1000;
 
 // The blocks a harness writes into a user message on the person's behalf;
-// the same list internal/agentflow/family.go strips for the family key. An
-// unclosed block runs to the end of the text.
+// the same list internal/agentflow/family.go strips for the family key. A
+// block opens at the start of a line, so a prompt that names a tag in its
+// prose keeps that prose; an unclosed block runs to the end of the text.
 const WRAPPERS = [
-  /<local-command-[a-z-]+>[\s\S]*?(?:<\/local-command-[a-z-]+>|$)/g,
-  /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g,
-  /<command-[a-z-]+>[\s\S]*?(?:<\/command-[a-z-]+>|$)/g,
-  /# AGENTS\.md instructions[^\n]*[\s\S]*?(?:<\/INSTRUCTIONS>|$)/g,
-  /<environment_context>[\s\S]*?(?:<\/environment_context>|$)/g,
-  /<codex_internal_context[^>]*>[\s\S]*?(?:<\/codex_internal_context>|$)/g,
-  /<guardian_tool_descriptions>[\s\S]*?(?:<\/guardian_tool_descriptions>|$)/g,
+  /^[ \t]*<local-command-[a-z-]+>[\s\S]*?(?:<\/local-command-[a-z-]+>|$(?![\s\S]))/gm,
+  /^[ \t]*<system-reminder>[\s\S]*?(?:<\/system-reminder>|$(?![\s\S]))/gm,
+  /^[ \t]*<command-[a-z-]+>[\s\S]*?(?:<\/command-[a-z-]+>|$(?![\s\S]))/gm,
+  /^# AGENTS\.md instructions[^\n]*[\s\S]*?(?:<\/INSTRUCTIONS>|$(?![\s\S]))/gm,
+  /^[ \t]*<environment_context>[\s\S]*?(?:<\/environment_context>|$(?![\s\S]))/gm,
+  /^[ \t]*<codex_internal_context[^>]*>[\s\S]*?(?:<\/codex_internal_context>|$(?![\s\S]))/gm,
+  /^[ \t]*<guardian_tool_descriptions>[\s\S]*?(?:<\/guardian_tool_descriptions>|$(?![\s\S]))/gm,
 ];
 
 export const WRAPPER_LABEL = 'AGENTS.md and environment context hidden';
@@ -166,7 +167,9 @@ export function groupCommands(steps) {
 export function groupHeader(steps, unresolved) {
   const tools = steps.flatMap(s => s.tools || []);
   const start = ms(steps[0].timestamp);
-  const end = Math.max(...steps.map(stepEnd));
+  // A turn whose calls carry no end stamp ends where the next turn starts.
+  const end = Math.max(...steps.map(s => ((s.tools || []).some(t => isNaN(ms(t.ended_at)))
+    ? Math.max(stepEnd(s), ms(s.timestamp) + (s.duration_ms || 0)) : stepEnd(s))));
   const durationMs = end > start ? end - start : 0;
   const cost = steps.reduce((a, s) => a + (s.cost_usd || 0), 0);
   const commands = tools.length;
@@ -318,18 +321,21 @@ export function storyRows(prompt, steps, children = [], keyPrefix = '') {
   const { byStep, before } = nestChildren(steps, children);
   let blockSeq = 0;
   const blocks = (list, note) => childBlocks(list, note).map(b => ({ ...b, key: `${keyPrefix}c${blockSeq++}` }));
-  const placed = i => {
-    const out = [];
-    for (const { child, note } of before.get(i) || []) out.push(...blocks([child], note));
-    return out;
-  };
-  // Merge orphans placed at the same spot so overlapping ones share a header.
-  const orphansAt = i => {
-    const list = before.get(i) || [];
-    if (list.length < 2) return placed(i);
-    const notes = [...new Set(list.map(x => x.note))];
-    return blocks(list.map(x => x.child), notes.join(' · '));
-  };
+  // Children with no loaded parent step cluster first, so overlapping ones
+  // share a header, and each run sits before the first step that started
+  // after its earliest member.
+  /** @type {Map<number, StoryRow[]>} */
+  const orphanRows = new Map();
+  const orphans = [...before.values()].flat();
+  for (const cluster of parallelClusters(orphans.map(x => x.child))) {
+    const start = ms(cluster[0].started_at);
+    let k = steps.findIndex(s => ms(s.timestamp) > start);
+    if (k < 0) k = steps.length;
+    const notes = [...new Set(cluster.map(c => orphans.find(x => x.child === c).note))].join(' · ');
+    if (!orphanRows.has(k)) orphanRows.set(k, []);
+    orphanRows.get(k).push(...blocks(cluster, notes));
+  }
+  const orphansAt = i => orphanRows.get(i) || [];
 
   for (const g of groupCommands(steps)) {
     const first = g.steps[0];
@@ -358,7 +364,7 @@ export function storyRows(prompt, steps, children = [], keyPrefix = '') {
           kind: 'step', key: `${keyPrefix}s${i}.${ti}`, index: i, step: s, tool: t, toolIndex: ti,
           clock: clock(t.started_at || s.timestamp), mark: statusMark(t), label: toolLabel(t),
           title: t.input || t.detail || t.name || '',
-          durationMs: span >= 0 ? span : (s.duration_ms || 0),
+          durationMs: isNaN(span) ? (s.duration_ms || 0) : Math.max(0, span),
         });
       });
       items.push(...blocks(byStep.get(i) || [], ''));

@@ -56,6 +56,9 @@ test('splitWrappers keeps the written text and the raw wrapper blocks apart', ()
   const caveat = splitWrappers('<local-command-caveat>Caveat: x</local-command-caveat>\n<system-reminder>r</system-reminder>hi');
   assert.equal(caveat.visible, 'hi');
   assert.equal(caveat.hidden, '<local-command-caveat>Caveat: x</local-command-caveat>\n\n<system-reminder>r</system-reminder>');
+  const prose = 'FamilyKey strips <local-command-caveat>, <system-reminder> and <command-name> blocks.\nSecond line.';
+  assert.deepEqual(splitWrappers(prose), { visible: prose, hidden: '' });
+  assert.deepEqual(splitWrappers('hi\n<system-reminder>unclosed\nmore'), { visible: 'hi', hidden: '<system-reminder>unclosed\nmore' });
 });
 
 test('groupCommands: tool-only steps join the group of the message before them', () => {
@@ -222,4 +225,22 @@ test('fmtDuration reads spans', () => {
   assert.equal(fmtDuration(250), '250ms');
   assert.equal(fmtDuration(0), '0s');
   assert.equal(fmtDuration(2 * 3600000 + 5 * 60000), '2h 5m');
+});
+
+test('a call stamped as ending before it started reads 0s; one with no stamps reads its turn\'s gap', () => {
+  const early = tool('t1', 'ls', 'ok', 10, 9.97);
+  const unstamped = { ...tool('t2', 'pwd', 'ok', 0, 0), started_at: undefined, ended_at: undefined };
+  const g = storyRows(null, [step('a1', 10, { text: 'x', duration_ms: 11000, tools: [early, unstamped] })])[1];
+  assert.deepEqual(g.items.map(i => i.durationMs), [0, 11000]);
+  assert.equal(g.header.text, '2 commands · 11s');
+});
+
+test('sub-agents with unknown parents that overlap share one header even when they start around different steps', () => {
+  const steps = [step('a1', 0, { text: 'one' }), step('a2', 10, { text: 'two' }), step('a3', 200, { text: 'three' })];
+  const a = child({ description: 'a', started_at: at(5), ended_at: at(500) });
+  const b = child({ description: 'b', started_at: at(20), ended_at: at(30) });
+  const rows = storyRows(null, steps, [a, b]);
+  assert.deepEqual(rows.map(r => r.kind), ['agent', 'parallel', 'agent', 'agent']);
+  assert.equal(rows[1].header, '2 agents in parallel · longest: a 8m 15s');
+  assert.deepEqual(rows[1].children.map(x => x.note), ['parent step unknown', 'parent step unknown']);
 });
