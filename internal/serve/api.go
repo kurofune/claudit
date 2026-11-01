@@ -77,7 +77,14 @@ type apiSectionSpec struct {
 	// snapshot + query and bypasses sharedAggregateData entirely (no
 	// Aggregator). Used by sections like /agents that
 	// derive their own structure from raw turns. Takes precedence over build.
-	buildFromSnapshot func(snap *Snapshot, q Query) (any, error)
+	// now is the request's clock reading, the one variant saw.
+	buildFromSnapshot func(snap *Snapshot, q Query, now time.Time) (any, error)
+	// variant, when set, names what else besides the generation and query
+	// the body depends on: wall-clock state such as which sessions are
+	// still active. It joins the ETag and the render-cache key, so a body
+	// that went stale as time passed is rebuilt and fails revalidation
+	// though the snapshot has not moved.
+	variant func(snap *Snapshot, q Query, now time.Time) string
 	// buildWithPrev, when set, also receives the aggregator over the
 	// previous window of equal length (nil for an unbounded window).
 	// Takes precedence over build.
@@ -103,7 +110,7 @@ type apiSectionSpec struct {
 // the browser revalidates with If-None-Match on every navigation but
 // can short-circuit the heavy work whenever the snapshot hasn't moved.
 func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec apiSectionSpec) {
-	now := time.Now()
+	now := s.clock()
 	q, err := parseQuery(r.URL.Query(), now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -112,7 +119,11 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	s.applyDefaults(&q, now)
 
 	snap := s.cache.Snapshot()
-	etag := buildAPIEtag(snap.Generation, spec.section, q.rawQuery)
+	section := spec.section
+	if spec.variant != nil {
+		section += "-" + spec.variant(snap, q, now)
+	}
+	etag := buildAPIEtag(snap.Generation, section, q.rawQuery)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
@@ -130,7 +141,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	}
 
 	wantGzip := acceptsGzip(r)
-	if body, ok := s.lookupCached(q, spec.section, snap.Generation, wantGzip); ok {
+	if body, ok := s.lookupCached(q, section, snap.Generation, wantGzip); ok {
 		if err := writeCached(w, body, wantGzip); err != nil {
 			s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelError, "serve: write api response failed",
 				slog.Any("err", err),
@@ -144,7 +155,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	if spec.buildFromSnapshot != nil {
 		// Snapshot-derived section (e.g. /agents): skip the Aggregator
 		// pass entirely and build straight from raw turns.
-		payload, err = spec.buildFromSnapshot(snap, q)
+		payload, err = spec.buildFromSnapshot(snap, q, now)
 	} else {
 		aggregateFor := s.sharedAggregateData
 		if spec.buildFiltered != nil {
@@ -223,7 +234,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	if wantGzip {
 		gz = gzipBytes(plain)
 	}
-	s.storeCached(q, spec.section, snap.Generation, plain, gz)
+	s.storeCached(q, section, snap.Generation, plain, gz)
 
 	body := plain
 	if wantGzip {

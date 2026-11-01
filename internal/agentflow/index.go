@@ -47,7 +47,8 @@ type SessionIndexRow struct {
 	// succeeded in the session: a failure the session fixed is not failed.
 	Failed       int       `json:"failed"`
 	LastActivity time.Time `json:"last_activity"`
-	// Active is LastActivity within IndexOptions.ActiveWindow of Now.
+	// Active is LastActivity within IndexOptions.ActiveWindow of Now
+	// (activeAt).
 	Active    bool      `json:"active"`
 	StartedAt time.Time `json:"started_at"`
 }
@@ -120,7 +121,7 @@ func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts I
 	row.Turns = len(turns)
 	row.DurationMs = row.LastActivity.Sub(row.StartedAt).Milliseconds()
 	row.Model = mostUsed(models)
-	row.Active = opts.ActiveWindow > 0 && !row.LastActivity.Before(opts.Now.Add(-opts.ActiveWindow))
+	row.Active = row.activeAt(opts.Now, opts.ActiveWindow)
 	sortMainFirst(ordinary, s.sessionID)
 	if len(ordinary) > 0 {
 		row.Outcome = lastMessageLine(ordinary[0].turns)
@@ -128,6 +129,35 @@ func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts I
 	sort.SliceStable(turns, func(i, j int) bool { return turns[i].Timestamp.Before(turns[j].Timestamp) })
 	row.Commands, row.Failed = countCommands(turns, results)
 	return row
+}
+
+func (r SessionIndexRow) activeAt(now time.Time, window time.Duration) bool {
+	return window > 0 && !r.LastActivity.Before(now.Add(-window))
+}
+
+// At is the index as it reads at now: each row's Active recomputed for
+// window, everything else unchanged. idx is not modified.
+func (idx SessionIndex) At(now time.Time, window time.Duration) SessionIndex {
+	rows := make([]SessionIndexRow, len(idx.Sessions))
+	for i, r := range idx.Sessions {
+		r.Active = r.activeAt(now, window)
+		rows[i] = r
+	}
+	return SessionIndex{Sessions: rows}
+}
+
+// Inactive counts the rows not active at now for window. A row only ever
+// turns from active to inactive as now advances, so the count names the
+// active set exactly: two instants with the same count read the same
+// index through At.
+func (idx SessionIndex) Inactive(now time.Time, window time.Duration) int {
+	n := 0
+	for _, r := range idx.Sessions {
+		if !r.activeAt(now, window) {
+			n++
+		}
+	}
+	return n
 }
 
 // toolErrors maps each tool_use id with a result to whether it errored.

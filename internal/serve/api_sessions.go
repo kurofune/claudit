@@ -19,19 +19,46 @@ const storyMemoMax = 8
 
 // handleAPISessions serves /_claudit/api/sessions — the Sessions list:
 // one light row per session in the filtered window, with its prompt-family
-// key. Built straight from the snapshot like /agents.
+// key. Built straight from the snapshot like /agents. A row's active flag
+// expires with wall-clock time while the snapshot stands still, so the
+// variant counts the rows no longer active at the request's now: the body
+// and ETag change the moment any row's window runs out.
 func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSessions,
-		buildFromSnapshot: func(snap *Snapshot, q Query) (any, error) {
-			// No promptData here: its PromptIndex is the costly half, and
-			// the index needs only the replay set, which it builds cheaply.
-			return agentflow.BuildSessionIndex(snap, s.opts.Prices, q.Filter, agentflow.IndexOptions{
-				Now:          time.Now(),
-				ActiveWindow: agentActiveWindow,
-			}), nil
+		variant: func(snap *Snapshot, q Query, now time.Time) string {
+			return "inactive" + strconv.Itoa(s.sessionIndex(snap, q).Inactive(now, agentActiveWindow))
+		},
+		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
+			return s.sessionIndex(snap, q).At(now, agentActiveWindow), nil
 		},
 	})
+}
+
+// sessionIndex returns the session index for q's filter, memoized per
+// generation; its Active flags are stale, so read it through At.
+func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
+	key := filterQueryKey(q)
+	s.filterAggMu.Lock()
+	if s.indexMemoGen == snap.Generation {
+		if idx, ok := s.indexMemo[key]; ok {
+			s.filterAggMu.Unlock()
+			return idx
+		}
+	}
+	s.filterAggMu.Unlock()
+
+	// No promptData here: its PromptIndex is the costly half, and the
+	// index needs only the replay set, which it builds cheaply.
+	idx := agentflow.BuildSessionIndex(snap, s.opts.Prices, q.Filter, agentflow.IndexOptions{})
+	s.filterAggMu.Lock()
+	if s.indexMemoGen != snap.Generation || len(s.indexMemo) >= storyMemoMax {
+		s.indexMemo = map[string]agentflow.SessionIndex{}
+		s.indexMemoGen = snap.Generation
+	}
+	s.indexMemo[key] = idx
+	s.filterAggMu.Unlock()
+	return idx
 }
 
 // handleAPISessionsStory serves /_claudit/api/sessions/story — one page of

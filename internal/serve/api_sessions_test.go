@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -157,6 +158,68 @@ func TestAPISessions_GzipEtagAndBadQuery(t *testing.T) {
 	}
 	if w3 := doAPI(t, srv, http.MethodGet, apiPathSessions+"?since=garbage", nil); w3.Code != http.StatusBadRequest {
 		t.Errorf("bad query status = %d, want 400", w3.Code)
+	}
+}
+
+// TestAPISessions_ActiveExpiresWithoutANewGeneration: with the snapshot
+// standing still, a row fetched while active reads inactive once its
+// window runs out, on an ordinary GET and on a conditional GET whose ETag
+// was issued while it was active; inside the window that ETag still
+// revalidates.
+func TestAPISessions_ActiveExpiresWithoutANewGeneration(t *testing.T) {
+	srv := fixtureServer(t)
+	betaLast := time.Date(2026, 5, 1, 11, 0, 1, 0, time.UTC)
+	now := betaLast.Add(30 * time.Second)
+	srv.now = func() time.Time { return now }
+	gen := srv.cache.Snapshot().Generation
+
+	active := func(w *httptest.ResponseRecorder) map[string]bool {
+		t.Helper()
+		var body struct {
+			Sessions []indexRowWire `json:"sessions"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+		}
+		out := map[string]bool{}
+		for _, r := range body.Sessions {
+			out[r.SessionID] = r.Active
+		}
+		return out
+	}
+
+	w := doAPI(t, srv, http.MethodGet, apiPathSessions, nil)
+	if got := active(w); !got["s-beta"] || got["s-alpha"] {
+		t.Fatalf("inside the window: active = %v, want only s-beta", got)
+	}
+	activeTag := w.Header().Get("ETag")
+
+	now = betaLast.Add(59 * time.Second)
+	if w := doAPI(t, srv, http.MethodGet, apiPathSessions, http.Header{"If-None-Match": []string{activeTag}}); w.Code != http.StatusNotModified {
+		t.Errorf("conditional GET inside the window: status %d, want 304", w.Code)
+	}
+
+	now = betaLast.Add(61 * time.Second)
+	if g := srv.cache.Snapshot().Generation; g != gen {
+		t.Fatalf("generation moved %d -> %d; the test needs it unchanged", gen, g)
+	}
+	w = doAPI(t, srv, http.MethodGet, apiPathSessions, nil)
+	if got := active(w); got["s-beta"] {
+		t.Errorf("ordinary GET past the window: active = %v, want none", got)
+	}
+	if tag := w.Header().Get("ETag"); tag == activeTag {
+		t.Errorf("ETag %s unchanged across the expiry", tag)
+	}
+	w = doAPI(t, srv, http.MethodGet, apiPathSessions, http.Header{"If-None-Match": []string{activeTag}, "Accept-Encoding": []string{"gzip"}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("conditional GET past the window with the active ETag: status %d, want 200", w.Code)
+	}
+	plain := doAPI(t, srv, http.MethodGet, apiPathSessions, nil)
+	if got := active(plain); got["s-beta"] {
+		t.Errorf("GET after the conditional one: active = %v, want none", got)
+	}
+	if w2 := doAPI(t, srv, http.MethodGet, apiPathSessions, http.Header{"If-None-Match": []string{plain.Header().Get("ETag")}}); w2.Code != http.StatusNotModified {
+		t.Errorf("conditional GET with the post-expiry ETag: status %d, want 304", w2.Code)
 	}
 }
 

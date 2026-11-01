@@ -117,13 +117,21 @@ type Server struct {
 	promptMemo   *promptMemo
 
 	// filterAggMu guards filterAgg, the last Aggregator built for a
-	// filter-only key (filterAggregate), and storyMemo, the stories
-	// built at the current generation (sessionStory). Story pages of one
-	// session share both instead of rebuilding per page.
+	// filter-only key (filterAggregate), storyMemo, the stories built at
+	// the current generation (sessionStory), and indexMemo, the session
+	// indexes built at the current generation (sessionIndex). Story pages
+	// of one session share the first two instead of rebuilding per page;
+	// the index's ETag check and body share the third.
 	filterAggMu  sync.Mutex
 	filterAgg    *filterAggMemo
 	storyMemo    map[string]*agentflow.SessionStory
 	storyMemoGen int64
+	indexMemo    map[string]agentflow.SessionIndex
+	indexMemoGen int64
+
+	// now is the API sections' clock; nil reads time.Now. Tests set it to
+	// cross a time boundary without the snapshot moving.
+	now func() time.Time
 
 	// promptIndexBuildN counts the number of PromptIndex+ReplaySet
 	// builds actually executed (i.e. memo misses). Test-only hook —
@@ -698,4 +706,11 @@ func writeCached(w http.ResponseWriter, body []byte, gz bool) error {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	_, err := w.Write(body)
 	return err
+}
+
+func (s *Server) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }

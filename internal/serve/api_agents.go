@@ -31,7 +31,7 @@ const agentSnippetRunes = 500
 func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionAgents,
-		buildFromSnapshot: func(snap *Snapshot, q Query) (any, error) {
+		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
 			// TopN honors the --sessions cap (set by applyDefaults). It
 			// defaults to 0 (no cap — every session in the window,
 			// recency-sorted); a positive --sessions bounds the view to the N
@@ -42,7 +42,7 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 				topN = 0
 			}
 			return agentflow.BuildAgentGraph(snap, s.opts.Prices, q.Filter, agentflow.Options{
-				Now:          time.Now(),
+				Now:          now,
 				ActiveWindow: agentActiveWindow,
 				TopN:         topN,
 				SnippetRunes: agentSnippetRunes,
