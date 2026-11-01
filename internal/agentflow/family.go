@@ -16,15 +16,19 @@ const titleMaxRunes = 200
 // wrapperBlocks are the blocks a harness writes into a user message on the
 // person's behalf: Claude Code's caveats, reminders and slash-command
 // echoes, and Codex's injected AGENTS.md, environment, goal and guardian
-// items. An unclosed block runs to the end of the text.
-var wrapperBlocks = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`),
-	regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`),
-	regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`),
-	regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`),
-	regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`),
-	regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`),
-	regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`),
+// items. An unclosed block runs to the end of the text. Each opens with
+// its marker, so a prompt without the marker skips the regexp.
+var wrapperBlocks = []struct {
+	marker string
+	re     *regexp.Regexp
+}{
+	{"<local-command-", regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`)},
+	{"<system-reminder>", regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`)},
+	{"<command-", regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`)},
+	{"# AGENTS.md instructions", regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`)},
+	{"<environment_context>", regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`)},
+	{"<codex_internal_context", regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`)},
+	{"<guardian_tool_descriptions>", regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`)},
 }
 
 // promptToken is one candidate for blanking: a run of characters that can
@@ -39,22 +43,44 @@ var beadID = regexp.MustCompile(`^([a-z][a-z0-9]*)-([0-9a-z]{3,8})((?:\.[0-9]+)*
 
 // stripWrappers removes every wrapper block from a prompt.
 func stripWrappers(prompt string) string {
-	for _, re := range wrapperBlocks {
-		prompt = re.ReplaceAllString(prompt, "\n")
+	for _, w := range wrapperBlocks {
+		if strings.Contains(prompt, w.marker) {
+			prompt = w.re.ReplaceAllString(prompt, "\n")
+		}
 	}
 	return prompt
 }
 
-// keyLine is the prompt's first non-empty line once wrappers are stripped,
-// whitespace collapsed; "" when nothing is left.
-func keyLine(prompt string) (line, body string) {
-	body = stripWrappers(prompt)
-	for _, l := range strings.Split(body, "\n") {
+// family derives a prompt's key, remainder and title in one pass; ok is
+// false when the prompt has no text of its own once wrappers are stripped.
+func family(prompt string) (Family, bool) {
+	body := stripWrappers(prompt)
+	line := ""
+	for rest := body; rest != "" && line == ""; {
+		var l string
+		l, rest, _ = strings.Cut(rest, "\n")
 		if f := strings.Fields(l); len(f) > 0 {
-			return strings.Join(f, " "), body
+			line = strings.Join(f, " ")
 		}
 	}
-	return "", body
+	if line == "" {
+		return Family{Key: NoPromptKey}, false
+	}
+	key, parts := blank(line)
+	fam := Family{Key: key, Title: truncateRunesPlain(line, titleMaxRunes)}
+	if len(parts) > 0 {
+		fam.Remainder = strings.Join(parts, " · ")
+		return fam, true
+	}
+	if strings.Contains(body, "-") {
+		for _, tok := range promptToken.FindAllString(body, -1) {
+			if core := trimTokenPunct(tok); isBeadID(core) {
+				fam.Remainder = core
+				break
+			}
+		}
+	}
+	return fam, true
 }
 
 // FamilyKey is the prompt-family key the Sessions list groups on by exact
@@ -62,31 +88,16 @@ func keyLine(prompt string) (line, body string) {
 // paths, 7+-character hex strings and digit runs blanked to "_". A prompt
 // with no text of its own keys as NoPromptKey.
 func FamilyKey(prompt string) string {
-	line, _ := keyLine(prompt)
-	if line == "" {
-		return NoPromptKey
-	}
-	key, _ := blank(line)
-	return key
+	f, _ := family(prompt)
+	return f.Key
 }
 
 // Remainder is what FamilyKey blanked from the key line, joined by " · ",
 // so a row can show what tells two prompts of one family apart. When the
 // key line blanked nothing, it is the first bead id the prompt names.
 func Remainder(prompt string) string {
-	line, body := keyLine(prompt)
-	if line == "" {
-		return ""
-	}
-	if _, parts := blank(line); len(parts) > 0 {
-		return strings.Join(parts, " · ")
-	}
-	for _, tok := range promptToken.FindAllString(body, -1) {
-		if core := trimTokenPunct(tok); isBeadID(core) {
-			return core
-		}
-	}
-	return ""
+	f, _ := family(prompt)
+	return f.Remainder
 }
 
 // Family is a session's prompt family: its key and remainder, and its
@@ -102,11 +113,9 @@ type Family struct {
 // NoPromptKey.
 func SessionFamily(prompts []string) Family {
 	for _, p := range prompts {
-		line, _ := keyLine(p)
-		if line == "" {
-			continue
+		if f, ok := family(p); ok {
+			return f
 		}
-		return Family{Key: FamilyKey(p), Remainder: Remainder(p), Title: truncateRunesPlain(line, titleMaxRunes)}
 	}
 	return Family{Key: NoPromptKey}
 }

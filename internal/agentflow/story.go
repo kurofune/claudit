@@ -18,6 +18,13 @@ type StoryOptions struct {
 	// SnippetRunes caps each tool call's input and output, as
 	// Options.SnippetRunes does; 0 keeps the parse-time snippet whole.
 	SnippetRunes int
+	// Replays is the snapshot's aggregate.BuildReplaySet when the caller
+	// already holds it; nil builds it.
+	Replays *aggregate.ReplaySet
+	// PromptIndex is the snapshot's aggregate.BuildPromptIndex when the
+	// caller already holds it, so the story reads each turn's prompt from it
+	// instead of walking the whole snapshot's parent links; nil walks them.
+	PromptIndex *aggregate.PromptIndex
 }
 
 // SessionStory is one session's whole story: its prompts, the main agent's
@@ -107,7 +114,7 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	if snap == nil || sessionID == "" {
 		return nil, false
 	}
-	c := collectSessions(snap, prices, f, sessionID)
+	c := collectSessions(snap, prices, f, sessionID, opts.Replays)
 	st := &SessionStory{
 		SessionID: sessionID,
 		Prompts:   []StoryPrompt{},
@@ -120,14 +127,7 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		return st, c.replays+c.outsideFilter > 0
 	}
 
-	var turns []parse.Turn
-	for _, n := range s.nodes {
-		for _, r := range n.turns {
-			turns = append(turns, *r.t)
-		}
-	}
-	resolver := aggregate.NewPromptResolver(turns, snap.Users, snap.Links)
-	as := assembleSession(s, toolResults(snap), resolver, Options{})
+	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex), Options{})
 	codexOutput := s.provider == parse.ProviderCodex
 
 	if as.Main != nil {
@@ -202,6 +202,67 @@ func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
 		}
 	}
 	return page, true
+}
+
+// storyPrompts is the promptLookup for one session's story: the snapshot's
+// PromptIndex when given, else a PromptResolver over the session's turns.
+func storyPrompts(snap *corpus.Snapshot, s *sessionAccum, idx *aggregate.PromptIndex) promptLookup {
+	if idx == nil {
+		var turns []parse.Turn
+		for _, n := range s.nodes {
+			for _, r := range n.turns {
+				turns = append(turns, *r.t)
+			}
+		}
+		return resolverLookup{aggregate.NewPromptResolver(turns, snap.Users, snap.Links)}
+	}
+	l := indexLookup{idx: idx, users: map[string]parse.UserMessage{}}
+	want := map[string]bool{}
+	for _, n := range s.nodes {
+		for _, r := range n.turns {
+			if u := idx.Lookup(r.t.UUID).UserUUID; u != "" {
+				want[u] = true
+			}
+		}
+	}
+	for _, m := range snap.Users {
+		if want[m.UUID] {
+			l.users[m.UUID] = m
+		}
+	}
+	return l
+}
+
+// indexLookup is a promptLookup over the snapshot's PromptIndex, with the
+// session's prompts by uuid for their text and time.
+type indexLookup struct {
+	idx   *aggregate.PromptIndex
+	users map[string]parse.UserMessage
+}
+
+func (l indexLookup) promptOf(step *AgentStep) string { return l.idx.Lookup(step.UUID).UserUUID }
+func (l indexLookup) text(uuid string) string         { return l.users[uuid].Text }
+func (l indexLookup) timestamp(uuid string) time.Time { return l.users[uuid].Timestamp }
+
+// sessionToolResults indexes the tool results of one session's calls.
+func sessionToolResults(snap *corpus.Snapshot, s *sessionAccum) map[string]parse.ToolResult {
+	ids := map[string]bool{}
+	for _, n := range s.nodes {
+		for _, r := range n.turns {
+			for _, u := range r.t.ToolUses {
+				if u.ID != "" {
+					ids[u.ID] = true
+				}
+			}
+		}
+	}
+	out := make(map[string]parse.ToolResult, len(ids))
+	for _, r := range snap.ToolResults {
+		if ids[r.ToolUseID] {
+			out[r.ToolUseID] = r
+		}
+	}
+	return out
 }
 
 // storySteps converts an agent's steps, splitting each Codex tool output's

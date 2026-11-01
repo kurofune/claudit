@@ -24,6 +24,8 @@ func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSessions,
 		buildFromSnapshot: func(snap *Snapshot, q Query) (any, error) {
+			// No promptData here: its PromptIndex is the costly half, and
+			// the index needs only the replay set, which it builds cheaply.
 			return agentflow.BuildSessionIndex(snap, s.opts.Prices, q.Filter, agentflow.IndexOptions{
 				Now:          time.Now(),
 				ActiveWindow: agentActiveWindow,
@@ -169,7 +171,12 @@ func (s *Server) sessionStory(snap *Snapshot, q Query, session string) (*agentfl
 	}
 	s.filterAggMu.Unlock()
 
-	st, ok := agentflow.BuildSessionStory(snap, s.opts.Prices, q.Filter, session, agentflow.StoryOptions{SnippetRunes: agentSnippetRunes})
+	idx, replays := s.promptData(snap)
+	st, ok := agentflow.BuildSessionStory(snap, s.opts.Prices, q.Filter, session, agentflow.StoryOptions{
+		SnippetRunes: agentSnippetRunes,
+		Replays:      &replays,
+		PromptIndex:  idx,
+	})
 	if !ok {
 		return nil, false
 	}

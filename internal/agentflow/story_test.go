@@ -225,3 +225,19 @@ func TestBuildSessionStory_UnknownSession(t *testing.T) {
 		t.Errorf("unknown session found")
 	}
 }
+
+// TestBuildSessionStory_PromptIndexMatchesResolver: the story the server
+// builds from the snapshot's PromptIndex segments prompts exactly as the
+// parent-link walk does.
+func TestBuildSessionStory_PromptIndexMatchesResolver(t *testing.T) {
+	snap, _ := twoPromptSnap(t)
+	prices, _ := pricing.LoadDefault()
+	walk, _ := BuildSessionStory(snap, prices, aggregate.Filter{}, "s1", StoryOptions{})
+	idx := aggregate.BuildPromptIndex(snap.Turns, snap.Users, snap.Links)
+	indexed, _ := BuildSessionStory(snap, prices, aggregate.Filter{}, "s1", StoryOptions{PromptIndex: idx})
+	a, _ := json.Marshal(walk.Prompts)
+	b, _ := json.Marshal(indexed.Prompts)
+	if string(a) != string(b) {
+		t.Errorf("prompts differ:\n walk  %s\n index %s", a, b)
+	}
+}

@@ -57,6 +57,9 @@ type IndexOptions struct {
 	// Now and ActiveWindow decide Active; a zero window marks none active.
 	Now          time.Time
 	ActiveWindow time.Duration
+	// Replays is the snapshot's aggregate.BuildReplaySet when the caller
+	// already holds it; nil builds it.
+	Replays *aggregate.ReplaySet
 }
 
 // BuildSessionIndex builds one row per session in the filtered window from
@@ -66,8 +69,8 @@ func BuildSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	if snap == nil || len(snap.Turns) == 0 {
 		return idx
 	}
-	c := collectSessions(snap, prices, f, "")
-	results := toolResults(snap)
+	c := collectSessions(snap, prices, f, "", opts.Replays)
+	results := toolErrors(snap)
 	prompts := sessionPrompts(snap, c.sessions)
 
 	for _, s := range c.sessions {
@@ -83,7 +86,7 @@ func BuildSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	return idx
 }
 
-func indexRow(s *sessionAccum, prompts []string, results map[string]parse.ToolResult, opts IndexOptions) SessionIndexRow {
+func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts IndexOptions) SessionIndexRow {
 	fam := SessionFamily(prompts)
 	row := SessionIndexRow{
 		SessionID: s.sessionID,
@@ -127,21 +130,39 @@ func indexRow(s *sessionAccum, prompts []string, results map[string]parse.ToolRe
 	return row
 }
 
+// toolErrors maps each tool_use id with a result to whether it errored.
+func toolErrors(snap *corpus.Snapshot) map[string]bool {
+	out := make(map[string]bool, len(snap.ToolResults))
+	for _, r := range snap.ToolResults {
+		if r.ToolUseID != "" {
+			out[r.ToolUseID] = r.IsError
+		}
+	}
+	return out
+}
+
 // countCommands counts a session's tool calls, and those that errored and
 // never later succeeded with the identical (name, input). turns are in
-// time order.
-func countCommands(turns []*parse.Turn, results map[string]parse.ToolResult) (commands, failed int) {
+// time order; errored maps a tool_use id with a result to whether it
+// errored.
+func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, failed int) {
 	type call struct{ name, input string }
-	pending := map[call]int{}
+	var pending map[call]int
 	for _, t := range turns {
 		for _, u := range t.ToolUses {
 			commands++
-			res, ok := aggregate.JoinToolResult(u, results)
+			if u.ID == "" {
+				continue
+			}
+			isErr, ok := errored[u.ID]
 			if !ok {
 				continue
 			}
 			k := call{u.Name, u.Input}
-			if res.IsError {
+			if isErr {
+				if pending == nil {
+					pending = map[call]int{}
+				}
 				pending[k]++
 			} else {
 				delete(pending, k)

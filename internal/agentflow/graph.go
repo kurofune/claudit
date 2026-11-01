@@ -201,20 +201,25 @@ type collected struct {
 
 // collectSessions groups a snapshot's turns into sessions and agents: the
 // filter, replay skip, thread-root fold and per-turn cost every Sessions
-// payload shares. A non-empty only keeps just that session.
+// payload shares. A non-empty only keeps just that session. replays is the
+// snapshot's aggregate.BuildReplaySet, or nil to build it here.
 //
 // A Claude Code sub-agent's JSONL carries its parent's sessionId and is
 // classified by parse.IsSubagentFile; a Codex sub-agent rollout carries its
 // own thread id and a ParentLink to the spawning thread, and threadRoots
 // folds it into the root session. The individual agents are distinguished by
 // SourceFile.
-func collectSessions(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, only string) collected {
+func collectSessions(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, only string, replays *aggregate.ReplaySet) collected {
 	c := collected{sessions: map[string]*sessionAccum{}}
 	// A resumed/forked session replays the original's turns verbatim (same
 	// message.id, different file/sessionId). Their cost/tokens were counted on
 	// the canonical occurrence, so skip the replays here or the per-session and
-	// per-agent figures would inflate above the deduped headline.
-	replays := aggregate.BuildReplaySet(snap.Turns)
+	// per-agent figures would inflate above the deduped headline. A caller
+	// holding the snapshot's replay set passes it; nil builds it.
+	if replays == nil {
+		built := aggregate.BuildReplaySet(snap.Turns)
+		replays = &built
+	}
 	roots := threadRoots(snap)
 
 	for i := range snap.Turns {
@@ -324,7 +329,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	if snap == nil || len(snap.Turns) == 0 {
 		return AgentGraph{}, nil
 	}
-	c := collectSessions(snap, prices, f, "")
+	c := collectSessions(snap, prices, f, "", nil)
 	results := toolResults(snap)
 
 	// Resolver for prompt segmentation (the Conversation lens): maps each main
@@ -335,7 +340,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 
 	out := make([]AgentSession, 0, len(c.sessions))
 	for _, s := range c.sessions {
-		out = append(out, assembleSession(s, results, resolver, opts))
+		out = append(out, assembleSession(s, results, resolverLookup{resolver}, opts))
 	}
 	// Cap to the N most-recently-active sessions before the display sort, so
 	// a busy corpus (thousands of sessions in the window) ships only what
@@ -365,7 +370,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 
 // assembleSession finalizes one collected session into its agent tree:
 // steps, main agent, children in start order, spawn rollups and prompts.
-func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, resolver *aggregate.PromptResolver, opts Options) AgentSession {
+func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, prompts promptLookup, opts Options) AgentSession {
 	as := AgentSession{
 		SessionID:  s.sessionID,
 		CWD:        s.cwd,
@@ -412,7 +417,7 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, resol
 		return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
 	})
 	attachSpawnRollups(&as)
-	as.Prompts = segmentPrompts(as.Main, resolver)
+	as.Prompts = segmentPrompts(as.Main, prompts)
 	return as
 }
 
@@ -595,7 +600,7 @@ func attachSpawnRollups(as *AgentSession) {
 // A new marker starts whenever the resolved prompt UUID changes from the
 // previous step, so every step belongs to exactly one marker and the markers
 // read in conversation order. The empty "" UUID (orphan steps with no resolvable prompt) yields a text-less marker.
-func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver) []PromptMarker {
+func segmentPrompts(main *AgentNode, r promptLookup) []PromptMarker {
 	if main == nil || len(main.Steps) == 0 {
 		return nil
 	}
@@ -603,20 +608,37 @@ func segmentPrompts(main *AgentNode, r *aggregate.PromptResolver) []PromptMarker
 	const sentinel = "\x00" // matches no real UUID, not even ""
 	prev := sentinel
 	for i := range main.Steps {
-		uuid := r.Resolve(main.Steps[i].parentUUID)
+		uuid := r.promptOf(&main.Steps[i])
 		if uuid == prev {
 			continue
 		}
 		prev = uuid
 		markers = append(markers, PromptMarker{
 			UUID:           uuid,
-			Text:           r.Text(uuid),
-			Timestamp:      r.Timestamp(uuid),
+			Text:           r.text(uuid),
+			Timestamp:      r.timestamp(uuid),
 			FirstStepIndex: i,
 		})
 	}
 	return markers
 }
+
+// promptLookup resolves a main-agent step to the uuid of the user prompt
+// that originated it ("" when none), and a prompt uuid to its text and
+// time.
+type promptLookup interface {
+	promptOf(step *AgentStep) string
+	text(uuid string) string
+	timestamp(uuid string) time.Time
+}
+
+// resolverLookup is a promptLookup over a PromptResolver, which walks the
+// step's parentUuid chain.
+type resolverLookup struct{ r *aggregate.PromptResolver }
+
+func (l resolverLookup) promptOf(step *AgentStep) string { return l.r.Resolve(step.parentUUID) }
+func (l resolverLookup) text(uuid string) string         { return l.r.Text(uuid) }
+func (l resolverLookup) timestamp(uuid string) time.Time { return l.r.Timestamp(uuid) }
 
 // lastToolName returns the name of the last tool invoked in an agent's most
 // recent step, or "" if the latest step ran no tools (a text-only turn).
