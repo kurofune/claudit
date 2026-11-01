@@ -83,15 +83,18 @@ export const fetchAgentTurnFull = (sessionId, turnUuid) =>
 /** @returns {Promise<SessionIndex>} */
 export const fetchSessions = () => getJSON('/sessions');
 // fetchSessionStory pulls one page of a session's story: the turns of user
-// prompt `prompt` (default 0), 200 at a time from turn `offset` (default 0).
+// prompt `prompt` (default 0), 200 at a time from turn `offset` (default 0),
+// or, given `turn`, the page that carries that turn uuid.
 /**
  * @param {string} sessionId
- * @param {{prompt?: number, offset?: number}} [page]
+ * @param {{prompt?: number, offset?: number, turn?: string}} [page]
  * @returns {Promise<SessionStoryPage>}
  */
-export const fetchSessionStory = (sessionId, { prompt = 0, offset = 0 } = {}) =>
+export const fetchSessionStory = (sessionId, { prompt = 0, offset = 0, turn = '' } = {}) =>
   getJSON('/sessions/story?session=' + encodeURIComponent(sessionId) +
-    '&prompt=' + encodeURIComponent(String(prompt)) +
-    '&offset=' + encodeURIComponent(String(offset)));
+    (turn
+      ? '&turn=' + encodeURIComponent(turn)
+      : '&prompt=' + encodeURIComponent(String(prompt)) +
+        '&offset=' + encodeURIComponent(String(offset))));
 /** @param {string} dim */
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));

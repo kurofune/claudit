@@ -48,6 +48,10 @@ test('fetchSessionStory encodes the session and pages by prompt and offset', asy
   assert.equal(await fetchURL(() => api.fetchSessionStory('s1', { offset: 400 }), '?project=x'),
     '/_claudit/api/sessions/story?session=s1&prompt=0&offset=400&project=x');
 });
+test('fetchSessionStory with a turn asks for the page that carries it', async () => {
+  assert.equal(await fetchURL(() => api.fetchSessionStory('s1', { turn: 'u/1' })),
+    '/_claudit/api/sessions/story?session=s1&turn=u%2F1');
+});
 test('fetchAgents, fetchAgentToolFull and fetchAgentTurnFull keep their URLs', async () => {
   assert.equal(await fetchURL(() => api.fetchAgents()), '/_claudit/api/agents');
   assert.equal(await fetchURL(() => api.fetchAgentToolFull('s 1', 'toolu_&1')),

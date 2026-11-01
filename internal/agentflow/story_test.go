@@ -241,3 +241,38 @@ func TestBuildSessionStory_PromptIndexMatchesResolver(t *testing.T) {
 		t.Errorf("prompts differ:\n walk  %s\n index %s", a, b)
 	}
 }
+
+// TestSessionStory_Locate: a turn uuid locates the prompt it belongs to and
+// the page offset, a multiple of the page size, whose page carries it.
+func TestSessionStory_Locate(t *testing.T) {
+	snap, _ := twoPromptSnap(t)
+	st := mustStory(t, snap, aggregate.Filter{}, "s1")
+	for _, c := range []struct {
+		uuid           string
+		prompt, offset int
+	}{{"a1", 0, 0}, {"a2", 0, 0}, {"b1", 1, 0}} {
+		p, o, ok := st.Locate(c.uuid, StoryPageTurns)
+		if !ok || p != c.prompt || o != c.offset {
+			t.Errorf("Locate(%s) = %d %d %v, want %d %d true", c.uuid, p, o, ok, c.prompt, c.offset)
+		}
+	}
+	if _, _, ok := st.Locate("nope", StoryPageTurns); ok {
+		t.Errorf("Locate(nope) found, want not found")
+	}
+
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turns := make([]parse.Turn, 450)
+	for i := range turns {
+		turns[i] = mkTurn(fmt.Sprintf("a%03d", i), "s1", "/root/s1.jsonl", t0.Add(time.Duration(i)*time.Second))
+		turns[i].ParentUUID = "u1"
+	}
+	long := mustStory(t, &corpus.Snapshot{Turns: turns, Users: []parse.UserMessage{{SessionID: "s1", UUID: "u1", Timestamp: t0, Text: "go"}}}, aggregate.Filter{}, "s1")
+	for _, c := range []struct {
+		uuid   string
+		offset int
+	}{{"a000", 0}, {"a199", 0}, {"a200", 200}, {"a449", 400}} {
+		if p, o, ok := long.Locate(c.uuid, StoryPageTurns); !ok || p != 0 || o != c.offset {
+			t.Errorf("Locate(%s) = %d %d %v, want 0 %d true", c.uuid, p, o, ok, c.offset)
+		}
+	}
+}

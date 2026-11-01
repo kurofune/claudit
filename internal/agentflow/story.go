@@ -225,6 +225,27 @@ func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
 	return page, true
 }
 
+// Locate finds the page that carries turn uuid: its prompt index and the
+// page offset into that prompt, a multiple of limit. ok is false when no
+// main-agent turn of the story has that uuid.
+func (st *SessionStory) Locate(uuid string, limit int) (prompt, offset int, ok bool) {
+	if uuid == "" || limit <= 0 {
+		return 0, 0, false
+	}
+	for i := range st.steps {
+		if st.steps[i].UUID != uuid {
+			continue
+		}
+		for p := len(st.promptStart) - 1; p >= 0; p-- {
+			if i >= st.promptStart[p] {
+				return p, (i - st.promptStart[p]) / limit * limit, true
+			}
+		}
+		return 0, 0, false
+	}
+	return 0, 0, false
+}
+
 // storyPrompts is the promptLookup for one session's story: the snapshot's
 // PromptIndex when given, else a PromptResolver over the session's turns.
 func storyPrompts(snap *corpus.Snapshot, s *sessionAccum, idx *aggregate.PromptIndex) promptLookup {

@@ -64,7 +64,9 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 // handleAPISessionsStory serves /_claudit/api/sessions/story — one page of
 // a session's story: ?session=<id> (required), ?prompt=<i> (default 0) and
 // ?offset=<n> turns into that prompt (default 0), agentflow.StoryPageTurns
-// turns per page. An unknown session, prompt or offset answers 404.
+// turns per page. ?turn=<uuid> instead of ?prompt and ?offset answers the
+// page that carries that turn. An unknown session, prompt, offset or turn
+// answers 404.
 //
 // The story is served on the shared-aggregator path so per-turn figures
 // from the Aggregator can join its steps by turn uuid; filterAggregate keys
@@ -87,6 +89,11 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "?offset: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	turn := strings.TrimSpace(v.Get("turn"))
+	if turn != "" && (v.Has("prompt") || v.Has("offset")) {
+		http.Error(w, "?turn excludes ?prompt and ?offset", http.StatusBadRequest)
+		return
+	}
 	if _, err := parseQuery(v, time.Now()); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -101,6 +108,12 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 			st, ok := s.sessionStory(snap, q, session)
 			if !ok {
 				return nil, errNotFound
+			}
+			prompt, offset := prompt, offset
+			if turn != "" {
+				if prompt, offset, ok = st.Locate(turn, agentflow.StoryPageTurns); !ok {
+					return nil, errNotFound
+				}
 			}
 			page, ok := st.Page(prompt, offset, agentflow.StoryPageTurns)
 			if !ok {

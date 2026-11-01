@@ -443,3 +443,41 @@ func TestAPISessionsStory_PagesShareOneAggregator(t *testing.T) {
 		t.Errorf("aggregate builds after three pages = %d, want %d", got, after1)
 	}
 }
+
+// TestAPISessionsStory_TurnLocatesItsPage: ?turn=<uuid> answers the page
+// that carries the turn; an unknown turn answers 404, and ?turn with
+// ?prompt or ?offset is a bad request.
+func TestAPISessionsStory_TurnLocatesItsPage(t *testing.T) {
+	srv := newTestServer(t, longCorpus(t))
+	for _, c := range []struct {
+		turn   string
+		offset int
+		first  string
+	}{{"a000", 0, "a000"}, {"a250", 200, "a200"}, {"a449", 400, "a400"}} {
+		body := getStory(t, srv, "?session=s-long&turn="+c.turn)
+		var p struct {
+			Steps []struct{ UUID string } `json:"steps"`
+			Page  struct {
+				PromptIndex int `json:"prompt_index"`
+				TurnOffset  int `json:"turn_offset"`
+			} `json:"page"`
+		}
+		raw, _ := json.Marshal(body)
+		_ = json.Unmarshal(raw, &p)
+		first := ""
+		if len(p.Steps) > 0 {
+			first = p.Steps[0].UUID
+		}
+		if p.Page.PromptIndex != 0 || p.Page.TurnOffset != c.offset || first != c.first {
+			t.Errorf("turn %s: page %+v first %q; want offset %d first %s", c.turn, p.Page, first, c.offset, c.first)
+		}
+	}
+	if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+"?session=s-long&turn=zzz", nil); w.Code != http.StatusNotFound {
+		t.Errorf("unknown turn: status %d, want 404", w.Code)
+	}
+	for _, q := range []string{"?session=s-long&turn=a000&prompt=0", "?session=s-long&turn=a000&offset=0"} {
+		if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+q, nil); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", q, w.Code)
+		}
+	}
+}
