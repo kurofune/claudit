@@ -13,10 +13,12 @@ import (
 	"text/template"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 // header opens every prompt: who it is for and what claudit measured.
-const header = `You are the coding agent working in this repository (Claude Code or Codex). claudit, an audit of this machine's Claude Code session logs, ranked the tool output that costs the most to keep in context. A tool result stays in context and is re-read from the prompt cache on every later turn until the session ends or compacts, so a large result is paid for many times over.
+const header = `You are the coding agent working in this repository (Claude Code or Codex). claudit, an audit of this machine's coding-agent session logs (Claude Code, Codex), ranked the tool output that costs the most to keep in context. A tool result stays in context and is re-read from the prompt cache on every later turn until the session ends or compacts, so a large result is paid for many times over.
 
 `
 
@@ -24,7 +26,7 @@ const header = `You are the coding agent working in this repository (Claude Code
 const evidence = `
 {{- define "examples"}}
 {{range $i, $e := .examples}}{{inc $i}}. {{if $e.Input}}` + "`{{snippet $e.Input}}`" + `{{else}}(no input recorded){{end}}
-   {{num $e.ContextTokens}} tokens · session {{$e.SessionID}} · {{$e.SourceFile}}
+   {{num $e.ContextTokens}} tokens · {{provider $e.Provider}} · session {{$e.SessionID}} · {{$e.SourceFile}}
 {{end}}{{end}}`
 
 // footer is the shared target line.
@@ -37,11 +39,12 @@ const footer = `
 var hotspotTemplates = map[aggregate.HotspotKind]*template.Template{}
 
 var promptFuncs = template.FuncMap{
-	"inc":     func(i int) int { return i + 1 },
-	"money":   func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) },
-	"pct":     func(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) },
-	"num":     fmtThousands,
-	"snippet": promptSnippet,
+	"inc":      func(i int) int { return i + 1 },
+	"money":    func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) },
+	"pct":      func(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) },
+	"num":      fmtThousands,
+	"snippet":  promptSnippet,
+	"provider": pricing.PriceProvider,
 }
 
 func init() {
@@ -59,49 +62,56 @@ func init() {
 Biggest invocations by context added:
 {{template "examples" .}}`
 
-	toolAsk := func(levers string) string {
+	// toolAsk takes a kind's three levers: what its instruction-file line
+	// says, its tool hook (Claude Code only), and what its CLI flag does.
+	toolAsk := func(l levers) string {
 		return `
 ## Ask
 
 Open one or two of the JSONL files above and look at what these calls returned. Then make exactly one change that shrinks what this pattern puts into context, choosing one of:
 
-` + levers + `
+` + l.list() + `
 
 Make that one change in this repository, then reply with the change and the evidence line above it addresses.
 `
 	}
 
-	parse(aggregate.HotspotBashPattern, toolEvidence+toolAsk(
-		"- a CLAUDE.md line telling you how to run `{{.pattern}}` so it prints less (a filter, a line cap, a narrower target)\n"+
-			"- a PostToolUse hook on Bash that trims `{{.pattern}}` output before it reaches context\n"+
-			"- a CLI flag that shrinks `{{.pattern}}` output (a quiet, summary or line-limited mode), written into the script or Makefile target you call"))
+	parse(aggregate.HotspotBashPattern, toolEvidence+toolAsk(levers{
+		instruction: "telling you how to run `{{.pattern}}` so it prints less (a filter, a line cap, a narrower target)",
+		hook:        "a PostToolUse hook on Bash that trims `{{.pattern}}` output before it reaches context",
+		cli:         "that shrinks `{{.pattern}}` output (a quiet, summary or line-limited mode), written into the script or Makefile target you call",
+	}))
 
-	parse(aggregate.HotspotFileExt, toolEvidence+toolAsk(
-		"- a CLAUDE.md line telling you to read `{{.pattern}}` files by range or search for the symbol first instead of reading whole files\n"+
-			"- a PreToolUse hook on {{.tool}} that refuses whole-file reads of large `{{.pattern}}` files without an offset and limit\n"+
-			"- a CLI flag on the tool you use to locate code (a symbol or outline mode) so you read only the lines you need"))
+	parse(aggregate.HotspotFileExt, toolEvidence+toolAsk(levers{
+		instruction: "telling you to read `{{.pattern}}` files by range or search for the symbol first instead of reading whole files",
+		hook:        "a PreToolUse hook on {{.tool}} that refuses whole-file reads of large `{{.pattern}}` files without an offset and limit",
+		cli:         "for the tool you use to locate code (a symbol or outline mode) so you read only the lines you need",
+	}))
 
-	parse(aggregate.HotspotGrepGlob, toolEvidence+toolAsk(
-		"- a CLAUDE.md line that scopes {{.tool}} searches for `{{.pattern}}` to the directories that matter\n"+
-			"- a PreToolUse hook on {{.tool}} that adds a path or head limit when none is given\n"+
-			"- a CLI flag that shrinks the match list (files-only output, a count, or a result cap)"))
+	parse(aggregate.HotspotGrepGlob, toolEvidence+toolAsk(levers{
+		instruction: "that scopes {{.tool}} searches for `{{.pattern}}` to the directories that matter",
+		hook:        "a PreToolUse hook on {{.tool}} that adds a path or head limit when none is given",
+		cli:         "that shrinks the match list (files-only output, a count, or a result cap)",
+	}))
 
-	parse(aggregate.HotspotWebHost, toolEvidence+toolAsk(
-		"- a CLAUDE.md line saying which pages on {{.pattern}} to fetch and to save a fetched page to a local file instead of fetching it again\n"+
-			"- a PreToolUse hook on WebFetch that serves a cached local copy of pages already fetched from {{.pattern}}\n"+
-			"- a CLI flag on a command-line client for {{.pattern}} that returns only the fields you need"))
+	parse(aggregate.HotspotWebHost, toolEvidence+toolAsk(levers{
+		instruction: "saying which pages on {{.pattern}} to fetch and to save a fetched page to a local file instead of fetching it again",
+		hook:        "a PreToolUse hook on WebFetch that serves a cached local copy of pages already fetched from {{.pattern}}",
+		cli:         "for a command-line client for {{.pattern}} that returns only the fields you need",
+	}))
 
-	parse(aggregate.HotspotToolPattern, toolEvidence+toolAsk(
-		"- a CLAUDE.md line telling you how to call {{.tool}} so it returns less\n"+
-			"- a PostToolUse hook on {{.tool}} that trims its result before it reaches context\n"+
-			"- a CLI flag or tool argument that shrinks {{.tool}} output"))
+	parse(aggregate.HotspotToolPattern, toolEvidence+toolAsk(levers{
+		instruction: "telling you how to call {{.tool}} so it returns less",
+		hook:        "a PostToolUse hook on {{.tool}} that trims its result before it reaches context",
+		cli:         "that shrinks {{.tool}} output, or a tool argument that does",
+	}))
 
 	parse(aggregate.HotspotRepeatedCacheWrite, `## Evidence
 
 - Session {{.session_id}}{{if .project}} in project {{.project}}{{end}} wrote {{num .write_tokens}} prompt-cache tokens and read back {{num .read_tokens}} ({{pct .write_pct_of_read}}% as many writes as reads) over {{num .turns}} turn(s).
 - Cache-write cost: ${{money .write_cost}} ({{pct .pct}}% of all cache-write cost in the window).
 
-A healthy session writes its prefix once and reads it back. Writes this large mean the cached prefix kept being rebuilt: a gap between turns longer than the cache lifetime, or content early in the prompt (CLAUDE.md, hook output, tool list) that changed mid-session.
+A healthy session writes its prefix once and reads it back. Writes this large mean the cached prefix kept being rebuilt: a gap between turns longer than the cache lifetime, or content early in the prompt ({{.instruction_files}}, hook output, tool list) that changed mid-session.
 
 Biggest cache-writing turns:
 {{template "examples" .}}
@@ -109,12 +119,68 @@ Biggest cache-writing turns:
 
 Open the JSONL file above, look at the turns listed, and find what changed or expired before each write. Then make exactly one change in this repository that keeps the prefix stable, choosing one of:
 
-- a CLAUDE.md line (for example: do not edit CLAUDE.md or other always-loaded files mid-session; commit them between sessions)
-- a hook whose output changes every turn made stable, or moved later in the prompt
-- a CLI flag on the command that starts these sessions so the prefix stays the same between runs
+`+levers{
+		instruction: "(for example: do not edit {{.instruction_files}} or other always-loaded files mid-session; commit them between sessions)",
+		hook:        "a hook whose output changes every turn made stable, or moved later in the prompt",
+		cli:         "on the command that starts these sessions so the prefix stays the same between runs",
+	}.list()+`
 
 Make that one change, then reply with the change and the turn above it explains.
 `)
+}
+
+// levers are one kind's fix options, as template text. The instruction
+// lever follows "a CLAUDE.md line" (or AGENTS.md); hook is a whole lever
+// offered only for Claude Code, which alone has tool-call hooks; cli follows
+// "a CLI flag" (or "a CLI flag or wrapper script" when Codex is present).
+type levers struct {
+	instruction, hook, cli string
+}
+
+// list renders l as the bulleted lever list for the template's provider set.
+func (l levers) list() string {
+	return "- {{.instruction_article}} {{.instruction_file}} line " + l.instruction + "\n" +
+		"{{if .claude}}- " + l.hook + "{{.hook_label}}\n{{end}}" +
+		"- {{.cli_lever}} " + l.cli
+}
+
+// providerData is the template data that names the providers behind
+// examples: which are present, their instruction files, and how the hook
+// and CLI levers are labelled. Examples with no provider predate the
+// provider seam and count as Claude Code, as does an empty list.
+func providerData(examples []aggregate.ContextExample) map[string]any {
+	var claude, codex bool
+	for _, e := range examples {
+		if e.Provider == parse.ProviderCodex {
+			codex = true
+		} else {
+			claude = true
+		}
+	}
+	if !codex {
+		claude = true
+	}
+	d := map[string]any{
+		"claude":              claude,
+		"instruction_article": "a",
+		"instruction_file":    "CLAUDE.md",
+		"instruction_files":   "CLAUDE.md",
+		"hook_label":          "",
+		"cli_lever":           "a CLI flag",
+	}
+	switch {
+	case claude && codex:
+		d["instruction_file"] = "CLAUDE.md (Claude Code) and AGENTS.md (Codex)"
+		d["instruction_files"] = "CLAUDE.md, AGENTS.md"
+		d["hook_label"] = " (Claude Code only)"
+		d["cli_lever"] = "a CLI flag or wrapper script"
+	case codex:
+		d["instruction_article"] = "an"
+		d["instruction_file"] = "AGENTS.md"
+		d["instruction_files"] = "AGENTS.md"
+		d["cli_lever"] = "a CLI flag or wrapper script"
+	}
+	return d
 }
 
 // HotspotPrompt renders the prompt for one hotspot. The target is half the
@@ -132,6 +198,9 @@ func HotspotPrompt(h aggregate.Hotspot) (string, error) {
 	ctx["cost"] = h.CostUSD
 	ctx["pct"] = h.PctOfTotal
 	ctx["examples"] = h.Examples
+	for k, v := range providerData(h.Examples) {
+		ctx[k] = v
+	}
 	ctx["target"] = h.CostUSD / 2
 	ctx["target_label"] = "Context cost of this pattern"
 	if h.Kind == aggregate.HotspotRepeatedCacheWrite {
