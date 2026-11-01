@@ -127,14 +127,7 @@ function hotspotsHTML(hotspots) {
   return hotspots.map(hotspotCard).join('');
 }
 
-function trendSectionHTML(data, anomalies) {
-  const points = data.trend_totals;
-  // The API ships the bucket granularity on the payload; a same-day
-  // window comes back as "hour" so the axis reads HH:MM. Fall back to
-  // day for older payloads / the static report.
-  const period = data.period || 'day';
-  if (!points || points.length === 0) return '';
-
+function costPanelHTML(points, period, anomalies) {
   let peak = 0, sum = 0;
   for (const p of points) { if (p.cost_usd > peak) peak = p.cost_usd; sum += p.cost_usd; }
   const mean = sum / points.length;
@@ -149,11 +142,8 @@ function trendSectionHTML(data, anomalies) {
       deltaHtml = `<span>Latest vs prior: <strong class="${cls}">${sign}${d.toFixed(1)}%</strong></span>`;
     }
   }
-
   const latestHit = points[points.length - 1].hit_ratio || 0;
-  const forecast = data.forecast || null;
-
-  const costPanel = `
+  return `
     <div class="trend-chart" data-trend-panel="cost">
       ${trendLineChart(points, period, anomalies)}
       ${hitRatioChart(points, period, anomalies)}
@@ -165,8 +155,25 @@ function trendSectionHTML(data, anomalies) {
         ${deltaHtml}
       </div>
     </div>`;
+}
 
-  if (!showForecastTab(forecast, period)) {
+function trendSectionHTML(data, anomalies) {
+  const points = data.trend_totals || [];
+  // The API ships the bucket granularity on the payload; a same-day
+  // window comes back as "hour" so the axis reads HH:MM. Fall back to
+  // day for older payloads / the static report.
+  const period = data.period || 'day';
+  const forecast = data.forecast || null;
+  const forecastTab = showForecastTab(forecast, period);
+  if (points.length === 0 && !forecastTab) return '';
+
+  const costPanel = points.length === 0
+    ? `<div class="trend-chart" data-trend-panel="cost">
+        <div class="small empty-state">No spend in this window yet.</div>
+      </div>`
+    : costPanelHTML(points, period, anomalies);
+
+  if (!forecastTab) {
     return `<h2>Cost by ${escHtml(period)}</h2>
       <div class="small">Spend bucketed by ${escHtml(period)}.</div>
       ${costPanel}`;

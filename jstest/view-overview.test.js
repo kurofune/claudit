@@ -134,6 +134,29 @@ test('a month too young to project keeps the Forecast tab, and its panel names t
     'No projection for October yet — needs at least two days of cost in the current calendar month.');
 });
 
+for (const [label, trend_totals] of [['empty', []], ['null', null]]) {
+  test(`${label} trend totals with too_few_days still render the Forecast tab over an empty cost panel`, async () => {
+    const { root } = await mount([{ ...OVERVIEW, trend_totals, forecast: noProjection('too_few_days') }]);
+    const trend = root.querySelector('#trend-section');
+    assert.equal(trend.querySelector('h2').textContent, 'Spend over time');
+    const tabs = trend.querySelectorAll('.subtab[data-trend-tab]');
+    assert.deepEqual(tabs.map(t => t.textContent), ['Cost by day', 'Forecast']);
+    const cost = trend.querySelector('[data-trend-panel="cost"]');
+    assert.equal(cost.querySelector('.empty-state').textContent, 'No spend in this window yet.');
+    const panel = trend.querySelector('[data-trend-panel="forecast"]');
+    click(tabs[1]);
+    assert.equal(cost.hidden, true);
+    assert.equal(panel.hidden, false);
+    assert.equal(panel.querySelector('.empty-state').textContent,
+      'No projection for October yet — needs at least two days of cost in the current calendar month.');
+  });
+}
+
+test('empty trend totals with nothing to project render no trend section', async () => {
+  const { root } = await mount([{ ...OVERVIEW, trend_totals: [], forecast: noProjection('historical') }]);
+  assert.equal(root.querySelector('#trend-section').innerHTML.trim(), '');
+});
+
 for (const reason of ['historical', 'not_daily']) {
   test(`reason ${reason} renders the plain Cost-by heading with no subtabs`, async () => {
     const period = reason === 'not_daily' ? 'week' : 'day';
