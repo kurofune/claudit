@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/kurofune/claudit/internal/parse"
 )
 
@@ -107,31 +109,61 @@ func TestCodex_ParseFileReadsRollout(t *testing.T) {
 	}
 }
 
-func parseCodexFixture(t *testing.T, name string) parse.Result {
+func parseCodexFile(t *testing.T, path string) parse.Result {
 	t.Helper()
-	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", name))
+	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	res, err := NewCodex("").ParseFile(f, name)
+	res, err := NewCodex("").ParseFile(f, path)
 	if err != nil {
-		t.Fatalf("ParseFile(%s): %v", name, err)
+		t.Fatalf("ParseFile(%s): %v", path, err)
 	}
 	return res
 }
 
+// zstdCopy writes src compressed with zstd to dst.
+func zstdCopy(t *testing.T, src, dst string) {
+	t.Helper()
+	plain, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := zstd.NewWriter(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enc.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCodex_ParseFileReadsZstdArchive(t *testing.T) {
-	plain := parseCodexFixture(t, "basic.jsonl")
-	archive := parseCodexFixture(t, "basic.jsonl.zst")
+	plainPath := filepath.Join("..", "parse", "codex", "testdata", "basic.jsonl")
+	archivePath := filepath.Join(t.TempDir(), "basic.jsonl.zst")
+	zstdCopy(t, plainPath, archivePath)
+
+	plain := parseCodexFile(t, plainPath)
+	archive := parseCodexFile(t, archivePath)
 	if len(plain.Turns) == 0 {
 		t.Fatal("basic.jsonl yielded no turns")
 	}
 	for i := range archive.Turns {
-		if archive.Turns[i].SourceFile != "basic.jsonl.zst" {
-			t.Errorf("turn %d SourceFile = %q, want basic.jsonl.zst", i, archive.Turns[i].SourceFile)
+		if archive.Turns[i].SourceFile != archivePath {
+			t.Errorf("turn %d SourceFile = %q, want %s", i, archive.Turns[i].SourceFile, archivePath)
 		}
-		archive.Turns[i].SourceFile = "basic.jsonl"
+		archive.Turns[i].SourceFile = plainPath
 	}
 	if !reflect.DeepEqual(archive.Turns, plain.Turns) {
 		t.Errorf("archive Turns = %+v\nwant %+v", archive.Turns, plain.Turns)
