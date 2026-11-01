@@ -213,7 +213,7 @@ func (s *Server) filterAggregate(ctx context.Context, snap *Snapshot, q Query) (
 	}
 	s.filterAggMu.Unlock()
 
-	fq := Query{Filter: q.Filter, Hotspots: q.Hotspots, SessionsTop: q.SessionsTop, rawQuery: key}
+	fq := Query{Filter: q.Filter, Hotspots: q.Hotspots, rawQuery: key}
 	agg, err := s.sharedAggregateData(ctx, snap, fq)
 	if err != nil {
 		return nil, err

@@ -21,12 +21,11 @@ func newTestServerWithCache(t *testing.T, dir string, cacheSize int) *Server {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	return NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultLast:        7 * 24 * time.Hour,
-		DefaultSessionsTop: 10,
-		DefaultHotspots:    10,
-		DefaultPeriod:      aggregate.Period("day"),
-		MaxCachedRenders:   cacheSize,
+		Prices:           loadPricesForTest(t),
+		DefaultLast:      7 * 24 * time.Hour,
+		DefaultHotspots:  10,
+		DefaultPeriod:    aggregate.Period("day"),
+		MaxCachedRenders: cacheSize,
 	})
 }
 

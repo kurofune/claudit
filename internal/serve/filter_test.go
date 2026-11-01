@@ -17,8 +17,8 @@ func TestParseQuery_Empty(t *testing.T) {
 	if !q.Filter.Since.IsZero() || !q.Filter.Until.IsZero() {
 		t.Errorf("date filter set: %+v", q.Filter)
 	}
-	if q.Hotspots != -1 || q.SessionsTop != -1 {
-		t.Errorf("expected sentinel -1 for unset counts, got hotspots=%d sessions=%d", q.Hotspots, q.SessionsTop)
+	if q.Hotspots != -1 {
+		t.Errorf("expected sentinel -1 for unset hotspots, got %d", q.Hotspots)
 	}
 	// No ?by in URL: parseQuery leaves Period zero so applyDefaults
 	// can overlay the server default. The server doesn't get to
@@ -29,7 +29,7 @@ func TestParseQuery_Empty(t *testing.T) {
 	if q.URLHasPeriod {
 		t.Errorf("URLHasPeriod = true, want false")
 	}
-	if q.URLHasLast || q.URLHasSince || q.URLHasUntil || q.URLHasSess {
+	if q.URLHasLast || q.URLHasSince || q.URLHasUntil {
 		t.Errorf("URL-set flags should all be false: %+v", q)
 	}
 }
@@ -124,7 +124,6 @@ func TestParseQuery_By(t *testing.T) {
 func TestParseQuery_Counts(t *testing.T) {
 	v := url.Values{}
 	v.Set("hotspots", "5")
-	v.Set("sessions", "0")
 	q, err := parseQuery(v, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -132,27 +131,27 @@ func TestParseQuery_Counts(t *testing.T) {
 	if q.Hotspots != 5 {
 		t.Errorf("Hotspots = %d, want 5", q.Hotspots)
 	}
-	if q.SessionsTop != 0 {
-		t.Errorf("SessionsTop = %d, want 0", q.SessionsTop)
-	}
 }
 
-// TestParseQuery_IgnoresRemovedMaskingKey: the content-masking query knob
-// is gone. Old bookmarks may still carry it, so parseQuery must treat it
-// like any unknown key — no 400 — rather than reject the URL. The key is
+// TestParseQuery_IgnoresRemovedKeys: the content-masking knob and the
+// ?sessions cap on the deleted Agents view are gone. Old bookmarks may
+// still carry them, so parseQuery treats them like any unknown key — no
+// 400, nothing set — rather than reject the URL. The masking key is
 // spelled in two halves so the repo-wide "no masking identifiers" grep
 // stays empty.
-func TestParseQuery_IgnoresRemovedMaskingKey(t *testing.T) {
-	removedKey := "re" + "dact"
-	for _, val := range []string{"true", "1", "bogus"} {
-		v := url.Values{}
-		v.Set(removedKey, val)
-		q, err := parseQuery(v, time.Now())
-		if err != nil {
-			t.Errorf("parseQuery(?%s=%s) err = %v, want nil (unknown keys are ignored)", removedKey, val, err)
-		}
-		if q.Hotspots != -1 || q.SessionsTop != -1 {
-			t.Errorf("parseQuery(?%s=%s) touched view knobs: %+v", removedKey, val, q)
+func TestParseQuery_IgnoresRemovedKeys(t *testing.T) {
+	for _, removedKey := range []string{"re" + "dact", "sessions"} {
+		for _, val := range []string{"true", "1", "10", "-1", "bogus"} {
+			v := url.Values{}
+			v.Set(removedKey, val)
+			q, err := parseQuery(v, time.Now())
+			if err != nil {
+				t.Errorf("parseQuery(?%s=%s) err = %v, want nil (unknown keys are ignored)", removedKey, val, err)
+			}
+			want := Query{Hotspots: -1, rawQuery: q.rawQuery}
+			if q != want {
+				t.Errorf("parseQuery(?%s=%s) = %+v, want only the unset sentinels", removedKey, val, q)
+			}
 		}
 	}
 }

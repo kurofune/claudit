@@ -20,8 +20,7 @@ type Query struct {
 	Period aggregate.Period
 
 	// View knobs — equivalent to the report flags of the same name.
-	Hotspots    int // -1 means "use server default"
-	SessionsTop int // -1 means "use server default"
+	Hotspots int // -1 means "use server default"
 
 	// Window provenance — which keys the URL provided. Used by
 	// applyDefaults to know whether to overlay the server default
@@ -29,7 +28,6 @@ type Query struct {
 	URLHasLast   bool
 	URLHasSince  bool
 	URLHasUntil  bool
-	URLHasSess   bool
 	URLHasPeriod bool
 
 	// LastLabel echoes the raw ?last value (e.g. "7d") so the pill
@@ -59,9 +57,8 @@ type Query struct {
 // the wrong range).
 func parseQuery(v url.Values, now time.Time) (Query, error) {
 	q := Query{
-		Hotspots:    -1,
-		SessionsTop: -1,
-		rawQuery:    canonicalQueryString(v),
+		Hotspots: -1,
+		rawQuery: canonicalQueryString(v),
 	}
 
 	if s := strings.TrimSpace(v.Get("project")); s != "" {
@@ -129,14 +126,6 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 			return q, fmt.Errorf("?hotspots: must be a non-negative integer, got %q", s)
 		}
 		q.Hotspots = n
-	}
-	if s, ok := lookupTrim(v, "sessions"); ok {
-		n, err := strconv.Atoi(s)
-		if err != nil || n < 0 {
-			return q, fmt.Errorf("?sessions: must be a non-negative integer, got %q", s)
-		}
-		q.SessionsTop = n
-		q.URLHasSess = true
 	}
 	if s, ok := lookupTrim(v, "scope"); ok {
 		switch s {

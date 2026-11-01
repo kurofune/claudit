@@ -38,10 +38,9 @@ type Options struct {
 	// narrow the served report into the "operational dashboard"
 	// shape: last week's data, top sessions. The full archive view
 	// is one click away via ?scope=all.
-	DefaultLast        time.Duration // 0 disables the default time window
-	DefaultHotspots    int
-	DefaultSessionsTop int
-	DefaultPeriod      aggregate.Period
+	DefaultLast     time.Duration // 0 disables the default time window
+	DefaultHotspots int
+	DefaultPeriod   aggregate.Period
 
 	// MaxCachedRenders bounds the (filter, generation) HTML cache.
 	// 0 disables caching; 16 is plenty for a single-user tool.
@@ -489,8 +488,6 @@ func (s *Server) Addr() string {
 //   - ?scope=all skips every server narrowing.
 //   - Server's DefaultLast applies only when the URL specified no
 //     time-window keys at all (?last, ?since, ?until).
-//   - Server's DefaultSessionsTop applies only when the URL didn't
-//     specify ?sessions.
 //   - Server's DefaultHotspots / DefaultPeriod apply
 //     when the URL didn't specify them.
 func (s *Server) applyDefaults(q *Query, now time.Time) {
@@ -501,17 +498,6 @@ func (s *Server) applyDefaults(q *Query, now time.Time) {
 		q.Filter.Since = midnight.Add(-s.opts.DefaultLast)
 	}
 
-	if !q.ScopeAll && !q.URLHasSess {
-		if q.SessionsTop < 0 {
-			q.SessionsTop = s.opts.DefaultSessionsTop
-		}
-	} else if q.SessionsTop < 0 {
-		// URL didn't specify sessions but did pass scope=all — lift the
-		// cap entirely (0 = no cap). scope=all is the most permissive
-		// scope, so it must not be more restrictive than the plain
-		// default, which is itself uncapped.
-		q.SessionsTop = 0
-	}
 	if q.Hotspots < 0 {
 		q.Hotspots = s.opts.DefaultHotspots
 	}

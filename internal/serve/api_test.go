@@ -368,7 +368,6 @@ func TestAPISections_FilterCombinations(t *testing.T) {
 		{"last_7d", "?last=7d"},
 		{"scope_all", "?scope=all"},
 		{"by_week", "?by=week"},
-		{"sessions_cap", "?sessions=10"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -393,7 +392,6 @@ func TestAPISections_BadQuery(t *testing.T) {
 		"/_claudit/api/cost?since=not-a-date",
 		"/_claudit/api/cost?by=bogus",
 		"/_claudit/api/cost?hotspots=-1",
-		"/_claudit/api/cost?sessions=abc",
 		"/_claudit/api/cost?provider=gemini",
 	}
 	for _, target := range cases {

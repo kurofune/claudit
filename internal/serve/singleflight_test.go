@@ -47,12 +47,11 @@ func TestServer_Singleflight_CollapsesConcurrentBuilds(t *testing.T) {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	srv := NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultLast:        7 * 24 * time.Hour,
-		DefaultSessionsTop: 10,
-		DefaultHotspots:    10,
-		DefaultPeriod:      aggregate.Period("day"),
-		MaxCachedRenders:   0,
+		Prices:           loadPricesForTest(t),
+		DefaultLast:      7 * 24 * time.Hour,
+		DefaultHotspots:  10,
+		DefaultPeriod:    aggregate.Period("day"),
+		MaxCachedRenders: 0,
 	})
 
 	const n = 10

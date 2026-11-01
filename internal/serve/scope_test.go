@@ -8,11 +8,10 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
-// newTestServerWithDefaults builds a Server with a positive sessions cap
-// (10) so the plumbing tests can assert the configured cap is applied. The
-// CLI itself ships sessions=0 (no cap — every session in the window),
-// but a positive value here exercises the capping path. The cache is empty
-// by default; pass a seed dir via newTestServer when you want real data.
+// newTestServerWithDefaults builds a Server with a 7-day default window,
+// 10 hotspots and day buckets so the plumbing tests can assert each
+// default is applied. The cache is empty by default; pass a seed dir via
+// newTestServer when you want real data.
 func newTestServerWithDefaults(t *testing.T, dir string) *Server {
 	t.Helper()
 	cache := NewCache(dir)
@@ -20,12 +19,11 @@ func newTestServerWithDefaults(t *testing.T, dir string) *Server {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	return NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultLast:        7 * 24 * time.Hour,
-		DefaultHotspots:    10,
-		DefaultSessionsTop: 10,
-		DefaultPeriod:      aggregate.Period("day"),
-		MaxCachedRenders:   4,
+		Prices:           loadPricesForTest(t),
+		DefaultLast:      7 * 24 * time.Hour,
+		DefaultHotspots:  10,
+		DefaultPeriod:    aggregate.Period("day"),
+		MaxCachedRenders: 4,
 	})
 }
 
@@ -39,9 +37,6 @@ func TestApplyDefaults_NoURL_SetsServerDefaults(t *testing.T) {
 	srv.applyDefaults(&q, now)
 	if q.Filter.Since.IsZero() {
 		t.Errorf("server default did not apply: Since still zero")
-	}
-	if q.SessionsTop != 10 {
-		t.Errorf("SessionsTop = %d, want 10", q.SessionsTop)
 	}
 	if q.Hotspots != 10 {
 		t.Errorf("Hotspots = %d, want 10", q.Hotspots)
@@ -66,10 +61,6 @@ func TestApplyDefaults_URLLast_SkipsServerWindow(t *testing.T) {
 	if !q.Filter.Since.Equal(wantSince) {
 		t.Errorf("Since = %s, want %s", q.Filter.Since, wantSince)
 	}
-	// SessionsTop still defaulted because URL didn't pin it.
-	if q.SessionsTop != 10 {
-		t.Errorf("SessionsTop = %d, want 10", q.SessionsTop)
-	}
 }
 
 func TestApplyDefaults_ScopeAll_LiftsEverything(t *testing.T) {
@@ -84,11 +75,6 @@ func TestApplyDefaults_ScopeAll_LiftsEverything(t *testing.T) {
 	srv.applyDefaults(&q, now)
 	if !q.Filter.Since.IsZero() {
 		t.Errorf("scope=all should leave Since zero; got %s", q.Filter.Since)
-	}
-	if q.SessionsTop != 0 {
-		// scope=all lifts the cap entirely (0 = no cap) — the most
-		// permissive scope can't be more restrictive than the default.
-		t.Errorf("SessionsTop = %d, want 0 (uncapped)", q.SessionsTop)
 	}
 }
 

@@ -34,9 +34,8 @@ func newTestServer(t *testing.T, dir string) *Server {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	return NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultHotspots:    10,
-		DefaultSessionsTop: 50,
+		Prices:          loadPricesForTest(t),
+		DefaultHotspots: 10,
 	})
 }
 
@@ -308,10 +307,9 @@ func TestServer_VersionFooter_Injected(t *testing.T) {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	srv := NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultHotspots:    10,
-		DefaultSessionsTop: 50,
-		Version:            "v1.2.3-abc",
+		Prices:          loadPricesForTest(t),
+		DefaultHotspots: 10,
+		Version:         "v1.2.3-abc",
 	})
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -340,10 +338,9 @@ func TestServer_VersionFooter_EmptyOmits(t *testing.T) {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	srv := NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultHotspots:    10,
-		DefaultSessionsTop: 50,
-		Version:            "",
+		Prices:          loadPricesForTest(t),
+		DefaultHotspots: 10,
+		Version:         "",
 	})
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -368,10 +365,9 @@ func TestServer_VersionFooter_EscapesHTML(t *testing.T) {
 		t.Fatalf("seed refresh: %v", err)
 	}
 	srv := NewServer(cache, Options{
-		Prices:             loadPricesForTest(t),
-		DefaultHotspots:    10,
-		DefaultSessionsTop: 50,
-		Version:            `<script>alert(1)</script>`,
+		Prices:          loadPricesForTest(t),
+		DefaultHotspots: 10,
+		Version:         `<script>alert(1)</script>`,
 	})
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)

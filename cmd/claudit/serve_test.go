@@ -93,28 +93,33 @@ func TestBindListenAddr_AcceptsHostAndComposesAddress(t *testing.T) {
 	}
 }
 
-// TestRunServe_RemovedMaskingFlagExits2: the content-masking flag is gone,
-// so the flag package rejects it like any unknown flag — exit 2 and the
-// standard "not defined" message on stderr. Runs in a child process because
-// flag.ExitOnError calls os.Exit. The flag name is spelled in two halves so
-// the repo-wide "no masking identifiers" grep stays empty.
-func TestRunServe_RemovedMaskingFlagExits2(t *testing.T) {
-	removedFlag := "-" + "re" + "dact"
-	if os.Getenv("CLAUDIT_TEST_SERVE_REMOVED_FLAG") == "1" {
-		_ = runServe([]string{"-" + removedFlag, "--open=false", "--root", t.TempDir()})
+// TestRunServe_RemovedFlagsExit2: retired flags are rejected like any
+// unknown flag — exit 2 and the standard "not defined" message on stderr —
+// rather than accepted and ignored. --sessions capped the deleted Agents
+// view; the Sessions list shows every session in the window. Runs in a
+// child process because flag.ExitOnError calls os.Exit. The masking flag's
+// name is spelled in two halves so the repo-wide "no masking identifiers"
+// grep stays empty.
+func TestRunServe_RemovedFlagsExit2(t *testing.T) {
+	if name := os.Getenv("CLAUDIT_TEST_SERVE_REMOVED_FLAG"); name != "" {
+		_ = runServe([]string{"--" + name + "=1", "--open=false", "--root", t.TempDir()})
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestRunServe_RemovedMaskingFlagExits2$")
-	cmd.Env = append(os.Environ(), "CLAUDIT_TEST_SERVE_REMOVED_FLAG=1")
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
-		t.Fatalf("serve -%s: err = %v, want exit status 2; stderr:\n%s", removedFlag, err, stderr.String())
-	}
-	if want := "flag provided but not defined: " + removedFlag; !strings.Contains(stderr.String(), want) {
-		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	for _, name := range []string{"re" + "dact", "sessions"} {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRunServe_RemovedFlagsExit2$")
+			cmd.Env = append(os.Environ(), "CLAUDIT_TEST_SERVE_REMOVED_FLAG="+name)
+			var stderr strings.Builder
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+				t.Fatalf("serve --%s: err = %v, want exit status 2; stderr:\n%s", name, err, stderr.String())
+			}
+			if want := "flag provided but not defined: -" + name; !strings.Contains(stderr.String(), want) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+			}
+		})
 	}
 }
 
