@@ -34,6 +34,9 @@ type Usage struct {
 // session log.
 const ProviderClaudeCode = "claude-code"
 
+// ProviderCodex is the Provider of every turn read from a Codex rollout.
+const ProviderCodex = "codex"
+
 // ToolUse is one tool_use entry inside an assistant turn.
 type ToolUse struct {
 	// ID is the tool_use block's id (e.g. "toolu_01..."). It ties this call
@@ -172,7 +175,23 @@ type Result struct {
 	ParentLinks []ParentLink
 	// CompactBoundaries are this file's compaction points, in file order.
 	CompactBoundaries []CompactBoundary
-	Malformed         int // count of lines we couldn't decode
+	// RateLimitSamples are the plan-usage readings the file reports, in file
+	// order. Claude Code logs carry none.
+	RateLimitSamples []RateLimitSample
+	Malformed        int // count of lines we couldn't decode
+}
+
+// RateLimitSample is one reading of a provider's plan-usage window: how much
+// of the window the account had used at Timestamp, and when the window
+// resets. Codex reports one with each response.
+type RateLimitSample struct {
+	SessionID     string
+	Provider      string
+	Timestamp     time.Time
+	UsedPercent   float64
+	WindowMinutes int
+	ResetsAt      time.Time
+	PlanType      string
 }
 
 // rawLine is the wire format. Only the fields we care about.
