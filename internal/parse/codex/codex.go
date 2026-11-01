@@ -22,6 +22,13 @@ import (
 	"github.com/kurofune/claudit/internal/parse"
 )
 
+// rawKind is a response_item or event_msg payload's discriminator, decoded
+// before the payload itself so an unmodeled kind is never held to a modeled
+// kind's field types.
+type rawKind struct {
+	Type string `json:"type"`
+}
+
 type rawRecord struct {
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
@@ -67,7 +74,6 @@ type rawItem struct {
 }
 
 type rawEvent struct {
-	Type       string `json:"type"`
 	RateLimits *struct {
 		Primary *struct {
 			UsedPercent   float64 `json:"used_percent"`
@@ -136,25 +142,42 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 			// A response's tool calls are written before its usage record.
 			pending = nil
 		case "response_item":
+			var kind rawKind
+			if err := json.Unmarshal(rec.Payload, &kind); err != nil {
+				res.Malformed++
+				continue
+			}
+			call := kind.Type == "custom_tool_call" || kind.Type == "function_call"
+			output := kind.Type == "custom_tool_call_output" || kind.Type == "function_call_output"
+			if !call && !output {
+				continue
+			}
 			var it rawItem
 			if err := json.Unmarshal(rec.Payload, &it); err != nil {
 				res.Malformed++
 				continue
 			}
-			switch it.Type {
-			case "custom_tool_call", "function_call":
+			if call {
 				pending = append(pending, toolUse(it))
-			case "custom_tool_call_output", "function_call_output":
-				text := outputText(it.Output)
-				res.ToolResults = append(res.ToolResults, parse.NewToolResult(it.CallID, exitError(text), text, ts))
+				continue
 			}
+			text := outputText(it.Output)
+			res.ToolResults = append(res.ToolResults, parse.NewToolResult(it.CallID, exitError(text), text, ts))
 		case "event_msg":
+			var kind rawKind
+			if err := json.Unmarshal(rec.Payload, &kind); err != nil {
+				res.Malformed++
+				continue
+			}
+			if kind.Type != "token_count" {
+				continue
+			}
 			var ev rawEvent
 			if err := json.Unmarshal(rec.Payload, &ev); err != nil {
 				res.Malformed++
 				continue
 			}
-			if ev.Type != "token_count" || ev.RateLimits == nil || ev.RateLimits.Primary == nil {
+			if ev.RateLimits == nil || ev.RateLimits.Primary == nil {
 				continue
 			}
 			p := ev.RateLimits.Primary

@@ -292,6 +292,10 @@ func TestParseRollout_SkipsUnknownAndCountsMalformed(t *testing.T) {
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.004Z","type":"event_msg","payload":{"type":"thread_settings_applied"}}` + "\n")
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.005Z","type":"world_state","payload":{}}` + "\n")
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.006Z","type":"compacted","payload":{}}` + "\n")
+	// Unmodeled item and event types whose fields clash with the modeled
+	// shapes (an object where a tool call has a string) are still skips.
+	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.007Z","type":"response_item","payload":{"type":"tool_search_call","call_id":"c0","arguments":{"query":"x","limit":5}}}` + "\n")
+	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.008Z","type":"event_msg","payload":{"type":"thread_goal_updated","rate_limits":"n/a"}}` + "\n")
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.010Z","type":"turn_context","payload":{"turn_id":"t1","model":"gpt-6-astra","cwd":"/home/u/proj"}}` + "\n")
 	// A single 2 MB line: a tool output larger than bufio's default token limit.
 	big := strings.Repeat("y", 2<<20)
