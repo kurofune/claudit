@@ -177,6 +177,24 @@ test('worthALook: an incomplete session idle 10 minutes past its unanswered call
   assert.equal(notes[0].link, 'a2');
 });
 
+test('worthALook ranks an unresolved error cascade above three slow calls, even when a slow call is on the last turn', () => {
+  // 63 timed calls: 60 at 30 s hold the p95 at 30 s; three at 70-90 s are each
+  // over 2× it and over 60 s, so four signals compete for three notes. The
+  // cascade (three errors, untimed) sits in turn 1.
+  const timedCall = (i, sec) => tool(`sleep ${i}`, 'ok', { started_at: at(0), ended_at: at(sec) });
+  const st = story([
+    step('a1', 0, [tool('npm test', 'error'), tool('make lint', 'error'), tool('go vet ./...', 'error')]),
+    step('a2', 5, Array.from({ length: 60 }, (_, i) => timedCall(i, 30))),
+    step('a3', 10, [timedCall(60, 70), timedCall(61, 80)]),
+    step('a4', 15, [timedCall(62, 90)]),
+  ]);
+  const notes = worthALook(sessionFrom(st), T0 + 20e3);
+  assert.deepEqual(notes.map(n => n.kind), ['error-cascade', 'slow-tool', 'slow-tool']);
+  assert.equal(notes[0].link, 'a1');
+  assert.equal(notes[1].link, 'a4', 'within the slow notes, the one on the last turn first');
+  assert.equal(notes[2].head, 'Bash took 80.0s — 2.7× the session p95');
+});
+
 test('worthALook keeps at most three notes', () => {
   const st = story([1, 2, 3, 4].map(i => step(`a${i}`, i, [tool(`echo ${i}`, 'ok')], { cost_usd: 1 })));
   assert.equal(worthALook(sessionFrom(st), T0).length, 3);

@@ -174,6 +174,20 @@ test('Worth a look: notes render as buttons with a bold head and a body, and jum
   assert.equal(location.hash, `#agents/${SID}/a1`);
 });
 
+test('Worth a look: a slow-tool note renders with its own class and neither failure class', async () => {
+  const call = (i, sec) => tool(`sleep ${i}`, 'ok', { started_at: at(0), ended_at: at(sec) });
+  const { host, done } = await mount(story([
+    step('a1', 0, Array.from({ length: 39 }, (_, i) => call(i, 30))),
+    step('a2', 100, [call(39, 70)]),
+  ]));
+  await done;
+  const notes = host.querySelectorAll('.sh-notes .note');
+  assert.equal(notes.length, 1);
+  assert.equal(text(notes[0].querySelector('strong.note-head')), 'Bash took 70.0s — 2.3× the session p95');
+  assert.ok(notes[0].classList.contains('note-slow-tool'));
+  assert.ok(!notes[0].classList.contains('note-retry-storm') && !notes[0].classList.contains('note-error-cascade'));
+});
+
 test('a session with no tool calls reads Failed 0, has no Worth a look section and still one bar per turn', async () => {
   const { host, done } = await mount(CLEAN());
   await done;

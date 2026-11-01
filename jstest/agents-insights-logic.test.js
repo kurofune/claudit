@@ -244,110 +244,98 @@ test('detectSignals: retry-storm summary names the tool, attempt count, and deta
 
 // ── detectSignals (Phase 3b — slow-tool / error-cascade / idle-stall) ──
 // Same contract as 3a: { kind, severity [0,1], tier, ref, summary }. Tool wall-clock
-// uses numeric started_at/ended_at (parseTime passes numbers through).
+// uses numeric started_at/ended_at (parseTime passes numbers through). A slow-tool
+// needs at least slowFloorMs (60 s) AND either slowP95Multiple× (2) the session p95
+// or slowMultiple× (3) its kind's median.
 
-test('detectSignals: a tool whose wall-clock exceeds the session p95 emits a slow-tool at sid#ai.si:ti', () => {
-  // Five 100ms tools and one 5000ms tool. p95 of those six lands at ~3775ms, so
-  // only the 5000ms tool clears it. It lives at main step 1, tool 0 -> s1#0.1:0.
-  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [
-        { tools: [fast(), fast(), fast(), fast(), fast()] },
-        { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
-      ] },
-      children: [],
-    }],
-  };
-  const slow = detectSignals(graph).filter(s => s.kind === 'slow-tool');
+const oneSession = (main, extra = {}) =>
+  ({ sessions: [{ session_id: 's1', main: { kind: 'main', ...main }, children: [], ...extra }] });
+const timed = (kind, name, ms) => ({ kind, name, started_at: 0, ended_at: ms });
+// n copies of one tool, then the extra tools; p95 over 40 tools lands on the
+// copies (rank 37.05 of 39), so the last tool's p95 multiple is exact.
+const slowSession = tools => oneSession({ steps: [{ tools }] });
+const copies = (n, kind, name, ms) => Array.from({ length: n }, () => timed(kind, name, ms));
+const slowOf = (graph, opts) => detectSignals(graph, opts).filter(s => s.kind === 'slow-tool');
+
+test('detectSignals: slow-tool defaults are a 60 s floor, 2× the session p95 and 3× the kind median', () => {
+  // Exactly 60 s at exactly 2× a 30 s p95 fires; the defaults equal the explicit opts.
+  const atBoth = slowSession([...copies(39, 'exec', 'Bash', 30000), timed('exec', 'Bash', 60000)]);
+  assert.equal(slowOf(atBoth).length, 1);
+  assert.deepEqual(slowOf(atBoth), slowOf(atBoth, { slowFloorMs: 60000, slowP95Multiple: 2, slowMultiple: 3 }));
+  // Floor: 59.999 s at 2.0× p95 is under 60 s.
+  assert.equal(slowOf(slowSession([...copies(39, 'exec', 'Bash', 29999), timed('exec', 'Bash', 59999)])).length, 0);
+  assert.equal(slowOf(slowSession([...copies(39, 'exec', 'Bash', 29999), timed('exec', 'Bash', 59999)]),
+    { slowFloorMs: 59999 }).length, 1);
+  // p95 multiple: 60 s at 1.99993× a 30.001 s p95 (and 2.0× its kind median).
+  const under2 = slowSession([...copies(39, 'exec', 'Bash', 30001), timed('exec', 'Bash', 60000)]);
+  assert.equal(slowOf(under2).length, 0);
+  assert.equal(slowOf(under2, { slowP95Multiple: 1.9 }).length, 1);
+  // Kind multiple: 60 s at exactly 3× a 20 s exec median fires; at 2.9999× it does not.
+  const kindAt = median => slowSession([
+    ...copies(4, 'exec', 'Bash', median), timed('exec', 'Bash', 60000), ...copies(5, 'agent', 'Task', 50000)]);
+  assert.equal(slowOf(kindAt(20000)).length, 1);
+  assert.equal(slowOf(kindAt(20001)).length, 0);
+  assert.equal(slowOf(kindAt(20001), { slowMultiple: 2.9 }).length, 1);
+});
+
+test('detectSignals: a 39.3 s Write at 1.9× a 20.7 s session p95 is no slow-tool', () => {
+  const graph = slowSession([...copies(39, 'exec', 'Bash', 20700), timed('write', 'Write', 39300)]);
+  assert.equal(slowOf(graph).length, 0);
+});
+
+test('detectSignals: a 65 s call at 1.5× the session p95 and under 3× its kind median is no slow-tool', () => {
+  const graph = slowSession([...copies(39, 'exec', 'Bash', 43334), timed('exec', 'Bash', 65000)]);
+  assert.equal(slowOf(graph).length, 0);
+});
+
+test('detectSignals: a 30 s Read at 10× the read median is no slow-tool (under the 60 s floor)', () => {
+  const graph = slowSession([
+    ...copies(5, 'exec', 'Bash', 40000),
+    timed('read', 'Read', 3000), timed('read', 'Read', 3000), timed('read', 'Read', 30000),
+    timed('read', 'Read', 3000), timed('read', 'Read', 3000)]);
+  assert.equal(slowOf(graph).length, 0);
+  assert.equal(slowOf(graph, { slowFloorMs: 1000 }).length, 1, 'only the floor holds it back');
+});
+
+test('detectSignals: a fewer-than-slowToolMin session yields no slow-tool', () => {
+  const graph = slowSession([timed('exec', 'Bash', 100), timed('exec', 'Bash', 100), timed('exec', 'Bash', 900000)]);
+  assert.equal(slowOf(graph).length, 0);
+});
+
+test('detectSignals: a 70 s call at 2.2× the session p95 is one slow-tool at sid#ai.si:ti', () => {
+  const graph = oneSession({ steps: [
+    { tools: copies(39, 'exec', 'Bash', 31818) },
+    { tools: [timed('exec', 'Bash', 70000)] },
+  ] });
+  const slow = slowOf(graph);
   assert.equal(slow.length, 1);
   assert.equal(slow[0].ref, 's1#0.1:0');
+  assert.equal(slow[0].summary, 'Bash took 70.0s — 2.2× the session p95');
+  assert.equal(slow[0].reason, 'Bash 70.0s vs session p95 31.8s — threshold 2× the session p95 and at least 60s');
   assert.ok(slow[0].severity > 0 && slow[0].severity <= 1);
 });
 
-test('detectSignals: a session with fewer than slowToolMin timed tools yields no slow-tool', () => {
-  // Three tools, one wildly slower — but below the 5-tool floor the percentile
-  // is meaningless, so nothing is flagged. (Regression guard for the min cut.)
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [{ tools: [
-        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 },
-        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 },
-        { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 9000 },
-      ] }] },
-      children: [],
-    }],
-  };
-  assert.equal(detectSignals(graph).filter(s => s.kind === 'slow-tool').length, 0);
-});
-
-test('detectSignals: a tool within global p95 but over slowMultiple× its kind median is a slow-tool', () => {
-  // Five 4000ms execs push p95 into exec territory; among the reads (median 10ms)
-  // a single 50ms read is 5× its kind median yet far below p95, so it is flagged
-  // only via the relative-to-peers path. It lives at main step 1, tool 2.
-  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
-  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
-  const graph = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [
-        { tools: [exec(), exec(), exec(), exec(), exec()] },
-        { tools: [read(10), read(10), read(50), read(10), read(10)] },
-      ] },
-      children: [],
-    }],
-  };
-  const slow = detectSignals(graph).filter(s => s.kind === 'slow-tool');
+test('detectSignals: a 65 s Bash at 4× the exec median, under 2× the session p95, is a kind-median slow-tool', () => {
+  const graph = oneSession({ steps: [
+    { tools: copies(5, 'agent', 'Task', 50000) },
+    { tools: [...copies(2, 'exec', 'Bash', 16250), timed('exec', 'Bash', 65000), ...copies(2, 'exec', 'Bash', 16250)] },
+  ] });
+  const slow = slowOf(graph);
   assert.equal(slow.length, 1);
   assert.equal(slow[0].ref, 's1#0.1:2');
+  assert.equal(slow[0].summary, 'Bash took 65.0s — 4.0× the typical exec');
+  assert.ok(slow[0].reason.endsWith('— threshold 3× the kind median and at least 60s'), slow[0].reason);
+  assert.ok(slow[0].reason.startsWith('Bash 65.0s vs exec median 16.'), slow[0].reason);
 });
 
-test('detectSignals: slow-tool tier bands by severity (over-p95 ratio)', () => {
-  // 38 tools at 100ms hold p95 ≈ 101.5; a 130ms tool is ~0.28 over (med band)
-  // and a 300ms tool is ~2× over (clamped, high band). Tools 38 and 39.
-  const base = Array.from({ length: 38 }, () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 }));
-  const tools = [...base,
-    { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 130 },
-    { kind: 'exec', name: 'Bash', started_at: 0, ended_at: 300 }];
-  const graph = { sessions: [{ session_id: 's1', main: { kind: 'main', steps: [{ tools }] }, children: [] }] };
-  const byRef = new Map(detectSignals(graph).filter(s => s.kind === 'slow-tool').map(s => [s.ref, s]));
-  assert.equal(byRef.get('s1#0.0:39').tier, 'high'); // ~2× over p95
-  assert.equal(byRef.get('s1#0.0:38').tier, 'med');  // ~0.28 over p95
-});
-
-test('detectSignals: slow-tool summary names the tool, its seconds, and the multiple', () => {
-  // p95 path: 5000ms tool against p95 ≈ 3775ms (1.3×).
-  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
-  const overP95 = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [
-        { tools: [fast(), fast(), fast(), fast(), fast()] },
-        { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
-      ] },
-      children: [],
-    }],
-  };
-  const a = detectSignals(overP95).find(s => s.kind === 'slow-tool');
-  assert.equal(a.summary, 'Bash took 5.0s — 1.3× the session p95');
-
-  // kind-median path: a 50ms read, 5× the 10ms read median, under p95.
-  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
-  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
-  const overKind = {
-    sessions: [{
-      session_id: 's1',
-      main: { kind: 'main', steps: [
-        { tools: [exec(), exec(), exec(), exec(), exec()] },
-        { tools: [read(10), read(10), read(50), read(10), read(10)] },
-      ] },
-      children: [],
-    }],
-  };
-  const b = detectSignals(overKind).find(s => s.kind === 'slow-tool');
-  assert.equal(b.summary, 'Read took 0.1s — 5.0× the typical read');
+test('detectSignals: slow-tool tier bands by how far past the p95 threshold it is', () => {
+  // 97 tools at 30 s hold p95 at 30 s: 99 s (3.3×) is high, 75 s (2.5×) med, 63 s (2.1×) low.
+  const graph = slowSession([...copies(97, 'exec', 'Bash', 30000),
+    timed('exec', 'Bash', 63000), timed('exec', 'Bash', 75000), timed('exec', 'Bash', 99000)]);
+  const byRef = new Map(slowOf(graph).map(s => [s.ref, s]));
+  assert.equal(byRef.get('s1#0.0:97').tier, 'low');
+  assert.equal(byRef.get('s1#0.0:98').tier, 'med');
+  assert.equal(byRef.get('s1#0.0:99').tier, 'high');
 });
 
 test('detectSignals: errorCascadeMin consecutive errored tools emit one error-cascade at the first error', () => {
@@ -538,9 +526,6 @@ test('detectSignals: a successful tool breaks the run so two short error runs ar
 // floor, retry-storm an earlier error on the SAME input, idle-stall unfinished
 // work. Every Signal carries a `reason` naming the measured value and threshold.
 
-const oneSession = (main, extra = {}) =>
-  ({ sessions: [{ session_id: 's1', main: { kind: 'main', ...main }, children: [], ...extra }] });
-
 test('detectSignals: a turn below the whale dollar floor is no cost-whale even at a dominant share', () => {
   // The session totals $0.001; the $0.0005 turns are each 50% of it.
   const graph = oneSession({ steps: [{ cost_usd: 0.0005 }, { cost_usd: 0.0004 }, { cost_usd: 0.0001 }] });
@@ -657,25 +642,6 @@ test('detectSignals: an inter-turn idle-stall after a tool with no joined result
   assert.equal(stall.reason, 'idle 10.0 min between turns after Read, which has no result — threshold 2.0 min');
 });
 
-test('detectSignals: slow-tool reason names the duration and the threshold it crossed', () => {
-  const fast = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 100 });
-  const overP95 = oneSession({ steps: [
-    { tools: [fast(), fast(), fast(), fast(), fast()] },
-    { tools: [{ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 5000 }] },
-  ] });
-  assert.equal(detectSignals(overP95).find(s => s.kind === 'slow-tool').reason,
-    'Bash 5.0s vs session p95 3.8s — threshold: above p95');
-
-  const exec = () => ({ kind: 'exec', name: 'Bash', started_at: 0, ended_at: 4000 });
-  const read = ms => ({ kind: 'read', name: 'Read', started_at: 0, ended_at: ms });
-  const overKind = oneSession({ steps: [
-    { tools: [exec(), exec(), exec(), exec(), exec()] },
-    { tools: [read(10), read(10), read(50), read(10), read(10)] },
-  ] });
-  assert.equal(detectSignals(overKind).find(s => s.kind === 'slow-tool').reason,
-    'Read 50ms vs read median 10ms — threshold 3× the kind median');
-});
-
 test('detectSignals: error-cascade reason names the run length, the first tool, and the threshold', () => {
   const err = () => ({ kind: 'exec', name: 'Bash', status: 'error' });
   const graph = oneSession({ steps: [{ tools: [err(), err(), err()] }] });
@@ -689,7 +655,7 @@ test('detectSignals: every emitted signal carries a non-empty reason', () => {
   const graph = oneSession({ status: 'running', steps: [
     { timestamp: 0, cost_usd: 5, tools: [err(), err(), err()] },
     { timestamp: 1000, cost_usd: 1, tools: [fast(), fast(), fast(), fast(), fast(),
-      { kind: 'read', name: 'Read', status: 'ok', started_at: 0, ended_at: 9000 }] },
+      { kind: 'read', name: 'Read', status: 'ok', started_at: 0, ended_at: 90000 }] },
   ] });
   const signals = detectSignals(graph, { nowMs: 10 * 60000 });
   assert.deepEqual([...new Set(signals.map(s => s.kind))].sort(),

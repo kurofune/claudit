@@ -109,8 +109,8 @@ export function detectRetries(agent) {
 /**
  * @param {AgentGraph|null|undefined} graph
  * @param {{whaleShare?: number, whaleMinUSD?: number, retryStormMin?: number, slowToolMin?: number,
- *   slowMultiple?: number, errorCascadeMin?: number, idleStallMs?: number,
- *   nowMs?: number}} [opts]
+ *   slowMultiple?: number, slowP95Multiple?: number, slowFloorMs?: number, errorCascadeMin?: number,
+ *   idleStallMs?: number, nowMs?: number}} [opts]
  * @returns {Signal[]}
  */
 export function detectSignals(graph, opts = {}) {
@@ -119,6 +119,8 @@ export function detectSignals(graph, opts = {}) {
   const retryStormMin = opts.retryStormMin > 0 ? opts.retryStormMin : 3;
   const slowToolMin = opts.slowToolMin > 0 ? opts.slowToolMin : 5;
   const slowMultiple = opts.slowMultiple > 0 ? opts.slowMultiple : 3;
+  const slowP95Multiple = opts.slowP95Multiple > 0 ? opts.slowP95Multiple : 2;
+  const slowFloorMs = opts.slowFloorMs > 0 ? opts.slowFloorMs : 60000;
   const errorCascadeMin = opts.errorCascadeMin > 0 ? opts.errorCascadeMin : 3;
   const idleStallMs = opts.idleStallMs > 0 ? opts.idleStallMs : 120000;
   // Static-safe: "now" must come from opts, never Date.now, so a static
@@ -131,7 +133,7 @@ export function detectSignals(graph, opts = {}) {
     const agents = flattenSession(session);
     signals.push(...retryStormSignals(agents, sid, retryStormMin));
     signals.push(...costWhaleSignals(agents, sid, whaleShare, whaleMinUSD));
-    signals.push(...slowToolSignals(agents, sid, slowToolMin, slowMultiple));
+    signals.push(...slowToolSignals(agents, sid, { slowToolMin, slowMultiple, slowP95Multiple, slowFloorMs }));
     signals.push(...errorCascadeSignals(agents, sid, errorCascadeMin));
     signals.push(...idleStallSignals(agents, sid, idleStallMs, nowMs));
   }
@@ -173,18 +175,20 @@ function retryStormSignals(agents, sid, retryStormMin) {
   return out;
 }
 
-// slowToolSignals: flag tool calls whose wall-clock is anomalous within the
-// session — either over the session-wide p95 of all tool durations, or over
-// slowMultiple× the median for the tool's own kind (so a slow Bash among fast
-// Reads is caught even when it's not in the global top tail). Needs at least
-// slowToolMin valid-duration tools for a meaningful percentile; below that the
-// session is too small to call anything an outlier. ref is the tool (sid#ai.si:ti).
+// slowToolSignals: flag tool calls whose wall-clock is a real outlier within
+// the session — at least slowFloorMs long AND either at least slowP95Multiple×
+// the session-wide p95 of all tool durations, or at least slowMultiple× the
+// median for the tool's own kind (so a slow Bash among fast Reads is caught
+// even when it's not in the global top tail). The floor holds for both paths:
+// a 30 s Read at 10× its peers is not worth a look. Needs at least slowToolMin
+// valid-duration tools for a meaningful percentile; below that the session is
+// too small to call anything an outlier. ref is the tool (sid#ai.si:ti).
 /**
  * @param {AgentNode[]} agents @param {string} sid
- * @param {number} slowToolMin @param {number} slowMultiple
+ * @param {{slowToolMin: number, slowMultiple: number, slowP95Multiple: number, slowFloorMs: number}} th
  * @returns {Signal[]}
  */
-function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
+function slowToolSignals(agents, sid, { slowToolMin, slowMultiple, slowP95Multiple, slowFloorMs }) {
   // Collect every tool with a real wall-clock (NaN-guarded).
   const tools = []; // { ai, si, ti, kind, name, dur }
   agents.forEach((a, ai) => {
@@ -209,13 +213,15 @@ function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
   for (const [kind, durs] of byKind) kindMedian.set(kind, percentiles(durs, [50])[0]);
   const out = [];
   for (const t of tools) {
+    if (t.dur < slowFloorMs) continue;
     const km = kindMedian.get(t.kind);
-    const overP95 = t.dur > p95;
-    const overKind = km > 0 && t.dur > slowMultiple * km;
+    const overP95 = p95 > 0 && t.dur >= slowP95Multiple * p95;
+    const overKind = km > 0 && t.dur >= slowMultiple * km;
     if (!overP95 && !overKind) continue;
-    // Severity from the global p95 ratio; a kind-median-only flag (within p95)
-    // floors to a small positive value so it still sorts as a real signal.
-    let severity = p95 > 0 ? (t.dur - p95) / p95 : 0;
+    // Severity from how far the p95 ratio runs past its threshold; a
+    // kind-median-only flag floors to a small positive value so it still
+    // sorts as a real signal.
+    let severity = p95 > 0 ? (t.dur / p95 - slowP95Multiple) / slowP95Multiple : 0;
     if (severity <= 0) severity = 0.05;
     severity = Math.max(0, Math.min(1, severity));
     const tier = severity >= 0.5 ? 'high' : severity >= 0.2 ? 'med' : 'low';
@@ -223,9 +229,10 @@ function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
     const summary = overP95
       ? `${t.name} took ${secs}s — ${(t.dur / p95).toFixed(1)}× the session p95`
       : `${t.name} took ${secs}s — ${(t.dur / km).toFixed(1)}× the typical ${t.kind}`;
+    const floor = `at least ${+(slowFloorMs / 1000).toFixed(1)}s`;
     const reason = overP95
-      ? `${t.name} ${fmtMs(t.dur)} vs session p95 ${fmtMs(p95)} — threshold: above p95`
-      : `${t.name} ${fmtMs(t.dur)} vs ${t.kind} median ${fmtMs(km)} — threshold ${slowMultiple}× the kind median`;
+      ? `${t.name} ${fmtMs(t.dur)} vs session p95 ${fmtMs(p95)} — threshold ${slowP95Multiple}× the session p95 and ${floor}`
+      : `${t.name} ${fmtMs(t.dur)} vs ${t.kind} median ${fmtMs(km)} — threshold ${slowMultiple}× the kind median and ${floor}`;
     out.push({ kind: 'slow-tool', severity, tier, ref: `${sid}#${t.ai}.${t.si}:${t.ti}`, summary, reason });
   }
   return out;

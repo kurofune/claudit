@@ -226,9 +226,12 @@ export function stripBars(story, mode, maxBars = MAX_BARS) {
 // worthALook runs the five per-session detectors over the one-session
 // graph with their default thresholds, drops a retry storm whose peak
 // attempt or a later one of the same call returned ok in the same agent
-// and an error cascade every one of whose errors did, ranks first a note on
-// the main agent's last turn (the session ended on it) and keeps at most
-// MAX_NOTES. A session with no tool calls has no notes.
+// and an error cascade every one of whose errors did, ranks the remaining
+// failures (retry storms, error cascades) before every cost-whale,
+// slow-tool and idle-stall note, within each group first a note on the main
+// agent's last turn (the session ended on it) then detectSignals' severity
+// order, and keeps at most MAX_NOTES. A session with no tool calls has no
+// notes.
 /**
  * @param {{session_id: string, main: {steps: StoryStep[]}, children: StoryChild[]}} session
  * @param {number} [nowMs]
@@ -264,12 +267,16 @@ export function worthALook(session, nowMs) {
     return true;
   };
 
-  const kept = signals.filter(s => !((s.kind === 'retry-storm' || s.kind === 'error-cascade') && resolved(s)));
+  const isFailure = (/** @type {Signal} */ s) => s.kind === 'retry-storm' || s.kind === 'error-cascade';
+  const kept = signals.filter(s => !(isFailure(s) && resolved(s)));
   const endedOn = (/** @type {Signal} */ s) => {
     const r = parseRefKey(s.ref);
     return !!r && r.agentIndex === 0 && r.stepIndex === mainLast && mainLast >= 0;
   };
-  const ranked = [...kept.filter(endedOn), ...kept.filter(s => !endedOn(s))].slice(0, MAX_NOTES);
+  const endedFirst = (/** @type {Signal[]} */ group) => [...group.filter(endedOn), ...group.filter(s => !endedOn(s))];
+  const ranked = [
+    ...endedFirst(kept.filter(isFailure)), ...endedFirst(kept.filter(s => !isFailure(s))),
+  ].slice(0, MAX_NOTES);
   return ranked.map(s => {
     const r = parseRefKey(s.ref);
     const turn = r && r.stepIndex != null ? turnAt.get(`${r.agentIndex}.${r.stepIndex}`) : undefined;
