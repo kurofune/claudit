@@ -1074,7 +1074,7 @@
     .hotspot .h-share { width: auto; flex: 1 1 24px; max-width: 120px; }
     .hotspot .h-pct { display: none; }
     .hotspot .h-cost, .hotspot .h-trend, .hotspot .h-notrend { min-width: 0; }
-    .hotspot-row > button.copy { position: absolute; right: var(--s-2); bottom: var(--s-2);
+    .hotspot .hotspot-row > button.copy { position: absolute; right: var(--s-2); bottom: var(--s-2);
                                  min-width: 0; width: 6.75rem; padding: var(--s-1) var(--s-2);
                                  font-size: var(--t-2); }
   }
