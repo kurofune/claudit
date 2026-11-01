@@ -463,13 +463,13 @@ func TestAPITrends_DimsCoverPlanTable(t *testing.T) {
 }
 
 // TestRoutes_RemovedEndpoints404 pins removed routes as gone: no SPA
-// module fetches them. The session-list and per-session timeline routes
-// would re-run the per-session timeline pass on demand; /cache backed the
-// Cache view, which the Spend view replaced.
+// module fetches them. The per-session timeline route would re-run the
+// per-session timeline pass on demand (its successor is
+// /_claudit/api/sessions/story); /cache backed the Cache view, which the
+// Spend view replaced.
 func TestRoutes_RemovedEndpoints404(t *testing.T) {
 	srv := fixtureServer(t)
 	for _, target := range []string{
-		"/_claudit/api/sessions",
 		"/_claudit/api/sessions/abc/timeline",
 		"/_claudit/api/cache",
 	} {

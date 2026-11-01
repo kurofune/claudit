@@ -33,6 +33,10 @@ const (
 	// (non-subtree) patterns, so they're simply two distinct routes —
 	// no precedence interplay.
 	apiPathAgentsFull = "/_claudit/api/agents/full"
+	// apiPathSessions is the Sessions list's index; apiPathSessionsStory
+	// pages one session's story.
+	apiPathSessions      = "/_claudit/api/sessions"
+	apiPathSessionsStory = "/_claudit/api/sessions/story"
 )
 
 // Section labels for the per-section render cache. Trends uses a
@@ -47,6 +51,11 @@ const (
 	apiSectionAnomalies = "api-anomalies"
 	apiSectionTrends    = "api-trends"
 	apiSectionAgents    = "api-agents"
+	// apiSectionSessions and apiSectionSessionsStory label the Sessions
+	// index and story pages; each story page is its own cache entry since
+	// session/prompt/offset are part of the canonical query.
+	apiSectionSessions      = "api-sessions"
+	apiSectionSessionsStory = "api-sessions-story"
 )
 
 // sectionBuilder receives the shared aggregator and returns a section's
@@ -73,6 +82,12 @@ type apiSectionSpec struct {
 	// previous window of equal length (nil for an unbounded window).
 	// Takes precedence over build.
 	buildWithPrev func(a, prev *aggregate.Aggregator) (any, error)
+	// buildFiltered, when set, receives the snapshot, the query and an
+	// Aggregator keyed on the filter alone (see filterAggregate), so
+	// request params that only pick a slice of the payload — a story's
+	// session, prompt and offset — never rebuild it. Takes precedence
+	// over build.
+	buildFiltered func(snap *Snapshot, q Query, a *aggregate.Aggregator) (any, error)
 }
 
 // serveAPISection is the shared body of every /_claudit/api/*
@@ -131,7 +146,11 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		// pass entirely and build straight from raw turns.
 		payload, err = spec.buildFromSnapshot(snap, q)
 	} else {
-		agg, aerr := s.sharedAggregateData(r.Context(), snap, q)
+		aggregateFor := s.sharedAggregateData
+		if spec.buildFiltered != nil {
+			aggregateFor = s.filterAggregate
+		}
+		agg, aerr := aggregateFor(r.Context(), snap, q)
 		if aerr != nil {
 			if isClientGone(aerr) {
 				// Client disconnected mid-aggregation (reload/navigation).
@@ -146,6 +165,8 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 			return
 		}
 		switch {
+		case spec.buildFiltered != nil:
+			payload, err = spec.buildFiltered(snap, q, agg)
 		case spec.buildWithPrev != nil:
 			var prev *aggregate.Aggregator
 			if pq, ok := previousWindow(q, now); ok {
@@ -172,6 +193,11 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		// which deserves a 400, not a 500.
 		if isUserInputError(err) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, errNotFound) {
+			w.Header().Del("ETag")
+			http.NotFound(w, r)
 			return
 		}
 		if isClientGone(err) {
@@ -261,6 +287,11 @@ type userInputError struct{ err error }
 
 func (e *userInputError) Error() string { return e.err.Error() }
 func (e *userInputError) Unwrap() error { return e.err }
+
+// errNotFound is returned by section builders when the request names
+// something the snapshot does not hold (a story's prompt index past the
+// end). The handler answers 404.
+var errNotFound = errors.New("not found")
 
 func isUserInputError(err error) bool {
 	_, ok := err.(*userInputError)

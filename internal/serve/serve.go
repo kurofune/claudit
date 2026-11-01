@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kurofune/claudit/internal/agentflow"
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/pricing"
 )
@@ -114,6 +115,15 @@ type Server struct {
 	// generations are unreachable the moment a newer one exists).
 	promptMemoMu sync.Mutex
 	promptMemo   *promptMemo
+
+	// filterAggMu guards filterAgg, the last Aggregator built for a
+	// filter-only key (filterAggregate), and storyMemo, the stories
+	// built at the current generation (sessionStory). Story pages of one
+	// session share both instead of rebuilding per page.
+	filterAggMu  sync.Mutex
+	filterAgg    *filterAggMemo
+	storyMemo    map[string]*agentflow.SessionStory
+	storyMemoGen int64
 
 	// promptIndexBuildN counts the number of PromptIndex+ReplaySet
 	// builds actually executed (i.e. memo misses). Test-only hook —
@@ -258,6 +268,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPathTheme, s.handleAPITheme)
 	s.mux.HandleFunc("GET "+apiPathAgents, s.handleAPIAgents)
 	s.mux.HandleFunc("GET "+apiPathAgentsFull, s.handleAPIAgentsFull)
+	s.mux.HandleFunc("GET "+apiPathSessions, s.handleAPISessions)
+	s.mux.HandleFunc("GET "+apiPathSessionsStory, s.handleAPISessionsStory)
 
 	s.mux.HandleFunc("GET "+webAssetURLPrefix, s.handleWebAsset)
 
