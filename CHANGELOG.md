@@ -25,6 +25,7 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ### Fixed
 
+- **Codex spend is attributed per prompt.** Spend → by prompt put every Codex dollar under "(no prompt)". Each Codex turn now counts under the user prompt before it in its rollout, keyed by the person's own words: the AGENTS.md instructions, environment context, goal reminders and guardian tool lists Codex injects into a user message are left out, so a `codex exec` run keys by its real ask rather than its injected preamble. A subagent rollout, which carries no prompt of its own, counts under its parent thread's prompt current when it started, or "(no prompt)" when the parent rollout is not on disk.
 - **The Forecast tab no longer vanishes at month end.** The month-end projection follows the local calendar month, the same local-midnight calendar the date filters use, so on the evening of the last day it still projects that month instead of rolling into a UTC month with no cost yet. Under daily bucketing the Forecast tab stays when no projection is possible yet and names the month and the two-days-of-cost requirement; it is hidden only for a historical or non-daily window. `/_claudit/api/overview`'s `forecast` gains `reason` (`not_daily`, `historical` or `too_few_days`; empty with a projection).
 
 ## [2.0.0] — 2026-10-31
