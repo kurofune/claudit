@@ -365,19 +365,18 @@ func convertUsage(u rawUsage) parse.Usage {
 }
 
 // toolUse maps a custom_tool_call or function_call. A shell call (the exec
-// custom tool with a resolvable command, or the exec_command function) is
-// named Bash, keeps its command string as Input and buckets by its Bash
-// pattern; any other call keeps its raw name and input.
+// custom tool calling tools.exec_command, or the exec_command function) is
+// named Bash and, when its command resolves, keeps that command as Input and
+// buckets by its Bash pattern; an exec call that only polls a running command
+// through tools.write_stdin is Bash under the pollDetail bucket; any other
+// exec call is named by the tools.* function it invokes; any other call keeps
+// its raw name and input.
 func toolUse(it rawItem) parse.ToolUse { return cappedToolUse(it, parse.ToolInputSnippet) }
 
 // cappedToolUse is toolUse with capInput bounding the input.
 func cappedToolUse(it rawItem, capInput func(string) string) parse.ToolUse {
-	input, cmd := toolInput(it)
-	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: capInput(input), InputKey: parse.ToolInputKey(rawToolInput(it))}
-	if cmd != "" {
-		tu.Detail = parse.BashPattern(cmd)
-	}
-	return tu
+	name, input, detail := toolCall(it)
+	return parse.ToolUse{ID: it.CallID, Name: name, Input: capInput(input), Detail: detail, InputKey: parse.ToolInputKey(rawToolInput(it))}
 }
 
 // rawToolInput is a call's input as the rollout recorded it, before any
@@ -389,42 +388,43 @@ func rawToolInput(it rawItem) string {
 	return it.Arguments
 }
 
-// toolName is Bash for a call that runs the shell command cmd, else the
-// call's raw name.
-func toolName(it rawItem, cmd string) string {
-	if cmd != "" {
-		return parse.BashToolName
-	}
-	return it.Name
-}
+// pollDetail is the Detail of an exec call that only reads more output from
+// a command an earlier exec_command started. No Bash pattern can produce it,
+// so the polls form one hotspot bucket of their own.
+const pollDetail = "poll: running command"
 
-// toolInput is a call's untruncated input as ToolUse.Input represents it —
-// the shell command when the call runs one (cmd, also returned), else the
-// call's raw input.
-func toolInput(it rawItem) (input, cmd string) {
+// toolCall is a call's name, its untruncated input as ToolUse.Input
+// represents it (the shell command when one resolves, else the call's raw
+// input) and its Detail.
+func toolCall(it rawItem) (name, input, detail string) {
+	input = rawToolInput(it)
 	switch {
 	case it.Type == "custom_tool_call" && it.Name == "exec":
-		if cmds, ok := execCommands(it.Input); ok {
-			cmd = strings.Join(cmds, "\n")
+		switch fn := execFunction(it.Input); fn {
+		case "exec_command":
+			if cmds, ok := execCommands(it.Input); ok {
+				cmd := strings.Join(cmds, "\n")
+				return parse.BashToolName, cmd, parse.BashPattern(cmd)
+			}
+			return parse.BashToolName, input, ""
+		case "write_stdin":
+			return parse.BashToolName, input, pollDetail
+		case "":
+			return it.Name, input, ""
+		default:
+			return fn, input, ""
 		}
-		input = it.Input
 	case it.Type == "custom_tool_call":
-		input = it.Input
+		return it.Name, input, ""
 	case it.Name == "exec_command":
 		var args struct {
 			Cmd string `json:"cmd"`
 		}
-		if json.Unmarshal([]byte(it.Arguments), &args) == nil {
-			cmd = args.Cmd
+		if json.Unmarshal([]byte(it.Arguments), &args) == nil && args.Cmd != "" {
+			return parse.BashToolName, args.Cmd, parse.BashPattern(args.Cmd)
 		}
-		input = it.Arguments
-	default:
-		input = it.Arguments
 	}
-	if cmd != "" {
-		return cmd, cmd
-	}
-	return input, ""
+	return it.Name, input, ""
 }
 
 // FindTexts reads one rollout at path back whole and returns the
@@ -482,9 +482,7 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 		}
 		switch it.Type {
 		case "custom_tool_call", "function_call":
-			var cmd string
-			out.Input, cmd = toolInput(it)
-			out.Name = toolName(it, cmd)
+			out.Name, out.Input, _ = toolCall(it)
 			found = true
 		case "custom_tool_call_output", "function_call_output":
 			out.Output = outputText(it.Output)
@@ -500,6 +498,101 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 // execCall matches the opening of a tools.exec_command({...}) call inside
 // the JavaScript an exec custom tool runs, through the object's brace.
 var execCall = regexp.MustCompile(`exec_command\(\s*\{`)
+
+// toolsCall matches a call of a tools.* function, capturing its name.
+var toolsCall = regexp.MustCompile(`\btools\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(`)
+
+// execFunction names the tools.* function an exec tool's JavaScript source
+// runs for: exec_command when it calls exec_command anywhere, else the first
+// function it calls other than write_stdin, else write_stdin when it only
+// polls, else empty. Calls written inside a comment or a string literal do
+// not count.
+func execFunction(src string) string {
+	code := jsCode(src)
+	if execCall.MatchString(code) {
+		return "exec_command"
+	}
+	polls := false
+	first := ""
+	for _, m := range toolsCall.FindAllStringSubmatch(code, -1) {
+		switch fn := m[1]; {
+		case fn == "exec_command":
+			return fn
+		case fn == "write_stdin":
+			polls = true
+		case first == "":
+			first = fn
+		}
+	}
+	if first == "" && polls {
+		return "write_stdin"
+	}
+	return first
+}
+
+// jsCode is src with every comment and the text of every string and template
+// literal blanked to spaces, keeping each template's ${...} substitutions as
+// code. A quote that opens no complete literal is kept as code.
+func jsCode(src string) string {
+	b := []byte(src)
+	blank := func(from, to int) {
+		for k := from; k < to; k++ {
+			b[k] = ' '
+		}
+	}
+	for i := 0; i < len(src); {
+		switch src[i] {
+		case '/':
+			n, ok := skipComment(src[i:])
+			if !ok {
+				n = len(src) - i
+			}
+			if n == 0 {
+				i++
+				continue
+			}
+			blank(i, i+n)
+			i += n
+		case '"', '\'':
+			_, n, ok := jsString(src[i:])
+			if !ok {
+				i++
+				continue
+			}
+			blank(i, i+n)
+			i += n
+		case '`':
+			n, ok := skipTemplate(src[i:])
+			if !ok {
+				i++
+				continue
+			}
+			blankTemplate(b[i:i+n], src[i:i+n])
+			i += n
+		default:
+			i++
+		}
+	}
+	return string(b)
+}
+
+// blankTemplate blanks the text of the template literal lit into b (the
+// same bytes), keeping jsCode of each ${...} substitution.
+func blankTemplate(b []byte, lit string) {
+	for i := range b {
+		b[i] = ' '
+	}
+	for i := 1; i < len(lit)-1; i++ {
+		switch {
+		case lit[i] == '\\':
+			i++
+		case lit[i] == '$' && lit[i+1] == '{':
+			n, _ := skipValue(lit[i+2:])
+			copy(b[i+2:], jsCode(lit[i+2:i+2+n]))
+			i += 2 + n
+		}
+	}
+}
 
 // execCommands returns the final cmd string of every exec_command call in an exec
 // tool's JavaScript source, wherever cmd sits among the object's properties,

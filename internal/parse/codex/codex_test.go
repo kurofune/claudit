@@ -293,19 +293,18 @@ func TestExecCommands(t *testing.T) {
 	}
 }
 
-func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
+func TestToolUse_UnresolvedExecCmdIsBashWithoutPattern(t *testing.T) {
 	for _, src := range []string{
 		`text(await tools.exec_command({cmd:"go test " + pkg}));`,
 		"text(await tools.exec_command({cmd:`go test ${pkg}`}));",
 		`text(await tools.exec_command({cmd:"git status", ...opts}));`,
 		`text(await tools.exec_command({cmd:'git status', re:/}/, cmd:'go test ./...'}));`,
-		`text(await tools.write_stdin({session_id:56642,chars:"",yield_time_ms:1000,max_output_tokens:3000}));`,
-		`const r=await tools.view_image({path:"/tmp/shot.png"});image(r.image_url);`,
+		`text(await tools.exec_command(opts));`,
 		"const q=s=>\"'\"+s+\"'\";\ntext(await tools.exec_command({cmd:\"herdr agent prompt w \"+q(msg)}));\ntext(await tools.exec_command({cmd:\"go test ./...\"}));",
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
-		if tu.Name != "exec" || tu.Input != src || tu.Detail != "" {
-			t.Errorf("toolUse(%q) = Name %q Input %q Detail %q, want the raw name exec, the original input and no Bash pattern", src, tu.Name, tu.Input, tu.Detail)
+		if tu.Name != parse.BashToolName || tu.Input != src || tu.Detail != "" {
+			t.Errorf("toolUse(%q) = Name %q Input %q Detail %q, want Bash, the original input and no Bash pattern", src, tu.Name, tu.Input, tu.Detail)
 		}
 	}
 	for _, src := range []string{
@@ -320,22 +319,95 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 	}
 }
 
-// TestParseRollout_UnresolvedExecKeepsRawName: an exec call whose cmd is not
-// a static string parses as the raw exec tool with its JavaScript as Input.
-func TestParseRollout_UnresolvedExecKeepsRawName(t *testing.T) {
-	src := `text(await tools.exec_command({cmd:"go test " + pkg}));`
-	line := `{"timestamp":"2026-10-31T23:53:17.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"exec","input":` + strconv.Quote(src) + `}}
-{"timestamp":"2026-10-31T23:53:18.000Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":1}}}`
-	res, err := ParseFile(strings.NewReader(line+"\n"), "x.jsonl")
+func TestExecFunction(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`text(await tools.exec_command({cmd:"ls"}));`, "exec_command"},
+		{`text(await tools.exec_command(opts));`, "exec_command"},
+		{`text(await tools.view_image({path:"a"})); text(await tools.exec_command({cmd:"ls"}));`, "exec_command"},
+		{`text(await tools.write_stdin({session_id:1,chars:""}));`, "write_stdin"},
+		{`await Promise.allSettled([tools.write_stdin({session_id:1}), tools.write_stdin({session_id:2})]);`, "write_stdin"},
+		{`tools.write_stdin({session_id:1}); tools.view_image({path:"a"}); tools.web__run({})`, "view_image"},
+		{`text(await tools.web__run({search_query:[]}));`, "web__run"},
+		{`text(await tools . apply_patch ("*** Begin Patch"));`, "apply_patch"},
+		{`text(JSON.stringify({ok:true}));`, ""},
+		{`text(mytools.view_image({}))`, ""},
+		{`text(tools.view_image)`, ""},
+		{"// tools.view_image({})\ntext(\"tools.web__run(\");", ""},
+		{"/* tools.view_image({}) */ text('tools.web__run(');", ""},
+		{"text(`tools.web__run( ${await tools.clock__curr_time({})}`)", "clock__curr_time"},
+		{`text("unterminated); tools.view_image({})`, "view_image"},
+		{"text(`a\\` tools.web__run(`); tools.view_image({})", "view_image"},
+		{"// tools.exec_command({cmd:\"x\"})\ntext(await tools.write_stdin({session_id:1}));", "write_stdin"},
+	}
+	for _, c := range cases {
+		if got := execFunction(c.src); got != c.want {
+			t.Errorf("execFunction(%q) = %q, want %q", c.src, got, c.want)
+		}
+	}
+}
+
+// TestExecCalls_NamedByToolsFunction: an exec custom tool call is named by
+// the tools.* function its JavaScript invokes, and ParseFile, FindTexts and
+// FindToolUseDetail agree on every call's Name and Input.
+func TestExecCalls_NamedByToolsFunction(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "exec.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
-		t.Fatalf("turns = %+v", res.Turns)
+	inputs := map[string]string{}
+	for _, l := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var rec rawRecord
+		var it rawItem
+		if json.Unmarshal([]byte(l), &rec) != nil || json.Unmarshal(rec.Payload, &it) != nil || it.CallID == "" {
+			continue
+		}
+		inputs[it.CallID] = rawToolInput(it)
 	}
-	want := parse.ToolUse{ID: "c1", Name: "exec", Input: src, InputKey: parse.ToolInputKey(src)}
-	if got := res.Turns[0].ToolUses[0]; got != want {
-		t.Errorf("tool use = %+v, want %+v", got, want)
+	cases := []struct{ id, name, input, detail string }{
+		{"call_exec_unresolved", "Bash", inputs["call_exec_unresolved"], ""},
+		{"call_poll_one", "Bash", `text(await tools.write_stdin({session_id:2252,chars:"","yield_time_ms":1000,"max_output_tokens":4500}));`, "poll: running command"},
+		{"call_poll_two", "Bash", inputs["call_poll_two"], "poll: running command"},
+		{"call_view_image", "view_image", inputs["call_view_image"], ""},
+		{"call_web_run", "web__run", inputs["call_web_run"], ""},
+		{"call_apply_patch", "apply_patch", inputs["call_apply_patch"], ""},
+		{"call_clock", "clock__curr_time", inputs["call_clock"], ""},
+		{"call_update_goal", "update_goal", inputs["call_update_goal"], ""},
+		{"call_poll_then_image", "view_image", inputs["call_poll_then_image"], ""},
+		{"call_no_tools", "exec", `text(JSON.stringify({ok:true}));`, ""},
+		{"call_near_miss", "Bash", "go test ./...", "go test"},
+		{"call_js", "js", inputs["call_js"], ""},
+	}
+	res := parseFixture(t, "exec.jsonl", "")
+	parsed := map[string]parse.ToolUse{}
+	want := parse.TextRequest{Tools: map[string]bool{}}
+	for _, turn := range res.Turns {
+		for _, tu := range turn.ToolUses {
+			parsed[tu.ID] = tu
+		}
+	}
+	for _, c := range cases {
+		want.Tools[c.id] = true
+	}
+	texts := FindTexts(strings.NewReader(string(raw)), filepath.Join("testdata", "exec.jsonl"), want)
+	for _, c := range cases {
+		if c.input == "" {
+			t.Fatalf("%s: fixture has no input", c.id)
+		}
+		tu, ok := parsed[c.id]
+		if !ok {
+			t.Errorf("ParseFile: no tool use %s", c.id)
+			continue
+		}
+		if tu.Name != c.name || tu.Input != c.input || tu.Detail != c.detail {
+			t.Errorf("ParseFile %s = Name %q Input %q Detail %q, want %q %q %q", c.id, tu.Name, tu.Input, tu.Detail, c.name, c.input, c.detail)
+		}
+		if got := texts.Inputs[c.id]; got != tu.Input {
+			t.Errorf("FindTexts %s Input = %q, ParseFile %q", c.id, got, tu.Input)
+		}
+		d, found := FindToolUseDetail(strings.NewReader(string(raw)), c.id)
+		if !found || d.Name != tu.Name || d.Input != tu.Input {
+			t.Errorf("FindToolUseDetail %s = found %v Name %q Input %q, ParseFile %q %q", c.id, found, d.Name, d.Input, tu.Name, tu.Input)
+		}
 	}
 }
 
