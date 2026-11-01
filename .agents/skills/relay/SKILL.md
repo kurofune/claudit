@@ -32,7 +32,7 @@ The id is required. Without one, stop and say so — never invent it.
 
 One self-contained brief a fresh session can act on without asking anything.
 It carries intent, never facts: the successor re-reads every fact
-(`.djinn/summoner-state.json`, `bd`, `djinn needs-you`), so point at state
+(`djinn lead brief`, `bd`, `djinn needs-you`), so point at state
 instead of copying it. Shape — drop a section with nothing to say:
 
 ```

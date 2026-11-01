@@ -84,7 +84,7 @@ Plumbing beads (DB migrations, single API endpoints, type definitions) are held 
 
 Independently of the embarrassing/UNDERSPEC rubric above, ask of each criterion:
 
-> "Could the **unattended autonomous harness** — no human present, formula-autonomous mode (the harness owns terminal status: it records the evidence comment on the bead and writes `.djinn/last-status.json` itself) — satisfy this criterion on its own?"
+> "Could the **unattended autonomous harness** — no human present, formula-autonomous mode (the harness owns terminal status: it records the evidence comment on the bead and writes `last-status.json` itself) — satisfy this criterion on its own?"
 
 If not, the criterion is **operator-required**. Flag it in `operator_required[]` (this is orthogonal to the criterion's `pass`/`embarrassing` tag — a criterion may be both concrete AND operator-required). There are exactly two trigger classes, and both turn on a **human being needed**:
 
@@ -93,7 +93,7 @@ If not, the criterion is **operator-required**. Flag it in `operator_required[]`
 | **(a) interactive-operator** | a human operator interacting mid-task — continuing between steps, answering a prompt, driving an `--interactive` workflow, making a live judgment call. | "Dogfood `/wish --interactive` end-to-end, continuing past each step." |
 | **(b) external-action** | a human's action OUTSIDE the repository — a login, a physical device, an approval in another system, a console-only deploy with no API. | "Get the design partner to approve the layout in a screen-share." |
 
-**Naming a recording surface is not a trigger.** A criterion that names the bead's evidence comment, `.djinn/last-status.json`, or the verify report as where a verification is recorded is satisfied by the harness writing it in formula mode, and is never operator-required — the write is the harness's job, so the criterion costs the agent nothing. Judge the VERIFICATION the criterion asks for, not the surface it names: authoring habits like "manual bd round trip" or "documented by hand in the evidence record" describe a record, not a human step, and flagging them defers beads a drain could have finished.
+**Naming a recording surface is not a trigger.** A criterion that names the bead's evidence comment, `last-status.json`, or the verify report as where a verification is recorded is satisfied by the harness writing it in formula mode, and is never operator-required — the write is the harness's job, so the criterion costs the agent nothing. Judge the VERIFICATION the criterion asks for, not the surface it names: authoring habits like "manual bd round trip" or "documented by hand in the evidence record" describe a record, not a human step, and flagging them defers beads a drain could have finished.
 
 For each operator-required criterion, emit one `operator_required[]` entry naming its 1-based `index`, the verbatim `criterion`, the `reason` (which trigger class and why), and the `manual_step` (what the operator must do by hand). Most beads have an empty `operator_required[]` — flag a criterion ONLY when the autonomous harness genuinely cannot satisfy it, not merely when a human *could* do it faster.
 

@@ -27,7 +27,8 @@ it lives here in instruction prose and never inside a `say` block.)
 
 `summoner` is the only executor. The lead never edits
 code and never runs a formula. Its only record is its seat (below); every fact
-about work it tells the operator is read fresh from `.djinn/summoner-state.json`,
+about work it tells the operator is read fresh from the drain's state file (`summoner-state.json` under
+`$(git rev-parse --git-common-dir)/djinn/`),
 from a bead's own log file, or from `bd`.
 Which formula the drain runs on is one of those facts: that file's `formula` field names it for every bead that does not name its own, and an absent `formula` field means the drain runs the default formula.
 
@@ -48,7 +49,7 @@ did) and `$seat/memory.md` (what to keep knowing). A missing file is empty.
 **Then read the state in one call:** run `djinn lead brief`. It prints the
 drain (the lock's answer, as `djinn drain alive` gives it), the workshop, the
 in-progress beads, the ready count and what needs the operator. It replaces
-reading `.djinn/summoner-state.json`, `bd list`, `bd ready`, `djinn needs-you`
+reading the drain's state file, `bd list`, `bd ready`, `djinn needs-you`
 and `djinn workshop status` one by one; open a bead's log or `bd show` only for
 a detail the brief does not carry.
 

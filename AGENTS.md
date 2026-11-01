@@ -113,15 +113,15 @@ djinn drain alive
 ```
 
 **The lock decides, not the state file.** `finished_at` is never stamped on a
-SIGKILL or a crash; read `.djinn/summoner-state.json` only for details to say
-aloud.
+SIGKILL or a crash; read the state file (`summoner-state.json` in
+`$(git rev-parse --git-common-dir)/djinn/`) only for details to say aloud.
 
 - **`alive pid <pid>` → refuse**, whatever the state file says.
 - **`unknown`, or any other non-zero exit → refuse.** The check could not
   tell; start nothing.
-- **`not-running`, and the state file has no `finished_at` → the previous drain
-  died.** Check for surviving workers (below) before starting a fresh one.
-- **`not-running` and `finished_at` present →** start normally.
+- **`not-running` → run the survivor check below** before any start, whatever
+  the state file says: a drain from before the upgrade left its workers only
+  in `.djinn/summoner-state.json`.
 
 On `alive`, refuse; on a yes, send pause-drain through `Stop one bead / pause
 the drain` (`.djinn/lead/status.md`):
@@ -148,13 +148,23 @@ SIGHUP or SIGKILL its workers outlive it in their worktrees, which the next
 sweep force-removes. Before starting anything, check every bead it worked:
 
 ```bash
-bin=$(jq -r '.worker_bin // empty' .djinn/summoner-state.json)
-workers=$(ps -A -o command= | BIN="$bin" awk '
-  ENVIRON["BIN"] == "" { n = split($1, p, "/"); if (p[n] == "djinn") print $0 " "; next }
-  $0 == ENVIRON["BIN"] || index($0, ENVIRON["BIN"] " ") == 1 { print $0 " " }')
-jq -r '.workers[].bead_id' .djinn/summoner-state.json | while read -r b; do
-  printf '%s\n' "$workers" | grep -qF -- "--bead $b " && echo "$b"
+(
+common=$(git rev-parse --path-format=absolute --git-common-dir) &&
+  top=$(git rev-parse --show-toplevel) && procs=$(ps -A -o command=) ||
+  { echo "unknown: cannot inspect"; exit 1; }
+for state in "$common/djinn/summoner-state.json" "$top/.djinn/summoner-state.json"; do
+  [ -e "$state" ] || continue
+  bin=$(jq -r '.worker_bin // empty' "$state") &&
+    beads=$(jq -r '(.workers // [])[].bead_id' "$state") ||
+    { echo "unknown: cannot read $state"; exit 1; }
+  workers=$(printf '%s\n' "$procs" | BIN="$bin" awk '
+    ENVIRON["BIN"] == "" { n = split($1, p, "/"); if (p[n] == "djinn") print $0 " "; next }
+    $0 == ENVIRON["BIN"] || index($0, ENVIRON["BIN"] " ") == 1 { print $0 " " }')
+  printf '%s\n' "$beads" | while read -r b; do
+    if [ -n "$b" ] && printf '%s\n' "$workers" | grep -qF -- "--bead $b "; then echo "$b"; fi
+  done
 done
+)
 ```
 
 A worker runs `--bead <id>` with argv[0] equal to `worker_bin`, or, when none
@@ -162,7 +172,8 @@ is recorded, any path named `djinn`. **Match the worker's
 path literally, never by process name.** A name match reads a regex and a
 truncated name.
 
-If it prints any bead, **refuse and name those beads.** On a yes, send one stop
+If it prints `unknown:` or exits non-zero, refuse as on `unknown`. If it
+prints any bead, **refuse and name those beads.** On a yes, send one stop
 per bead through `Stop one bead / pause the drain`; start only once every stop
 is confirmed and the check prints nothing:
 
@@ -173,7 +184,8 @@ from under them. I can stop those beads for you, and start fresh once they have
 stopped. Say stop, or ask me for status.
 ```
 
-Only when it prints nothing is the repo actually quiet, and only then:
+Only when it prints nothing is the repo actually quiet: start, and when a
+document it read lacks `finished_at`, first say:
 
 ```say
 The last drain here died without finishing — nothing is running now. Starting a
@@ -182,7 +194,7 @@ fresh one.
 
 ## Escalate
 
-A drain has ended when `.djinn/summoner-state.json` carries `finished_at`. Then,
+A drain has ended when its state file carries `finished_at`. Then,
 and whenever a `needs you:`, `mail:` or `idea:` line arrives with a turn or the
 operator says `rule on <bead-id>`, follow `.djinn/lead/escalate.md`: each bead
 that did not close goes to the operator one at a time as a plain explanation

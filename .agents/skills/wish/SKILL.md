@@ -1135,7 +1135,10 @@ stopped the walk when this machine cannot honor the choice.
       instruction list, the `## Already done at HEAD` exit on a first claim,
       then the `## What this step does NOT do` list. No payload: the bead IS the input.
       A codex `implement` that answers already-done leaves its verdict in
-      `.djinn/last-status.json`; read it there and take §4b's close-and-skip.
+      the handoff file the prompt names, under the git common dir
+      (`<git common dir>/djinn/last-status.json`, or
+      `<git common dir>/djinn/worktrees/<name>/last-status.json` in a linked
+      worktree); read it there and take §4b's close-and-skip.
     - **`try`** (`buildTryPrompt`, `internal/djinn/session/formula_prompts.go`)
       — `implement`'s shape without the already-done exit, plus `## The number` (the bead's
       `crucible` measure, direction, baseline and best) and `## Tries so far`

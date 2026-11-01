@@ -109,7 +109,8 @@ for it by name.
 or **omit the flag entirely and let the summoner apply
 its own default of 3**. Never invent a number. Start the drain as a
 **background process** with exactly one of `--epic` or `--bead` — it writes
-`.djinn/summoner-state.json` and one log file per bead, which status and the
+`summoner-state.json` and one log file per bead under
+`$(git rev-parse --git-common-dir)/djinn/`, which status and the
 wrap-up read:
 
 ```bash

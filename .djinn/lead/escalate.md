@@ -2,7 +2,8 @@
 
 ## Job 4 — When the drain ends
 
-The drain has ended when `.djinn/summoner-state.json` carries `finished_at`.
+The drain has ended when its state file (`summoner-state.json` under
+`$(git rev-parse --git-common-dir)/djinn/`) carries `finished_at`.
 Read it in one call, `djinn lead brief`, never the state file, `bd` and
 `djinn needs-you` one by one: its `result:` line is `<closed> of <total>
 closed`, the summed `cost_usd` and the wall clock, and its `not closed` list
@@ -100,7 +101,7 @@ again — workshop check first, same guards, same refusal check).
 An operator line `rule on <bead-id>` starts Job 4 for that bead, drain or no
 drain: the ops room's `r` key types it into the lead's pane, or starts the
 lead there with it when that pane is a bare shell. Run the conversation above
-from step 1 for that one bead; when `.djinn/summoner-state.json` names no worker for it, read
+from step 1 for that one bead; when the drain's state file names no worker for it, read
 what was tried from `bd comments <bead-id> --json` instead of a log.
 
 ### A `needs you:` or `mail:` line arrives with a turn
