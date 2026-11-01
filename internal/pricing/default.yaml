@@ -436,8 +436,10 @@ providers:
   # .model_context_window), so long-context turns do occur. These are
   # API-equivalent prices: claudit models no subscription exemption.
   #
-  # Models the page does not list (e.g. codex-auto-review, the guardian
-  # reviewer) have no entry and stay in the unknown-models warning.
+  # codex-auto-review, the guardian reviewer, is priced at $0: the pricing
+  # page lists no rate for it, and OpenAI's Codex FAQ says auto-review
+  # checks are free. Any other model the page does not list has no entry
+  # and stays in the unknown-models warning.
   codex:
     models:
       gpt-6-astra:                  # https://platform.openai.com/docs/pricing fetched 2026-10-31 — Standard $10 / $50
@@ -496,3 +498,12 @@ providers:
           cache_read_per_mtok: 1.00
           cache_write_5m_per_mtok: 0
           cache_write_1h_per_mtok: 0
+
+      codex-auto-review:            # free per https://help.openai.com/en/articles/11369540-openai-codex-faq fetched 2026-10-31; https://platform.openai.com/docs/pricing lists no rate for it
+        # The FAQ: auto-review checks are free and do not count toward plan
+        # usage when signed in with ChatGPT.
+        input_per_mtok: 0
+        output_per_mtok: 0
+        cache_read_per_mtok: 0
+        cache_write_5m_per_mtok: 0
+        cache_write_1h_per_mtok: 0

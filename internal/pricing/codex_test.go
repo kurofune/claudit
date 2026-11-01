@@ -12,6 +12,10 @@ import (
 // codexPricingSource is the page every bundled Codex rate is copied from.
 var codexPricingSource = regexp.MustCompile(`https://(?:openai\.com/api/pricing/|platform\.openai\.com/docs/pricing)`)
 
+// codexFreeModels are the Codex models OpenAI states are free, so their
+// all-zero rates are deliberate.
+var codexFreeModels = map[string]bool{"codex-auto-review": true}
+
 var isoDate = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}\b`)
 
 // codexModelNodes returns the key and value nodes of providers.codex.models
@@ -50,8 +54,8 @@ func TestDefault_CodexEntriesCiteSource(t *testing.T) {
 			t.Errorf("providers.codex.models lacks %s, which OpenAI's pricing page lists", m)
 		}
 	}
-	if _, ok := nodes["codex-auto-review"]; ok {
-		t.Error("codex-auto-review has an entry, but OpenAI's pricing page lists no rate for it")
+	if _, ok := nodes["codex-auto-review"]; !ok {
+		t.Error("providers.codex.models lacks codex-auto-review, which OpenAI's Codex FAQ says is free")
 	}
 	for name, kv := range nodes {
 		comment := kv[0].HeadComment + " " + kv[0].LineComment + " " + kv[1].HeadComment + " " + kv[1].LineComment
@@ -71,8 +75,11 @@ func TestDefault_CodexEntriesCiteSource(t *testing.T) {
 		t.Fatalf("loaded %d codex models, YAML holds %d", len(tab.Providers["codex"].Models), len(nodes))
 	}
 	for name, p := range tab.Providers["codex"].Models {
-		if p.Rate == (Rate{}) {
+		if p.Rate == (Rate{}) && !codexFreeModels[name] {
 			t.Errorf("codex/%s has all-zero rates", name)
+		}
+		if p.Rate != (Rate{}) && codexFreeModels[name] {
+			t.Errorf("codex/%s is free per OpenAI's Codex FAQ but carries rates %+v", name, p.Rate)
 		}
 	}
 }
@@ -133,7 +140,7 @@ func TestDefault_CodexRates(t *testing.T) {
 	if !known || math.Abs(cost-97) > 1e-9 {
 		t.Errorf("codex/gpt-6-astra long cost = %v, %v; want 97, true", cost, known)
 	}
-	if _, known := tab.CostAt("codex", "codex-auto-review", time.Time{}, 1, 1, 0, 0, 0, ""); known {
-		t.Error("codex/codex-auto-review is priced; it must stay unknown")
+	if cost, known := tab.CostAt("codex", "codex-auto-review", time.Time{}, 1000, 1000, 1000, 1000, 1000, ""); cost != 0 || !known {
+		t.Errorf("codex/codex-auto-review cost = %v, %v; want 0, true (auto-review is free)", cost, known)
 	}
 }

@@ -72,7 +72,7 @@ func TestAPICost_CodexModelRow(t *testing.T) {
 		t.Errorf("gpt-6-astra cost = %v, want %v", c, want)
 	}
 	if got["codex-auto-review"] != 0 {
-		t.Errorf("codex-auto-review cost = %v, want 0 (unpriced)", got["codex-auto-review"])
+		t.Errorf("codex-auto-review cost = %v, want 0 (auto-review is free)", got["codex-auto-review"])
 	}
 
 	ov := readJSONResponse(t, doAPI(t, srv, http.MethodGet, "/_claudit/api/overview?scope=all", nil))
@@ -80,8 +80,8 @@ func TestAPICost_CodexModelRow(t *testing.T) {
 	if err := json.Unmarshal(ov["unknown_models"], &unknown); err != nil {
 		t.Fatalf("unknown_models: %v; raw %s", err, ov["unknown_models"])
 	}
-	if len(unknown) != 1 || unknown[0].Provider != "codex" || unknown[0].Model != "codex-auto-review" {
-		t.Errorf("unknown_models = %s, want only codex/codex-auto-review", ov["unknown_models"])
+	if unknown == nil || len(unknown) != 0 {
+		t.Errorf("unknown_models = %s, want an empty list", ov["unknown_models"])
 	}
 }
 
