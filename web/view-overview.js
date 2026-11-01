@@ -83,7 +83,7 @@ function exampleRowHTML(e) {
     ? `<td class="ex-cmd" title="${escHtml(full)}"><code>${escHtml(full.replace(/\s+/g, ' ').trim())}</code></td>`
     : '<td class="ex-cmd is-empty">(no input recorded)</td>';
   const session = sid
-    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)} in the Agents tree">${escHtml(sid.slice(0, 8))}</a>`
+    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)}">${escHtml(sid.slice(0, 8))}</a>`
     : '<span class="ex-session is-empty">none</span>';
   return `<tr>
       <td class="num ex-tokens">${escHtml(fmtNum(e.context_tokens || 0))}</td>

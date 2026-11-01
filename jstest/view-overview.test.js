@@ -140,7 +140,8 @@ for (const [how, activate] of [
     const cells = rows[0].querySelectorAll('td');
     assert.equal(cells[0].textContent, '42,000');
     const link = cells[1].querySelector('a.ex-session');
-    assert.equal(link.getAttribute('href'), '#agents/tree/0f1e2d3c-aaaa-bbbb');
+    assert.equal(link.getAttribute('href'), '#agents/0f1e2d3c-aaaa-bbbb');
+    assert.equal(link.getAttribute('title'), 'Open session 0f1e2d3c-aaaa-bbbb');
     assert.equal(link.textContent, '0f1e2d3c');
     assert.ok(cells[2].classList.contains('ex-cmd'));
     assert.equal(cells[2].getAttribute('title'), 'go test ./...');

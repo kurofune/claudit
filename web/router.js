@@ -3,8 +3,8 @@
 //   #spend/<tab>               → Spend, <tab>, Dollars
 //   #spend/<tab>/tokens        → Spend, <tab>, Tokens
 //   #overview/all              → Overview with the tool-patterns table open
-//   #agents/<lens>             → Agents
-//   #agents/tree/<session>     → Agents Tree with <session> selected
+//   #agents                    → the Sessions list
+//   #agents/<session>[/<turn>] → that session's page, at <turn> when named
 //
 // Retired views redirect through REDIRECTS so old bookmarks still land:
 // #cost, #tokens and #cache on the Spend view, #tools on the Overview's
@@ -50,19 +50,26 @@ export function redirectHash(raw) {
   return spendHash(tab, rule.unit);
 }
 
-// agentsSessionHash is the hash that opens the Agents Tree lens with
-// sessionId selected.
-export function agentsSessionHash(sessionId) {
-  return `#agents/tree/${encodeURIComponent(sessionId)}`;
+// sessionHash is the hash of a session page, optionally opened at one
+// turn: #agents/<id>[/<turn>], each part URI-encoded.
+export function sessionHash(sessionId, turnUuid = '') {
+  const base = `#agents/${encodeURIComponent(sessionId)}`;
+  return turnUuid ? `${base}/${encodeURIComponent(turnUuid)}` : base;
 }
 
-// parseAgentsSub splits an Agents route's sub into its lens and the
-// session it should select ('' when none, or when the id is malformed).
+// agentsSessionHash is the hash that opens sessionId's session page.
+export function agentsSessionHash(sessionId) {
+  return sessionHash(sessionId);
+}
+
+// parseAgentsSub splits an Agents route's sub into the session it opens
+// and the turn to land on ('' for each when absent or malformed; a
+// malformed session id reads as the list).
 export function parseAgentsSub(sub) {
-  const [lens, ...rest] = String(sub || '').split('/');
-  let sessionId = '';
-  try { sessionId = decodeURIComponent(rest.join('/')); } catch { sessionId = ''; }
-  return { lens, sessionId };
+  const [rawId = '', rawTurn = ''] = String(sub || '').split('/');
+  const decode = s => { try { return decodeURIComponent(s); } catch { return ''; } };
+  const sessionId = decode(rawId);
+  return { sessionId, turnUuid: sessionId ? decode(rawTurn) : '' };
 }
 
 // parseHash reads a route from raw (a hash string, '#' optional), or

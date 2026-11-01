@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, redirectHash, spendHash, REDIRECTS, agentsSessionHash, parseAgentsSub, onChange } from '../web/router.js';
+import { parseHash, redirectHash, spendHash, REDIRECTS, agentsSessionHash, sessionHash, parseAgentsSub, onChange } from '../web/router.js';
 import { installDOM } from './helpers/mini-dom.js';
 
 test('parseHash reads the Spend tab and Tokens unit from the hash', () => {
@@ -114,16 +114,29 @@ test('onChange leaves a current hash alone', () => {
   assert.deepEqual(seen, [{ view: 'overview', sub: 'hotspot-2', unit: 'dollars' }]);
 });
 
-test('agentsSessionHash deep-links a session into the Tree lens', () => {
+test('sessionHash builds #agents/<id>[/<turn>] with each part encoded', () => {
+  assert.equal(sessionHash('3f2a-session'), '#agents/3f2a-session');
+  assert.equal(sessionHash('3f2a-session', 'turn-9'), '#agents/3f2a-session/turn-9');
+  assert.equal(sessionHash('a b/c', 't/1 x'), '#agents/a%20b%2Fc/t%2F1%20x');
+});
+test('agentsSessionHash deep-links a session to its session page', () => {
   const h = agentsSessionHash('3f2a-session');
-  assert.equal(h, '#agents/tree/3f2a-session');
+  assert.equal(h, '#agents/3f2a-session');
+  assert.equal(h, sessionHash('3f2a-session'));
   const route = parseHash(h);
   assert.equal(route.view, 'agents');
-  assert.deepEqual(parseAgentsSub(route.sub), { lens: 'tree', sessionId: '3f2a-session' });
+  assert.deepEqual(parseAgentsSub(route.sub), { sessionId: '3f2a-session', turnUuid: '' });
 });
-test('parseAgentsSub reads a bare lens and survives a malformed session id', () => {
-  assert.deepEqual(parseAgentsSub('timeline'), { lens: 'timeline', sessionId: '' });
-  assert.deepEqual(parseAgentsSub(''), { lens: '', sessionId: '' });
-  assert.deepEqual(parseAgentsSub('tree/%E0%A4%A'), { lens: 'tree', sessionId: '' });
-  assert.equal(parseAgentsSub(parseHash(agentsSessionHash('a b/c')).sub).sessionId, 'a b/c');
+test('parseAgentsSub reads the session and turn of #agents/<id>/<turn>', () => {
+  const route = parseHash('#agents/3f2a-session/turn-9');
+  assert.equal(route.view, 'agents');
+  assert.deepEqual(parseAgentsSub(route.sub), { sessionId: '3f2a-session', turnUuid: 'turn-9' });
+  assert.deepEqual(parseAgentsSub(parseHash(sessionHash('a b/c', 't/1 x')).sub), { sessionId: 'a b/c', turnUuid: 't/1 x' });
+});
+test('parseAgentsSub reads the list for a bare #agents and survives a malformed id', () => {
+  assert.deepEqual(parseAgentsSub(''), { sessionId: '', turnUuid: '' });
+  assert.deepEqual(parseAgentsSub(parseHash('#agents').sub), { sessionId: '', turnUuid: '' });
+  assert.deepEqual(parseAgentsSub('%E0%A4%A'), { sessionId: '', turnUuid: '' });
+  assert.deepEqual(parseAgentsSub('%E0%A4%A/turn-1'), { sessionId: '', turnUuid: '' });
+  assert.deepEqual(parseAgentsSub('s1/%E0%A4%A'), { sessionId: 's1', turnUuid: '' });
 });
