@@ -497,7 +497,9 @@ stop and report the unknown shape rather than skipping it silently.
 
 <!-- djinn-dispatch: claude-code -->
 **Starting a dispatch.** The agents are the `.claude/agents/<name>.md` files
-`djinn init` writes. Start each dispatch with the Agent tool, naming the agent
+`djinn init` writes or, in a repo carrying none, the `~/.claude/agents/<name>.md`
+files `djinn skills install --global` writes; Claude Code resolves either by bare
+name. Start each dispatch with the Agent tool, naming the agent
 by bare name as `subagent_type` (a reviewer takes no agent file: dispatch it as
 a general-purpose subagent).
 <!-- djinn-dispatch: end -->

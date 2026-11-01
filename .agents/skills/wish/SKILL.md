@@ -527,11 +527,14 @@ every other step is a `codex exec` run built by the codex-exec rule in §4c (the
 prompt on stdin, the run's files under `$OUT`, the step's resolved `model` /
 `effort` on the argv). The implementer and fixer are
 the Codex agents `djinn init` writes, `.codex/agents/djinn-implementer.toml`
-and `.codex/agents/djinn-fixer.toml`; a write step's prompt opens with the line
-naming its agent file:
+and `.codex/agents/djinn-fixer.toml`; in a repo carrying no `.codex/agents/`,
+they are the user-scope copies `djinn skills install --global` writes,
+`~/.codex/agents/<name>.toml`. A write step's prompt opens with the line naming
+its agent file, `<agent file>` being whichever of the two exists, the repo's
+first:
 
 ```text
-Act as the <name> agent: read .codex/agents/<name>.toml and follow its developer_instructions as your own.
+Act as the <name> agent: read <agent file> and follow its developer_instructions as your own.
 ```
 
 ```bash
@@ -1074,10 +1077,12 @@ stopped the walk when this machine cannot honor the choice.
 
   Run it from `<worktree>`, outside this session's sandbox (it needs the
   network, and `bd` its database). A write step's prompt opens with the line
-  naming its Claude agent file, which `djinn init` writes:
+  naming its Claude agent file, `<agent file>`: the repo's
+  `.claude/agents/<name>.md`, which `djinn init` writes, or, in a repo carrying
+  none, `~/.claude/agents/<name>.md`, which `djinn skills install --global` writes:
 
   ```text
-  Act as the <name> agent: read .claude/agents/<name>.md and follow its instructions as your own.
+  Act as the <name> agent: read <agent file> and follow its instructions as your own.
   ```
 
   Print `notice: <step-id> declares adapter=claude-code; running it on claude -p (model=<resolved model>, effort=<resolved effort>)`

@@ -439,7 +439,7 @@ Graph-filed children get flat ids, not the `<parent>.N` ids the Step 6 preview s
 - **Dispatch each `/create-bead` invocation to a subagent** (one per bead, or small batches of related beads), passing the structured payload and pinning the planning model (below). Planning is where the strongest model pays for itself. The subagent returns only its gate-approved node (JSON) or `{HALT, findings[]}` — the planner never sees the gate's intermediate passes, and the subagent never files.
 - **Pre-gate plumbing beads as one batch.** Before dispatching, run a single `/ac-quality-review` pass over ALL plumbing drafts together (the gate is already lenient on structural criteria) and fold its findings in. Dispatch that batched pass to a subagent with the same planning-model pin. The in-skill gate then passes on attempt 1, and the per-bead 3-pass budget stays reserved for feature beads, where it earns its cost.
 
-Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gates, and never files a bead or edits a file. When its agent file is missing, run `djinn init --resync` first.
+Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gates, and never files a bead or edits a file. Its agent file is the repo's copy or, in a repo carrying none, the user-scope copy `djinn skills install --global` writes. When neither is there, run `djinn init --resync` (in a home realm, `djinn skills install --global`) first.
 
 <!-- djinn-dispatch: codex -->
 **Starting a subagent:** each one is its own `codex exec` run — a fresh process is Codex's context-isolated subagent. Write the dispatch prompt to a file, start every run in the background and `wait` for all of them, then read each node from its `last-message.md`:
@@ -448,8 +448,9 @@ Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gat
 OUT=$(mktemp -d)   # one per subagent
 MODEL=$(djinn formula describe --embedded iter-codex --json | jq -r '.steps[] | select(.id == "implement") | .model')
 # $OUT/prompt.txt opens with the line naming the agent file, then the job and its payloads:
-#   Act as the djinn-planner agent: read .codex/agents/djinn-planner.toml and follow its developer_instructions as your own.
-#   Draft beads: use the $create-bead skill (.agents/skills/create-bead/SKILL.md) on each payload below.
+#   Act as the djinn-planner agent: read <agent file> and follow its developer_instructions as your own.
+#     (<agent file>: .codex/agents/djinn-planner.toml, else ~/.codex/agents/djinn-planner.toml)
+#   Draft beads: use the $create-bead skill (.agents/skills/create-bead/SKILL.md, else ~/.agents/skills/create-bead/SKILL.md) on each payload below.
 #   (or) Pre-gate plumbing: run the $ac-quality-review skill once over every draft below.
 codex exec --skip-git-repo-check -C "$(git rev-parse --show-toplevel)" -m "$MODEL" \
   -c model_reasoning_effort=high -o "$OUT/last-message.md" - \

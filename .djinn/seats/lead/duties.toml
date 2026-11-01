@@ -116,11 +116,17 @@ Triage the review follow-ups the drain filed, under the charter's
    - Anything else (new scope, deleting behaviour a user or consumer repo can
      see or depend on or a DECISIONS.md ruling or doc promises, deleting code
      unreachable only by today's data, two reasonable fixes, a matter of
-     taste): leave it proposed. Append four notes, one call each,
-     with `bd update <id> --append-notes`: "why: <why only the operator can
-     decide it>", "question: <one question>", "a: <first answer>",
-     "b: <second answer>". Then add the lead-ruled and lead-escalated labels.
-5. Add one comment to each follow-up you left open, saying what you decided.
+     taste): leave it proposed. Hand it to the operator with one command,
+     which records the question where the ops room, the digest and the
+     needs-you hook read it:
+     `djinn needs-you defer <id> --what "<2-4 sentences in everyday words: what is wrong or proposed today, what would change, what the operator would notice; no file paths, bead ids or code names>" --why "<why only the operator can decide it>" --question "<one question>" --a "<first answer>" --b "<second answer>" --recommend <a|b> --because "<why you recommend that answer, in one line of everyday words>"`.
+     Then run
+     `bd update <id> --add-label=lead-escalated --add-label=lead-ruled`:
+     the defer clears lead-escalated, and without it the rule duty would take
+     the bead back as a give-back and the operator would see it only after
+     half an hour.
+     Change nothing else on it.
+5. Add one comment to each follow-up you left open or deferred, saying what you decided.
 6. Write one ledger entry for the run, headed date-only
    (`## YYYY-MM-DD — follow-ups`, for the digest check's sake), naming each id
    and what you did. A run that files, closes, relabels and comments nothing

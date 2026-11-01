@@ -439,10 +439,10 @@ Graph-filed children get flat ids, not the `<parent>.N` ids the Step 6 preview s
 - **Dispatch each `/create-bead` invocation to a subagent** (one per bead, or small batches of related beads), passing the structured payload and pinning the planning model (below). Planning is where the strongest model pays for itself. The subagent returns only its gate-approved node (JSON) or `{HALT, findings[]}` — the planner never sees the gate's intermediate passes, and the subagent never files.
 - **Pre-gate plumbing beads as one batch.** Before dispatching, run a single `/ac-quality-review` pass over ALL plumbing drafts together (the gate is already lenient on structural criteria) and fold its findings in. Dispatch that batched pass to a subagent with the same planning-model pin. The in-skill gate then passes on attempt 1, and the per-bead 3-pass budget stays reserved for feature beads, where it earns its cost.
 
-Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gates, and never files a bead or edits a file. When its agent file is missing, run `djinn init --resync` first.
+Every subagent is the djinn-planner agent `djinn init` writes: it drafts and gates, and never files a bead or edits a file. Its agent file is the repo's copy or, in a repo carrying none, the user-scope copy `djinn skills install --global` writes. When neither is there, run `djinn init --resync` (in a home realm, `djinn skills install --global`) first.
 
 <!-- djinn-dispatch: claude-code -->
-**Starting a subagent:** use the Agent tool with `subagent_type: djinn-planner` (`.claude/agents/djinn-planner.md`), and **`model: fable` on every Agent call**.
+**Starting a subagent:** use the Agent tool with `subagent_type: djinn-planner` (`.claude/agents/djinn-planner.md`, else `~/.claude/agents/djinn-planner.md`), and **`model: fable` on every Agent call**.
 <!-- djinn-dispatch: end -->
 
 **Post-filing verification — required.** Filed beads are claims until read back. After the `bd create --graph` call:
