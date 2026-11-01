@@ -398,7 +398,6 @@ func TestParseRollout_SkipsUnknownAndCountsMalformed(t *testing.T) {
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.003Z","type":"response_item","payload":{"type":"message","role":"user","content":[]}}` + "\n")
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.004Z","type":"event_msg","payload":{"type":"thread_settings_applied"}}` + "\n")
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.005Z","type":"world_state","payload":{}}` + "\n")
-	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.006Z","type":"compacted","payload":{}}` + "\n")
 	// Unmodeled item and event types whose fields clash with the modeled
 	// shapes (an object where a tool call has a string) are still skips.
 	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.007Z","type":"response_item","payload":{"type":"tool_search_call","call_id":"c0","arguments":{"query":"x","limit":5}}}` + "\n")
@@ -698,5 +697,43 @@ func TestParseRollout_LegacyTurnsLinkPrompts(t *testing.T) {
 		if tr.ParentUUID != latest {
 			t.Errorf("turn %d ParentUUID = %q, want %q", i, tr.ParentUUID, latest)
 		}
+	}
+}
+
+// TestParseRollout_CompactedRecordIsABoundary: a top-level `compacted`
+// record is one CompactBoundary stamped with the thread's session.
+func TestParseRollout_CompactedRecordIsABoundary(t *testing.T) {
+	const path = "/home/u/.codex/sessions/rollout-2026-10-22T19-37-10-01a1669e-9291-7fb0-a4c1-a2812946a438.jsonl"
+	res := parseFixture(t, "compact.jsonl", path)
+	if len(res.Turns) != 5 {
+		t.Fatalf("turns = %d, want 5", len(res.Turns))
+	}
+	if len(res.CompactBoundaries) != 1 {
+		t.Fatalf("CompactBoundaries = %+v, want 1", res.CompactBoundaries)
+	}
+	want := parse.CompactBoundary{
+		SessionID:  "01a1669e-9291-7fb0-a4c1-a2812946a438",
+		SourceFile: path,
+		Timestamp:  time.Date(2026, 10, 23, 7, 3, 12, 691_000_000, time.UTC),
+	}
+	if got := res.CompactBoundaries[0]; got != want {
+		t.Errorf("boundary = %+v, want %+v", got, want)
+	}
+}
+
+// TestParseRollout_CompactionItemIsNoBoundary: a response_item of type
+// compaction opens a rollout resumed from a compacted thread; it is not a
+// compaction inside the file.
+func TestParseRollout_CompactionItemIsNoBoundary(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"timestamp":"2026-10-25T00:52:01.951Z","type":"session_meta","payload":{"session_id":"s1","id":"s1","cwd":"/home/u/proj","originator":"codex-tui","thread_source":"user"}}` + "\n")
+	b.WriteString(`{"timestamp":"2026-10-25T00:52:02.000Z","ordinal":1,"type":"response_item","payload":{"type":"compaction","encrypted_content":"gAAAA"}}` + "\n")
+	b.WriteString(`{"timestamp":"2026-10-25T00:52:04.000Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":2}}}` + "\n")
+	res, err := ParseFile(strings.NewReader(b.String()), "x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.CompactBoundaries) != 0 {
+		t.Errorf("CompactBoundaries = %+v, want none", res.CompactBoundaries)
 	}
 }

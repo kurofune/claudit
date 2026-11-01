@@ -5,7 +5,8 @@
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
 // model response — one Turn), the response_item user and assistant messages,
-// tool calls and their outputs, and event_msg token_count (the per-response usage
+// tool calls and their outputs, compacted (a context compaction, one
+// CompactBoundary), and event_msg token_count (the per-response usage
 // of rollouts written before token_usage_record existed). Every other record type is skipped.
 package codex
 
@@ -169,6 +170,10 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				continue
 			}
 			model, turnCWD = tc.Model, tc.CWD
+		case "compacted":
+			// The thread's context was summarized here: every tool output
+			// before this record leaves the next response's prompt.
+			res.CompactBoundaries = append(res.CompactBoundaries, parse.CompactBoundary{Timestamp: ts, SourceFile: path})
 		case "token_usage_record":
 			var tu rawTokenUsageRecord
 			if err := json.Unmarshal(rec.Payload, &tu); err != nil || tu.Usage == nil {
@@ -292,6 +297,9 @@ func stampThread(res *parse.Result, meta rawSessionMeta, path string) {
 		if t.ParentUUID != "" {
 			t.ParentUUID = thread + ":" + t.ParentUUID
 		}
+	}
+	for i := range res.CompactBoundaries {
+		res.CompactBoundaries[i].SessionID = sessionID
 	}
 	for i := range res.UserMessages {
 		m := &res.UserMessages[i]
