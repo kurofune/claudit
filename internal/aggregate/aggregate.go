@@ -18,6 +18,23 @@ import (
 type Filter struct {
 	Since, Until     time.Time // zero means open-ended
 	ProjectSubstring string    // case-insensitive substring of the resolved project name or the raw cwd
+	// Provider keeps only turns from that agent tool (parse.ProviderClaudeCode
+	// or parse.ProviderCodex); empty keeps every provider.
+	Provider string
+}
+
+// matchesProvider reports whether a turn from provider passes want. A turn
+// with no Provider is a Claude Code turn, as pricing reads it.
+func matchesProvider(provider, want string) bool {
+	return want == "" || pricing.PriceProvider(provider) == want
+}
+
+// inWindow reports whether ts falls in the filter's [Since, Until).
+func (f Filter) inWindow(ts time.Time) bool {
+	if !f.Since.IsZero() && ts.Before(f.Since) {
+		return false
+	}
+	return f.Until.IsZero() || ts.Before(f.Until)
 }
 
 // matchesProject reports whether the turn's raw cwd or its resolved project
@@ -170,6 +187,12 @@ type Aggregator struct {
 
 	unknownModels map[string]*UnknownModel
 
+	// byProvider rolls the counted turns up per agent tool; planUsage is
+	// the latest in-window rate-limit sample (planUsageOK when one exists).
+	byProvider  map[string]*providerAccum
+	planUsage   parse.RateLimitSample
+	planUsageOK bool
+
 	// Cross-file dedup set, keyed by message.id. A resumed/forked session
 	// replays the prior transcript into a new file verbatim — same message.id,
 	// usage, uuid, and timestamp; only sessionId and the file path differ.
@@ -246,6 +269,7 @@ func New(p *pricing.Table) *Aggregator {
 		projectSession:    map[string]map[string]struct{}{},
 		bySession:         map[string]*SessionBucket{},
 		unknownModels:     map[string]*UnknownModel{},
+		byProvider:        map[string]*providerAccum{},
 		seenMessageID:     map[string]struct{}{},
 		byPrompt:          map[string]*promptBucketInternal{},
 		ctxTurns:          map[string][]contextTurn{},
@@ -317,13 +341,9 @@ func (a *Aggregator) WithTrendFill(start, end time.Time) *Aggregator {
 }
 
 func (a *Aggregator) match(t parse.Turn) bool {
-	if !a.filter.Since.IsZero() && t.Timestamp.Before(a.filter.Since) {
-		return false
-	}
-	if !a.filter.Until.IsZero() && !t.Timestamp.Before(a.filter.Until) {
-		return false
-	}
-	return matchesProject(t.CWD, a.resolver, a.filter.ProjectSubstring)
+	return a.filter.inWindow(t.Timestamp) &&
+		matchesProvider(t.Provider, a.filter.Provider) &&
+		matchesProject(t.CWD, a.resolver, a.filter.ProjectSubstring)
 }
 
 // SubagentLookup is called per sidechain turn to resolve subagent
@@ -383,6 +403,7 @@ func (a *Aggregator) AddWithSubagent(t parse.Turn, lookup SubagentLookup) bool {
 	}
 
 	a.recordContextTurn(t)
+	a.addProvider(t, cost)
 
 	a.totals.addUsage(t.Usage)
 	a.totals.CostUSD += cost

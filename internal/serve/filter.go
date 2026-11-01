@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/parse"
 )
 
 // Query is the parsed view of a request's URL query string: the
@@ -65,6 +66,15 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 
 	if s := strings.TrimSpace(v.Get("project")); s != "" {
 		q.Filter.ProjectSubstring = s
+	}
+
+	if s, ok := lookupTrim(v, "provider"); ok && s != "" {
+		switch s {
+		case parse.ProviderClaudeCode, parse.ProviderCodex:
+			q.Filter.Provider = s
+		default:
+			return q, fmt.Errorf("?provider: must be one of %s|%s, got %q", parse.ProviderClaudeCode, parse.ProviderCodex, s)
+		}
 	}
 
 	last := strings.TrimSpace(v.Get("last"))

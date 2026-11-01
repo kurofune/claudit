@@ -78,19 +78,15 @@ type SpawnRollup struct {
 	ErrorCount int     `json:"error_count"`
 }
 
-// MatchesFilter is the since/until/project test the rolled-up sections use
+// MatchesFilter is the since/until/provider/project test the rolled-up sections use
 // (Aggregator.match), exported so other packages (e.g. agentflow) filter turns
 // identically. It runs without an Aggregator reference, so it resolves
 // projects through project.Default; the project test itself is the shared
 // matchesProject, so the Agents view and the rolled-up sections agree.
 func MatchesFilter(t parse.Turn, f Filter) bool {
-	if !f.Since.IsZero() && t.Timestamp.Before(f.Since) {
-		return false
-	}
-	if !f.Until.IsZero() && !t.Timestamp.Before(f.Until) {
-		return false
-	}
-	return matchesProject(t.CWD, project.Default, f.ProjectSubstring)
+	return f.inWindow(t.Timestamp) &&
+		matchesProvider(t.Provider, f.Provider) &&
+		matchesProject(t.CWD, project.Default, f.ProjectSubstring)
 }
 
 // DistinctToolInvocations returns (Name, Detail) pairs in first-occurrence

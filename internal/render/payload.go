@@ -104,6 +104,63 @@ type OverviewPayload struct {
 	// Period is the bucket granularity of TrendTotals. The SPA reads it
 	// to label the trend axis ("hour" → HH:MM) instead of hardcoding day.
 	Period aggregate.Period `json:"period"`
+	// Providers holds one row per agent tool with turns in the window.
+	Providers []ProviderTotal `json:"providers"`
+	// PlanUsage is the latest plan-usage sample in the window; nil when none.
+	PlanUsage *PlanUsage `json:"plan_usage"`
+}
+
+// ProviderTotal is one agent tool's slice of the window: Share is its
+// percentage of the window's dollars (0 when the window cost nothing).
+type ProviderTotal struct {
+	Provider string  `json:"provider"`
+	Sessions int     `json:"sessions"`
+	Turns    int     `json:"turns"`
+	CostUSD  float64 `json:"cost_usd"`
+	Share    float64 `json:"share"`
+}
+
+// PlanUsage is how much of a subscription's rate-limit window was used at
+// SampledAt, and when that window resets.
+type PlanUsage struct {
+	Provider      string    `json:"provider"`
+	UsedPercent   float64   `json:"used_percent"`
+	WindowMinutes int       `json:"window_minutes"`
+	ResetsAt      time.Time `json:"resets_at"`
+	PlanType      string    `json:"plan_type"`
+	SampledAt     time.Time `json:"sampled_at"`
+}
+
+func buildProviderTotals(a *aggregate.Aggregator) []ProviderTotal {
+	rows := a.ByProvider()
+	total := 0.0
+	for _, r := range rows {
+		total += r.CostUSD
+	}
+	out := make([]ProviderTotal, 0, len(rows))
+	for _, r := range rows {
+		share := 0.0
+		if total > 0 {
+			share = 100 * r.CostUSD / total
+		}
+		out = append(out, ProviderTotal{Provider: r.Provider, Sessions: r.Sessions, Turns: r.Turns, CostUSD: r.CostUSD, Share: share})
+	}
+	return out
+}
+
+func buildPlanUsage(a *aggregate.Aggregator) *PlanUsage {
+	s, ok := a.LatestRateLimit()
+	if !ok {
+		return nil
+	}
+	return &PlanUsage{
+		Provider:      s.Provider,
+		UsedPercent:   s.UsedPercent,
+		WindowMinutes: s.WindowMinutes,
+		ResetsAt:      s.ResetsAt,
+		PlanType:      s.PlanType,
+		SampledAt:     s.Timestamp,
+	}
 }
 
 // CostPayload backs /_claudit/api/cost — every "where did the money
@@ -115,6 +172,9 @@ type CostPayload struct {
 	ByProject    []aggregate.ProjectBucket `json:"by_project"`
 	BySkill      []aggregate.SkillBucket   `json:"by_skill"`
 	ByPrompt     []aggregate.PromptBucket  `json:"by_prompt"`
+	// Sessions counts the window's sessions, so the SPA can tell an empty
+	// provider from one whose rows were all filtered out.
+	Sessions int `json:"sessions"`
 }
 
 // ToolsPayload backs /_claudit/api/tools — one row per tool plus the
@@ -123,6 +183,8 @@ type CostPayload struct {
 type ToolsPayload struct {
 	ByTool       []ToolRow            `json:"by_tool"`
 	ByToolDetail map[string][]ToolRow `json:"by_tool_detail"`
+	// Sessions counts the window's sessions (see CostPayload.Sessions).
+	Sessions int `json:"sessions"`
 }
 
 // ToolRow is one tool's, or one (tool, pattern)'s, calls joined to their
@@ -221,6 +283,8 @@ func BuildOverview(a, prev *aggregate.Aggregator) OverviewPayload {
 		Forecast:        a.MonthEndForecast(time.Now()),
 		UnknownModels:   a.UnknownModels(),
 		Period:          a.Period(),
+		Providers:       buildProviderTotals(a),
+		PlanUsage:       buildPlanUsage(a),
 	}
 }
 
@@ -232,6 +296,7 @@ func BuildCost(a *aggregate.Aggregator) CostPayload {
 		ByProject:    a.ByProject(),
 		BySkill:      a.BySkill(),
 		ByPrompt:     a.ByPrompt(),
+		Sessions:     a.Totals().Sessions,
 	}
 }
 
@@ -267,7 +332,7 @@ func BuildTools(a *aggregate.Aggregator) ToolsPayload {
 		sortToolRows(rows)
 		byDetail[tool] = rows
 	}
-	return ToolsPayload{ByTool: byTool, ByToolDetail: byDetail}
+	return ToolsPayload{ByTool: byTool, ByToolDetail: byDetail, Sessions: a.Totals().Sessions}
 }
 
 // BuildSubagents rolls the aggregator into the Subagents-tab payload.

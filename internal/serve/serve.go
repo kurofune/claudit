@@ -626,6 +626,7 @@ func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator 
 	}
 	agg.AddToolResults(snap.ToolResults)
 	agg.AddCompactBoundaries(snap.CompactBoundaries)
+	agg.AddRateLimitSamples(snap.RateLimitSamples)
 	return agg
 }
 

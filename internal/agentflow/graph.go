@@ -36,6 +36,9 @@ type AgentSession struct {
 	// interactive session, "sdk-cli" for a headless/SDK run. Lets the Agents
 	// view badge headless runs. Constant across a session; first non-empty wins.
 	Entrypoint string `json:"entrypoint"`
+	// Provider is the agent tool that wrote the session (parse.ProviderClaudeCode
+	// or parse.ProviderCodex), lifted from its turns like Entrypoint.
+	Provider string `json:"provider"`
 	// StartedAt/EndedAt span every agent in the session; CostUSD is the sum
 	// across the main agent and all its sub-agents.
 	StartedAt time.Time `json:"started_at"`
@@ -177,6 +180,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		sessionID  string
 		cwd        string
 		entrypoint string
+		provider   string
 		// nodes keyed by SourceFile — one agent per file.
 		nodes map[string]*nodeAccum
 	}
@@ -222,6 +226,9 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		// Entrypoint is a session invariant — capture the first non-empty one.
 		if s.entrypoint == "" && t.Entrypoint != "" {
 			s.entrypoint = t.Entrypoint
+		}
+		if s.provider == "" {
+			s.provider = pricing.PriceProvider(t.Provider)
 		}
 		n, ok := s.nodes[t.SourceFile]
 		if !ok {
@@ -281,6 +288,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			CWD:        s.cwd,
 			Project:    project.Default.Resolve(s.cwd).Name,
 			Entrypoint: s.entrypoint,
+			Provider:   s.provider,
 		}
 		var ordinary []*nodeAccum
 		for _, n := range s.nodes {

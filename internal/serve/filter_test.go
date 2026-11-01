@@ -192,3 +192,36 @@ func TestParseLastDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestParseQuery_Provider(t *testing.T) {
+	for _, c := range []struct {
+		raw, want string
+		wantErr   bool
+	}{
+		{raw: "", want: ""},
+		{raw: "claude-code", want: "claude-code"},
+		{raw: "codex", want: "codex"},
+		{raw: " codex ", want: "codex"},
+		{raw: "gemini", wantErr: true},
+		{raw: "Codex", wantErr: true},
+	} {
+		v := url.Values{}
+		if c.raw != "" {
+			v.Set("provider", c.raw)
+		}
+		q, err := parseQuery(v, time.Now())
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("provider=%q: want error, got Provider %q", c.raw, q.Filter.Provider)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("provider=%q: %v", c.raw, err)
+			continue
+		}
+		if q.Filter.Provider != c.want {
+			t.Errorf("provider=%q: Filter.Provider = %q, want %q", c.raw, q.Filter.Provider, c.want)
+		}
+	}
+}

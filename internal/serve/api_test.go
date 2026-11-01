@@ -167,12 +167,12 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "overview",
 			path:     "/_claudit/api/overview",
-			wantKeys: []string{"totals", "overall_hit_ratio", "total_tokens", "hotspots", "trend_totals", "forecast", "unknown_models", "period"},
+			wantKeys: []string{"totals", "overall_hit_ratio", "total_tokens", "hotspots", "trend_totals", "forecast", "unknown_models", "period", "providers", "plan_usage"},
 		},
 		{
 			name:     "cost",
 			path:     "/_claudit/api/cost",
-			wantKeys: []string{"by_model", "by_project", "by_skill", "by_prompt", "total_cost_usd"},
+			wantKeys: []string{"by_model", "by_project", "by_skill", "by_prompt", "total_cost_usd", "sessions"},
 		},
 		{
 			name:     "tokens",
@@ -182,7 +182,7 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 		{
 			name:     "tools",
 			path:     "/_claudit/api/tools",
-			wantKeys: []string{"by_tool", "by_tool_detail"},
+			wantKeys: []string{"by_tool", "by_tool_detail", "sessions"},
 		},
 		{
 			name:     "subagents",
@@ -375,6 +375,8 @@ func TestAPISections_BadQuery(t *testing.T) {
 		"/_claudit/api/cost?by=bogus",
 		"/_claudit/api/cost?hotspots=-1",
 		"/_claudit/api/cost?sessions=abc",
+		"/_claudit/api/cost?provider=gemini",
+		"/_claudit/api/agents?provider=gemini",
 	}
 	for _, target := range cases {
 		t.Run(target, func(t *testing.T) {

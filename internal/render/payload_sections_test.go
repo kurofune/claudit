@@ -32,6 +32,8 @@ func TestBuildOverview_ShapeAndKeys(t *testing.T) {
 		"overall_hit_ratio",
 		"total_tokens",
 		"period",
+		"providers",
+		"plan_usage",
 	})
 }
 
@@ -75,6 +77,7 @@ func TestBuildCost_ShapeAndKeys(t *testing.T) {
 		"by_skill",
 		"by_prompt",
 		"total_cost_usd",
+		"sessions",
 	})
 }
 
@@ -100,6 +103,7 @@ func TestBuildTools_ShapeAndKeys(t *testing.T) {
 	wantTopLevel(t, got, []string{
 		"by_tool",
 		"by_tool_detail",
+		"sessions",
 	})
 }
 
