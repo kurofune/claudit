@@ -72,8 +72,9 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 		switch s {
 		case parse.ProviderClaudeCode, parse.ProviderCodex:
 			q.Filter.Provider = s
+		case "all":
 		default:
-			return q, fmt.Errorf("?provider: must be one of %s|%s, got %q", parse.ProviderClaudeCode, parse.ProviderCodex, s)
+			return q, fmt.Errorf("?provider: must be one of all|%s|%s, got %q", parse.ProviderClaudeCode, parse.ProviderCodex, s)
 		}
 	}
 

@@ -216,6 +216,25 @@ func TestAPISections_ShapeAndKeys(t *testing.T) {
 	}
 }
 
+// TestAPIOverview_ProviderAllMatchesUnfiltered locks the SPA's explicit
+// All URL: ?provider=all answers 200 with the same totals and providers
+// as the URL with no provider key.
+func TestAPIOverview_ProviderAllMatchesUnfiltered(t *testing.T) {
+	srv := fixtureServer(t)
+	plain := doAPI(t, srv, http.MethodGet, "/_claudit/api/overview", nil)
+	all := doAPI(t, srv, http.MethodGet, "/_claudit/api/overview?provider=all", nil)
+	if all.Code != http.StatusOK {
+		t.Fatalf("?provider=all status = %d, want 200; body=%s", all.Code, all.Body.String())
+	}
+	plainBody, allBody := readJSONResponse(t, plain), readJSONResponse(t, all)
+	assertTopLevelKeys(t, allBody, []string{"totals", "overall_hit_ratio", "total_tokens", "hotspots", "trend_totals", "forecast", "unknown_models", "period", "providers"})
+	for _, k := range []string{"totals", "total_tokens", "providers"} {
+		if string(allBody[k]) != string(plainBody[k]) {
+			t.Errorf("%s differs: provider=all %s, unfiltered %s", k, allBody[k], plainBody[k])
+		}
+	}
+}
+
 // TestAPISections_EtagRevalidation asserts every section honors
 // If-None-Match: a fresh request gets a 200 + ETag, and replaying
 // that ETag returns 304 with no body. Keep both behaviors locked —

@@ -199,6 +199,8 @@ func TestParseQuery_Provider(t *testing.T) {
 		wantErr   bool
 	}{
 		{raw: "", want: ""},
+		{raw: "all", want: ""},
+		{raw: "All", wantErr: true},
 		{raw: "claude-code", want: "claude-code"},
 		{raw: "codex", want: "codex"},
 		{raw: " codex ", want: "codex"},
