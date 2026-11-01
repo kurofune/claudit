@@ -32,6 +32,7 @@ func runServe(args []string) error {
 	fs := flag.NewFlagSet("claudit serve", flag.ExitOnError)
 	defaultRoot := defaultProjectsRoot()
 	root := fs.String("root", defaultRoot, "root directory to watch (defaults to $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
+	codexRoot := codexRootFlag(fs)
 	bind := fs.String("bind", "127.0.0.1", "host to bind on (loopback only by default; pass 0.0.0.0 to expose to your LAN at your own risk)")
 	port := fs.Int("port", 8787, "TCP port to listen on")
 	pricesPath := fs.String("prices", "", "override pricing YAML path (default: ~/.config/claudit/prices.yaml)")
@@ -94,7 +95,7 @@ func runServe(args []string) error {
 		return err
 	}
 
-	cache := serve.NewCache(*root)
+	cache := newServeCache(*root, *codexRoot)
 	srv := serve.NewServer(cache, serve.Options{
 		Bind:               listenAddr,
 		Prices:             prices,
@@ -117,6 +118,9 @@ func runServe(args []string) error {
 	// even if the listener fails — surface address conflicts loud.
 	addr := srv.Addr()
 	fmt.Fprintf(os.Stderr, "claudit serve: watching %s\n", *root)
+	if *codexRoot != "" {
+		fmt.Fprintf(os.Stderr, "claudit serve: watching %s (codex)\n", *codexRoot)
+	}
 	fmt.Fprintf(os.Stderr, "claudit serve: listening on %s (Ctrl-C to stop)\n", addr)
 	if isNonLoopbackBind(*bind) {
 		fmt.Fprintln(os.Stderr, "claudit serve: WARNING — bound to a non-loopback address; this exposes prompt text on your network.")
