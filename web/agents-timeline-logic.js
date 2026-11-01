@@ -83,6 +83,7 @@ export function timelineSessionList(sessions, nowMs = Date.now()) {
       cwd: session.cwd || '',
       project: projectName(session),
       entrypoint: session.entrypoint || '',
+      provider: session.provider || '',
       index,
       ...sessionStats(session, nowMs),
     });

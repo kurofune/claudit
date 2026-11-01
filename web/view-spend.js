@@ -13,6 +13,7 @@ import {
   buildRows, withTrend, injectTrendColumn, wireViewFilters, rowPassesFilter,
 } from './table.js';
 import { tableBodySkeleton, stackedSkeleton } from './skeleton.js';
+import { providerFromSearch, emptyProviderText } from './provider-filter.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
@@ -533,6 +534,13 @@ function render() {
   if (state.status === 'error') {
     status.innerHTML = `<div class="warning-card" role="alert"><strong class="danger">Failed to load spend data:</strong> ${escHtml(state.error && state.error.message)}</div>`;
     body.hidden = true;
+    return;
+  }
+  const provider = providerFromSearch(window.location.search);
+  if (state.status === 'ready' && provider !== 'all' && !((state.data.cost || {}).sessions > 0)) {
+    status.innerHTML = `<p class="empty-state">${escHtml(emptyProviderText(provider))}</p>`;
+    body.hidden = true;
+    writeNavMetric(state.data, unit);
     return;
   }
   status.innerHTML = '';

@@ -27,6 +27,7 @@
 // pure, unit-tested helpers in agents-logic.js.
 
 import { fetchAgents } from './api.js';
+import { providerFromSearch, emptyProviderText } from './provider-filter.js';
 import { fmtMoney, fmtNum, fmtCompact, fmtPct1, escHtml } from './format.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { setLiveHandler } from './sse.js';
@@ -47,9 +48,9 @@ import {
   setPlayheadT, setTlMinPxPerMs, setTimelineSid,
   setFilterSpec, setFilterBarBuilt, setHitIndex,
   openAgentBodies, TREE_PAGE, treeLimit, setTreeLimit, coreHooks,
-  labelIcon, originBadgeHTML, colorSlot, convSidebarWidth,
+  labelIcon, originBadgeHTML, providerBadgeHTML, colorSlot, convSidebarWidth,
   startConvResize, startTimelineResize, kindFamily, kindBadge,
-  captureState, restoreState, clockTime, shortId,
+  captureState, restoreState, clockTime, shortId, clip,
 } from './agents-shared.js';
 import { renderControl } from './agents-feed.js';
 import {
@@ -210,11 +211,21 @@ export function reset() {
   frozenTreeOrder = null;
 }
 
+// inFlight is the graph fetch paint() and paintNav() share: on an #agents
+// load both run at once, and the graph can be hundreds of MB, so fetching and
+// parsing it twice doubles the wait before the first paint. Cleared once it
+// settles, so a later load fetches fresh data.
+let inFlight = null;
+function loadGraph() {
+  if (!inFlight) inFlight = fetchAgents().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
 // paintNav resolves the sidebar metric before the tab is first opened.
 export async function paintNav() {
   if (navPainted || painted) return;
   let graph;
-  try { graph = await fetchAgents(); } catch { return; }
+  try { graph = await loadGraph(); } catch { return; }
   setLastGraph(graph);
   updateNavMetric(graphStats(graph));
   navPainted = true;
@@ -251,7 +262,7 @@ export async function paint(route) {
 
   if (lastGraph == null) {
     try {
-      setLastGraph(await fetchAgents());
+      setLastGraph(await loadGraph());
     } catch (err) {
       container.innerHTML = `<header class="view-head"><h1>${labelIcon('agents')}Agents</h1></header>
         <div class="warning-card" role="alert"><strong class="danger">Failed to load agents:</strong> ${escHtml(err.message)}</div>`;
@@ -344,10 +355,17 @@ function renderActive(container, preserve = false, paintDrawer = true) {
   const sessions = (lastGraph && lastGraph.sessions) || [];
   ensureSelection(lastGraph);
   const empty = container.querySelector('#agents-empty');
-  if (empty) empty.hidden = sessions.length > 0;
+  const provider = providerFromSearch(window.location.search);
+  const providerEmpty = sessions.length === 0 && provider !== 'all';
+  if (empty) empty.hidden = sessions.length > 0 || providerEmpty;
 
   const host = container.querySelector(`.subview[data-subview="${activeSub}"]`);
   if (!host) return;
+  if (providerEmpty) {
+    host.innerHTML = `<p class="empty-state">${escHtml(emptyProviderText(provider))}</p>`;
+    if (paintDrawer) renderDrawer(container);
+    return;
+  }
 
   const memo = preserve ? captureState(host) : null;
   if (activeSub === 'feed') host.innerHTML = renderControl(sessions);
@@ -772,12 +790,12 @@ function tickTimers(root) {
 //
 // "What did I ask, and how did it respond?" — the SELECTED session's main agent
 // read as a chat thread: each user-prompt bubble followed by the assistant's
-// spoken replies (conversationSegments slices main.steps by prompt marker;
-// conversationReplies keeps only the steps that produced text). Tool calls are
-// deliberately absent — this lens is the dialogue, not the trace; the tools and
-// reasoning are a click away in the shared drawer (each bubble carries the SAME
-// refKey the other lenses use, main = agentIndex 0) and in the Tree/Timeline
-// lenses. Sub-agents are out of frame too — this is the human↔main-agent talk.
+// replies (conversationSegments slices main.steps by prompt marker;
+// conversationReplies keeps the steps that produced text or called a tool).
+// Each tool call shows as one compact line — name, input, a snippet of its
+// output, and a failed mark — under the reply; the full I/O and reasoning are a
+// click away in the shared drawer (each bubble carries the SAME refKey the
+// other lenses use, main = agentIndex 0) and in the Tree/Timeline lenses. Sub-agents are out of frame too — this is the human↔main-agent talk.
 //
 // ONE session at a time, keyed off the shared selection: a "conversation"
 // stacking thousands of sessions is neither readable nor renderable (full
@@ -813,6 +831,7 @@ function conversationSidebarHTML(list, curSid) {
     return `<button type="button" class="conv-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-conv-sess="${escHtml(e.sessionId)}" data-c="${c}">
       <span class="conv-sess-item-head">
         <span class="conv-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(projectName(e) || '—')}</span>
+        ${providerBadgeHTML(e)}
         ${originBadgeHTML(e)}
       </span>
       <span class="conv-sess-item-meta">
@@ -862,13 +881,29 @@ function conversationReplyHTML(reply, sid) {
   const sel = ref === selectedRef ? ' is-selected' : '';
   const cost = reply.cost_usd
     ? `<span class="conv-reply-cost">${escHtml(fmtMoney(reply.cost_usd))}</span>` : '';
+  const text = reply.text ? `<div class="conv-reply-text">${escHtml(reply.text)}</div>` : '';
+  const tools = (reply.tools || []).length
+    ? `<ul class="conv-tools">${reply.tools.map(conversationToolHTML).join('')}</ul>` : '';
   return `<div class="conv-reply${sel}" data-ref="${escHtml(ref)}" tabindex="0" role="button">
-    <div class="conv-reply-text">${escHtml(reply.text)}</div>
+    ${text}${tools}
     <div class="conv-reply-foot">
       <span class="conv-reply-time">${escHtml(clockTime(parseTime(reply.timestamp)))}</span>
       ${cost}
     </div>
   </div>`;
+}
+
+// conversationToolHTML is one tool call inside a reply: its name, the input
+// snippet, the first lines of its output, and a failed mark when it errored.
+function conversationToolHTML(t) {
+  const out = (t.output || '').trim();
+  const outHTML = out
+    ? `<span class="conv-tool-out" title="${escHtml(out)}">${escHtml(clip(out.replace(/\s+/g, ' '), 160))}</span>` : '';
+  const failed = t.failed ? '<span class="conv-tool-failed">failed</span>' : '';
+  return `<li class="conv-tool${t.failed ? ' is-error' : ''}">
+    <span class="conv-tool-call"><code class="conv-tool-name">${escHtml(t.name)}</code>${t.input ? ` <code class="conv-tool-input" title="${escHtml(t.input)}">${escHtml(clip(t.input, 120))}</code>` : ''}${failed}</span>
+    ${outHTML}
+  </li>`;
 }
 
 // ── Insights lens (Phase 2) ─────────────────────────────────────────────────

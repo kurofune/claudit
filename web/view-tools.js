@@ -8,6 +8,7 @@ import { fmtNum, fmtMoney, fmtPct1, escHtml, truncate } from './format.js';
 import { buildRows, wireViewFilters, rowPassesFilter, sortRows } from './table.js';
 import { tableBodySkeleton, skeletonResetIfPending } from './skeleton.js';
 import { toolRows, drillSections, contextCostTip, fmtDuration, DEFAULT_SORT } from './view-tools-logic.js';
+import { providerFromSearch, emptyProviderText } from './provider-filter.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 const HEAD = `<header class="view-head"><h1>${labelIcon('tools')}Tools</h1></header>`;
@@ -155,6 +156,14 @@ export async function paint(route) {
   }
 
   const rows = sortRows(toolRows(tools.by_tool), DEFAULT_SORT.key, DEFAULT_SORT.dir);
+  const provider = providerFromSearch(window.location.search);
+  if (provider !== 'all' && !(tools.sessions > 0)) {
+    container.innerHTML = `${HEAD}<p class="empty-state">${escHtml(emptyProviderText(provider))}</p>`;
+    updateNavMetric(rows);
+    painted = true;
+    navPainted = true;
+    return;
+  }
   const sort = { sortKey: DEFAULT_SORT.key, sortDir: DEFAULT_SORT.dir };
 
   buildRows(container.querySelector('[data-table="tool"]'), rows,

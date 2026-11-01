@@ -38,6 +38,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
     // Session origin, stamped on every event so a Feed row can mark headless
     // (SDK) runs without re-deriving it per row.
     const entrypoint = (s && s.entrypoint) || '';
+    const provider = (s && s.provider) || '';
     flattenSession(s).forEach((a, idx) => {
       if (!a) return;
       const label = agentLabel(a);
@@ -46,7 +47,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const st = parseTime(a.started_at);
         if (!Number.isNaN(st)) {
           events.push({
-            kind: 'spawn', t: st, sessionId: sid, cwd, project, entrypoint, agentIndex: idx,
+            kind: 'spawn', t: st, sessionId: sid, cwd, project, entrypoint, provider, agentIndex: idx,
             agentLabel: label, description: a.description || '',
           });
         }
@@ -57,7 +58,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         (step.tools || []).forEach((tool, toolIndex) => {
           if (!tool) return;
           events.push({
-            kind: 'tool', t, sessionId: sid, cwd, project, entrypoint, agentIndex: idx, agentLabel: label,
+            kind: 'tool', t, sessionId: sid, cwd, project, entrypoint, provider, agentIndex: idx, agentLabel: label,
             tool: tool.name || '', toolKind: tool.kind || '', detail: tool.detail || '',
             input: tool.input || '', status: tool.status || '',
             output: tool.output || '',
@@ -73,7 +74,7 @@ export function buildEventFeed(graph, { limit = 200 } = {}) {
         const et = parseTime(a.ended_at);
         if (!Number.isNaN(et)) {
           events.push({
-            kind: 'done', t: et, sessionId: sid, cwd, project, entrypoint, agentIndex: idx,
+            kind: 'done', t: et, sessionId: sid, cwd, project, entrypoint, provider, agentIndex: idx,
             agentLabel: label, steps: (a.steps || []).length, cost_usd: a.cost_usd || 0,
             tokens: agentTokens(a).total,
           });

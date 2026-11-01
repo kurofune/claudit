@@ -381,6 +381,72 @@
   .brand-sub-button .icon {
     width: 13px; height: 13px; opacity: 0.85;
   }
+  /* Provider filter — a radiogroup of native radios drawn as a compact
+     segmented control under the date-range button. The inputs stay in the
+     tab order (visually hidden) so arrow keys move the check natively. */
+  .provider-filter { display: flex; flex-direction: column; gap: 4px;
+                     margin-top: var(--s-2); }
+  .provider-filter-label { font-size: var(--t-1); color: var(--muted);
+                           text-transform: uppercase; letter-spacing: 0.04em; }
+  .provider-opts { display: inline-flex; align-self: flex-start;
+                   border: 1px solid var(--border); border-radius: var(--r-sm);
+                   background: var(--surface); overflow: hidden; }
+  .provider-opt { position: relative; cursor: pointer; }
+  .provider-opt + .provider-opt { border-left: 1px solid var(--border); }
+  .provider-opt input { position: absolute; opacity: 0; width: 1px; height: 1px;
+                        margin: 0; pointer-events: none; }
+  .provider-opt span { display: block; padding: 3px 8px; font-size: var(--t-2);
+                       color: var(--ink-2); white-space: nowrap;
+                       transition: background-color 80ms ease, color 80ms ease; }
+  .provider-opt:hover span { background: var(--surface-2); color: var(--ink); }
+  .provider-opt input:checked + span { background: var(--accent-soft); color: var(--ink);
+                                       font-weight: 600; }
+  .provider-opt input:focus-visible + span { outline: 2px solid var(--accent);
+                                             outline-offset: -2px; }
+  .provider-filter.is-busy .provider-opt { cursor: progress; }
+  .provider-filter.is-busy .provider-opt span { opacity: 0.6; }
+
+  /* Overview: one tile per provider, and the Codex plan-usage card. */
+  .provider-tiles { display: grid; gap: var(--s-3); margin: var(--s-3) 0;
+                    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .provider-tile, .plan-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--s-3) var(--s-4);
+    box-shadow: var(--shadow-sm);
+  }
+  .provider-tile-head { display: flex; align-items: baseline; gap: var(--s-2); }
+  .provider-tile-name { font-weight: 700; color: var(--ink); }
+  .provider-tile-share { margin-left: auto; font-variant-numeric: tabular-nums;
+                         color: var(--ink-2); }
+  .provider-tile-cost { font-size: var(--t-5); font-weight: 700; color: var(--ink);
+                        font-variant-numeric: tabular-nums; margin: 2px 0; }
+  .provider-tile-meta { font-size: var(--t-2); color: var(--muted);
+                        font-variant-numeric: tabular-nums; }
+  .provider-tile-bar { height: 4px; border-radius: 2px; background: var(--surface-2);
+                       margin-top: var(--s-2); overflow: hidden; }
+  .provider-tile-bar > span { display: block; height: 100%; background: var(--accent); }
+  .api-eq { font-size: var(--t-1); color: var(--muted); text-transform: uppercase; white-space: nowrap;
+            letter-spacing: 0.03em; border-bottom: 1px dotted var(--muted);
+            cursor: help; }
+  .api-eq:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+                          border-radius: 2px; }
+  .plan-card { margin: var(--s-3) 0; display: grid; gap: var(--s-2); }
+  .plan-card-head { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
+  .plan-card-title { font-weight: 700; color: var(--ink); }
+  .plan-card-plan { margin-left: auto; }
+  .plan-card-used { font-size: var(--t-4); font-weight: 700; color: var(--ink);
+                    font-variant-numeric: tabular-nums; }
+  .plan-meter { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .plan-meter > span { display: block; height: 100%; background: var(--accent); }
+  .plan-card-foot { display: flex; gap: var(--s-4); flex-wrap: wrap; align-items: baseline;
+                    font-size: var(--t-2); color: var(--ink-2); }
+  .plan-card-none { color: var(--ink-2); }
+  .s-provider-codex {
+    color: var(--accent-2);
+    border-color: color-mix(in oklch, var(--accent-2) 35%, var(--border));
+  }
+  .fe-provider { color: var(--accent-2); font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 0.03em; margin-right: 0.4em; }
   .nav-list { display: flex; flex-direction: column; gap: 2px;
               list-style: none; margin: 0; padding: 0; }
   .nav-item {
@@ -2628,6 +2694,20 @@
     background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
   }
   .conv-reply-text { white-space: pre-wrap; word-break: break-word; font-size: var(--t-2); color: var(--ink); line-height: 1.45; }
+  .conv-tools { list-style: none; margin: var(--s-1) 0 0; padding: 0;
+                display: flex; flex-direction: column; gap: 4px; }
+  .conv-reply-text + .conv-tools { margin-top: var(--s-2); }
+  .conv-tool { display: flex; flex-direction: column; gap: 2px; padding: 4px var(--s-2);
+               border-left: 2px solid var(--border); font-size: var(--t-1); min-width: 0; }
+  .conv-tool.is-error { border-left-color: var(--danger, #e5484d); }
+  .conv-tool-call { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .conv-tool-name { font-weight: 700; color: var(--ink); flex: none; }
+  .conv-tool-input { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; min-width: 0; }
+  .conv-tool-failed { flex: none; margin-left: auto; color: var(--danger, #e5484d);
+                      font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .conv-tool-out { color: var(--muted); font-family: var(--font-mono);
+                   white-space: pre-wrap; word-break: break-word; }
   .conv-reply-foot { display: flex; align-items: baseline; gap: var(--s-2); margin-top: var(--s-1); }
   .conv-reply-time { color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
   .conv-reply-cost { margin-left: auto; color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }

@@ -25,6 +25,14 @@ export function originBadgeHTML(session) {
     : '';
 }
 
+// providerBadgeHTML tags a Codex session with a "Codex" pill. Claude Code is
+// the default provider and carries no badge, like an interactive origin.
+export function providerBadgeHTML(session) {
+  return session && session.provider === 'codex'
+    ? `<span class="s-entry s-provider-codex" title="Codex session">Codex</span>`
+    : '';
+}
+
 // View-local state. lastGraph is the most recent payload; the live handler
 // and lens switches both re-render against it without a refetch. selectedRef
 // is the ONE selection shared across every lens — a refKey string

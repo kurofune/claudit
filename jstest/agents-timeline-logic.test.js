@@ -855,6 +855,7 @@ test('timelineSessionList maps sessionId/cwd/index plus the sessionStats rollups
     cwd: '/home/me/proj',
     project: 'proj',
     entrypoint: '',
+    provider: '',
     index: 0,
     durationMs: 60000,
     turnCount: 3,

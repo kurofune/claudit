@@ -20,7 +20,7 @@ import {
   tlMinPxPerMs, setTlMinPxPerMs, prevTimelineKeys, setPrevTimelineKeys,
   timelinePinned, jumpFlashRef, filterMatchSet, dimNodes,
   captureState, restoreState, convSidebarWidth,
-  colorSlot, originBadgeHTML, kindFamily, cssEsc,
+  colorSlot, originBadgeHTML, providerBadgeHTML, kindFamily, cssEsc,
   clockTime, shortId, clip,
 } from './agents-shared.js';
 
@@ -127,6 +127,7 @@ function timelineSidebarHTML(list, curSid) {
     return `<button type="button" class="tl-sess-item${sel}" role="tab" aria-selected="${e.sessionId === curSid}" data-tl-sess="${escHtml(e.sessionId)}" data-c="${c}">
       <span class="tl-sess-item-head">
         <span class="tl-sess-item-proj" title="${escHtml(e.cwd || '')}">${escHtml(projectName(e) || '—')}</span>
+        ${providerBadgeHTML(e)}
         ${originBadgeHTML(e)}
       </span>
       <span class="tl-sess-item-meta">

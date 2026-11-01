@@ -112,6 +112,14 @@
         <svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
         <span id="date-range">—</span>
       </button>
+      <div class="provider-filter" id="provider-filter" role="radiogroup" aria-labelledby="provider-filter-label">
+        <span class="provider-filter-label" id="provider-filter-label">Provider</span>
+        <span class="provider-opts">
+          <label class="provider-opt"><input type="radio" name="provider" value="all" checked><span>All</span></label>
+          <label class="provider-opt"><input type="radio" name="provider" value="claude-code"><span>Claude Code</span></label>
+          <label class="provider-opt"><input type="radio" name="provider" value="codex"><span>Codex</span></label>
+        </span>
+      </div>
     </div>
     <nav class="nav-list">
       <a class="nav-item is-active" href="#overview" data-view="overview">

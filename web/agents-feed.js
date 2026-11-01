@@ -127,7 +127,10 @@ function feCtx(e) {
   const origin = originClass(e.entrypoint) === 'sdk'
     ? `<span class="fe-origin" title="Headless run (claude -p / Agent SDK)">sdk</span>`
     : '';
-  return `<span class="fe-ctx" title="${escHtml(title)}">${origin}<span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
+  const provider = e.provider === 'codex'
+    ? `<span class="fe-provider" title="Codex session">codex</span>`
+    : '';
+  return `<span class="fe-ctx" title="${escHtml(title)}">${provider}${origin}<span class="fe-ctx-proj">${escHtml(proj)}</span><span class="fe-ctx-sep">›</span><span class="fe-ctx-thread">${escHtml(thread)}</span></span>`;
 }
 
 // feMetric is the compact per-row cost·duration·tokens chip — the feed doubles

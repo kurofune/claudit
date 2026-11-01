@@ -80,6 +80,28 @@ test('conversationReplies keeps only the steps that spoke, with absolute indices
   assert.equal(replies[0].cost_usd, 0.02);
 });
 
+test('conversationReplies keeps tool-calling steps with each call\'s name, input, output and status', () => {
+  const seg = {
+    firstStepIndex: 0,
+    steps: [
+      { timestamp: 't0', text: '', model: 'gpt-6-astra', cost_usd: 0.01, tools: [
+        { name: 'exec', input: 'cat README.md', output: '# proj', status: 'ok', detail: 'cat' },
+        { name: 'exec_command', input: 'go test ./...', output: 'FAIL', status: 'error' },
+      ] },
+      { timestamp: 't1', text: 'Summary.', model: 'gpt-6-astra', cost_usd: 0.02, tools: null },
+    ],
+  };
+  const replies = conversationReplies(seg);
+  assert.equal(replies.length, 2);
+  assert.equal(replies[0].text, '');
+  assert.deepEqual(replies[0].tools, [
+    { name: 'exec', input: 'cat README.md', output: '# proj', failed: false },
+    { name: 'exec_command', input: 'go test ./...', output: 'FAIL', failed: true },
+  ]);
+  assert.equal(replies[1].text, 'Summary.');
+  assert.deepEqual(replies[1].tools, []);
+});
+
 test('conversationReplies returns [] for an empty or missing segment', () => {
   assert.deepEqual(conversationReplies(null), []);
   assert.deepEqual(conversationReplies({}), []);
@@ -112,10 +134,24 @@ test('conversationSessionList maps the per-session summary fields', () => {
     cwd: '/home/me/proj',
     project: 'the-repo',
     entrypoint: 'sdk-cli',
+    provider: '',
     index: 0,
     promptCount: 1,
     replyCount: 2,
   });
+});
+
+test('conversationSessionList carries the provider and counts only spoken replies', () => {
+  const session = {
+    session_id: 'x1', provider: 'codex',
+    main: { steps: [
+      { text: '', tools: [{ name: 'exec', input: 'ls', output: 'a', status: 'ok' }] },
+      { text: 'Summary.' },
+    ] },
+  };
+  const [e] = conversationSessionList([session]);
+  assert.equal(e.provider, 'codex');
+  assert.equal(e.replyCount, 1);
 });
 
 test('conversationSessionList excludes null and main-less sessions', () => {

@@ -12,16 +12,27 @@ import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } 
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
 import { hotspotTrend } from './overview-logic.js';
+import {
+  providerFromSearch, providerTiles, providerLabel, shareText, planCardState,
+  planUsageText, emptyProviderText, API_EQUIVALENT_TIP,
+} from './provider-filter.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
-function totalsHTML(totals, overallHitRatio, totalTokens) {
+// apiEquivalentHTML labels Codex dollars: Codex is billed by subscription,
+// so its dollars are the same tokens at API list prices. Focusable so the
+// tooltip opens from the keyboard too.
+const apiEquivalentHTML = () =>
+  `<span class="api-eq" tabindex="0" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span>`;
+
+function totalsHTML(totals, overallHitRatio, totalTokens, provider) {
   const cost = totals.CostUSD || 0;
   const sessions = totals.Sessions || 0;
   const turns = totals.Turns || 0;
+  const costLabel = provider === 'codex' ? `Total cost ${apiEquivalentHTML()}` : 'Total cost';
   return `
     <div class="headline">
-      <div class="label">${labelIcon('cost')}Total cost</div>
+      <div class="label">${labelIcon('cost')}${costLabel}</div>
       <div class="value">${escHtml(fmtMoney(cost))}</div>
     </div>
     <div class="metric">
@@ -40,6 +51,60 @@ function totalsHTML(totals, overallHitRatio, totalTokens) {
       <div class="label">${labelIcon('gauge')}Cache hit ratio</div>
       <div class="value">${hitRatioPill(overallHitRatio)}</div>
     </div>`;
+}
+
+// providerTilesHTML draws one tile per provider with data: its name,
+// sessions, turns, dollars and share of the window's dollars.
+function providerTilesHTML(rows, provider) {
+  const tiles = providerTiles(rows, provider);
+  if (tiles.length === 0) return '';
+  return `<div class="provider-tiles" aria-label="Spend by provider">${tiles.map(r => `
+    <div class="provider-tile" data-provider="${escHtml(r.provider)}">
+      <div class="provider-tile-head">
+        <span class="provider-tile-name">${escHtml(providerLabel(r.provider))}</span>
+        ${r.provider === 'codex' ? apiEquivalentHTML() : ''}
+        <span class="provider-tile-share" title="Share of this window's dollars">${escHtml(shareText(r.share))}</span>
+      </div>
+      <div class="provider-tile-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</div>
+      <div class="provider-tile-meta">${escHtml(fmtNum(r.sessions || 0))} sessions · ${escHtml(fmtNum(r.turns || 0))} turns</div>
+      <div class="provider-tile-bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, r.share || 0)).toFixed(1)}%"></span></div>
+    </div>`).join('')}</div>`;
+}
+
+function fmtLocalDateTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// planCardHTML draws the Codex plan-usage card from the latest rate-limit
+// sample in the window, beside the API-equivalent dollars.
+function planCardHTML(overview, provider) {
+  const st = planCardState(overview, provider);
+  if (!st) return '';
+  const dollars = `<span>${apiEquivalentHTML()} <strong>${escHtml(fmtMoney(st.codex.cost_usd || 0))}</strong></span>`;
+  if (st.kind === 'none') {
+    return `<section class="plan-card" aria-label="Codex plan usage">
+      <div class="plan-card-head"><span class="plan-card-title">Codex plan usage</span></div>
+      <div class="plan-card-none">No plan-usage sample in this window</div>
+      <div class="plan-card-foot">${dollars}</div>
+    </section>`;
+  }
+  const u = st.usage;
+  const used = Math.max(0, Math.min(100, Number(u.used_percent) || 0));
+  return `<section class="plan-card" aria-label="Codex plan usage">
+    <div class="plan-card-head">
+      <span class="plan-card-title">Codex plan usage</span>
+      ${u.plan_type ? `<span class="pill plan-card-plan">${escHtml(u.plan_type)} plan</span>` : ''}
+    </div>
+    <div class="plan-card-used">${escHtml(planUsageText(u))}</div>
+    <div class="plan-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${used}" aria-label="Plan window used"><span style="width:${used.toFixed(1)}%"></span></div>
+    <div class="plan-card-foot">
+      <span>resets ${escHtml(fmtLocalDateTime(u.resets_at))}</span>
+      <span class="small" title="When this reading was taken">sampled ${escHtml(fmtLocalDateTime(u.sampled_at))}</span>
+      ${dollars}
+    </div>
+  </section>`;
 }
 
 const kindLabel = kind => String(kind).replace(/_/g, ' ');
@@ -263,6 +328,15 @@ export async function paint() {
   }
 
   const totals = overview.totals || {};
+  const provider = providerFromSearch(window.location.search);
+  if (provider !== 'all' && !(totals.Sessions > 0)) {
+    container.innerHTML = `
+      <div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
+      <p class="empty-state">${escHtml(emptyProviderText(provider))}</p>`;
+    updateNavMetric('overview', fmtMoney(0));
+    painted = true;
+    return;
+  }
   // OverallHitRatio is computed server-side (aggregate.OverallHitRatio)
   // and shipped on the payload — read it rather than reimplementing the
   // formula here. Single source of truth lives in Go.
@@ -270,7 +344,9 @@ export async function paint() {
 
   container.innerHTML = `
     <div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
-    <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0)}</div>
+    <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0, provider)}</div>
+    ${providerTilesHTML(overview.providers, provider)}
+    ${planCardHTML(overview, provider)}
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
     <h2>${labelIcon('flame')}Top context-cost hotspots</h2>

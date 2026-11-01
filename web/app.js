@@ -12,6 +12,7 @@ import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js'
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
+import { wireProviderFilter, setProviderBusy } from './provider-filter.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 import { init as initThemes } from './themes.js';
 import { init as initTooltips } from './tooltip.js';
@@ -30,8 +31,12 @@ onChange(async (route) => {
   if (route.view !== 'agents') clearLiveHandler();
   const painter = VIEW_PAINTERS[route.view];
   if (painter) {
+    // The provider radiogroup stays disabled while the view's fetch is in
+    // flight; each painter renders its own error state, so finally re-enables.
+    setProviderBusy(true);
     try { await painter(route); }
     catch (err) { console.error('paint failed:', err); }
+    finally { setProviderBusy(false); }
   }
 });
 
@@ -46,6 +51,7 @@ startSSE({
 });
 
 wireDatePicker();
+wireProviderFilter();
 
 // Theme picker — gear icon next to the version footer. The chosen
 // theme is already applied by the inline FOUC-prevention script in

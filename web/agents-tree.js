@@ -10,7 +10,7 @@ import {
 } from './agents-logic.js';
 import {
   lastGraph, selectedRef, treeLimit, TREE_PAGE, openAgentBodies,
-  colorSlot, kindBadge, cssEsc, originBadgeHTML, clockTime, shortId,
+  colorSlot, kindBadge, cssEsc, originBadgeHTML, providerBadgeHTML, clockTime, shortId,
   shortModel,
 } from './agents-shared.js';
 
@@ -60,6 +60,7 @@ function itreeSessionHTML(session, si, sel) {
       <span class="itree-caret" aria-hidden="true">▸</span>
       <span class="insp-sess-proj">${escHtml(projectName(session) || '—')}</span>
       <span class="insp-sess-sid" title="${escHtml(sid)}">${escHtml(shortId(sid))}</span>
+      ${providerBadgeHTML(session)}
       ${originBadgeHTML(session)}
     </summary>
     <div class="itree-sess-body">${rows}</div>

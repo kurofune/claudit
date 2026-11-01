@@ -110,6 +110,7 @@
  * @property {string} cwd
  * @property {string} [project]         resolved project name (git repo root's basename, or a fallback bucket)
  * @property {string} entrypoint        "cli" | "sdk-cli" | ""
+ * @property {string} provider          "claude-code" | "codex"
  * @property {string} started_at        RFC3339
  * @property {string} ended_at          RFC3339
  * @property {number} cost_usd

@@ -50,15 +50,17 @@ export function conversationSegments(session) {
   return out;
 }
 
-// conversationReplies distills a segment down to the assistant's spoken turns —
-// the steps that actually produced text — for the text-only Conversation lens.
-// Tool-only steps (no prose) are dropped so the thread reads as a dialogue, not
-// a trace. Each reply keeps its absolute stepIndex (firstStepIndex + local k) so
-// the rendered bubble carries the SAME refKey the other lenses use and a click
-// still opens the full turn (tools, reasoning) in the shared drawer.
+// conversationReplies distills a segment down to the assistant's replies for
+// the Conversation lens: the steps that produced text or called a tool. Each
+// reply carries its tool calls as {name, input, output, failed} so the thread
+// shows what was run and a snippet of what came back; a step with neither text
+// nor tools is dropped. Each reply keeps its absolute stepIndex (firstStepIndex
+// + local k) so the rendered bubble carries the SAME refKey the other lenses
+// use and a click still opens the full turn in the shared drawer.
 /**
+ * @typedef {{name: string, input: string, output: string, failed: boolean}} ConversationTool
  * @param {ConversationSegment|null|undefined} seg
- * @returns {{stepIndex: number, text: string, timestamp: string, model: string, cost_usd: number}[]}
+ * @returns {{stepIndex: number, text: string, timestamp: string, model: string, cost_usd: number, tools: ConversationTool[]}[]}
  */
 export function conversationReplies(seg) {
   const steps = (seg && seg.steps) || [];
@@ -66,13 +68,21 @@ export function conversationReplies(seg) {
   const out = [];
   for (let k = 0; k < steps.length; k++) {
     const st = steps[k] || /** @type {Partial<AgentStep>} */ ({});
-    if (!(st.text || '').trim()) continue;
+    const text = (st.text || '').trim() ? st.text || '' : '';
+    const tools = (st.tools || []).filter(Boolean).map(t => ({
+      name: t.name || '',
+      input: t.input || t.detail || '',
+      output: t.output || '',
+      failed: t.status === 'error',
+    }));
+    if (!text && tools.length === 0) continue;
     out.push({
       stepIndex: base + k,
-      text: st.text,
+      text,
       timestamp: st.timestamp || '',
       model: st.model || '',
       cost_usd: st.cost_usd || 0,
+      tools,
     });
   }
   return out;
@@ -87,7 +97,7 @@ export function conversationReplies(seg) {
 // segment. Null/main-less sessions are excluded; a null/empty input → [].
 /**
  * @param {AgentSession[]|null|undefined} sessions
- * @returns {{sessionId: string, cwd: string, project: string, entrypoint: string, index: number,
+ * @returns {{sessionId: string, cwd: string, project: string, entrypoint: string, provider: string, index: number,
  *   promptCount: number, replyCount: number}[]}
  */
 export function conversationSessionList(sessions) {
@@ -100,13 +110,14 @@ export function conversationSessionList(sessions) {
     let replyCount = 0;
     for (const seg of segments) {
       if (seg.uuid) promptCount++;
-      replyCount += conversationReplies(seg).length;
+      replyCount += conversationReplies(seg).filter(r => r.text).length;
     }
     out.push({
       sessionId: session.session_id || '',
       cwd: session.cwd || '',
       project: projectName(session),
       entrypoint: session.entrypoint || '',
+      provider: session.provider || '',
       index,
       promptCount,
       replyCount,
