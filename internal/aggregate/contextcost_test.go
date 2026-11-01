@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -246,60 +247,82 @@ func TestContextCost_CompactionBoundaryEndsRereads(t *testing.T) {
 	}
 }
 
+// TestContextCostReconciles: per fixture, the attributed context cost never
+// exceeds the prompt spend it explains — cache reads and writes, plus a
+// Codex turn's uncached input, which is what a Codex result's tokens add —
+// under a flat table and the bundled one. Codex fixtures go through
+// codex.ParseFile unpatched.
 func TestContextCostReconciles(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "parse", "testdata", "*.jsonl"))
-	if err != nil || len(paths) == 0 {
+	claude, err := filepath.Glob(filepath.Join("..", "parse", "testdata", "*.jsonl"))
+	if err != nil || len(claude) == 0 {
 		t.Fatalf("no fixtures: %v", err)
+	}
+	cx, err := filepath.Glob(filepath.Join("..", "parse", "codex", "testdata", "*.jsonl"))
+	if err != nil || len(cx) == 0 {
+		t.Fatalf("no codex fixtures: %v", err)
 	}
 	flatRate := pricing.Rate{Input: 5, Output: 25, CacheRead: 0.5, CacheWrite5m: 6.25, CacheWrite1h: 10}
 	defaults, err := pricing.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var attributed float64
-	for _, path := range paths {
-		res := loadFixture(t, path)
-
-		flat := &pricing.Table{Models: map[string]pricing.ModelPrice{}}
-		for _, tn := range res.Turns {
-			flat.Models[tn.Model] = pricing.ModelPrice{Rate: flatRate}
+	// budget is what tables price the turns' prompt-side spend that context
+	// cost can explain.
+	budget := func(tbl *pricing.Table, turns []parse.Turn) float64 {
+		var b float64
+		for _, tn := range turns {
+			u := tn.Usage
+			r, _ := tbl.EffectiveRate(tn.Provider, tn.Model, tn.Timestamp,
+				u.InputTokens+u.CacheCreate5mTokens+u.CacheCreate1hTokens+u.CacheReadTokens, u.Speed)
+			b += (float64(u.CacheReadTokens)*r.CacheRead +
+				float64(u.CacheCreate5mTokens)*r.CacheWrite5m +
+				float64(u.CacheCreate1hTokens)*r.CacheWrite1h) / 1e6
+			if tn.Provider == parse.ProviderCodex {
+				b += float64(u.InputTokens) * r.Input / 1e6
+			}
 		}
-		agg := New(flat)
+		return b
+	}
+	attributed := func(tbl *pricing.Table, res parse.Result) float64 {
+		agg := New(tbl)
 		feed(agg, res, true)
-		tot := agg.Totals()
-		budget := (float64(tot.CacheReadTokens)*flatRate.CacheRead +
-			float64(tot.CacheCreate5mTokens)*flatRate.CacheWrite5m +
-			float64(tot.CacheCreate1hTokens)*flatRate.CacheWrite1h) / 1e6
 		var sum float64
 		for _, r := range agg.ContextCostByTool() {
 			sum += r.ContextCostUSD
 		}
-		if sum > budget+ctxEps {
-			t.Errorf("%s: attributed $%v > cache budget $%v", path, sum, budget)
-		}
-		attributed += sum
-
-		dflt := New(defaults)
-		feed(dflt, res, true)
-		var realBudget float64
-		for _, tn := range res.Turns {
-			u := tn.Usage
-			r, _ := defaults.EffectiveRate(tn.Provider, tn.Model, tn.Timestamp,
-				u.InputTokens+u.CacheCreate5mTokens+u.CacheCreate1hTokens+u.CacheReadTokens, u.Speed)
-			realBudget += (float64(tn.Usage.CacheReadTokens)*r.CacheRead +
-				float64(tn.Usage.CacheCreate5mTokens)*r.CacheWrite5m +
-				float64(tn.Usage.CacheCreate1hTokens)*r.CacheWrite1h) / 1e6
-		}
-		var realSum float64
-		for _, r := range dflt.ContextCostByTool() {
-			realSum += r.ContextCostUSD
-		}
-		if realSum > realBudget+ctxEps {
-			t.Errorf("%s (default prices): attributed $%v > cache budget $%v", path, realSum, realBudget)
-		}
+		return sum
 	}
-	if attributed == 0 {
-		t.Error("no fixture attributed any context cost; the reconciliation is vacuous")
+	check := func(path string, res parse.Result) float64 {
+		flat := &pricing.Table{Models: map[string]pricing.ModelPrice{}, Providers: map[string]pricing.ProviderPrices{}}
+		for _, tn := range res.Turns {
+			prov := pricing.PriceProvider(tn.Provider)
+			if flat.Providers[prov].Models == nil {
+				flat.Providers[prov] = pricing.ProviderPrices{Models: map[string]pricing.ModelPrice{}}
+			}
+			flat.Providers[prov].Models[tn.Model] = pricing.ModelPrice{Rate: flatRate}
+		}
+		sum := attributed(flat, res)
+		if b := budget(flat, res.Turns); sum > b+ctxEps {
+			t.Errorf("%s: attributed $%v > prompt budget $%v", path, sum, b)
+		}
+		if real, b := attributed(defaults, res), budget(defaults, res.Turns); real > b+ctxEps {
+			t.Errorf("%s (default prices): attributed $%v > prompt budget $%v", path, real, b)
+		}
+		return sum
+	}
+
+	var claudeSum, codexSum float64
+	for _, path := range claude {
+		claudeSum += check(path, loadFixture(t, path))
+	}
+	for _, path := range cx {
+		codexSum += check(path, loadCodexFixture(t, path))
+	}
+	if claudeSum == 0 {
+		t.Error("no Claude Code fixture attributed any context cost; the reconciliation is vacuous")
+	}
+	if codexSum == 0 {
+		t.Error("no Codex fixture attributed any context cost; the reconciliation is vacuous")
 	}
 }
 
@@ -496,5 +519,147 @@ func TestContextCost_LongSessionRetainsLinearMemory(t *testing.T) {
 			reads += float64(n-2-k) * 100 * 2 / 1e6
 		}
 		check("Bash·"+name, byDetail[name].ContextCost, tokens, n-2-d, float64(tokens)*6/1e6, reads)
+	}
+}
+
+// codexCtxTable prices model "cx" for provider codex only. Its cache-write
+// rates are set so a walk that priced a Codex turn's added tokens as a cache
+// write would show it.
+func codexCtxTable() *pricing.Table {
+	return &pricing.Table{Providers: map[string]pricing.ProviderPrices{parse.ProviderCodex: {Models: map[string]pricing.ModelPrice{
+		"cx": {Rate: pricing.Rate{Input: 10, Output: 40, CacheRead: 1, CacheWrite5m: 99, CacheWrite1h: 99}},
+	}}}}
+}
+
+func codexCtxTurn(id string, ts time.Time, u parse.Usage, tools ...parse.ToolUse) parse.Turn {
+	t := ctxTurn("rollout.jsonl", "s", id, "cx", ts, u, tools...)
+	t.Provider = parse.ProviderCodex
+	return t
+}
+
+func findCtxDetail(rows map[string][]DetailContextCost, tool, detail string) *DetailContextCost {
+	for i := range rows[tool] {
+		if rows[tool][i].Detail == detail {
+			return &rows[tool][i]
+		}
+	}
+	return nil
+}
+
+// TestContextCost_CodexUncachedInputIsTheWrite: Codex writes no prompt
+// cache, so the tokens a result added are the carrying response's uncached
+// input, split by OutputBytes and priced at the input rate; later responses
+// re-read them at the cached-input rate.
+func TestContextCost_CodexUncachedInputIsTheWrite(t *testing.T) {
+	t0 := time.Date(2026, 10, 23, 7, 0, 0, 0, time.UTC)
+	agg := New(codexCtxTable())
+	agg.Add(codexCtxTurn("A", t0, parse.Usage{InputTokens: 25_000},
+		parse.ToolUse{ID: "tu-1", Name: "Bash", Detail: "cat"},
+		parse.ToolUse{ID: "tu-2", Name: "Bash", Detail: "ls"}))
+	agg.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "tu-1", OutputBytes: 900},
+		{ToolUseID: "tu-2", OutputBytes: 100},
+		{ToolUseID: "tu-3", OutputBytes: 4000},
+	})
+	// B carries tu-1 and tu-2 and calls tu-3; C carries tu-3 with no
+	// uncached input and re-reads B's results; D re-reads with less cached
+	// input than is live.
+	agg.Add(codexCtxTurn("B", t0.Add(time.Second), parse.Usage{InputTokens: 1000, CacheReadTokens: 25_000},
+		parse.ToolUse{ID: "tu-3", Name: "Read", Detail: ".go"}))
+	agg.Add(codexCtxTurn("C", t0.Add(2*time.Second), parse.Usage{InputTokens: 0, CacheReadTokens: 26_000}))
+	agg.Add(codexCtxTurn("D", t0.Add(3*time.Second), parse.Usage{InputTokens: 50, CacheReadTokens: 500}))
+
+	rows := agg.ContextCostByToolDetail()
+	cat, ls := findCtxDetail(rows, "Bash", "cat"), findCtxDetail(rows, "Bash", "ls")
+	if cat == nil || ls == nil {
+		t.Fatalf("ContextCostByToolDetail = %+v, want Bash cat and ls", rows)
+	}
+	if cat.ContextTokens != 900 || ls.ContextTokens != 100 {
+		t.Errorf("ContextTokens cat=%d ls=%d, want 900 and 100 (B's 1000 uncached input by bytes)", cat.ContextTokens, ls.ContextTokens)
+	}
+	if !approx(cat.WriteCostUSD, 900*10/1e6) || !approx(ls.WriteCostUSD, 100*10/1e6) {
+		t.Errorf("WriteCostUSD cat=%v ls=%v, want %v and %v at the $10 input rate", cat.WriteCostUSD, ls.WriteCostUSD, 900*10/1e6, 100*10/1e6)
+	}
+	// C re-reads all 1000 live tokens; D's 500 cached tokens scale its
+	// re-read to half.
+	if want := (900 + 900*0.5) * 1 / 1e6; !approx(cat.ReadCostUSD, want) {
+		t.Errorf("cat ReadCostUSD = %v, want %v", cat.ReadCostUSD, want)
+	}
+	if want := (100 + 100*0.5) * 1 / 1e6; !approx(ls.ReadCostUSD, want) {
+		t.Errorf("ls ReadCostUSD = %v, want %v", ls.ReadCostUSD, want)
+	}
+	if cat.RereadTurns != 2 || ls.RereadTurns != 2 {
+		t.Errorf("RereadTurns cat=%d ls=%d, want 2 (C and D)", cat.RereadTurns, ls.RereadTurns)
+	}
+	checkSum(t, "cat", cat.ContextCost)
+	if read := findCtxDetail(rows, "Read", ".go"); read != nil && read.ContextTokens != 0 {
+		t.Errorf("Read = %+v, want 0 tokens: C had no uncached input", read.ContextCost)
+	}
+}
+
+// TestContextCost_ClaudeUncachedInputAttributesNothing: a Claude Code turn
+// that writes no cache adds nothing, however much uncached input it has.
+func TestContextCost_ClaudeUncachedInputAttributesNothing(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{}, parse.ToolUse{ID: "tu-1", Name: "Bash", Detail: "ls"}))
+	agg.AddToolResults([]parse.ToolResult{{ToolUseID: "tu-1", OutputBytes: 900}})
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(time.Second), parse.Usage{InputTokens: 5000, CacheReadTokens: 1000}))
+	agg.Add(ctxTurn("f.jsonl", "s", "C", "m", t0.Add(2*time.Second), parse.Usage{InputTokens: 5000, CacheReadTokens: 6000}))
+	if got := agg.ContextCostTotal(); got.ContextTokens != 0 || got.ContextCostUSD != 0 {
+		t.Errorf("ContextCostTotal = %+v, want nothing attributed", got)
+	}
+}
+
+func loadCodexFixture(t *testing.T, path string) parse.Result {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	res, err := codex.ParseFile(f, path)
+	if err != nil {
+		t.Fatalf("codex.ParseFile %s: %v", path, err)
+	}
+	return res
+}
+
+// TestContextCost_CodexCompactedRecordEndsRereads: the `cat` output carried
+// before the rollout's compacted record is re-read only by the compaction
+// response; the two responses after the record re-read only what they
+// themselves carried.
+func TestContextCost_CodexCompactedRecordEndsRereads(t *testing.T) {
+	res := loadCodexFixture(t, filepath.Join("..", "parse", "codex", "testdata", "compact.jsonl"))
+	if len(res.CompactBoundaries) != 1 {
+		t.Fatalf("fixture boundaries = %d, want 1", len(res.CompactBoundaries))
+	}
+	tbl := &pricing.Table{Providers: map[string]pricing.ProviderPrices{parse.ProviderCodex: {Models: map[string]pricing.ModelPrice{
+		"gpt-6-astra": {Rate: pricing.Rate{Input: 10, Output: 60, CacheRead: 1}},
+	}}}}
+
+	agg := New(tbl)
+	feed(agg, res, true)
+	rows := agg.ContextCostByToolDetail()
+	cat, ls := findCtxDetail(rows, "Bash", "cat"), findCtxDetail(rows, "Bash", "ls")
+	if cat == nil || ls == nil {
+		t.Fatalf("ContextCostByToolDetail = %+v, want Bash cat and ls", rows)
+	}
+	// The second response's uncached input: 244,851 − 240,512.
+	if cat.ContextTokens != 4339 || !approx(cat.WriteCostUSD, 4339*10/1e6) {
+		t.Errorf("cat = %+v, want 4339 tokens written at $10", cat.ContextCost)
+	}
+	if cat.RereadTurns != 1 || !approx(cat.ReadCostUSD, 4339*1/1e6) {
+		t.Errorf("cat = %+v, want one re-read (the compaction response) and none after the record", cat.ContextCost)
+	}
+	// The last response's uncached input: 36,056 − 33,536.
+	if ls.ContextTokens != 2520 || ls.ReadCostUSD != 0 {
+		t.Errorf("ls = %+v, want 2520 tokens, no re-reads", ls.ContextCost)
+	}
+
+	plain := New(tbl)
+	feed(plain, res, false)
+	if c := findCtxDetail(plain.ContextCostByToolDetail(), "Bash", "cat"); c == nil || c.RereadTurns != 3 {
+		t.Errorf("cat without the boundary = %+v, want 3 re-reads (fixture exercises the boundary)", c)
 	}
 }

@@ -330,6 +330,49 @@ func TestHotspotsExamplesFromCodexRollout(t *testing.T) {
 	}
 }
 
+// TestHotspotsFromUnpatchedCodexRollout: Codex writes no prompt cache, yet
+// the real tools.jsonl rollout still ranks a tool-pattern card — its second
+// response's 1,162 uncached input tokens are what the three outputs added.
+func TestHotspotsFromUnpatchedCodexRollout(t *testing.T) {
+	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	res, err := codex.ParseFile(f, "/home/u/.codex/sessions/rollout.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := ctxTable()
+	table.Providers = map[string]pricing.ProviderPrices{parse.ProviderCodex: {Models: map[string]pricing.ModelPrice{
+		"gpt-6.1-sol": {Rate: pricing.Rate{Input: 5, Output: 25, CacheRead: 0.5}},
+	}}}
+	agg := New(table)
+	for _, tr := range res.Turns {
+		agg.Add(tr)
+	}
+	agg.AddToolResults(res.ToolResults)
+
+	hs := agg.Hotspots(10)
+	var found bool
+	for _, h := range hs {
+		if h.Kind == HotspotRepeatedCacheWrite || len(h.Examples) == 0 {
+			continue
+		}
+		all := true
+		for _, e := range h.Examples {
+			if e.Provider != parse.ProviderCodex || e.ContextTokens <= 0 {
+				all = false
+				t.Errorf("%s example %+v, want provider %q with ContextTokens > 0", h.Title, e, parse.ProviderCodex)
+			}
+		}
+		found = found || all
+	}
+	if !found {
+		t.Fatalf("Hotspots(10) = %+v, want a tool-pattern card of Codex examples", hs)
+	}
+}
+
 // TestHotspotsFoldCodexShellIntoBash: a Claude Code Bash `go test` and a
 // Codex exec_command `go test` land on one Bash pattern card whose examples
 // name both providers, and no card is keyed on a raw Codex shell tool name.

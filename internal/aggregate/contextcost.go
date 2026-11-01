@@ -9,16 +9,20 @@ import (
 )
 
 // ContextCost is what the bytes a tool result put into context went on to
-// cost: the cache write on the turn that first carried them, plus the cache
-// reads of every later turn in the same session file that re-read them
+// cost: the tokens they added on the turn that first carried them, plus the
+// cache reads of every later turn in the same session file that re-read them
 // before the session ended or was compacted.
 type ContextCost struct {
-	// ContextTokens is the share of the attributing turn's cache-creation
-	// tokens, split across the tool results it carried by OutputBytes.
+	// ContextTokens is the result's share, by OutputBytes among the tool
+	// results the carrying turn carried, of the tokens that turn added to
+	// context: its cache-creation tokens, or for Codex, which writes no
+	// prompt cache, its uncached input tokens.
 	ContextTokens int64
 	// RereadTurns counts the distinct later turns that read those tokens
 	// from cache; a turn re-reading several of a row's results counts once.
-	RereadTurns    int
+	RereadTurns int
+	// WriteCostUSD is ContextTokens priced as what added them: the cache
+	// write rate, or for Codex the input rate.
 	WriteCostUSD   float64
 	ReadCostUSD    float64
 	ContextCostUSD float64 // WriteCostUSD + ReadCostUSD
@@ -207,16 +211,16 @@ func (a *Aggregator) contextCosts() contextWalk {
 // computeContextCosts walks each session file's turns in time order. A tool
 // result is carried by the first turn after the one that called the tool
 // whose timestamp is not before the result's arrival; a result with no
-// arrival time is carried by the next turn. That carrying turn's
-// cache-creation tokens split across the results it carries by OutputBytes,
-// written at its effective cache-write rates in its 5m/1h proportion. A
-// compaction boundary between a result's arrival (or, lacking one, its
-// calling turn) and its carrying turn drops the result: it never reached a
-// cache write. Each later turn re-reads every live result at its own
-// effective cache-read rate, and a compaction boundary ends every live
-// result's re-reads. A turn's attributed reads are scaled down to its actual
-// CacheReadTokens, so attribution never exceeds the cache spend it explains
-// (an expired cache re-reads less than what is live). A turn that re-reads
+// arrival time is carried by the next turn. The tokens that carrying turn
+// added (addedContext) split across the results it carries by OutputBytes,
+// at its effective rate for what added them. A compaction boundary between
+// a result's arrival (or, lacking one, its calling turn) and its carrying
+// turn drops the result: it never reached a prompt. Each later turn re-reads
+// every live result at its own effective cache-read rate, and a compaction
+// boundary ends every live result's re-reads. A turn's attributed reads are
+// scaled down to its actual CacheReadTokens, and its added tokens are what
+// it paid for, so attribution never exceeds the prompt spend it explains (an
+// expired cache re-reads less than what is live). A turn that re-reads
 // counts once toward every row key among the live results holding tokens.
 func (a *Aggregator) computeContextCosts() contextWalk {
 	var out []resultContextCost
@@ -263,12 +267,7 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 				counts.countTurn(&keys)
 			}
 
-			cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens
-			writePerTok := 0.0
-			if cc > 0 {
-				writePerTok = (float64(u.CacheCreate5mTokens)*rate.CacheWrite5m +
-					float64(u.CacheCreate1hTokens)*rate.CacheWrite1h) / float64(cc) / 1e6
-			}
+			added, writePerTok := addedContext(c, rate)
 			totalBytes := 0
 			for _, p := range carried[i] {
 				totalBytes += p.bytes
@@ -276,7 +275,7 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 			for _, p := range carried[i] {
 				var n int64
 				if totalBytes > 0 {
-					n = int64(cc) * int64(p.bytes) / int64(totalBytes)
+					n = added * int64(p.bytes) / int64(totalBytes)
 				}
 				write := float64(n) * writePerTok
 				live = append(live, len(out))
@@ -298,6 +297,27 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 		}
 	}
 	return contextWalk{results: out, rereads: counts}
+}
+
+// addedContext is how many tokens turn c added to context, which the tool
+// results it carried split, and what each cost (USD per token) at rate. A
+// provider with a prompt cache adds what it wrote to that cache, at the
+// cache-write rates in the turn's 5m/1h proportion. Codex writes no cache:
+// a token is billed once as uncached input and afterwards as a cached
+// re-read, so what it adds is its uncached input at the input rate. This
+// branches on the provider, not on a zero cache write: a Claude Code turn
+// that wrote no cache added nothing to it, whatever its uncached input.
+func addedContext(c contextTurn, rate pricing.Rate) (tokens int64, usdPerTok float64) {
+	u := c.usage
+	if c.provider == parse.ProviderCodex {
+		return int64(u.InputTokens), rate.Input / 1e6
+	}
+	cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens
+	if cc <= 0 {
+		return 0, 0
+	}
+	return int64(cc), (float64(u.CacheCreate5mTokens)*rate.CacheWrite5m +
+		float64(u.CacheCreate1hTokens)*rate.CacheWrite1h) / float64(cc) / 1e6
 }
 
 // chargeRereads bills turn c's re-read of every live result at readRate

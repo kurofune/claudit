@@ -419,7 +419,7 @@ func TestBuildOverview_HotspotExampleProvider(t *testing.T) {
 	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-a", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0, SourceFile: "cx.jsonl",
 		ToolUses: []parse.ToolUse{{ID: "cx-tu", Name: "Bash", Detail: "rg", Input: "rg x"}}})
 	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-b", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0.Add(time.Second), SourceFile: "cx.jsonl",
-		Usage: parse.Usage{CacheCreate5mTokens: 200_000}})
+		Usage: parse.Usage{InputTokens: 200_000}})
 	a.AddToolResults([]parse.ToolResult{{ToolUseID: "cx-tu", OutputBytes: 100}})
 
 	raw, err := json.Marshal(BuildOverview(a, nil).Hotspots)
