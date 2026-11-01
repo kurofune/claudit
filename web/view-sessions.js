@@ -76,6 +76,13 @@ function fresher(answer) {
 
 const container = () => document.getElementById('view-agents');
 
+// guideHTML is the "How to read this section" guide web/index.html keeps
+// in its #agents-guide template, or '' when the shell has none.
+const guideHTML = () => {
+  const tpl = document.getElementById('agents-guide');
+  return tpl ? tpl.innerHTML : '';
+};
+
 /** @param {SessionIndexRow[]} list */
 function updateNavMetric(list) {
   const el = document.getElementById('nav-metric-agents');
@@ -107,7 +114,7 @@ export async function paint(route) {
     await paintSession(host, sessionId, turnUuid);
     return;
   }
-  host.innerHTML = `<header class="view-head"><h1>${ICON}Sessions</h1></header>${listShellHTML(ui)}`;
+  host.innerHTML = `<header class="view-head"><h1>${ICON}Sessions</h1></header>${guideHTML()}${listShellHTML(ui)}`;
   const root = host.querySelector('.sessions-list');
   if (!root) return;
   listRoot = root;
@@ -190,7 +197,7 @@ async function paintSession(host, sessionId, turnUuid) {
     <header class="view-head session-head">
       <a class="story-back" href="#agents">Back to sessions</a>
       <h1>${ICON}Session <code class="session-id">${escHtml(sessionId)}</code></h1>
-    </header>
+    </header>${guideHTML()}
     <div id="session-header" class="session-header-host"></div>
     <div class="session-story-host"></div></div>`;
   const headerHost = host.querySelector('#session-header');

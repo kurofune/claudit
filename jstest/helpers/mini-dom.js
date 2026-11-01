@@ -77,6 +77,11 @@ class Node extends EventTarget {
     const sib = this.parentNode.childNodes;
     return sib[sib.indexOf(this) + 1] || null;
   }
+  get nextElementSibling() {
+    if (!this.parentNode) return null;
+    const sib = this.parentNode.children;
+    return sib[sib.indexOf(this) + 1] || null;
+  }
   get children() { return this.childNodes.filter(n => n.nodeType === 1); }
   get parentElement() { return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null; }
   appendChild(child) { return this.insertBefore(child, null); }

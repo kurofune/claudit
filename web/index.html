@@ -160,6 +160,19 @@
   </main>
 </div>
 
+<template id="agents-guide">
+  <details class="guide">
+    <summary>How to read this section</summary>
+    <div class="body">
+      <ul>
+        <li><strong>List</strong> — every session in the window, grouped by prompt family (the first line of its first real prompt). Each row names what set it apart, the agent's last line, provider, cost, duration and unresolved failures. Search, the <em>All</em> / <em>Active in the last minute</em> / <em>Had unresolved failures</em> chips and the <em>Newest</em> / <em>Cost</em> / <em>Duration</em> sorts narrow it; sessions active in the last minute pin to the top. Arrow keys and Enter open a session.</li>
+        <li><strong>Header</strong> — the session's cost (API-equivalent), duration with its turn and command counts, tokens with the share re-read from cache, and its unresolved failures; a strip of one bar per turn, sized by what the turn added to context or by its time, where a click or Enter jumps to that turn; up to three <em>Worth a look</em> notes on retry storms, cost whales, slow tools, error cascades and idle stalls; and a button that copies a prompt asking the agent that ran the session to explain it.</li>
+        <li><strong>Story</strong> — what happened, one user prompt at a time: the prompt and each agent message verbatim, each message's commands one row per call (time, ✓ / ✕, command, duration) that expands to the exact input, output and the turn's reasoning, idle gaps, and sub-agents nested under the call that spawned them. <em>Show full</em> reads the untruncated text back from the session log.</li>
+      </ul>
+    </div>
+  </details>
+</template>
+
 <div class="claudit-reload-toast" id="reload-toast" hidden role="status">
   <span class="claudit-reload-toast-msg">New data available.</span>
   <button type="button" id="reload-toast-btn">Reload</button>

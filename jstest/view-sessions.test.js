@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 import { installDOM, click, keydown, Event } from './helpers/mini-dom.js';
 import { start as startSSE, clearLiveHandler } from '../web/sse.js';
+import { agentsGuide } from './helpers/agents-guide.js';
 
 const NOW = Date.parse('2026-11-01T10:00:00Z');
 const at = min => new Date(NOW + min * 60_000).toISOString();
@@ -42,8 +43,14 @@ const settle = () => new Promise(r => setTimeout(r, 0));
 let n = 0;
 // mount installs a fresh DOM and a fresh copy of the view module (its list
 // state is module-level), then paints route.
-async function mount(sub = '', { hash = '#agents', search = '' } = {}) {
+async function mount(sub = '', { hash = '#agents', search = '', guide = true } = {}) {
   const env = installDOM({ hash, search });
+  if (guide) {
+    const tpl = env.document.createElement('template');
+    tpl.setAttribute('id', 'agents-guide');
+    tpl.innerHTML = agentsGuide();
+    env.document.body.appendChild(tpl);
+  }
   env.window.scrollY = 0;
   env.window.scrollTo = (_x, y) => { env.window.scrollY = y; };
   const view = env.document.createElement('section');
@@ -474,4 +481,31 @@ test('an index that lands after the user opened a session paints nothing over th
   assert.equal(view.querySelector('.sessions-list'), null);
   assert.equal(view.querySelector('.session-id').textContent, 's-a');
   clearLiveHandler();
+});
+
+test('the list and the session page show the index.html guide under their heading', async () => {
+  stubFetch(path => (path === '/sessions' ? { sessions: THREE() } : { httpStatus: 404 }));
+  const list = await mount();
+  await list.done;
+  const head = list.view.querySelector('.view-head');
+  assert.ok(head, 'the list has its heading');
+  const guide = list.view.querySelector('.guide');
+  assert.ok(guide, 'the list shows the guide');
+  assert.equal(head.nextElementSibling, guide, 'the guide sits right under the heading');
+  assert.equal(guide.querySelector('summary').textContent, 'How to read this section');
+  assert.deepEqual(guide.querySelectorAll('strong').map(s => s.textContent), ['List', 'Header', 'Story']);
+
+  const page = await mount('s-a', { hash: '#agents/s-a' });
+  await page.done;
+  const pageHead = page.view.querySelector('.session-head');
+  assert.ok(pageHead, 'the session page has its heading');
+  assert.ok(pageHead.nextElementSibling && pageHead.nextElementSibling.classList.contains('guide'), 'the session page shows the guide under its heading');
+});
+
+test('a shell without the guide template paints the list without one', async () => {
+  stubFetch(() => ({ sessions: THREE() }));
+  const { view, done } = await mount('', { guide: false });
+  await done;
+  assert.equal(view.querySelector('.guide'), null);
+  assert.equal(view.querySelectorAll('.sl-group').length, 3);
 });
