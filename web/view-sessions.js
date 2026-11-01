@@ -11,6 +11,7 @@ import { parseAgentsSub } from './router.js';
 import { setLiveHandler, clearLiveHandler } from './sse.js';
 import { clearSkeletonFlag } from './skeleton.js';
 import { paintStory } from './session-story.js';
+import { paintSessionHeader } from './session-header.js';
 import { listShellHTML, renderList, renderListLoading, renderListError, renderRefreshError, clearRefreshError, wireList } from './sessions-list.js';
 
 /** @import { SessionIndexRow } from './api-types.js' */
@@ -174,13 +175,28 @@ function liveUpdate() {
   return undefined;
 }
 
+// paintSession paints the session page: its header above its story. A
+// jump to another turn of the session already on screen keeps the header
+// and repaints only the story.
 /** @param {Element} host @param {string} sessionId @param {string} turnUuid */
 async function paintSession(host, sessionId, turnUuid) {
-  host.innerHTML = `<header class="view-head session-head">
+  const page = host.querySelector('.session-page');
+  if (page && page.getAttribute('data-session') === sessionId) {
+    const storyHost = host.querySelector('.session-story-host');
+    if (storyHost) await paintStory(storyHost, sessionId, turnUuid);
+    return;
+  }
+  host.innerHTML = `<div class="session-page" data-session="${escHtml(sessionId)}">
+    <header class="view-head session-head">
       <a class="story-back" href="#agents">Back to sessions</a>
       <h1>${ICON}Session <code class="session-id">${escHtml(sessionId)}</code></h1>
     </header>
-    <div class="session-story-host"></div>`;
+    <div id="session-header" class="session-header-host"></div>
+    <div class="session-story-host"></div></div>`;
+  const headerHost = host.querySelector('#session-header');
   const storyHost = host.querySelector('.session-story-host');
-  if (storyHost) await paintStory(storyHost, sessionId, turnUuid);
+  await Promise.all([
+    storyHost ? paintStory(storyHost, sessionId, turnUuid) : undefined,
+    headerHost ? paintSessionHeader(headerHost, sessionId) : undefined,
+  ]);
 }
