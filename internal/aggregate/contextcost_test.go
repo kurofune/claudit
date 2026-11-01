@@ -4,6 +4,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -413,5 +415,86 @@ func TestContextCost_UsesEffectiveRate(t *testing.T) {
 		if !approx(rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn)) {
 			t.Errorf("%s: ContextCostUSD = %v, want CostAt's cache spend %v", c.name, rows[0].ContextCostUSD, (bAll-bIn)+(cAll-cIn))
 		}
+	}
+}
+
+// TestContextCost_LongSessionRetainsLinearMemory: n turns each carry the
+// previous turn's result and re-read every earlier one, with no
+// compaction — about n²/2 result-to-reread pairs. The walk must count
+// distinct re-reading turns without keeping a reference per pair, while
+// still billing every pair's tokens and dollars.
+func TestContextCost_LongSessionRetainsLinearMemory(t *testing.T) {
+	const n = 4000
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	details := []string{"ls", "git status", "go test"}
+	results := make([]parse.ToolResult, 0, n)
+	for i := 0; i < n; i++ {
+		id := "tu-" + strconv.Itoa(i)
+		u := parse.Usage{CacheReadTokens: 1 << 30}
+		if i > 0 {
+			u.CacheCreate5mTokens = 100
+		}
+		agg.Add(ctxTurn("f.jsonl", "s", "T"+strconv.Itoa(i), "m", t0.Add(time.Duration(i)*time.Second), u,
+			parse.ToolUse{ID: id, Name: "Bash", Detail: details[i%len(details)]}))
+		results = append(results, parse.ToolResult{ToolUseID: id, OutputBytes: 100})
+	}
+	agg.AddToolResults(results)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	agg.contextCosts()
+	runtime.ReadMemStats(&after)
+	// Linear state is a few hundred bytes per result; one 24-byte reference
+	// per pair would be ~190 MB here.
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 16<<20 {
+		t.Errorf("attribution walk allocated %d MB for %d turns, want linear (< 16 MB)", alloc>>20, n)
+	}
+
+	// Turn j carries result j-1 (100 tokens) and re-reads results 0..j-2.
+	pairs := int64(0)
+	for j := 2; j < n; j++ {
+		pairs += int64(j - 1)
+	}
+	wantTokens := int64(100 * (n - 1))
+	wantWrite := float64(wantTokens) * 6 / 1e6
+	wantRead := float64(pairs) * 100 * 2 / 1e6
+	check := func(label string, c ContextCost, tokens int64, rereads int, write, read float64) {
+		t.Helper()
+		if c.ContextTokens != tokens || c.RereadTurns != rereads {
+			t.Errorf("%s = %d tokens / %d rereads, want %d / %d", label, c.ContextTokens, c.RereadTurns, tokens, rereads)
+		}
+		if math.Abs(c.WriteCostUSD-write) > 1e-6 || math.Abs(c.ReadCostUSD-read) > 1e-6 {
+			t.Errorf("%s = $%v write / $%v read, want $%v / $%v", label, c.WriteCostUSD, c.ReadCostUSD, write, read)
+		}
+		checkSum(t, label, c)
+	}
+	check("total", agg.ContextCostTotal(), wantTokens, n-2, wantWrite, wantRead)
+	tools := agg.ContextCostByTool()
+	if len(tools) != 1 {
+		t.Fatalf("ContextCostByTool rows = %d, want 1", len(tools))
+	}
+	check("Bash", tools[0].ContextCost, wantTokens, n-2, wantWrite, wantRead)
+	sessions := agg.ContextCostBySession()
+	if len(sessions) != 1 {
+		t.Fatalf("ContextCostBySession rows = %d, want 1", len(sessions))
+	}
+	check("session", sessions[0].ContextCost, wantTokens, n-2, wantWrite, wantRead)
+
+	// Detail d (result index d, d+3, ...) is first live on turn d+2, so
+	// turns d+2..n-1 re-read it.
+	byDetail := map[string]DetailContextCost{}
+	for _, r := range agg.ContextCostByToolDetail()["Bash"] {
+		byDetail[r.Detail] = r
+	}
+	for d, name := range details {
+		var tokens int64
+		var reads float64
+		for k := d; k < n-1; k += len(details) {
+			tokens += 100
+			reads += float64(n-2-k) * 100 * 2 / 1e6
+		}
+		check("Bash·"+name, byDetail[name].ContextCost, tokens, n-2-d, float64(tokens)*6/1e6, reads)
 	}
 }

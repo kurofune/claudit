@@ -23,18 +23,10 @@ type ContextCost struct {
 	ContextCostUSD float64 // WriteCostUSD + ReadCostUSD
 }
 
-// turnRef names one turn of the attribution walk: its session file and its
-// index in that file's time-ordered turns.
-type turnRef struct {
-	file string
-	idx  int
-}
-
-// contextCostSum sums results' ContextCost, counting each re-reading turn
-// once however many of the summed results it re-read.
+// contextCostSum sums results' ContextCost. RereadTurns is not summed: a
+// row's distinct re-reading turns come from the walk's rereadCounts.
 type contextCostSum struct {
 	ContextCost
-	rereadBy map[turnRef]struct{}
 }
 
 func (c *contextCostSum) add(r resultContextCost) {
@@ -42,13 +34,65 @@ func (c *contextCostSum) add(r resultContextCost) {
 	c.WriteCostUSD += r.WriteCostUSD
 	c.ReadCostUSD += r.ReadCostUSD
 	c.ContextCostUSD += r.ContextCostUSD
-	if c.rereadBy == nil {
-		c.rereadBy = map[turnRef]struct{}{}
+}
+
+// rereadCounts is, per aggregate row key, how many distinct turns re-read at
+// least one of that row's results. The walk counts each turn once per key
+// it re-reads, so the counts cost one entry per key, never one per
+// result-to-turn pair.
+type rereadCounts struct {
+	byTool    map[string]int
+	byDetail  map[toolDetailKey]int
+	bySession map[string]int
+	total     int
+}
+
+// liveKeys is the set of row keys among the live results that hold tokens:
+// exactly the rows a re-reading turn counts once.
+type liveKeys struct {
+	tools    map[string]struct{}
+	details  map[toolDetailKey]struct{}
+	sessions map[string]struct{}
+	any      bool
+}
+
+func newLiveKeys() liveKeys {
+	return liveKeys{tools: map[string]struct{}{}, details: map[toolDetailKey]struct{}{}, sessions: map[string]struct{}{}}
+}
+
+func (l *liveKeys) add(r *resultContextCost) {
+	if r.ContextTokens == 0 {
+		return
 	}
-	for _, t := range r.rereadBy {
-		c.rereadBy[t] = struct{}{}
+	l.any = true
+	l.tools[r.tool] = struct{}{}
+	if r.detail != "" {
+		l.details[toolDetailKey{r.tool, r.detail}] = struct{}{}
 	}
-	c.RereadTurns = len(c.rereadBy)
+	if r.sessionID != "" {
+		l.sessions[r.sessionID] = struct{}{}
+	}
+}
+
+// countTurn counts one re-reading turn against every live key.
+func (c *rereadCounts) countTurn(l *liveKeys) {
+	c.total++
+	for k := range l.tools {
+		c.byTool[k]++
+	}
+	for k := range l.details {
+		c.byDetail[k]++
+	}
+	for k := range l.sessions {
+		c.bySession[k]++
+	}
+}
+
+// contextWalk is computeContextCosts' result: every attributed tool result
+// and the distinct re-reading turn count of every aggregate row.
+type contextWalk struct {
+	results []resultContextCost
+	rereads rereadCounts
 }
 
 // ToolContextCost is one tool's summed ContextCost.
@@ -86,7 +130,6 @@ type contextTurn struct {
 type resultContextCost struct {
 	tool, detail, sessionID string
 	input, sourceFile       string
-	rereadBy                []turnRef
 	ContextCost
 }
 
@@ -143,14 +186,14 @@ type pendingResult struct {
 
 func (a *Aggregator) invalidateContextCosts() {
 	a.ctxMu.Lock()
-	a.ctxMemo, a.ctxMemoOK = nil, false
+	a.ctxMemo, a.ctxMemoOK = contextWalk{}, false
 	a.ctxMu.Unlock()
 }
 
 // contextCosts is computeContextCosts memoized until the next Add or
 // registration, so every ContextCost* accessor and Hotspots share one walk.
-// Callers must treat the returned slice as read-only.
-func (a *Aggregator) contextCosts() []resultContextCost {
+// Callers must treat the returned walk as read-only.
+func (a *Aggregator) contextCosts() contextWalk {
 	a.ctxMu.Lock()
 	defer a.ctxMu.Unlock()
 	if !a.ctxMemoOK {
@@ -171,9 +214,11 @@ func (a *Aggregator) contextCosts() []resultContextCost {
 // effective cache-read rate, and a compaction boundary ends every live
 // result's re-reads. A turn's attributed reads are scaled down to its actual
 // CacheReadTokens, so attribution never exceeds the cache spend it explains
-// (an expired cache re-reads less than what is live).
-func (a *Aggregator) computeContextCosts() []resultContextCost {
+// (an expired cache re-reads less than what is live). A turn that re-reads
+// counts once toward every row key among the live results holding tokens.
+func (a *Aggregator) computeContextCosts() contextWalk {
 	var out []resultContextCost
+	counts := rereadCounts{byTool: map[string]int{}, byDetail: map[toolDetailKey]int{}, bySession: map[string]int{}}
 	for file, turns := range a.ctxTurns {
 		turns = append([]contextTurn(nil), turns...)
 		sort.SliceStable(turns, func(i, j int) bool { return turns[i].ts.Before(turns[j].ts) })
@@ -204,14 +249,17 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 		}
 
 		var live []int // indexes into out
+		keys := newLiveKeys()
 		for i, c := range turns {
 			if i > 0 && compactedBetween(turns[i-1].ts.Add(time.Nanosecond), c.ts) {
-				live = nil
+				live, keys = nil, newLiveKeys()
 			}
 			u := c.usage
 			prompt := u.InputTokens + u.CacheCreate5mTokens + u.CacheCreate1hTokens + u.CacheReadTokens
 			rate, _ := a.prices.EffectiveRate(c.provider, c.model, c.ts, prompt, u.Speed)
-			a.chargeRereads(out, live, turnRef{file, i}, c, rate.CacheRead)
+			if chargeRereads(out, live, c, rate.CacheRead) {
+				counts.countTurn(&keys)
+			}
 
 			cc := u.CacheCreate5mTokens + u.CacheCreate1hTokens
 			writePerTok := 0.0
@@ -242,21 +290,23 @@ func (a *Aggregator) computeContextCosts() []resultContextCost {
 						ContextCostUSD: write,
 					},
 				})
+				keys.add(&out[len(out)-1])
 			}
 		}
 	}
-	return out
+	return contextWalk{results: out, rereads: counts}
 }
 
 // chargeRereads bills turn c's re-read of every live result at readRate
-// (USD per MTok), scaled so the total never exceeds c's CacheReadTokens.
-func (a *Aggregator) chargeRereads(out []resultContextCost, live []int, ref turnRef, c contextTurn, readRate float64) {
+// (USD per MTok), scaled so the total never exceeds c's CacheReadTokens,
+// and reports whether c re-read anything.
+func chargeRereads(out []resultContextCost, live []int, c contextTurn, readRate float64) bool {
 	var liveTokens int64
 	for _, idx := range live {
 		liveTokens += out[idx].ContextTokens
 	}
 	if liveTokens == 0 || c.usage.CacheReadTokens <= 0 {
-		return
+		return false
 	}
 	scale := 1.0
 	if cr := int64(c.usage.CacheReadTokens); cr < liveTokens {
@@ -271,14 +321,15 @@ func (a *Aggregator) chargeRereads(out []resultContextCost, live []int, ref turn
 		r.ReadCostUSD += read
 		r.ContextCostUSD += read
 		r.RereadTurns++
-		r.rereadBy = append(r.rereadBy, ref)
 	}
+	return true
 }
 
 // ContextCostByTool returns per-tool context cost, highest first.
 func (a *Aggregator) ContextCostByTool() []ToolContextCost {
+	walk := a.contextCosts()
 	byTool := map[string]*contextCostSum{}
-	for _, r := range a.contextCosts() {
+	for _, r := range walk.results {
 		row := byTool[r.tool]
 		if row == nil {
 			row = &contextCostSum{}
@@ -288,6 +339,7 @@ func (a *Aggregator) ContextCostByTool() []ToolContextCost {
 	}
 	out := make([]ToolContextCost, 0, len(byTool))
 	for tool, row := range byTool {
+		row.RereadTurns = walk.rereads.byTool[tool]
 		out = append(out, ToolContextCost{Tool: tool, ContextCost: row.ContextCost})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -303,13 +355,13 @@ func (a *Aggregator) ContextCostByTool() []ToolContextCost {
 // first. Results whose tool_use carried no Detail are absent, as in
 // ByToolDetail.
 func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
-	type key struct{ tool, detail string }
-	byKey := map[key]*contextCostSum{}
-	for _, r := range a.contextCosts() {
+	walk := a.contextCosts()
+	byKey := map[toolDetailKey]*contextCostSum{}
+	for _, r := range walk.results {
 		if r.detail == "" {
 			continue
 		}
-		k := key{r.tool, r.detail}
+		k := toolDetailKey{r.tool, r.detail}
 		row := byKey[k]
 		if row == nil {
 			row = &contextCostSum{}
@@ -319,6 +371,7 @@ func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
 	}
 	out := map[string][]DetailContextCost{}
 	for k, row := range byKey {
+		row.RereadTurns = walk.rereads.byDetail[k]
 		out[k.tool] = append(out[k.tool], DetailContextCost{Tool: k.tool, Detail: k.detail, ContextCost: row.ContextCost})
 	}
 	for _, rows := range out {
@@ -335,8 +388,9 @@ func (a *Aggregator) ContextCostByToolDetail() map[string][]DetailContextCost {
 // ContextCostBySession returns per-session context cost, highest first.
 // Results from turns without a session id are absent.
 func (a *Aggregator) ContextCostBySession() []SessionContextCost {
+	walk := a.contextCosts()
 	bySession := map[string]*contextCostSum{}
-	for _, r := range a.contextCosts() {
+	for _, r := range walk.results {
 		if r.sessionID == "" {
 			continue
 		}
@@ -349,6 +403,7 @@ func (a *Aggregator) ContextCostBySession() []SessionContextCost {
 	}
 	out := make([]SessionContextCost, 0, len(bySession))
 	for id, row := range bySession {
+		row.RereadTurns = walk.rereads.bySession[id]
 		out = append(out, SessionContextCost{SessionID: id, ContextCost: row.ContextCost})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -363,10 +418,12 @@ func (a *Aggregator) ContextCostBySession() []SessionContextCost {
 // ContextCostTotal is the context cost summed over every attributed tool
 // result — the denominator of a hotspot's share.
 func (a *Aggregator) ContextCostTotal() ContextCost {
+	walk := a.contextCosts()
 	var total contextCostSum
-	for _, r := range a.contextCosts() {
+	for _, r := range walk.results {
 		total.add(r)
 	}
+	total.RereadTurns = walk.rereads.total
 	return total.ContextCost
 }
 
@@ -393,7 +450,7 @@ type toolDetailKey struct{ tool, detail string }
 // top n invocations by ContextTokens (ties: session, then file).
 func (a *Aggregator) contextEvidence(n int) map[toolDetailKey]*detailEvidence {
 	out := map[toolDetailKey]*detailEvidence{}
-	for _, r := range a.contextCosts() {
+	for _, r := range a.contextCosts().results {
 		if r.detail == "" {
 			continue
 		}

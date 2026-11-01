@@ -248,7 +248,7 @@ type Aggregator struct {
 	// input change clears it. ctxMu guards both because API sections read
 	// one shared Aggregator concurrently.
 	ctxMu     sync.Mutex
-	ctxMemo   []resultContextCost
+	ctxMemo   contextWalk
 	ctxMemoOK bool
 }
 
