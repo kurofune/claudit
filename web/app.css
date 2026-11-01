@@ -406,10 +406,10 @@
   .provider-filter.is-busy .provider-opt { cursor: progress; }
   .provider-filter.is-busy .provider-opt span { opacity: 0.6; }
 
-  /* Overview: one tile per provider, and the Codex plan-usage card. */
+  /* Overview: one tile per provider. */
   .provider-tiles { display: grid; gap: var(--s-3); margin: var(--s-3) 0;
                     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  .provider-tile, .plan-card {
+  .provider-tile {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--r-lg); padding: var(--s-3) var(--s-4);
     box-shadow: var(--shadow-sm);
@@ -430,17 +430,6 @@
             cursor: help; }
   .api-eq:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
                           border-radius: 2px; }
-  .plan-card { margin: var(--s-3) 0; display: grid; gap: var(--s-2); }
-  .plan-card-head { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
-  .plan-card-title { font-weight: 700; color: var(--ink); }
-  .plan-card-plan { margin-left: auto; }
-  .plan-card-used { font-size: var(--t-4); font-weight: 700; color: var(--ink);
-                    font-variant-numeric: tabular-nums; }
-  .plan-meter { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
-  .plan-meter > span { display: block; height: 100%; background: var(--accent); }
-  .plan-card-foot { display: flex; gap: var(--s-4); flex-wrap: wrap; align-items: baseline;
-                    font-size: var(--t-2); color: var(--ink-2); }
-  .plan-card-none { color: var(--ink-2); }
   .s-provider-codex {
     color: var(--accent-2);
     border-color: color-mix(in oklch, var(--accent-2) 35%, var(--border));

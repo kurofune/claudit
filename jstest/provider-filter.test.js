@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   PROVIDERS, providerFromSearch, searchWithProvider, providerLabel,
-  windowLabel, planUsageText, providerTiles, shareText, planCardState,
+  providerTiles, shareText,
   emptyProviderText, busyPainter,
 } from '../web/provider-filter.js';
 
@@ -48,19 +48,6 @@ test('providerLabel names each provider; unknown ids pass through', () => {
   assert.equal(providerLabel('other'), 'other');
 });
 
-test('windowLabel renders whole days, hours and minutes', () => {
-  assert.equal(windowLabel(10080), '7-day');
-  assert.equal(windowLabel(1440), '1-day');
-  assert.equal(windowLabel(300), '5-hour');
-  assert.equal(windowLabel(90), '90-minute');
-  assert.equal(windowLabel(0), 'plan');
-});
-
-test('planUsageText reads "<used>% of <window> used"', () => {
-  assert.equal(planUsageText({ used_percent: 6, window_minutes: 10080 }), '6% of 7-day used');
-  assert.equal(planUsageText({ used_percent: 31.5, window_minutes: 300 }), '31.5% of 5-hour used');
-});
-
 const rows = [
   { provider: 'claude-code', sessions: 2, turns: 3, cost_usd: 0.96, share: 61.2775 },
   { provider: 'codex', sessions: 4, turns: 6, cost_usd: 0.61, share: 38.7225 },
@@ -82,23 +69,6 @@ test('shareText rounds to one decimal and the tiles sum to 100%', () => {
   assert.equal(shareText(100), '100.0%');
   const sum = providerTiles(rows, 'all').reduce((s, r) => s + r.share, 0);
   assert.ok(Math.abs(sum - 100) < 1e-9);
-});
-
-test('planCardState is hidden without Codex sessions in scope', () => {
-  assert.equal(planCardState({ providers: rows.slice(0, 1), plan_usage: null }, 'all'), null);
-  assert.equal(planCardState({ providers: [], plan_usage: null }, 'codex'), null);
-  assert.equal(planCardState({ providers: rows, plan_usage: { used_percent: 6 } }, 'claude-code'), null);
-});
-
-test('planCardState says there is no sample when Codex has turns but no reading', () => {
-  assert.deepEqual(planCardState({ providers: rows, plan_usage: null }, 'all'),
-    { kind: 'none', codex: rows[1] });
-});
-
-test('planCardState carries the sample beside the Codex row', () => {
-  const pu = { provider: 'codex', used_percent: 6, window_minutes: 10080, resets_at: '2026-10-30T17:41:25Z', plan_type: 'pro' };
-  assert.deepEqual(planCardState({ providers: rows, plan_usage: pu }, 'codex'),
-    { kind: 'sample', codex: rows[1], usage: pu });
 });
 
 test('emptyProviderText names the provider and where claudit reads it', () => {

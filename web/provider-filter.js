@@ -43,22 +43,6 @@ export function providerLabel(id) {
   return p ? p.label : id;
 }
 
-// windowLabel names a rate-limit window: 10080 minutes is "7-day".
-/** @param {number} minutes */
-export function windowLabel(minutes) {
-  const m = Number(minutes) || 0;
-  if (m <= 0) return 'plan';
-  if (m % 1440 === 0) return `${m / 1440}-day`;
-  if (m % 60 === 0) return `${m / 60}-hour`;
-  return `${m}-minute`;
-}
-
-/** @param {{used_percent: number, window_minutes: number}} usage */
-export function planUsageText(usage) {
-  const used = Math.round((Number(usage.used_percent) || 0) * 10) / 10;
-  return `${used}% of ${windowLabel(usage.window_minutes)} used`;
-}
-
 /**
  * @typedef {{provider: string, sessions: number, turns: number, cost_usd: number, share: number}} ProviderRow
  */
@@ -76,28 +60,13 @@ export function shareText(share) {
   return `${(Number(share) || 0).toFixed(1)}%`;
 }
 
-// planCardState decides the Codex plan-usage card: null hides it (no Codex
-// sessions in scope); 'none' means Codex ran but reported no reading in the
-// window; 'sample' carries the latest reading.
-/**
- * @param {{providers?: ProviderRow[]|null, plan_usage?: any}} overview
- * @param {string} selected
- */
-export function planCardState(overview, selected) {
-  if (selected === 'claude-code') return null;
-  const codex = providerTiles(overview.providers, selected).find(r => r.provider === 'codex');
-  if (!codex) return null;
-  if (!overview.plan_usage) return { kind: 'none', codex };
-  return { kind: 'sample', codex, usage: overview.plan_usage };
-}
-
 /** @param {string} id */
 export function emptyProviderText(id) {
   if (!SOURCES[id]) return '';
   return `No ${providerLabel(id)} sessions in this range (claudit reads ${SOURCES[id]})`;
 }
 
-// API_EQUIVALENT_TIP explains Codex dollars wherever they sit beside plan usage.
+// API_EQUIVALENT_TIP explains why Codex dollars are API-equivalent.
 export const API_EQUIVALENT_TIP =
   'These are the tokens priced at API list rates. Plan usage is billed by the subscription, not per token.';
 

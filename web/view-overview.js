@@ -13,8 +13,8 @@ import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
 import { hotspotTrend } from './overview-logic.js';
 import {
-  providerFromSearch, providerTiles, providerLabel, shareText, planCardState,
-  planUsageText, emptyProviderText, API_EQUIVALENT_TIP,
+  providerFromSearch, providerTiles, providerLabel, shareText,
+  emptyProviderText, API_EQUIVALENT_TIP,
 } from './provider-filter.js';
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
@@ -69,42 +69,6 @@ function providerTilesHTML(rows, provider) {
       <div class="provider-tile-meta">${escHtml(fmtNum(r.sessions || 0))} sessions · ${escHtml(fmtNum(r.turns || 0))} turns</div>
       <div class="provider-tile-bar" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, r.share || 0)).toFixed(1)}%"></span></div>
     </div>`).join('')}</div>`;
-}
-
-function fmtLocalDateTime(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-// planCardHTML draws the Codex plan-usage card from the latest rate-limit
-// sample in the window, beside the API-equivalent dollars.
-function planCardHTML(overview, provider) {
-  const st = planCardState(overview, provider);
-  if (!st) return '';
-  const dollars = `<span>${apiEquivalentHTML()} <strong>${escHtml(fmtMoney(st.codex.cost_usd || 0))}</strong></span>`;
-  if (st.kind === 'none') {
-    return `<section class="plan-card" aria-label="Codex plan usage">
-      <div class="plan-card-head"><span class="plan-card-title">Codex plan usage</span></div>
-      <div class="plan-card-none">No plan-usage sample in this window</div>
-      <div class="plan-card-foot">${dollars}</div>
-    </section>`;
-  }
-  const u = st.usage;
-  const used = Math.max(0, Math.min(100, Number(u.used_percent) || 0));
-  return `<section class="plan-card" aria-label="Codex plan usage">
-    <div class="plan-card-head">
-      <span class="plan-card-title">Codex plan usage</span>
-      ${u.plan_type ? `<span class="pill plan-card-plan">${escHtml(u.plan_type)} plan</span>` : ''}
-    </div>
-    <div class="plan-card-used">${escHtml(planUsageText(u))}</div>
-    <div class="plan-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${used}" aria-label="Plan window used"><span style="width:${used.toFixed(1)}%"></span></div>
-    <div class="plan-card-foot">
-      <span>resets ${escHtml(fmtLocalDateTime(u.resets_at))}</span>
-      <span class="small" title="When this reading was taken">sampled ${escHtml(fmtLocalDateTime(u.sampled_at))}</span>
-      ${dollars}
-    </div>
-  </section>`;
 }
 
 const kindLabel = kind => String(kind).replace(/_/g, ' ');
@@ -346,7 +310,6 @@ export async function paint() {
     <div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
     <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0, provider)}</div>
     ${providerTilesHTML(overview.providers, provider)}
-    ${planCardHTML(overview, provider)}
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
     <h2>${labelIcon('flame')}Top context-cost hotspots</h2>
