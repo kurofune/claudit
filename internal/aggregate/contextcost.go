@@ -122,6 +122,7 @@ type SessionContextCost struct {
 // contextTurn is the slice of a counted turn the attribution walk needs.
 type contextTurn struct {
 	sessionID string
+	uuid      string
 	ts        time.Time
 	endTS     time.Time
 	provider  string
@@ -134,8 +135,10 @@ type contextTurn struct {
 // evidence a hotspot card shows for it.
 type resultContextCost struct {
 	tool, detail, sessionID string
-	input, sourceFile       string
-	provider                string
+	// turnUUID is the turn that carried the result into context.
+	turnUUID          string
+	input, sourceFile string
+	provider          string
 	ContextCost
 }
 
@@ -146,6 +149,7 @@ func (a *Aggregator) recordContextTurn(t parse.Turn) {
 	a.invalidateContextCosts()
 	a.ctxTurns[t.SourceFile] = append(a.ctxTurns[t.SourceFile], contextTurn{
 		sessionID: t.SessionID,
+		uuid:      t.UUID,
 		ts:        t.Timestamp,
 		endTS:     t.EndTimestamp,
 		provider:  pricing.PriceProvider(t.Provider),
@@ -283,6 +287,7 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 					tool:       p.tool,
 					detail:     p.detail,
 					sessionID:  p.sessionID,
+					turnUUID:   c.uuid,
 					input:      p.input,
 					sourceFile: file,
 					provider:   p.provider,
@@ -435,6 +440,26 @@ func (a *Aggregator) ContextCostBySession() []SessionContextCost {
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
+	return out
+}
+
+// ContextCostByTurn returns, per turn uuid of the session, the summed
+// WriteCostUSD of the tool results that turn carried into context: what the
+// turn added. Re-read charges stay on the session total. A turn that
+// carried nothing is absent.
+func (a *Aggregator) ContextCostByTurn(sessionID string) map[string]float64 {
+	return a.ContextCostByTurnWhere(func(id string) bool { return id != "" && id == sessionID })
+}
+
+// ContextCostByTurnWhere is ContextCostByTurn over every session id in
+// accepts: a session and its Codex sub-agent threads, say.
+func (a *Aggregator) ContextCostByTurnWhere(in func(sessionID string) bool) map[string]float64 {
+	out := map[string]float64{}
+	for _, r := range a.contextCosts().results {
+		if r.turnUUID != "" && in(r.sessionID) {
+			out[r.turnUUID] += r.WriteCostUSD
+		}
+	}
 	return out
 }
 

@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kurofune/claudit/internal/aggregate"
 )
 
 type indexRowWire struct {
@@ -276,7 +279,7 @@ func keysOf(t *testing.T, raw json.RawMessage) string {
 func TestAPISessionsStory_Shape(t *testing.T) {
 	srv := newTestServer(t, storyCorpus(t))
 	body := getStory(t, srv, "?session=s-story")
-	assertTopLevelKeys(t, body, []string{"session_id", "prompts", "page", "steps", "children", "hidden"})
+	assertTopLevelKeys(t, body, []string{"session_id", "prompts", "page", "steps", "children", "hidden", "source_files"})
 
 	var p struct {
 		SessionID string `json:"session_id"`
@@ -312,7 +315,7 @@ func TestAPISessionsStory_Shape(t *testing.T) {
 	if len(p.Steps) != 2 {
 		t.Fatalf("steps = %d, want prompt 0's 2", len(p.Steps))
 	}
-	if got, want := keysOf(t, p.Steps[0]), "context_tokens,cost_usd,duration_ms,gen_ms,model,text,timestamp,tokens,tools,uuid"; got != want {
+	if got, want := keysOf(t, p.Steps[0]), "context_cost_usd,context_tokens,cost_usd,duration_ms,gen_ms,model,text,timestamp,tokens,tools,uuid"; got != want {
 		t.Errorf("step keys = %s\nwant        %s", got, want)
 	}
 	var step struct {
@@ -479,5 +482,97 @@ func TestAPISessionsStory_TurnLocatesItsPage(t *testing.T) {
 		if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+q, nil); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, w.Code)
 		}
+	}
+}
+
+// TestAPISessionsStory_ContextCostAndSourceFiles: over the story corpus
+// plus a session whose `go test` result the next turn writes to cache,
+// that carrying turn's context_cost_usd is the result's write cost (the
+// session's whole WriteCostUSD), the calling and re-reading turns carry 0,
+// and source_files names every log the session's turns came from.
+func TestAPISessionsStory_ContextCostAndSourceFiles(t *testing.T) {
+	dir := storyCorpus(t)
+	t0 := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	writeContextSession(t, dir, "s-ctx", 10_000, t0)
+	srv := newTestServer(t, dir)
+
+	var p struct {
+		Steps []struct {
+			UUID           string  `json:"uuid"`
+			ContextCostUSD float64 `json:"context_cost_usd"`
+		} `json:"steps"`
+		SourceFiles []string `json:"source_files"`
+	}
+	raw, _ := json.Marshal(getStory(t, srv, "?scope=all&session=s-ctx"))
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]float64{}
+	for _, s := range p.Steps {
+		by[s.UUID] = s.ContextCostUSD
+	}
+	agg := aggregate.New(srv.opts.Prices)
+	snap := srv.cache.Snapshot()
+	for _, turn := range snap.Turns {
+		agg.Add(turn)
+	}
+	agg.AddToolResults(snap.ToolResults)
+	var want float64
+	for _, row := range agg.ContextCostBySession() {
+		if row.SessionID == "s-ctx" {
+			want = row.WriteCostUSD
+		}
+	}
+	if want <= 0 {
+		t.Fatalf("fixture session write cost = %v, want > 0", want)
+	}
+	if math.Abs(by["s-ctx-b"]-want) > 1e-12 || by["s-ctx-a"] != 0 || by["s-ctx-c"] != 0 {
+		t.Errorf("context_cost_usd by turn = %v, want s-ctx-b %v and 0 elsewhere", by, want)
+	}
+	if got := strings.Join(p.SourceFiles, ","); got != filepath.Join(dir, "s-ctx.jsonl") {
+		t.Errorf("source_files = %v, want the one session log", p.SourceFiles)
+	}
+
+	raw, _ = json.Marshal(getStory(t, srv, "?scope=all&session=s-story"))
+	p.SourceFiles = nil
+	_ = json.Unmarshal(raw, &p)
+	if got, want := strings.Join(p.SourceFiles, ","), filepath.Join(dir, "s-story.jsonl")+","+filepath.Join(dir, "s-story", "subagents", "agent-k1.jsonl"); got != want {
+		t.Errorf("source_files = %s\nwant           %s", got, want)
+	}
+}
+
+// TestAPISessionsStory_Whole: ?whole=1 answers every turn of every prompt
+// and every sub-agent in one payload, with the session's title, project,
+// provider, model and time span from its index row.
+func TestAPISessionsStory_Whole(t *testing.T) {
+	srv := newTestServer(t, storyCorpus(t))
+	body := getStory(t, srv, "?scope=all&session=s-story&whole=1")
+	assertTopLevelKeys(t, body, []string{"session_id", "prompts", "page", "steps", "children", "hidden", "source_files",
+		"title", "project", "provider", "model", "started_at", "ended_at"})
+	var p struct {
+		Steps    []struct{ UUID string } `json:"steps"`
+		Children []json.RawMessage       `json:"children"`
+		Title    string                  `json:"title"`
+		Project  string                  `json:"project"`
+		Provider string                  `json:"provider"`
+		Model    string                  `json:"model"`
+		Started  time.Time               `json:"started_at"`
+		Ended    time.Time               `json:"ended_at"`
+	}
+	raw, _ := json.Marshal(body)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(p.Steps); got != 3 || p.Steps[2].UUID != "a3" || len(p.Children) != 1 {
+		t.Errorf("whole steps = %+v children = %d, want a1 a2 a3 and the sub-agent", p.Steps, len(p.Children))
+	}
+	if p.Title != "fix the login bug" || p.Provider != "claude-code" || p.Model != "claude-opus-4-7" || p.Project == "" {
+		t.Errorf("whole header = %q %q %q %q", p.Title, p.Project, p.Provider, p.Model)
+	}
+	if !p.Started.Equal(time.Date(2026, 5, 1, 12, 0, 1, 0, time.UTC)) || !p.Ended.Equal(time.Date(2026, 5, 3, 12, 0, 1, 0, time.UTC)) {
+		t.Errorf("whole span = %v .. %v", p.Started, p.Ended)
+	}
+	if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+"?session=s-story&whole=1&prompt=1", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("whole with prompt: status %d, want 400", w.Code)
 	}
 }

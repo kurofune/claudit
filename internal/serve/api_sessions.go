@@ -66,7 +66,13 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 // ?offset=<n> turns into that prompt (default 0), agentflow.StoryPageTurns
 // turns per page. ?turn=<uuid> instead of ?prompt and ?offset answers the
 // page that carries that turn. An unknown session, prompt, offset or turn
-// answers 404.
+// answers 404. ?whole=1 instead answers the whole session as one page —
+// every turn of every prompt and every sub-agent, text left as snippets —
+// with the session's title, project, provider, model and time span from
+// its index row: what the session header computes over.
+//
+// Every step carries context_cost_usd (aggregate.ContextCostByTurn) and
+// every page the session's source_files.
 //
 // The story is served on the shared-aggregator path so per-turn figures
 // from the Aggregator can join its steps by turn uuid; filterAggregate keys
@@ -94,6 +100,11 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "?turn excludes ?prompt and ?offset", http.StatusBadRequest)
 		return
 	}
+	whole := v.Get("whole") == "1"
+	if whole && (turn != "" || v.Has("prompt") || v.Has("offset")) {
+		http.Error(w, "?whole excludes ?turn, ?prompt and ?offset", http.StatusBadRequest)
+		return
+	}
 	if _, err := parseQuery(v, time.Now()); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -104,10 +115,14 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 	}
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSessionsStory,
-		buildFiltered: func(snap *Snapshot, q Query, _ *aggregate.Aggregator) (any, error) {
+		buildFiltered: func(snap *Snapshot, q Query, agg *aggregate.Aggregator) (any, error) {
 			st, ok := s.sessionStory(snap, q, session)
 			if !ok {
 				return nil, errNotFound
+			}
+			byTurn := agg.ContextCostByTurnWhere(agentflow.InSession(snap, session))
+			if whole {
+				return s.wholeSession(snap, q, st.Whole().WithContextCost(byTurn)), nil
 			}
 			prompt, offset := prompt, offset
 			if turn != "" {
@@ -119,9 +134,35 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 			if !ok {
 				return nil, errNotFound
 			}
-			return st.FullText(page, readLogText), nil
+			return st.FullText(page.WithContextCost(byTurn), readLogText), nil
 		},
 	})
+}
+
+// sessionWhole is the ?whole=1 story payload: the whole session as one
+// page plus what its index row says of it.
+type sessionWhole struct {
+	agentflow.StoryPage
+	Title     string    `json:"title"`
+	Project   string    `json:"project"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+}
+
+// wholeSession joins page to the session's index row under q's filter; a
+// session the filter left no row for keeps those fields empty.
+func (s *Server) wholeSession(snap *Snapshot, q Query, page agentflow.StoryPage) sessionWhole {
+	out := sessionWhole{StoryPage: page}
+	for _, row := range s.sessionIndex(snap, q).Sessions {
+		if row.SessionID == page.SessionID {
+			out.Title, out.Project, out.Provider, out.Model = row.Title, row.Project, row.Provider, row.Model
+			out.StartedAt, out.EndedAt = row.StartedAt, row.LastActivity
+			break
+		}
+	}
+	return out
 }
 
 // nonNegativeParam parses an optional non-negative integer query value;

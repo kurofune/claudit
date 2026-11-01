@@ -1,6 +1,7 @@
 package agentflow
 
 import (
+	"sort"
 	"strconv"
 	"time"
 
@@ -42,6 +43,8 @@ type SessionStory struct {
 	// turnLog, promptLog and toolLog name the log each turn, prompt and
 	// tool call was read from, so FullText can read its whole text back.
 	turnLog, promptLog, toolLog map[string]LogSource
+	// sourceFiles is every session log the story's turns came from.
+	sourceFiles []string
 }
 
 // LogSource is a session log and the provider that wrote it.
@@ -97,6 +100,10 @@ type StoryTool struct {
 type StoryStep struct {
 	AgentStep
 	Tools []StoryTool `json:"tools"`
+	// ContextCostUSD is the write cost of the tool results this turn
+	// carried into context (aggregate.ContextCostByTurn): what the turn
+	// added. Re-reads stay on the session total.
+	ContextCostUSD float64 `json:"context_cost_usd"`
 }
 
 // StoryChild is one sub-agent (or further rollout sharing the session id,
@@ -123,6 +130,9 @@ type StoryPage struct {
 	Steps     []StoryStep   `json:"steps"`
 	Children  []StoryChild  `json:"children"`
 	Hidden    StoryHidden   `json:"hidden"`
+	// SourceFiles is every session log the story's turns came from,
+	// sorted.
+	SourceFiles []string `json:"source_files"`
 }
 
 // BuildSessionStory assembles one session's story with the grouping
@@ -135,14 +145,15 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	}
 	c := collectSessions(snap, prices, f, sessionID, opts.Replays)
 	st := &SessionStory{
-		SessionID: sessionID,
-		Prompts:   []StoryPrompt{},
-		Hidden:    StoryHidden{Replays: c.replays, OutsideFilter: c.outsideFilter},
-		steps:     []StoryStep{},
-		children:  []StoryChild{},
-		turnLog:   map[string]LogSource{},
-		promptLog: map[string]LogSource{},
-		toolLog:   map[string]LogSource{},
+		SessionID:   sessionID,
+		Prompts:     []StoryPrompt{},
+		Hidden:      StoryHidden{Replays: c.replays, OutsideFilter: c.outsideFilter},
+		steps:       []StoryStep{},
+		children:    []StoryChild{},
+		turnLog:     map[string]LogSource{},
+		promptLog:   map[string]LogSource{},
+		toolLog:     map[string]LogSource{},
+		sourceFiles: []string{},
 	}
 	s, ok := c.sessions[sessionID]
 	if !ok {
@@ -163,6 +174,14 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 			}
 		}
 	}
+	files := map[string]bool{}
+	for _, src := range st.turnLog {
+		if src.File != "" && !files[src.File] {
+			files[src.File] = true
+			st.sourceFiles = append(st.sourceFiles, src.File)
+		}
+	}
+	sort.Strings(st.sourceFiles)
 	codexOutput := s.provider == parse.ProviderCodex
 
 	if as.Main != nil {
@@ -239,12 +258,13 @@ func InSession(snap *corpus.Snapshot, sessionID string) func(id string) bool {
 // has one empty page.
 func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
 	page := StoryPage{
-		SessionID: st.SessionID,
-		Prompts:   st.Prompts,
-		Page:      StoryPageInfo{PromptIndex: prompt, TurnOffset: offset, TurnLimit: limit},
-		Steps:     []StoryStep{},
-		Children:  []StoryChild{},
-		Hidden:    st.Hidden,
+		SessionID:   st.SessionID,
+		Prompts:     st.Prompts,
+		Page:        StoryPageInfo{PromptIndex: prompt, TurnOffset: offset, TurnLimit: limit},
+		Steps:       []StoryStep{},
+		Children:    []StoryChild{},
+		Hidden:      st.Hidden,
+		SourceFiles: st.sourceFiles,
 	}
 	if limit <= 0 || prompt < 0 || offset < 0 {
 		return StoryPage{}, false
@@ -276,6 +296,43 @@ func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
 		}
 	}
 	return page, true
+}
+
+// Whole is the session's whole story as one page: every main-agent turn
+// and every sub-agent, Page placing it at prompt 0 offset 0 with every turn
+// in it. Its text stays the parse-time snippets.
+func (st *SessionStory) Whole() StoryPage {
+	return StoryPage{
+		SessionID:   st.SessionID,
+		Prompts:     st.Prompts,
+		Page:        StoryPageInfo{TurnLimit: len(st.steps)},
+		Steps:       st.steps,
+		Children:    st.children,
+		Hidden:      st.Hidden,
+		SourceFiles: st.sourceFiles,
+	}
+}
+
+// WithContextCost returns page with each step's ContextCostUSD read from
+// byTurn by turn uuid, its main and sub-agent steps copied so the story
+// they came from is left unchanged.
+func (page StoryPage) WithContextCost(byTurn map[string]float64) StoryPage {
+	withCost := func(steps []StoryStep) []StoryStep {
+		out := make([]StoryStep, len(steps))
+		for i, s := range steps {
+			s.ContextCostUSD = byTurn[s.UUID]
+			out[i] = s
+		}
+		return out
+	}
+	page.Steps = withCost(page.Steps)
+	children := make([]StoryChild, len(page.Children))
+	for i, ch := range page.Children {
+		ch.Steps = withCost(ch.Steps)
+		children[i] = ch
+	}
+	page.Children = children
+	return page
 }
 
 // Locate finds the page that carries turn uuid: its prompt index and the

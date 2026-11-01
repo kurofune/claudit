@@ -676,3 +676,47 @@ func TestContextCost_CodexCompactedRecordEndsRereads(t *testing.T) {
 		t.Errorf("cat without the boundary = %+v, want 3 re-reads (fixture exercises the boundary)", c)
 	}
 }
+
+func TestContextCostByTurn_CarryingTurnGetsTheWriteCost(t *testing.T) {
+	t0 := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	agg := New(ctxTable())
+	agg.Add(ctxTurn("f.jsonl", "s", "A", "m", t0, parse.Usage{},
+		parse.ToolUse{ID: "tu-bash", Name: "Bash", Detail: "git status"},
+		parse.ToolUse{ID: "tu-read", Name: "Read", Detail: ".go"}))
+	agg.AddToolResults([]parse.ToolResult{
+		{ToolUseID: "tu-bash", OutputBytes: 900},
+		{ToolUseID: "tu-read", OutputBytes: 100},
+		{ToolUseID: "tu-grep", OutputBytes: 50},
+	})
+	agg.Add(ctxTurn("f.jsonl", "s", "B", "m", t0.Add(time.Second), parse.Usage{CacheCreate5mTokens: 1000, CacheReadTokens: 500},
+		parse.ToolUse{ID: "tu-grep", Name: "Grep", Detail: "x"}))
+	agg.Add(ctxTurn("f.jsonl", "s", "C", "m", t0.Add(2*time.Second), parse.Usage{CacheCreate1hTokens: 200, CacheReadTokens: 1000}))
+	agg.Add(ctxTurn("g.jsonl", "other", "D", "m", t0, parse.Usage{CacheCreate5mTokens: 10}))
+
+	by := agg.ContextCostByTurn("s")
+	if got := by["uuid-A"]; got != 0 {
+		t.Errorf("turn A = %v, want 0 (it carried no result)", got)
+	}
+	if want := 1000 * 6.0 / 1e6; !approx(by["uuid-B"], want) {
+		t.Errorf("turn B = %v, want %v (A's results' write cost)", by["uuid-B"], want)
+	}
+	if want := 200 * 10.0 / 1e6; !approx(by["uuid-C"], want) {
+		t.Errorf("turn C = %v, want %v (B's grep result's write cost)", by["uuid-C"], want)
+	}
+	if _, ok := by["uuid-D"]; ok {
+		t.Errorf("turn D of another session present: %v", by)
+	}
+	var sum float64
+	for _, v := range by {
+		sum += v
+	}
+	var want float64
+	for _, row := range agg.ContextCostBySession() {
+		if row.SessionID == "s" {
+			want = row.WriteCostUSD
+		}
+	}
+	if want == 0 || !approx(sum, want) {
+		t.Errorf("per-turn sum = %v, want session WriteCostUSD %v", sum, want)
+	}
+}
