@@ -11,7 +11,7 @@ import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
-import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank } from './overview-logic.js';
+import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, promptPreview } from './overview-logic.js';
 import {
   providerFromSearch, providerTiles, providerLabel, shareText,
   emptyProviderText, API_EQUIVALENT_TIP,
@@ -107,6 +107,7 @@ function hotspotDetailHTML(h, rank) {
     </div>
     <details class="hotspot-prompt">
       <summary>Show prompt</summary>
+      <p class="small">JSONL paths are left out here; Copy prompt includes them.</p>
       <pre></pre>
     </details>`;
 }
@@ -255,12 +256,10 @@ function setOpen(card, h, open) {
   }
 }
 
-// fillPrompt writes the prompt, JSONL paths and all, only once the user
-// asks to see it.
+// fillPrompt writes the path-free preview only once the user asks to see it.
 function fillPrompt(details, h) {
   const pre = details.querySelector('pre');
-  if (pre && !pre.textContent && h) pre.textContent = h.prompt;
-  return pre;
+  if (pre && !pre.textContent && h) pre.textContent = promptPreview(h);
 }
 
 // openDeepLink opens the #overview/hotspot-N row and scrolls it into view.
@@ -273,8 +272,28 @@ function openDeepLink(container, hotspots) {
   if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'start' });
 }
 
-async function copyPrompt(btn, card, h) {
-  let pre = card ? card.querySelector('pre') : null;
+// copyText falls back to a selected off-screen textarea when the Clipboard
+// API is missing or refuses, so the row stays as the user left it.
+function copyText(text) {
+  const ta = document.createElement('textarea');
+  ta.setAttribute('readonly', '');
+  ta.setAttribute('aria-hidden', 'true');
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  ta.style.opacity = '0';
+  ta.value = text;
+  ta.textContent = text;
+  document.body.appendChild(ta);
+  let ok = false;
+  try {
+    if (typeof ta.select === 'function') ta.select();
+    ok = document.execCommand('copy') === true;
+  } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+async function copyPrompt(btn, h) {
   const text = h ? h.prompt : '';
   let ok = false;
   try {
@@ -283,19 +302,8 @@ async function copyPrompt(btn, card, h) {
       ok = true;
     }
   } catch { ok = false; }
-  if (!ok && card) {
-    if (!pre) { setOpen(card, h, true); writeOpen(card.parentNode); pre = card.querySelector('pre'); }
-    const details = pre && pre.closest('details');
-    if (details) { details.open = true; fillPrompt(details, h); }
-    if (pre) {
-      const range = document.createRange();
-      range.selectNodeContents(pre);
-      const sel = window.getSelection();
-      sel.removeAllRanges(); sel.addRange(range);
-      try { ok = document.execCommand('copy'); } catch { ok = false; }
-    }
-  }
-  btn.textContent = ok ? 'Copied' : 'Copy failed — select the prompt below';
+  if (!ok) ok = copyText(text);
+  btn.textContent = ok ? 'Copied' : 'Copy failed — the browser blocked the clipboard';
   btn.classList.toggle('copied', ok);
   clearTimeout(btn._resetTimer);
   btn._resetTimer = setTimeout(() => { btn.textContent = 'Copy prompt'; btn.classList.remove('copied'); }, 2200);
@@ -307,7 +315,7 @@ function wireHotspots(container, hotspots) {
   container.querySelectorAll('button.copy').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      copyPrompt(btn, btn.closest('.hotspot'), hotspots[Number(btn.dataset.hotspot)]);
+      copyPrompt(btn, hotspots[Number(btn.dataset.hotspot)]);
     });
   });
   const toggle = btn => {

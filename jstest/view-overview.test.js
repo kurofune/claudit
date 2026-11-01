@@ -147,7 +147,10 @@ for (const [how, activate] of [
     assert.equal(pre.textContent, '', 'the prompt, with its JSONL paths, waits for Show prompt');
     details.open = true;
     details.dispatchEvent(new Event('toggle'));
-    assert.equal(pre.textContent, OVERVIEW.hotspots[0].prompt);
+    assert.ok(pre.textContent.startsWith(`prompt for ${OVERVIEW.hotspots[0].title}`), 'Show prompt fills the preview');
+    assert.match(pre.textContent, /session 0f1e2d3c/);
+    assert.doesNotMatch(pre.textContent, SOURCE, 'the open Show-prompt preview holds no JSONL path');
+    assert.doesNotMatch(card.innerHTML, SOURCE, 'the expanded row holds no JSONL path');
     assert.equal(storage.get(OPEN_KEY), '[1]');
 
     activate(t);
@@ -275,6 +278,51 @@ test('Copy prompt copies the card prompt and reads "Copied"', async () => {
   const card = root.querySelector('#hotspot-2');
   assert.equal(card.querySelector('.hotspot-toggle').getAttribute('aria-expanded'), 'false', 'copying does not expand the row');
   assert.ok(card.querySelector('#hotspot-2-detail').hidden);
+});
+
+// A fallback copy: navigator.clipboard as given, document.execCommand
+// recording the text of the textarea it copies from.
+async function mountFallback(clipboard, execResult = true) {
+  const m = await mount([OVERVIEW]);
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: clipboard ? { clipboard } : {} });
+  const copied = [];
+  m.document.execCommand = cmd => {
+    const ta = m.document.querySelector('textarea');
+    copied.push({ cmd, text: ta ? ta.value : null });
+    return execResult;
+  };
+  return { ...m, copied };
+}
+
+for (const [name, clipboard] of [
+  ['unavailable', null],
+  ['rejected', { writeText: async () => { throw new Error('NotAllowedError'); } }],
+]) {
+  test(`Copy prompt with the Clipboard API ${name} copies the full prompt without expanding the row`, async () => {
+    const { root, document, storage, copied } = await mountFallback(clipboard);
+    const btn = root.querySelectorAll('button.copy')[1];
+    click(btn);
+    await new Promise(r => setTimeout(r, 0));
+    assert.deepEqual(copied, [{ cmd: 'copy', text: OVERVIEW.hotspots[1].prompt }], 'execCommand copies the full prompt, JSONL paths and all');
+    assert.equal(btn.textContent, 'Copied');
+    const card = root.querySelector('#hotspot-2');
+    assert.equal(card.querySelector('.hotspot-toggle').getAttribute('aria-expanded'), 'false', 'the fallback does not expand the row');
+    assert.ok(card.querySelector('#hotspot-2-detail').hidden);
+    assert.equal(card.querySelectorAll('table, pre').length, 0);
+    assert.equal(storage.get(OPEN_KEY), undefined, 'the fallback persists no open row');
+    assert.equal(document.querySelectorAll('textarea').length, 0, 'the temporary textarea is removed');
+    assert.doesNotMatch(root.innerHTML, SOURCE);
+  });
+}
+
+test('Copy prompt names the failure when both the Clipboard API and execCommand fail', async () => {
+  const { root, document } = await mountFallback(null, false);
+  const btn = root.querySelectorAll('button.copy')[0];
+  click(btn);
+  await new Promise(r => setTimeout(r, 0));
+  assert.match(btn.textContent, /^Copy failed/);
+  assert.equal(root.querySelector('#hotspot-1 .hotspot-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(document.querySelectorAll('textarea').length, 0);
 });
 
 // Two daily buckets so the trend section renders; the forecast is the

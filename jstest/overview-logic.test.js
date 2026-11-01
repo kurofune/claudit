@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank } from '../web/overview-logic.js';
+import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, promptPreview } from '../web/overview-logic.js';
 
 test('hotspotTrend: up, down and new against the previous window', () => {
   assert.deepEqual(
@@ -83,4 +83,25 @@ test('restoreExpanded: malformed stored values are ignored', () => {
     assert.deepEqual(restoreExpanded({ hash: '#overview/hotspot-1', stored }), [1], String(stored));
   }
   assert.deepEqual(restoreExpanded({ hash: '', stored: '[2,"x",7]' }), [2, 7]);
+});
+
+test('promptPreview drops every JSONL path and the separator before it, keeping the rest', () => {
+  const h = {
+    prompt: 'Fix it.\n1. `wc -l main.go`\n   42,000 tokens · session sess-aaa · /home/u/.claude/projects/p/sess-aaa.jsonl\n'
+      + '2. `ls`\n   9,000 tokens · session sess-bbb · /home/u/Application Support/p/sess-bbb.jsonl\nTarget: halve it.',
+    examples: [
+      { source_file: '/home/u/.claude/projects/p/sess-aaa.jsonl' },
+      { source_file: '/home/u/Application Support/p/sess-bbb.jsonl' },
+    ],
+  };
+  assert.equal(promptPreview(h),
+    'Fix it.\n1. `wc -l main.go`\n   42,000 tokens · session sess-aaa\n2. `ls`\n   9,000 tokens · session sess-bbb\nTarget: halve it.');
+});
+test('promptPreview drops a JSONL path no example names', () => {
+  assert.equal(promptPreview({ prompt: 'session s in /x/y/s.jsonl now' }), 'session s in  now');
+  assert.doesNotMatch(promptPreview({ prompt: 'a · /p/q.jsonl\nb', examples: [] }), /jsonl/);
+});
+test('promptPreview of a missing prompt is empty', () => {
+  assert.equal(promptPreview(null), '');
+  assert.equal(promptPreview({}), '');
 });

@@ -62,3 +62,18 @@ export function restoreExpanded({ hash, stored }) {
   if (linked != null) ranks.add(linked);
   return [...ranks].sort((a, b) => a - b);
 }
+
+// promptPreview is h.prompt as the Show-prompt preview displays it: every
+// JSONL path removed, with the separator that introduced it. The copied
+// prompt keeps them, since the agent opens those files.
+export function promptPreview(h) {
+  if (!h || !h.prompt) return '';
+  const files = [...new Set((h.examples || []).map(e => e && e.source_file).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+  let text = h.prompt;
+  for (const f of files) text = text.split(f).join('');
+  return text
+    .replace(/\S*\.jsonl\b/g, '')
+    .replace(/[ \t]*·[ \t]*$/gm, '')
+    .replace(/[ \t]+$/gm, '');
+}
