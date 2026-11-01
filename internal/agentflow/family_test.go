@@ -113,10 +113,52 @@ func TestFamilyKey(t *testing.T) {
 			remainder: "",
 		},
 		{
-			name:      "hyphenated words are not bead ids",
+			name:      "short-prefix bead id without a digit",
+			prompt:    "close bd-abc now",
+			key:       "close _ now",
+			remainder: "bd-abc",
+		},
+		{
+			name:      "bead id with a suffix past eight characters",
+			prompt:    "work djinn-abcdefghij next",
+			key:       "work _ next",
+			remainder: "djinn-abcdefghij",
+		},
+		{
+			name:      "hyphenated word of the bead-id shape blanks; a two-letter suffix does not",
 			prompt:    "give a one-sentence reason, no-go or go",
-			key:       "give a one-sentence reason, no-go or go",
+			key:       "give a _ reason, no-go or go",
+			remainder: "one-sentence",
+		},
+		{
+			name:      "dot-relative path",
+			prompt:    "edit ./file.go then ../file.go",
+			key:       "edit _ then _",
+			remainder: "./file.go · ../file.go",
+		},
+		{
+			name:      "home-relative path; a lone slash command stays text",
+			prompt:    "run /wish on ~/notes",
+			key:       "run /wish on _",
+			remainder: "~/notes",
+		},
+		{
+			name:      "hex string without a digit",
+			prompt:    "checkout deadbeef now",
+			key:       "checkout _ now",
+			remainder: "deadbeef",
+		},
+		{
+			name:      "six hex characters stay text",
+			prompt:    "checkout facade now",
+			key:       "checkout facade now",
 			remainder: "",
+		},
+		{
+			name:      "an ID line names the remainder over the key line's blanks",
+			prompt:    "Run step 2 of the plan.\n\nID: bd-xyz\nTitle: t",
+			key:       "Run step _ of the plan.",
+			remainder: "bd-xyz",
 		},
 		{
 			name:      "running text names no bead",
@@ -157,8 +199,8 @@ func TestFamilyKey(t *testing.T) {
 
 // TestFamilyKey_RealPromptsDifferingOnlyInBeadID: two prompts of one family
 // that differ only in their bead id share a key, and the remainder is the
-// id. The triage judge's first line names no bead, so its remainder is the
-// first bead id the prompt names.
+// id. The triage judge's first line names no bead (it blanks only
+// "one-sentence"), so its remainder is the bead on its "ID:" line.
 func TestFamilyKey_RealPromptsDifferingOnlyInBeadID(t *testing.T) {
 	triage := func(id string) string {
 		return triageJudgePrefix + "t change nothing.\n\n## The proposal\n\nID: " + id + "\nTitle: Closed beads' leftover worker state expires\nType: epic\n"
@@ -177,7 +219,7 @@ func TestFamilyKey_RealPromptsDifferingOnlyInBeadID(t *testing.T) {
 			mk:   triage,
 			a:    "djinn-ca6nj",
 			b:    "djinn-swi8x",
-			key:  "You are a triage judge for this repository's workshop. Decide whether the workshop should build the proposal below: go or no-go, with a one-sentence reason. Read the repository as much as you need, but change nothing.",
+			key:  "You are a triage judge for this repository's workshop. Decide whether the workshop should build the proposal below: go or no-go, with a _ reason. Read the repository as much as you need, but change nothing.",
 		},
 		{
 			name: "implement step",

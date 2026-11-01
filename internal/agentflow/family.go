@@ -35,11 +35,11 @@ var wrapperBlocks = []struct {
 // make up an id, a path or a number. Quotes, brackets and separators end it.
 var promptToken = regexp.MustCompile("[^\\s`'\"()\\[\\]{}<>,;]+")
 
-// beadID is a bead id: a lowercase prefix, a hyphen, a 3–8 character
-// base36 suffix and optional .N child numbers (djinn-bhl6v, claudit-fw1.3).
-// A prefix shorter than four letters counts only when its suffix carries a
-// digit, so hyphenated words ("one-sentence", "sub-agent") stay text.
-var beadID = regexp.MustCompile(`^([a-z][a-z0-9]*)-([0-9a-z]{3,8})((?:\.[0-9]+)*)$`)
+// beadID is a bead id: a lowercase prefix, a hyphen, a base36 suffix of 3
+// or more characters and optional .N child numbers (djinn-bhl6v, bd-abc,
+// claudit-fw1.3). A hyphenated word of that shape ("one-sentence") matches
+// too; the key blanks it like any other id.
+var beadID = regexp.MustCompile(`^([a-z][a-z0-9]*)-([0-9a-z]{3,})((?:\.[0-9]+)*)$`)
 
 // stripWrappers removes every wrapper block from a prompt.
 func stripWrappers(prompt string) string {
@@ -68,27 +68,37 @@ func family(prompt string) (Family, bool) {
 	}
 	key, parts := blank(line)
 	fam := Family{Key: key, Title: truncateRunesPlain(line, titleMaxRunes)}
-	if len(parts) > 0 {
+	switch id := idLineBead(body); {
+	case id != "":
+		fam.Remainder = id
+	case len(parts) > 0:
 		fam.Remainder = strings.Join(parts, " · ")
-		return fam, true
+	default:
+		fam.Remainder = runningTextBead(body)
 	}
-	fam.Remainder = namedBeadID(body)
 	return fam, true
 }
 
 // beadIDLine is the "ID: <bead>" line a bead block opens with.
 var beadIDLine = regexp.MustCompile(`(?m)^ID: (\S+)\s*$`)
 
-// namedBeadID is the bead a prompt body names when its key line names none:
-// the id on its first "ID:" line, else its first bead id whose suffix
-// carries a digit. Hyphenated words that merely look like ids
-// ("write-heavy") are not taken from running text.
-func namedBeadID(body string) string {
-	if !strings.Contains(body, "-") {
+// idLineBead is the bead id on a prompt body's first "ID:" line, or "".
+func idLineBead(body string) string {
+	if !strings.Contains(body, "ID: ") {
 		return ""
 	}
 	if m := beadIDLine.FindStringSubmatch(body); m != nil && isBeadID(m[1]) {
 		return m[1]
+	}
+	return ""
+}
+
+// runningTextBead is the first bead id in a prompt body whose suffix
+// carries a digit. Hyphenated words that merely look like ids
+// ("write-heavy") are not taken from running text.
+func runningTextBead(body string) string {
+	if !strings.Contains(body, "-") {
+		return ""
 	}
 	for _, tok := range promptToken.FindAllString(body, -1) {
 		core := trimTokenPunct(tok)
@@ -101,16 +111,17 @@ func namedBeadID(body string) string {
 
 // FamilyKey is the prompt-family key the Sessions list groups on by exact
 // match: the first line of the prompt's own text, with bead ids, file
-// paths, 7+-character hex strings and digit runs blanked to "_". A prompt
+// paths, hex strings of 7+ characters and digit runs blanked to "_". A prompt
 // with no text of its own keys as NoPromptKey.
 func FamilyKey(prompt string) string {
 	f, _ := family(prompt)
 	return f.Key
 }
 
-// Remainder is what FamilyKey blanked from the key line, joined by " · ",
-// so a row can show what tells two prompts of one family apart. When the
-// key line blanked nothing, it is the bead the prompt names (namedBeadID).
+// Remainder is what tells two prompts of one family apart: the bead on the
+// prompt's "ID:" line when it has one (idLineBead), else what FamilyKey
+// blanked from the key line joined by " · ", else the first digit-bearing
+// bead id in the prompt's running text (runningTextBead).
 func Remainder(prompt string) string {
 	f, _ := family(prompt)
 	return f.Remainder
@@ -162,8 +173,9 @@ func trimTokenPunct(tok string) string {
 }
 
 // isPath reports whether a token is a file path or URL: it holds a slash
-// and at least two non-empty segments ("/Users/x", "web/api.js"), or a
-// scheme ("https://…"). A lone "/wish" stays text.
+// and at least two non-empty segments ("/Users/x", "web/api.js",
+// "./file.go", "~/notes"), or a scheme ("https://…"). A lone "/wish" stays
+// text.
 func isPath(tok string) bool {
 	if strings.Contains(tok, "://") {
 		return true
@@ -173,7 +185,7 @@ func isPath(tok string) bool {
 	}
 	n := 0
 	for _, seg := range strings.Split(tok, "/") {
-		if seg != "" && seg != "~" && seg != "." && seg != ".." {
+		if seg != "" {
 			n++
 		}
 	}
@@ -181,17 +193,12 @@ func isPath(tok string) bool {
 }
 
 func isBeadID(tok string) bool {
-	m := beadID.FindStringSubmatch(tok)
-	if m == nil {
-		return false
-	}
-	prefix, suffix, children := m[1], m[2], m[3]
-	return len(prefix) >= 4 || children != "" || strings.ContainsAny(suffix, "0123456789")
+	return beadID.MatchString(tok)
 }
 
 // blankNumbers blanks, within one token, every alphanumeric run that is a
-// hex string of 7+ characters carrying a digit (a commit or hash) and every
-// remaining digit run.
+// hex string of 7+ characters (a commit or hash) and every remaining digit
+// run.
 func blankNumbers(tok string, parts *[]string) string {
 	var b strings.Builder
 	i := 0
@@ -206,7 +213,7 @@ func blankNumbers(tok string, parts *[]string) string {
 			j++
 		}
 		run := tok[i:j]
-		if len(run) >= 7 && isHex(run) && strings.ContainsAny(run, "0123456789") {
+		if len(run) >= 7 && isHex(run) {
 			*parts = append(*parts, run)
 			b.WriteByte('_')
 		} else {
