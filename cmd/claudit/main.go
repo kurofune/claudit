@@ -1,4 +1,4 @@
-// claudit — audit Claude Code session JSONL files for token & cost spend.
+// claudit — audit Claude Code and Codex session logs for token & cost spend.
 package main
 
 import (
@@ -58,7 +58,7 @@ func isTopLevelFlag(arg string) bool {
 	return false
 }
 
-const topLevelUsage = `claudit — audit Claude Code session JSONL files for token & cost spend.
+const topLevelUsage = `claudit — audit Claude Code and Codex session logs for token & cost spend.
 
 Usage:
   claudit <command> [flags]

@@ -1,6 +1,6 @@
 # claudit
 
-Go CLI that audits Claude Code sessions from the `.jsonl` logs under `~/.claude/projects/` — what the agents did (Agents trace view) and what it cost. Outputs `--json` and `--html` (default).
+Go tool that audits coding-agent session logs (Claude Code, Codex) — what the agents did (Agents trace view) and what it cost — as a local web app (`claudit serve`, bare `claudit`) plus the `claudit watch` TUI.
 
 ## Agent skills
 

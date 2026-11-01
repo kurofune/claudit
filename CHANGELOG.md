@@ -15,6 +15,8 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ### Changed
 
+- **claudit describes itself as auditing Claude Code and Codex sessions.** The `--help` banner, the README tagline and intro (which now name both log roots, `~/.claude/projects/` and `~/.codex/sessions`, and the `--codex-root` flag), the AGENTS.md brief (which also drops the removed `--json`/`--html` outputs in favour of `claudit serve` and `claudit watch`) and the Agents view's guide paragraph no longer call it a Claude Code tool.
+
 - **Unpriced-model warnings name the provider.** The Overview warning lists each gap as `provider/model` (e.g. `claude-code/claude-future-9`), and `unknown_models` rows gain a `provider` field.
 
 - **Hotspot prompts fit the agent that produced the evidence.** Copy prompt on an Overview hotspot now describes claudit as an audit of coding-agent session logs (Claude Code, Codex), names each example's provider (`42,000 tokens · codex · session …`), and offers only the fixes that provider's agent can make: Claude Code evidence keeps the CLAUDE.md line, the PreToolUse/PostToolUse hook and the CLI flag; Codex evidence gets an AGENTS.md line and a CLI flag or wrapper script, with no hook, since Codex has no tool-call hook; evidence from both names both instruction files and marks the hook Claude Code only. A repeated-cache-write prompt names the session's own instruction file. Each `/_claudit/api/overview` hotspot example gains a `provider` field (`claude-code` or `codex`).

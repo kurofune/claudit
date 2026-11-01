@@ -89,6 +89,15 @@ func TestTopLevelUsage(t *testing.T) {
 	if !strings.Contains(topLevelUsage, `alias for "claudit serve"`) {
 		t.Errorf("topLevelUsage does not say bare claudit runs serve:\n%s", topLevelUsage)
 	}
+	first, _, _ := strings.Cut(topLevelUsage, "\n")
+	for _, provider := range []string{"Claude Code", "Codex"} {
+		if !strings.Contains(first, provider) {
+			t.Errorf("topLevelUsage first line %q does not name %s", first, provider)
+		}
+	}
+	if strings.Contains(topLevelUsage, "Claude Code session JSONL files") {
+		t.Errorf("topLevelUsage still describes claudit as Claude Code only:\n%s", topLevelUsage)
+	}
 }
 
 func TestMainExitsOneOnRemovedCommands(t *testing.T) {

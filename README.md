@@ -4,11 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/kurofune/claudit)](https://github.com/kurofune/claudit/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Audit your Claude Code sessions — what your agents actually did, and what it cost.
+Audit your coding-agent sessions (Claude Code and Codex) — what your agents actually did, and what it cost.
 
 ![claudit agents view screenshot](docs/images/claudit-agents.png)
 
-claudit is a local web app over the `.jsonl` session logs that Claude Code writes under `~/.claude/projects/`. Run `claudit serve` and open the dashboard in your browser: it re-reads the logs as new turns land and shows where the money went — by project, model, tool, subagent, and individual user prompt.
+claudit is a local web app over the `.jsonl` session logs your coding agents write: Claude Code's under `~/.claude/projects/` (`--root` to override) and Codex's rollouts under `$CODEX_HOME/sessions`, else `~/.codex/sessions` (`--codex-root` to override, or `--codex-root=""` to leave Codex out). Run `claudit serve` and open the dashboard in your browser: it re-reads the logs as new turns land and shows where the money went — by project, model, tool, subagent, and individual user prompt.
 
 Its centrepiece is the **Agents** view: a full trace of what each session's agents actually did — every turn, tool call, and sub-agent on a real timeline, with automatic anomaly detection. See [The Agents view](#the-agents-view). For a terminal, `claudit watch` tails a live session and shows its cost accruing.
 
