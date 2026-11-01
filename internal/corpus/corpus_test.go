@@ -511,3 +511,34 @@ func TestCache_FailedWalkKeepsCachedFiles(t *testing.T) {
 	}
 	want("successful empty walk drops the source's files", 1, 1)
 }
+
+// rateSource yields one file whose parse carries one rate-limit sample.
+type rateSource struct{ fakeSource }
+
+func (r rateSource) ParseFile(rd io.Reader, path string) (parse.Result, error) {
+	res, err := r.fakeSource.ParseFile(rd, path)
+	res.RateLimitSamples = []parse.RateLimitSample{{SessionID: "fake-session", Provider: "fake", UsedPercent: 6, WindowMinutes: 10080}}
+	return res, err
+}
+
+func TestSnapshotsCarryRateLimitSamples(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.log")
+	if err := os.WriteFile(path, []byte("fake-session\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := rateSource{fakeSource{path: path}}
+	c := New(src)
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Snapshot().RateLimitSamples; len(got) != 1 || got[0].UsedPercent != 6 {
+		t.Errorf("Cache snapshot RateLimitSamples = %+v, want the one sample", got)
+	}
+	snap, err := LoadConcurrent([]provider.Source{src}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.RateLimitSamples; len(got) != 1 || got[0].WindowMinutes != 10080 {
+		t.Errorf("LoadConcurrent RateLimitSamples = %+v, want the one sample", got)
+	}
+}

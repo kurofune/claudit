@@ -49,6 +49,7 @@ type fileEntry struct {
 	links       []parse.ParentLink
 	toolResults []parse.ToolResult
 	compacts    []parse.CompactBoundary
+	rateLimits  []parse.RateLimitSample
 	malformed   int
 	// source indexes Cache.sources: the Source that yielded the path.
 	source int
@@ -64,10 +65,12 @@ type Snapshot struct {
 	ToolResults []parse.ToolResult
 	// CompactBoundaries are every file's compaction points.
 	CompactBoundaries []parse.CompactBoundary
-	Generation        int64
-	LastUpdate        time.Time
-	FileCount         int
-	Malformed         int
+	// RateLimitSamples are every file's plan-usage readings.
+	RateLimitSamples []parse.RateLimitSample
+	Generation       int64
+	LastUpdate       time.Time
+	FileCount        int
+	Malformed        int
 	// FileErrors holds non-fatal per-file open/parse errors. Populated
 	// by LoadConcurrent (the one-shot path surfaces them as a warning);
 	// the polled Cache leaves it nil since the daemon tolerates broken
@@ -175,6 +178,7 @@ func (c *Cache) Refresh() (changed bool, err error) {
 				links:       pr.links,
 				toolResults: pr.toolResults,
 				compacts:    pr.compacts,
+				rateLimits:  pr.rateLimits,
 				malformed:   pr.malformed,
 				mtime:       mods[pr.path],
 				size:        sizes[pr.path],
@@ -233,6 +237,7 @@ func (c *Cache) publishSnapshot() {
 		snap.Links = append(snap.Links, e.links...)
 		snap.ToolResults = append(snap.ToolResults, e.toolResults...)
 		snap.CompactBoundaries = append(snap.CompactBoundaries, e.compacts...)
+		snap.RateLimitSamples = append(snap.RateLimitSamples, e.rateLimits...)
 	}
 	c.snapshot.Store(snap)
 	c.notifySubscribers(snap.Generation)
@@ -357,6 +362,7 @@ func LoadConcurrent(sources []provider.Source, earliest time.Time) (*Snapshot, e
 		snap.Links = append(snap.Links, pr.links...)
 		snap.ToolResults = append(snap.ToolResults, pr.toolResults...)
 		snap.CompactBoundaries = append(snap.CompactBoundaries, pr.compacts...)
+		snap.RateLimitSamples = append(snap.RateLimitSamples, pr.rateLimits...)
 		snap.Malformed += pr.malformed
 		if pr.err != nil {
 			snap.FileErrors = append(snap.FileErrors, pr.err)
@@ -374,6 +380,7 @@ type parseResult struct {
 	links       []parse.ParentLink
 	toolResults []parse.ToolResult
 	compacts    []parse.CompactBoundary
+	rateLimits  []parse.RateLimitSample
 	malformed   int
 	err         error
 }
@@ -472,6 +479,7 @@ func parseOne(job fileJob) parseResult {
 	pr.links = r.ParentLinks
 	pr.toolResults = r.ToolResults
 	pr.compacts = r.CompactBoundaries
+	pr.rateLimits = r.RateLimitSamples
 	pr.malformed = r.Malformed
 	if perr != nil {
 		pr.err = fmt.Errorf("parse %s: %w", path, perr)
