@@ -6,7 +6,9 @@
 package agentflow
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
@@ -41,9 +43,11 @@ type AgentSession struct {
 	CostUSD   float64   `json:"cost_usd"`
 	// ErrorCount is the sum of every agent's ErrorCount in this session —
 	// the main agent plus all its sub-agents.
-	ErrorCount int         `json:"error_count"`
-	Main       *AgentNode  `json:"main"`
-	Children   []AgentNode `json:"children"`
+	ErrorCount int        `json:"error_count"`
+	Main       *AgentNode `json:"main"`
+	// Children holds every other agent in start order: the sub-agents, plus
+	// any further ordinary rollout sharing the session id (kind "main").
+	Children []AgentNode `json:"children"`
 	// Prompts segments the main agent's timeline by originating user prompt,
 	// in order, so the Conversation lens can interleave "what was asked" with
 	// the turns it produced. Each marker points at the first Main.Steps index
@@ -278,6 +282,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			Project:    project.Default.Resolve(s.cwd).Name,
 			Entrypoint: s.entrypoint,
 		}
+		var ordinary []*nodeAccum
 		for _, n := range s.nodes {
 			// Roll node spans/cost up to the session.
 			if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
@@ -287,13 +292,26 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 				as.EndedAt = n.ended
 			}
 			as.CostUSD += n.cost
+			if !n.subagent {
+				ordinary = append(ordinary, n)
+				continue
+			}
 			node := finalizeNode(n, opts)
 			as.ErrorCount += node.ErrorCount
-			if node.Kind == "subagent" {
-				as.Children = append(as.Children, node)
+			as.Children = append(as.Children, node)
+		}
+		// Several ordinary rollouts can share one session id (a Codex
+		// guardian_review rollout carries its user session's id). One is Main;
+		// the others stay visible as kind "main" children so every node the
+		// session cost sums is displayed.
+		sortMainFirst(ordinary, s.sessionID)
+		for i, n := range ordinary {
+			node := finalizeNode(n, opts)
+			as.ErrorCount += node.ErrorCount
+			if i == 0 {
+				as.Main = &node
 			} else {
-				main := node
-				as.Main = &main
+				as.Children = append(as.Children, node)
 			}
 		}
 		// Children ordered by start time so the swimlane reads left-to-right
@@ -329,6 +347,24 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		return out[i].SessionID < out[j].SessionID
 	})
 	return AgentGraph{Sessions: out}, nil
+}
+
+// sortMainFirst orders a session's ordinary agents so the one that is the
+// session itself leads: the rollout whose file name carries the session id,
+// then the earliest started, then by SourceFile for a stable order.
+func sortMainFirst(nodes []*nodeAccum, sessionID string) {
+	ownsID := func(n *nodeAccum) bool {
+		return sessionID != "" && strings.Contains(filepath.Base(n.sourceFile), sessionID)
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if oi, oj := ownsID(nodes[i]), ownsID(nodes[j]); oi != oj {
+			return oi
+		}
+		if !nodes[i].started.Equal(nodes[j].started) {
+			return nodes[i].started.Before(nodes[j].started)
+		}
+		return nodes[i].sourceFile < nodes[j].sourceFile
+	})
 }
 
 // threadRoots maps the SessionID of every sub-agent thread that names its

@@ -1222,3 +1222,81 @@ func TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot(t *testing.T) {
 		t.Errorf("sessions = %+v, want root with 2 children and plain on its own", g.Sessions)
 	}
 }
+
+// TestBuildAgentGraph_CodexGuardianSharesSessionWithUser: a guardian_review
+// rollout parses as an ordinary session carrying its user session's id. Both
+// rollouts' responses must stay visible — the user rollout as Main (its file
+// name carries the session id, even when the guardian started first), the
+// guardian as a kind "main" child, never a sub-agent — and the displayed
+// nodes must sum to the session totals.
+func TestBuildAgentGraph_CodexGuardianSharesSessionWithUser(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "guardian.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	guardian, err := codex.ParseFile(f, "/codex/2026/10/29/rollout-2026-10-29T04-56-37-01a18784-eaa5-7850-b7db-776a88eb52ee.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "01a18784-ea7e-78c0-9157-660fde6ba86d"
+	userSrc := "/codex/2026/10/29/rollout-2026-10-29T04-56-00-" + sessionID + ".jsonl"
+	t0 := time.Date(2026, 10, 29, 11, 57, 0, 0, time.UTC)
+	var turns []parse.Turn
+	for i, id := range []string{"resp_user_1", "resp_user_2"} {
+		u := mkTurn(id, sessionID, userSrc, t0.Add(time.Duration(i)*time.Minute))
+		u.Provider = parse.ProviderCodex
+		u.Model = "gpt-6-sol"
+		turns = append(turns, u)
+	}
+	turns = append(turns, guardian.Turns...)
+
+	for run := 0; run < 20; run++ {
+		g, err := BuildAgentGraph(&corpus.Snapshot{Turns: turns}, prices, aggregate.Filter{}, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(g.Sessions) != 1 {
+			t.Fatalf("sessions = %d, want 1", len(g.Sessions))
+		}
+		s := g.Sessions[0]
+		if s.Main == nil || len(s.Main.Steps) != 2 || s.Main.Steps[0].UUID != "resp_user_1" {
+			t.Fatalf("Main = %+v, want the user rollout's two steps", s.Main)
+		}
+		if len(s.Children) != 1 {
+			t.Fatalf("children = %d, want the guardian rollout", len(s.Children))
+		}
+		gc := s.Children[0]
+		if gc.Kind != "main" || len(gc.Steps) != 1 || gc.Steps[0].UUID != guardian.Turns[0].UUID {
+			t.Fatalf("guardian = Kind %q steps %+v, want an ordinary node with its one step", gc.Kind, gc.Steps)
+		}
+		seen := map[string]bool{}
+		for _, n := range append([]AgentNode{*s.Main}, s.Children...) {
+			for _, st := range n.Steps {
+				seen[st.UUID] = true
+			}
+		}
+		for _, tn := range turns {
+			if !seen[tn.UUID] {
+				t.Errorf("response %q missing from the displayed nodes", tn.UUID)
+			}
+		}
+		if s.Main.CostUSD <= 0 || gc.Tokens.InputTokens <= 0 {
+			t.Fatalf("main cost %v guardian input tokens %d, want both > 0", s.Main.CostUSD, gc.Tokens.InputTokens)
+		}
+		if got, want := s.CostUSD, s.Main.CostUSD+gc.CostUSD; got != want {
+			t.Errorf("session CostUSD = %v, want main+guardian %v", got, want)
+		}
+		var wantIn int64
+		for _, tn := range turns {
+			wantIn += int64(tn.Usage.InputTokens)
+		}
+		if got := int64(s.Main.Tokens.InputTokens + gc.Tokens.InputTokens); got != wantIn {
+			t.Errorf("displayed input tokens = %d, want every turn's %d", got, wantIn)
+		}
+		if !s.StartedAt.Equal(gc.StartedAt) {
+			t.Errorf("session StartedAt = %v, want the guardian's earlier start %v", s.StartedAt, gc.StartedAt)
+		}
+	}
+}
