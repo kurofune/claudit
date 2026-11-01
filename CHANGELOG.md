@@ -19,6 +19,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 - **The Tools view shows columns that add up.** The by-tool table and each tool's (tool, pattern) drill-down now show Calls, Error %, Median and p95 duration, Context added and Context cost, sorted by context cost. Error % counts only calls whose result was recorded; duration runs from the end of the calling turn to the tool's result. Context cost is the cache write that put a tool's results into context plus every later turn that re-read them, so each call counts once; hover a cell for the tokens, re-read turns, and write/read split. The old Cost column, which credited each tool with the whole cost of every turn that called it and so summed to more than total spend, is gone with its explainer, its heat shading and the per-tool trend column. The drill-down lists every pattern, paged, instead of the top 50. `/_claudit/api/tools` rows change shape accordingly (`tool`, `pattern`, `calls`, `error_count`, `error_rate`, `duration_median_ms`, `duration_p95_ms`, `context_tokens`, `context_cost_usd`, …).
 
+### Fixed
+
+- **The Forecast tab no longer vanishes at month end.** The month-end projection follows the local calendar month, the same local-midnight calendar the date filters use, so on the evening of the last day it still projects that month instead of rolling into a UTC month with no cost yet. Under daily bucketing the Forecast tab stays when no projection is possible yet and names the month and the two-days-of-cost requirement; it is hidden only for a historical or non-daily window. `/_claudit/api/overview`'s `forecast` gains `reason` (`not_daily`, `historical` or `too_few_days`; empty with a projection).
+
 ## [2.0.0] — 2026-10-31
 
 claudit is now a local daemon plus a TUI: `claudit serve` hosts the live dashboard and the Agents trace view, and `claudit watch` tails a session in the terminal. The one-shot file outputs — HTML, markdown and JSON reports, and diffs — are gone, along with everything that existed only to support them.

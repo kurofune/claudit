@@ -107,3 +107,49 @@ test('Copy prompt copies the card prompt and reads "Copied"', async () => {
   assert.equal(copied, 'prompt for Bash: `rg`');
   assert.equal(btn.textContent, 'Copied');
 });
+
+// Two daily buckets so the trend section renders; the forecast is the
+// server's no-projection shape (aggregate.Forecast with a reason).
+const TREND = [
+  { time: '2026-10-30T00:00:00Z', cost_usd: 4, hit_ratio: 0.9 },
+  { time: '2026-10-31T00:00:00Z', cost_usd: 6, hit_ratio: 0.9 },
+];
+const noProjection = reason => ({
+  as_of: '2026-10-02T05:43:00Z', month_start: '2026-10-01T00:00:00-07:00', month_end: '2026-11-01T00:00:00-07:00',
+  window_start: '0001-01-01T00:00:00Z', days_elapsed: 0, days_in_month: 31, mtd_cost_usd: 0, window_cost_usd: 0,
+  daily_rate_usd: 0, projected_month_end_usd: 0, reason,
+});
+
+test('a month too young to project keeps the Forecast tab, and its panel names the month and the two-day need', async () => {
+  const { root } = await mount([{ ...OVERVIEW, trend_totals: TREND, forecast: noProjection('too_few_days') }]);
+  const trend = root.querySelector('#trend-section');
+  assert.equal(trend.querySelector('h2').textContent, 'Spend over time');
+  const tabs = trend.querySelectorAll('.subtab[data-trend-tab]');
+  assert.deepEqual(tabs.map(t => t.textContent), ['Cost by day', 'Forecast']);
+  const panel = trend.querySelector('[data-trend-panel="forecast"]');
+  assert.ok(panel.hidden, 'forecast panel starts hidden behind the Cost-by-day tab');
+  click(tabs[1]);
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.querySelector('.empty-state').textContent,
+    'No projection for October yet — needs at least two days of cost in the current calendar month.');
+});
+
+for (const reason of ['historical', 'not_daily']) {
+  test(`reason ${reason} renders the plain Cost-by heading with no subtabs`, async () => {
+    const period = reason === 'not_daily' ? 'week' : 'day';
+    const { root } = await mount([{ ...OVERVIEW, period, trend_totals: TREND, forecast: noProjection(reason) }]);
+    const trend = root.querySelector('#trend-section');
+    assert.equal(trend.querySelector('h2').textContent, `Cost by ${period}`);
+    assert.equal(trend.querySelectorAll('.subtab').length, 0);
+    assert.equal(trend.querySelector('[data-trend-panel="forecast"]'), null);
+  });
+}
+
+test('forecastChart keeps the generic empty text when the payload names no month', async () => {
+  const { forecastChart } = await import('../web/charts.js');
+  const generic = /^<div class="small empty-state">Forecast unavailable — needs at least two days of cost in the current calendar month and daily bucketing\.<\/div>$/;
+  assert.match(forecastChart({ projected_month_end_usd: 0 }, []), generic);
+  assert.match(forecastChart({ projected_month_end_usd: 0, month_start: '0001-01-01T00:00:00Z' }, []), generic);
+  assert.match(forecastChart(null, []), generic);
+  assert.match(forecastChart({ projected_month_end_usd: 0, month_start: '2026-02-01T00:00:00+09:00' }, []), /No projection for February yet/);
+});

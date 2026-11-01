@@ -11,7 +11,7 @@ import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
-import { hotspotTrend } from './overview-logic.js';
+import { hotspotTrend, showForecastTab } from './overview-logic.js';
 import {
   providerFromSearch, providerTiles, providerLabel, shareText,
   emptyProviderText, API_EQUIVALENT_TIP,
@@ -152,7 +152,6 @@ function trendSectionHTML(data, anomalies) {
 
   const latestHit = points[points.length - 1].hit_ratio || 0;
   const forecast = data.forecast || null;
-  const showForecastTab = !!forecast && (forecast.projected_month_end_usd || 0) > 0;
 
   const costPanel = `
     <div class="trend-chart" data-trend-panel="cost">
@@ -167,7 +166,7 @@ function trendSectionHTML(data, anomalies) {
       </div>
     </div>`;
 
-  if (!showForecastTab) {
+  if (!showForecastTab(forecast, period)) {
     return `<h2>Cost by ${escHtml(period)}</h2>
       <div class="small">Spend bucketed by ${escHtml(period)}.</div>
       ${costPanel}`;

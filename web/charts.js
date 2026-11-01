@@ -514,10 +514,27 @@ export function wireChartInteractivity(root) {
   });
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+// forecastMonthName reads the month from month_start's own date digits
+// (the server's local midnight, e.g. 2026-10-01T00:00:00-07:00), so a
+// browser in another zone still names the server's month. Go's zero time
+// (year 0001) means the payload named no month.
+function forecastMonthName(forecast) {
+  const m = /^(\d{4})-(\d{2})-/.exec((forecast && forecast.month_start) || '');
+  if (!m || m[1] === '0001') return '';
+  return MONTH_NAMES[Number(m[2]) - 1] || '';
+}
+
 // forecastChart — cumulative cost burn-up with a dashed projection to
 // month-end. X spans [window_start, month_end), Y is cumulative $.
 export function forecastChart(forecast, points) {
   if (!forecast || (forecast.projected_month_end_usd || 0) <= 0) {
+    const month = forecastMonthName(forecast);
+    if (month) {
+      return `<div class="small empty-state">No projection for ${escHtml(month)} yet — needs at least two days of cost in the current calendar month.</div>`;
+    }
     return '<div class="small empty-state">Forecast unavailable — needs at least two days of cost in the current calendar month and daily bucketing.</div>';
   }
   const ws = new Date(forecast.window_start).getTime();

@@ -16,3 +16,16 @@ export function hotspotTrend(h) {
   if (h.trend_pct >= 0) return { text: `▲ +${n}%`, dir: 'up', title: prev };
   return { text: `▼ −${n}%`, dir: 'down', title: prev };
 }
+
+// showForecastTab decides whether the trend section offers a Forecast
+// subtab. It stays on daily bucketing even before the month has two days
+// of cost (reason too_few_days) so the panel can say why there is no
+// projection yet; a historical or non-daily window has nothing to project.
+// Payloads from before the reason field fall back to "has a projection".
+export function showForecastTab(forecast, period) {
+  if (period !== 'day' || !forecast) return false;
+  if (typeof forecast.reason === 'string') {
+    return forecast.reason === '' || forecast.reason === 'too_few_days';
+  }
+  return (forecast.projected_month_end_usd || 0) > 0;
+}
