@@ -137,6 +137,18 @@ func TestFamilyKey(t *testing.T) {
 			remainder: "./file.go · ../file.go",
 		},
 		{
+			name:      "root-level absolute file",
+			prompt:    "edit /file.go",
+			key:       "edit _",
+			remainder: "/file.go",
+		},
+		{
+			name:      "root-level files differ only in the remainder; a dotless root word stays text",
+			prompt:    "copy /.env to /tmp via /main.rs",
+			key:       "copy _ to /tmp via _",
+			remainder: "/.env · /main.rs",
+		},
+		{
 			name:      "home-relative path; a lone slash command stays text",
 			prompt:    "run /wish on ~/notes",
 			key:       "run /wish on _",

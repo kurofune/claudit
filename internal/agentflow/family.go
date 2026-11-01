@@ -174,7 +174,8 @@ func trimTokenPunct(tok string) string {
 
 // isPath reports whether a token is a file path or URL: it holds a slash
 // and at least two non-empty segments ("/Users/x", "web/api.js",
-// "./file.go", "~/notes"), or a scheme ("https://…"). A lone "/wish" stays
+// "./file.go", "~/notes"), a scheme ("https://…"), or a root-level file
+// whose name carries a dot ("/file.go", "/.env"). A lone "/wish" stays
 // text.
 func isPath(tok string) bool {
 	if strings.Contains(tok, "://") {
@@ -183,13 +184,23 @@ func isPath(tok string) bool {
 	if !strings.Contains(tok, "/") {
 		return false
 	}
-	n := 0
+	var segs []string
 	for _, seg := range strings.Split(tok, "/") {
 		if seg != "" {
-			n++
+			segs = append(segs, seg)
 		}
 	}
-	return n >= 2
+	if len(segs) >= 2 {
+		return true
+	}
+	return len(segs) == 1 && strings.HasPrefix(tok, "/") && isFileName(segs[0])
+}
+
+// isFileName reports whether a path segment names a file by its dot: a dot
+// with a character after it ("file.go", ".env").
+func isFileName(seg string) bool {
+	i := strings.LastIndexByte(seg, '.')
+	return i >= 0 && i < len(seg)-1
 }
 
 func isBeadID(tok string) bool {
