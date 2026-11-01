@@ -6,11 +6,11 @@
 
 Audit your coding-agent sessions (Claude Code and Codex) — what your agents actually did, and what it cost.
 
-![claudit agents view screenshot](docs/images/claudit-agents.png)
+![claudit session page: header and story](docs/images/claudit-agents.png)
 
 claudit is a local web app over the `.jsonl` session logs your coding agents write: Claude Code's under `~/.claude/projects/` (`--root` to override) and Codex's rollouts under `$CODEX_HOME/sessions`, else `~/.codex/sessions` (`--codex-root` to override, or `--codex-root=""` to leave Codex out). Run `claudit serve` and open the dashboard in your browser: it re-reads the logs as new turns land and shows where the money went — by project, model, tool, subagent, and individual user prompt.
 
-Its centrepiece is the **Agents** view: a full trace of what each session's agents actually did — every turn, tool call, and sub-agent on a real timeline, with automatic anomaly detection. See [The Agents view](#the-agents-view). For a terminal, `claudit watch` tails a live session and shows its cost accruing.
+Its centrepiece is the **Agents** view: every session in the window, grouped by what it was asked to do, and for each one a page that reads like a CI log — every prompt, agent message, command and sub-agent, with the session's cost, failures and what is worth a look. See [The Agents view](#the-agents-view). For a terminal, `claudit watch` tails a live session and shows its cost accruing.
 
 ![claudit watch screenshot](docs/images/claudit-watch.png)
 
@@ -32,8 +32,8 @@ claudit serve --port=9000 --open=false
 #   http://127.0.0.1:8787/?project=myrepo&last=7d
 #   http://127.0.0.1:8787/?since=2026-05-01&until=2026-05-15&by=week#spend
 #   http://127.0.0.1:8787/#spend/project/tokens   # Spend by project, in tokens
-#   http://127.0.0.1:8787/#agents                 # the Agents trace viewer
-#   http://127.0.0.1:8787/#agents/timeline        # deep-link a specific lens
+#   http://127.0.0.1:8787/#agents                 # the Sessions list
+#   http://127.0.0.1:8787/#agents/<session-id>    # one session's page
 
 # Tail the currently-running session and watch cost accrue
 claudit watch --budget=5.00
@@ -54,22 +54,18 @@ Date filters (serve's `?since` / `?until`) are calendar dates interpreted at mid
 - **Subagent attribution.** Sidechain (subagent) cost separated from main-thread cost, with per-invocation rows and per-agent-type roll-ups.
 - **Per-prompt cost.** Every user prompt's downstream cost, computed by walking the conversation's parent links (Spend → By top prompts).
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.
-- **Agent traces.** The Agents view reconstructs each session turn-by-turn — the ordered user prompts and the assistant turns each one produced, every tool call (with the exact input/output), and every sub-agent — on a timeline, with automatic anomaly detection. See [The Agents view](#the-agents-view).
+- **Agents.** The Agents view is the Sessions surface: a list of every session grouped by prompt family, and per session a header (cost, duration, tokens, unresolved failures, a per-turn cost or time strip and up to three Worth a look notes) above its story — each prompt, agent message and command with its exact input and output, and every sub-agent nested where it was spawned. See [The Agents view](#the-agents-view).
 - **Trends and anomalies.** Day/week/month buckets; buckets with abnormal cost spikes or cache hit-ratio drops are flagged inline on the chart.
 
 ## The Agents view
 
-The **Agents** tab turns the raw transcript into a trace you can actually read and audit — not just "where did the money go," but "what did the agent *do*." Open it at `http://127.0.0.1:8787/#agents`.
+The **Agents** tab turns the raw transcript into something you can read and audit — not just "where did the money go," but "what did the agent *do*." Open it at `http://127.0.0.1:8787/#agents`. It has three parts:
 
-Everything you click — an agent, a turn, or a single tool call — fills one shared **detail drawer** on the right (input, output, status, reasoning, tokens, cost, model, duration), and the selection persists as you switch between five lenses over the same data:
+- **List** — every session in the window, grouped by prompt family (the first line of its first real prompt, with bead ids, paths, hashes and numbers blanked), each row naming what set it apart, the agent's last line, provider, cost, duration and unresolved failures. Search, the All / Active in the last minute / Had unresolved failures chips and the Newest / Cost / Duration sorts narrow it; sessions active in the last minute pin to the top. Arrow keys and Enter open a session.
+- **Header** — the session's cost (API-equivalent), duration with its turn and command counts, tokens with the share re-read from cache, and its unresolved failures; a strip of one bar per turn sized by what it added to context or by its duration; up to three **Worth a look** notes from the retry-storm, cost-whale, slow-tool, error-cascade and idle-stall detectors; and a button that copies a prompt asking the agent that ran the session to explain it.
+- **Story** — "What happened", one user prompt at a time: the prompt and each agent message verbatim, each message's commands under a counted header, one row per call (time, ✓ / ✕, command, duration) that expands to the exact input, output and the turn's reasoning, idle gaps, and sub-agents nested under the call that spawned them. Show full reads the untruncated text back from the session log.
 
-- **Feed** — a live, newest-first stream of activity. Currently-running agents pin to the top as sticky "live" rows and update in place every couple of seconds; your scroll, selection, and open panels stay put.
-- **Tree** — the drill-down. Pick any agent and read its step-by-step tool log, with sub-agents nested under the call that spawned them, per-turn reasoning, and the exact input each tool sent and the output it got back (✓/✗). Cost and error counts roll up onto parents.
-- **Timeline** — a Gantt on a real time axis: one row per agent, indented by who spawned whom, bar width = lifetime, overlap = concurrency. Bars are tiled into per-turn segments colored by tool kind, with idle-gap and critical-path marks, a draggable **playhead** that replays the trace at any instant, and scroll-wheel zoom.
-- **Conversation** — the prompt-by-prompt thread for a single session, with a session picker.
-- **Insights** — an analytical dashboard, each section its own tab: **Signals** (automatic anomaly detection — cost whales, retry storms, slow tools, error cascades, idle stalls — worst-first, click-through to the Timeline), **Tool mix**, **Cost Pareto**, **Latency**, **Errors**, **Token & context**, and **Group by** (kind/model/agent/status). A Graph / Session / Agent scope toggle re-slices every panel except the graph-wide Signals.
-
-A trace filter (kind, cost, duration, errors, free text) dims non-matching steps across every lens at once. Deep-link a specific lens with `#agents/<lens>` (e.g. `#agents/timeline`, `#agents/insights`). Prompt and tool-I/O content is shown in full — see [Privacy](#privacy).
+`#agents/<session-id>` opens a session's page and `#agents/<session-id>/<turn-uuid>` lands on one turn. Prompt and tool-I/O content is shown in full — see [Privacy](#privacy).
 
 ## Privacy
 
@@ -201,7 +197,7 @@ The `rates:` key is optional and purely additive — an overlay written in the f
 
 | Command | Purpose |
 |---|---|
-| `serve` | Run the local web daemon: a live dashboard that re-reads the JSONLs as they change and hosts the [Agents](#the-agents-view) trace viewer. Default when no subcommand is given. |
+| `serve` | Run the local web daemon: a live dashboard that re-reads the JSONLs as they change and hosts the [Agents](#the-agents-view) Sessions surface. Default when no subcommand is given. |
 | `watch` | Tail the active session (or every recently-modified session with `--all`) in a full-screen TUI, with rolling hour/today/week/month totals, spike detection, and budget alerts. |
 | `version` | Print the installed claudit version (also `--version`). |
 

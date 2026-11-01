@@ -1,3 +1,8 @@
+> **Status: superseded by the v3 Sessions surface** (the Sessions list, session header and
+> session story at `#agents` and `#agents/<session-id>`). The Feed, Tree, Timeline,
+> Conversation and Insights lenses, the detail drawer, the filter bar and
+> `/_claudit/api/agents` this document plans were deleted; it is kept as history only.
+
 # claudit — Agents View Redesign
 
 Captured 2026-06-07. A living roadmap for turning the Agents tab (Mission Control /
