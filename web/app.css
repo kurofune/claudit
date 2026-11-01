@@ -3502,17 +3502,23 @@
   }
   .sl-outcome.is-empty { color: var(--muted); font-style: italic; }
   .sl-meta {
-    display: flex; align-items: center; gap: var(--s-3); flex: none;
+    display: grid; grid-template-columns: 7.5em 5em 5em 5.5em; align-items: center;
+    column-gap: var(--s-3); flex: none;
     font-size: var(--t-2); color: var(--ink-2); font-variant-numeric: tabular-nums;
   }
+  .sl-meta > .sl-provider { grid-column: 1; justify-self: end; }
+  .sl-meta > .sl-cost { grid-column: 2; }
+  .sl-meta > .sl-dur { grid-column: 3; }
+  .sl-meta > .sl-failed { grid-column: 4; text-align: right; }
+  .sl-active-row .sl-meta { display: flex; }
   .sl-provider {
     font-family: var(--font-mono); font-size: var(--t-1); line-height: 1;
     padding: 2px 6px; border-radius: var(--r-pill); border: 1px solid var(--border);
     text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-2); background: var(--surface-2);
   }
   .sl-provider.s-provider-codex { color: var(--accent-2); border-color: color-mix(in oklch, var(--accent-2) 35%, var(--border)); }
-  .sl-cost { min-width: 4.5em; text-align: right; color: var(--ink); }
-  .sl-dur { min-width: 4.5em; text-align: right; }
+  .sl-cost { text-align: right; color: var(--ink); }
+  .sl-dur { text-align: right; }
   .sl-failed { color: var(--hot); font-weight: 600; white-space: nowrap; }
   .sl-elapsed { color: var(--accent-2); }
   .sl-more {
