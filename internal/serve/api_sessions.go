@@ -119,7 +119,7 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 			if !ok {
 				return nil, errNotFound
 			}
-			return page, nil
+			return st.FullText(page, readLogText), nil
 		},
 	})
 }

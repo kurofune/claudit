@@ -28,6 +28,9 @@ type ToolInvocation struct {
 	// already says everything. Distinct inputs are NOT collapsed (the dedup
 	// key includes Input), so two different Bash commands in one turn both show.
 	Input string `json:"input"`
+	// InputKey is parse.ToolUse.InputKey: the identity of the call's whole
+	// input, which Input's cap can hide. Not serialized here.
+	InputKey uint64 `json:"-"`
 	// Status is the tool's outcome, joined from the matching tool_result:
 	// "ok", "error", or "" when no result was captured (still running, or an
 	// older session that didn't record one). Output is a bounded snippet of
@@ -110,35 +113,57 @@ func DistinctToolInvocations(uses []parse.ToolUse, results map[string]parse.Tool
 	seen := make(map[key]int, len(uses))
 	out := make([]ToolInvocation, 0, len(uses))
 	for _, u := range uses {
-		d := toolDetailFor(u)
-		k := key{u.Name, d, u.Input}
+		k := key{u.Name, toolDetailFor(u), u.Input}
 		if idx, ok := seen[k]; ok {
 			out[idx].Count++
 			continue
 		}
-		inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: d, Input: u.Input, StartedAt: startedAt, Count: 1}
-		if res, ok := JoinToolResult(u, results); ok {
-			if res.IsError {
-				inv.Status = "error"
-			} else {
-				inv.Status = "ok"
-			}
-			inv.Output = res.Content
-			inv.OutputBytes = res.OutputBytes
-			inv.OutputLines = res.OutputLines
-			inv.Rows = res.Rows
-			// The result line's timestamp is this tool's wall-clock end. Guard
-			// the zero time (older transcripts without line timestamps) so a
-			// missing end stays nil rather than a year-1 instant.
-			if !res.Timestamp.IsZero() {
-				end := res.Timestamp
-				inv.EndedAt = &end
-			}
-		}
 		seen[k] = len(out)
-		out = append(out, inv)
+		out = append(out, newInvocation(u, results, startedAt))
 	}
 	return out
+}
+
+// EachToolInvocation is DistinctToolInvocations without the dedup: one row
+// per call, in call order, each with Count 1 and its own outcome.
+func EachToolInvocation(uses []parse.ToolUse, results map[string]parse.ToolResult, turnTS time.Time) []ToolInvocation {
+	if len(uses) == 0 {
+		return nil
+	}
+	var startedAt *time.Time
+	if !turnTS.IsZero() {
+		ts := turnTS
+		startedAt = &ts
+	}
+	out := make([]ToolInvocation, 0, len(uses))
+	for _, u := range uses {
+		out = append(out, newInvocation(u, results, startedAt))
+	}
+	return out
+}
+
+// newInvocation is one call's row, joined to its result.
+func newInvocation(u parse.ToolUse, results map[string]parse.ToolResult, startedAt *time.Time) ToolInvocation {
+	inv := ToolInvocation{ID: u.ID, Name: u.Name, Kind: ToolKind(u.Name), Detail: toolDetailFor(u), Input: u.Input, InputKey: u.InputKey, StartedAt: startedAt, Count: 1}
+	if res, ok := JoinToolResult(u, results); ok {
+		if res.IsError {
+			inv.Status = "error"
+		} else {
+			inv.Status = "ok"
+		}
+		inv.Output = res.Content
+		inv.OutputBytes = res.OutputBytes
+		inv.OutputLines = res.OutputLines
+		inv.Rows = res.Rows
+		// The result line's timestamp is this tool's wall-clock end. Guard
+		// the zero time (older transcripts without line timestamps) so a
+		// missing end stays nil rather than a year-1 instant.
+		if !res.Timestamp.IsZero() {
+			end := res.Timestamp
+			inv.EndedAt = &end
+		}
+	}
+	return inv
 }
 
 // JoinToolResult is the one tool_use → tool_result join: the result whose

@@ -127,6 +127,23 @@ type legacyTurn struct {
 // never mix within one file, since a newer rollout carries both for the
 // same responses.
 func ParseFile(r io.Reader, path string) (parse.Result, error) {
+	return parseFile(r, path, snippets)
+}
+
+// textCaps bounds the text a parse keeps: snippets for the corpus, none
+// for FindTexts.
+type textCaps struct {
+	prompt func(string) string
+	join   func(text, block string) string
+	input  func(string) string
+}
+
+var (
+	snippets = textCaps{prompt: parse.PromptSnippet, join: parse.JoinTurnText, input: parse.ToolInputSnippet}
+	fullText = textCaps{prompt: func(s string) string { return s }, join: parse.JoinText, input: func(s string) string { return s }}
+)
+
+func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 	var (
 		res     parse.Result
 		meta    rawSessionMeta
@@ -202,14 +219,14 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 						UUID:       prompt,
 						Timestamp:  ts,
 						CWD:        turnCWD,
-						Text:       parse.PromptSnippet(text),
+						Text:       caps.prompt(text),
 						SourceFile: path,
 					})
 					continue
 				}
-				msg := m.assistantText()
-				cur.text = parse.JoinTurnText(cur.text, msg)
-				old.text = parse.JoinTurnText(old.text, msg)
+				msg := m.assistantText(caps.join)
+				cur.text = caps.join(cur.text, msg)
+				old.text = caps.join(old.text, msg)
 				continue
 			}
 			call := kind.Type == "custom_tool_call" || kind.Type == "function_call"
@@ -223,7 +240,7 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				continue
 			}
 			if call {
-				use := toolUse(it)
+				use := cappedToolUse(it, caps.input)
 				cur.tools = append(cur.tools, use)
 				old.tools = append(old.tools, use)
 				continue
@@ -266,7 +283,7 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 	// A message after the last usage reading still belongs to that response.
 	if cur.text != "" && len(res.Turns) > 0 {
 		last := &res.Turns[len(res.Turns)-1]
-		last.Text = parse.JoinTurnText(last.Text, cur.text)
+		last.Text = caps.join(last.Text, cur.text)
 	}
 	stampThread(&res, meta, path)
 	return res, sc.Err()
@@ -346,9 +363,12 @@ func convertUsage(u rawUsage) parse.Usage {
 // custom tool with a resolvable command, or the exec_command function) is
 // named Bash, keeps its command string as Input and buckets by its Bash
 // pattern; any other call keeps its raw name and input.
-func toolUse(it rawItem) parse.ToolUse {
+func toolUse(it rawItem) parse.ToolUse { return cappedToolUse(it, parse.ToolInputSnippet) }
+
+// cappedToolUse is toolUse with capInput bounding the input.
+func cappedToolUse(it rawItem, capInput func(string) string) parse.ToolUse {
 	input, cmd := toolInput(it)
-	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: parse.ToolInputSnippet(input), InputKey: parse.ToolInputKey(rawToolInput(it))}
+	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: capInput(input), InputKey: parse.ToolInputKey(rawToolInput(it))}
 	if cmd != "" {
 		tu.Detail = parse.BashPattern(cmd)
 	}
@@ -400,6 +420,39 @@ func toolInput(it rawItem) (input, cmd string) {
 		return cmd, cmd
 	}
 	return input, ""
+}
+
+// FindTexts reads one rollout at path back whole and returns the
+// untruncated text of each requested turn and prompt and the input of each
+// requested call, in the representation ParseFile snippets. A Codex turn
+// carries no thinking. path names the thread, as for ParseFile.
+func FindTexts(r io.Reader, path string, want parse.TextRequest) parse.FullTexts {
+	out := parse.NewFullTexts()
+	res, _ := parseFile(r, path, fullText)
+	for _, t := range res.Turns {
+		if want.Turns[t.UUID] {
+			out.Turns[t.UUID] = parse.TurnTextDetail{Text: t.Text}
+		}
+		for _, u := range t.ToolUses {
+			if want.Tools[u.ID] {
+				out.Inputs[u.ID] = u.Input
+			}
+		}
+	}
+	for _, m := range res.UserMessages {
+		if want.Users[m.UUID] {
+			out.Users[m.UUID] = m.Text
+		}
+	}
+	return out
+}
+
+// FindTurnText is FindTexts for one turn; found is false when the rollout
+// at path has no turn with that uuid.
+func FindTurnText(r io.Reader, path, turnUUID string) (parse.TurnTextDetail, bool) {
+	got := FindTexts(r, path, parse.TextRequest{Turns: map[string]bool{turnUUID: true}})
+	d, ok := got.Turns[turnUUID]
+	return d, ok
 }
 
 // FindToolUseDetail streams r (one rollout) and returns the untruncated input
@@ -775,16 +828,16 @@ func injected(text string) bool {
 	return false
 }
 
-// assistantText is an assistant message's output_text, joined; "" for a
-// message from any other role.
-func (m rawMessage) assistantText() string {
+// assistantText is an assistant message's output_text, joined by join; ""
+// for a message from any other role.
+func (m rawMessage) assistantText(join func(text, block string) string) string {
 	if m.Role != "assistant" {
 		return ""
 	}
 	out := ""
 	for _, c := range m.Content {
 		if c.Type == "output_text" && c.Text != "" {
-			out = parse.JoinTurnText(out, c.Text)
+			out = join(out, c.Text)
 		}
 	}
 	return out

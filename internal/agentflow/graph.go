@@ -157,6 +157,9 @@ type Options struct {
 	// cost; the drawer's "show full" reads the untruncated text from disk.
 	// 0 keeps the parse-time snippet whole.
 	SnippetRunes int
+	// EachCall keeps one tool row per call, as the session story lists them,
+	// instead of collapsing repeats of the same call into a counted row.
+	EachCall bool
 }
 
 // nodeAccum is the in-progress per-agent state during graph construction —
@@ -296,7 +299,11 @@ func toolResults(snap *corpus.Snapshot) map[string]parse.ToolResult {
 }
 
 // buildSteps turns an agent's counted turns into its AgentSteps.
-func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes int) {
+func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes int, eachCall bool) {
+	invocations := aggregate.DistinctToolInvocations
+	if eachCall {
+		invocations = aggregate.EachToolInvocation
+	}
 	n.steps = make([]AgentStep, 0, len(n.turns))
 	for _, r := range n.turns {
 		t := r.t
@@ -316,7 +323,7 @@ func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes 
 			Tokens:        stepTokens,
 			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
 			GenMs:         genMs,
-			Tools:         capToolSnippets(aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp), snippetRunes),
+			Tools:         capToolSnippets(invocations(t.ToolUses, results, t.Timestamp), snippetRunes),
 			Thinking:      t.Thinking,
 			Text:          t.Text,
 			parentUUID:    t.ParentUUID,
@@ -380,7 +387,7 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, promp
 	}
 	var ordinary []*nodeAccum
 	for _, n := range s.nodes {
-		buildSteps(n, results, opts.SnippetRunes)
+		buildSteps(n, results, opts.SnippetRunes, opts.EachCall)
 		// Roll node spans/cost up to the session.
 		if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
 			as.StartedAt = n.started

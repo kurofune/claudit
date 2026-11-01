@@ -1,6 +1,7 @@
 package agentflow
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
@@ -38,6 +39,14 @@ type SessionStory struct {
 	// promptStart[i] is the index in steps of prompt i's first turn.
 	promptStart []int
 	children    []StoryChild
+	// turnLog, promptLog and toolLog name the log each turn, prompt and
+	// tool call was read from, so FullText can read its whole text back.
+	turnLog, promptLog, toolLog map[string]LogSource
+}
+
+// LogSource is a session log and the provider that wrote it.
+type LogSource struct {
+	File, Provider string
 }
 
 // StoryPrompt is one user prompt and how many main-agent turns it drove.
@@ -71,6 +80,16 @@ type StoryHidden struct {
 type StoryTool struct {
 	aggregate.ToolInvocation
 	ExitCode *int `json:"exit_code"`
+	// InputHash is the call's whole-input identity (parse.ToolUse.InputKey)
+	// in hex, "" when it had no input: two calls ran the same input exactly
+	// when their names and InputHash match, however Input is capped.
+	InputHash string `json:"input_key"`
+	// InputFull is the call's whole input when Input is a cut snippet, ""
+	// when Input is already whole.
+	InputFull string `json:"input_full,omitempty"`
+	// inputOnDisk marks an InputFull that only the session log holds: the
+	// parse-time snippet was cut too.
+	inputOnDisk bool
 }
 
 // StoryStep is an AgentStep whose tools carry their exit code. UUID is the
@@ -121,13 +140,29 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		Hidden:    StoryHidden{Replays: c.replays, OutsideFilter: c.outsideFilter},
 		steps:     []StoryStep{},
 		children:  []StoryChild{},
+		turnLog:   map[string]LogSource{},
+		promptLog: map[string]LogSource{},
+		toolLog:   map[string]LogSource{},
 	}
 	s, ok := c.sessions[sessionID]
 	if !ok {
 		return st, c.replays+c.outsideFilter > 0
 	}
 
-	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex), Options{})
+	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex), Options{EachCall: true})
+	for _, n := range s.nodes {
+		for _, r := range n.turns {
+			src := LogSource{File: r.t.SourceFile, Provider: r.t.Provider}
+			if r.t.UUID != "" {
+				st.turnLog[r.t.UUID] = src
+			}
+			for _, u := range r.t.ToolUses {
+				if u.ID != "" {
+					st.toolLog[u.ID] = src
+				}
+			}
+		}
+	}
 	codexOutput := s.provider == parse.ProviderCodex
 
 	if as.Main != nil {
@@ -140,6 +175,15 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		}
 		st.Prompts = append(st.Prompts, StoryPrompt{UUID: m.UUID, Text: m.Text, Timestamp: m.Timestamp, Turns: end - m.FirstStepIndex})
 		st.promptStart = append(st.promptStart, m.FirstStepIndex)
+		if m.UUID != "" {
+			st.promptLog[m.UUID] = LogSource{Provider: s.provider}
+		}
+	}
+	for _, m := range snap.Users {
+		if src, ok := st.promptLog[m.UUID]; ok && src.File == "" {
+			src.File = m.SourceFile
+			st.promptLog[m.UUID] = src
+		}
 	}
 	for _, ch := range as.Children {
 		st.children = append(st.children, StoryChild{
@@ -165,17 +209,26 @@ func HasSession(snap *corpus.Snapshot, sessionID string) bool {
 	if snap == nil || sessionID == "" {
 		return false
 	}
-	roots := threadRoots(snap)
+	in := InSession(snap, sessionID)
 	for i := range snap.Turns {
-		id := snap.Turns[i].SessionID
-		if root, ok := roots[id]; ok {
-			id = root
-		}
-		if id == sessionID {
+		if in(snap.Turns[i].SessionID) {
 			return true
 		}
 	}
 	return false
+}
+
+// InSession is the test HasSession applies to each turn: whether a turn
+// whose SessionID is id belongs to sessionID, its own or a Codex sub-agent
+// thread descending from it.
+func InSession(snap *corpus.Snapshot, sessionID string) func(id string) bool {
+	roots := threadRoots(snap)
+	return func(id string) bool {
+		if root, ok := roots[id]; ok {
+			id = root
+		}
+		return id != "" && id == sessionID
+	}
 }
 
 // Page cuts the story at prompt index prompt, turns [offset, offset+limit)
@@ -322,13 +375,126 @@ func storySteps(steps []AgentStep, codexOutput bool, snippetRunes int) []StorySt
 				}
 			}
 			if snippetRunes > 0 {
+				whole := tool.Input
 				tool.Input = truncateRunes(tool.Input, snippetRunes)
 				tool.Output = truncateRunes(tool.Output, snippetRunes)
+				if tool.Input != whole {
+					tool.InputFull = whole
+					tool.inputOnDisk = parse.ToolInputSnippetCut(whole)
+				}
+			}
+			if inv.InputKey != 0 {
+				tool.InputHash = strconv.FormatUint(inv.InputKey, 16)
 			}
 			tools[j] = tool
 		}
 		s.Tools = nil
 		out[i] = StoryStep{AgentStep: s, Tools: tools}
+	}
+	return out
+}
+
+// TextReader reads the whole text a TextRequest names back from one session
+// log.
+type TextReader func(src LogSource, want parse.TextRequest) parse.FullTexts
+
+// FullText gives page the whole text the parse-time snippets cut: every
+// prompt's text, every agent message's text, its sub-agents' messages and
+// each cut tool input, read back through read, one pass per log. What read
+// cannot find keeps its snippet. The story itself is left unchanged.
+func (st *SessionStory) FullText(page StoryPage, read TextReader) StoryPage {
+	reqs := map[LogSource]*parse.TextRequest{}
+	want := func(src LogSource, ok bool) *parse.TextRequest {
+		if !ok || src.File == "" {
+			return nil
+		}
+		r := reqs[src]
+		if r == nil {
+			r = &parse.TextRequest{Turns: map[string]bool{}, Users: map[string]bool{}, Tools: map[string]bool{}}
+			reqs[src] = r
+		}
+		return r
+	}
+	for _, p := range page.Prompts {
+		if parse.TextSnippetCut(p.Text) {
+			if r := want(st.promptLog[p.UUID], st.promptLog[p.UUID] != LogSource{}); r != nil {
+				r.Users[p.UUID] = true
+			}
+		}
+	}
+	askSteps := func(steps []StoryStep) {
+		for _, s := range steps {
+			if parse.TextSnippetCut(s.Text) {
+				src, ok := st.turnLog[s.UUID]
+				if r := want(src, ok); r != nil {
+					r.Turns[s.UUID] = true
+				}
+			}
+			for _, t := range s.Tools {
+				if t.inputOnDisk {
+					src, ok := st.toolLog[t.ID]
+					if r := want(src, ok); r != nil {
+						r.Tools[t.ID] = true
+					}
+				}
+			}
+		}
+	}
+	askSteps(page.Steps)
+	for _, ch := range page.Children {
+		askSteps(ch.Steps)
+	}
+	if len(reqs) == 0 {
+		return page
+	}
+	got := parse.NewFullTexts()
+	for src, r := range reqs {
+		texts := read(src, *r)
+		for k, v := range texts.Turns {
+			got.Turns[k] = v
+		}
+		for k, v := range texts.Users {
+			got.Users[k] = v
+		}
+		for k, v := range texts.Inputs {
+			got.Inputs[k] = v
+		}
+	}
+	prompts := make([]StoryPrompt, len(page.Prompts))
+	for i, p := range page.Prompts {
+		if text, ok := got.Users[p.UUID]; ok && text != "" {
+			p.Text = text
+		}
+		prompts[i] = p
+	}
+	page.Prompts = prompts
+	page.Steps = fullSteps(page.Steps, got)
+	children := make([]StoryChild, len(page.Children))
+	for i, ch := range page.Children {
+		ch.Steps = fullSteps(ch.Steps, got)
+		children[i] = ch
+	}
+	page.Children = children
+	return page
+}
+
+// fullSteps copies steps with the whole text got holds in place of their
+// cut text and tool inputs.
+func fullSteps(steps []StoryStep, got parse.FullTexts) []StoryStep {
+	out := make([]StoryStep, len(steps))
+	for i, s := range steps {
+		if d, ok := got.Turns[s.UUID]; ok && d.Text != "" {
+			s.Text = d.Text
+		}
+		tools := make([]StoryTool, len(s.Tools))
+		for j, t := range s.Tools {
+			if in, ok := got.Inputs[t.ID]; ok && in != "" && t.inputOnDisk {
+				t.InputFull = in
+			}
+			tools[j] = t
+		}
+		s.Tools = tools
+		out[i] = s
 	}
 	return out
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -119,4 +120,34 @@ func digits(s string, n int) bool {
 		}
 	}
 	return true
+}
+
+// OpenLog opens a session log for reading back, through a zstd decoder when
+// path ends .zst, as ParseFile reads it.
+func OpenLog(path string) (io.ReadCloser, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(path, ".zst") {
+		return f, nil
+	}
+	dec, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("zstd: %w", err)
+	}
+	return zstdLog{dec, f}, nil
+}
+
+type zstdLog struct {
+	dec *zstd.Decoder
+	f   *os.File
+}
+
+func (z zstdLog) Read(p []byte) (int, error) { return z.dec.Read(p) }
+
+func (z zstdLog) Close() error {
+	z.dec.Close()
+	return z.f.Close()
 }
