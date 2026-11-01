@@ -54,9 +54,6 @@ func TestServe_SnapshotIncludesCodexTurns(t *testing.T) {
 	if byProvider[parse.ProviderCodex] != 3 || byProvider[parse.ProviderClaudeCode] != 1 {
 		t.Errorf("turns by provider = %v, want codex 3 and claude-code 1", byProvider)
 	}
-	if len(snap.RateLimitSamples) != 1 {
-		t.Errorf("RateLimitSamples = %d, want 1", len(snap.RateLimitSamples))
-	}
 	if len(snap.Links) != 1 {
 		t.Errorf("Links = %+v, want the subagent's parent link", snap.Links)
 	}

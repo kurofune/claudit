@@ -310,9 +310,6 @@ func TestParseRollout_SubagentLinksParent(t *testing.T) {
 	if res.Malformed != 0 {
 		t.Errorf("Malformed = %d (a token_count with null rate_limits is not malformed)", res.Malformed)
 	}
-	if len(res.RateLimitSamples) != 0 {
-		t.Errorf("RateLimitSamples = %+v, want none for null rate_limits", res.RateLimitSamples)
-	}
 
 	// A file name without a uuid falls back to the session_meta thread id.
 	res = parseFixture(t, "subagent.jsonl", "")
@@ -339,30 +336,6 @@ func TestParseRollout_SubagentLinksParent(t *testing.T) {
 	}
 	if len(g.ParentLinks) != 0 {
 		t.Errorf("guardian ParentLinks = %+v, want none", g.ParentLinks)
-	}
-}
-
-func TestParseRollout_RateLimitSamples(t *testing.T) {
-	res := parseFixture(t, "basic.jsonl", "")
-	if len(res.RateLimitSamples) != 1 {
-		t.Fatalf("samples = %d, want 1", len(res.RateLimitSamples))
-	}
-	s := res.RateLimitSamples[0]
-	want := parse.RateLimitSample{
-		SessionID:     "01a1708b-04a3-75a1-a07c-92bbb16be66f",
-		Provider:      "codex",
-		Timestamp:     mustTime(t, "2026-10-25T00:52:10.936Z"),
-		UsedPercent:   6.0,
-		WindowMinutes: 10080,
-		ResetsAt:      time.Unix(1793382085, 0).UTC(),
-		PlanType:      "pro",
-	}
-	if !s.Timestamp.Equal(want.Timestamp) || !s.ResetsAt.Equal(want.ResetsAt) {
-		t.Errorf("sample times = %v / %v, want %v / %v", s.Timestamp, s.ResetsAt, want.Timestamp, want.ResetsAt)
-	}
-	s.Timestamp, s.ResetsAt = want.Timestamp, want.ResetsAt
-	if s != want {
-		t.Errorf("sample = %+v, want %+v", s, want)
 	}
 }
 
@@ -512,17 +485,6 @@ func TestParseRollout_LegacyTokenCount(t *testing.T) {
 		t.Errorf("first tool use Detail = %q, want pwd", res.Turns[0].ToolUses[0].Detail)
 	}
 
-	// The repeated reading still yields its own rate-limit sample.
-	if len(res.RateLimitSamples) != 8 {
-		t.Fatalf("rate-limit samples = %d, want 8 (one per token_count)", len(res.RateLimitSamples))
-	}
-	s43, s44 := res.RateLimitSamples[4], res.RateLimitSamples[5]
-	if !s43.Timestamp.Equal(mustTime(t, "2026-05-30T08:21:08.919Z")) || s43.UsedPercent != 10 {
-		t.Errorf("sample for line 43 = %+v, want 10%% at 08:21:08.919", s43)
-	}
-	if !s44.Timestamp.Equal(mustTime(t, "2026-05-30T08:21:08.925Z")) || s44.UsedPercent != 11 {
-		t.Errorf("sample for line 44 = %+v, want 11%% at 08:21:08.925", s44)
-	}
 	if res.Malformed != 0 {
 		t.Errorf("Malformed = %d, want 0", res.Malformed)
 	}

@@ -33,7 +33,6 @@ func TestBuildOverview_ShapeAndKeys(t *testing.T) {
 		"total_tokens",
 		"period",
 		"providers",
-		"plan_usage",
 	})
 }
 

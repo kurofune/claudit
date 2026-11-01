@@ -175,23 +175,7 @@ type Result struct {
 	ParentLinks []ParentLink
 	// CompactBoundaries are this file's compaction points, in file order.
 	CompactBoundaries []CompactBoundary
-	// RateLimitSamples are the plan-usage readings the file reports, in file
-	// order. Claude Code logs carry none.
-	RateLimitSamples []RateLimitSample
-	Malformed        int // count of lines we couldn't decode
-}
-
-// RateLimitSample is one reading of a provider's plan-usage window: how much
-// of the window the account had used at Timestamp, and when the window
-// resets. Codex reports one with each response.
-type RateLimitSample struct {
-	SessionID     string
-	Provider      string
-	Timestamp     time.Time
-	UsedPercent   float64
-	WindowMinutes int
-	ResetsAt      time.Time
-	PlanType      string
+	Malformed         int // count of lines we couldn't decode
 }
 
 // rawLine is the wire format. Only the fields we care about.

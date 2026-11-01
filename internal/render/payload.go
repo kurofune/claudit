@@ -106,8 +106,6 @@ type OverviewPayload struct {
 	Period aggregate.Period `json:"period"`
 	// Providers holds one row per agent tool with turns in the window.
 	Providers []ProviderTotal `json:"providers"`
-	// PlanUsage is the latest plan-usage sample in the window; nil when none.
-	PlanUsage *PlanUsage `json:"plan_usage"`
 }
 
 // ProviderTotal is one agent tool's slice of the window: Share is its
@@ -118,17 +116,6 @@ type ProviderTotal struct {
 	Turns    int     `json:"turns"`
 	CostUSD  float64 `json:"cost_usd"`
 	Share    float64 `json:"share"`
-}
-
-// PlanUsage is how much of a subscription's rate-limit window was used at
-// SampledAt, and when that window resets.
-type PlanUsage struct {
-	Provider      string    `json:"provider"`
-	UsedPercent   float64   `json:"used_percent"`
-	WindowMinutes int       `json:"window_minutes"`
-	ResetsAt      time.Time `json:"resets_at"`
-	PlanType      string    `json:"plan_type"`
-	SampledAt     time.Time `json:"sampled_at"`
 }
 
 func buildProviderTotals(a *aggregate.Aggregator) []ProviderTotal {
@@ -146,21 +133,6 @@ func buildProviderTotals(a *aggregate.Aggregator) []ProviderTotal {
 		out = append(out, ProviderTotal{Provider: r.Provider, Sessions: r.Sessions, Turns: r.Turns, CostUSD: r.CostUSD, Share: share})
 	}
 	return out
-}
-
-func buildPlanUsage(a *aggregate.Aggregator) *PlanUsage {
-	s, ok := a.LatestRateLimit()
-	if !ok {
-		return nil
-	}
-	return &PlanUsage{
-		Provider:      s.Provider,
-		UsedPercent:   s.UsedPercent,
-		WindowMinutes: s.WindowMinutes,
-		ResetsAt:      s.ResetsAt,
-		PlanType:      s.PlanType,
-		SampledAt:     s.Timestamp,
-	}
 }
 
 // CostPayload backs /_claudit/api/cost — every "where did the money
@@ -284,7 +256,6 @@ func BuildOverview(a, prev *aggregate.Aggregator) OverviewPayload {
 		UnknownModels:   a.UnknownModels(),
 		Period:          a.Period(),
 		Providers:       buildProviderTotals(a),
-		PlanUsage:       buildPlanUsage(a),
 	}
 }
 

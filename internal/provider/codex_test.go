@@ -171,7 +171,4 @@ func TestCodex_ParseFileReadsZstdArchive(t *testing.T) {
 	if !reflect.DeepEqual(archive.ToolResults, plain.ToolResults) {
 		t.Errorf("archive ToolResults = %+v\nwant %+v", archive.ToolResults, plain.ToolResults)
 	}
-	if !reflect.DeepEqual(archive.RateLimitSamples, plain.RateLimitSamples) {
-		t.Errorf("archive RateLimitSamples = %+v\nwant %+v", archive.RateLimitSamples, plain.RateLimitSamples)
-	}
 }

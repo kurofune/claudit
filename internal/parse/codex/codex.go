@@ -5,9 +5,8 @@
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
 // model response — one Turn), the response_item assistant messages, tool
-// calls and their outputs, and event_msg token_count (plan-usage readings,
-// and the per-response usage of rollouts written before token_usage_record
-// existed). Every other record type is skipped.
+// calls and their outputs, and event_msg token_count (the per-response usage
+// of rollouts written before token_usage_record existed). Every other record type is skipped.
 package codex
 
 import (
@@ -78,14 +77,6 @@ type rawEvent struct {
 	Info *struct {
 		LastTokenUsage *rawUsage `json:"last_token_usage"`
 	} `json:"info"`
-	RateLimits *struct {
-		Primary *struct {
-			UsedPercent   float64 `json:"used_percent"`
-			WindowMinutes int     `json:"window_minutes"`
-			ResetsAt      int64   `json:"resets_at"`
-		} `json:"primary"`
-		PlanType string `json:"plan_type"`
-	} `json:"rate_limits"`
 }
 
 // response gathers the tool calls and assistant text written before the
@@ -231,18 +222,6 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 					lastUsage = &u
 				}
 			}
-			if ev.RateLimits == nil || ev.RateLimits.Primary == nil {
-				continue
-			}
-			p := ev.RateLimits.Primary
-			res.RateLimitSamples = append(res.RateLimitSamples, parse.RateLimitSample{
-				Provider:      parse.ProviderCodex,
-				Timestamp:     ts,
-				UsedPercent:   p.UsedPercent,
-				WindowMinutes: p.WindowMinutes,
-				ResetsAt:      time.Unix(p.ResetsAt, 0).UTC(),
-				PlanType:      ev.RateLimits.PlanType,
-			})
 		}
 	}
 	if len(res.Turns) == 0 && len(legacy) > 0 {
@@ -282,9 +261,6 @@ func stampThread(res *parse.Result, meta rawSessionMeta, path string) {
 		if t.CWD == "" {
 			t.CWD = meta.CWD
 		}
-	}
-	for i := range res.RateLimitSamples {
-		res.RateLimitSamples[i].SessionID = sessionID
 	}
 }
 

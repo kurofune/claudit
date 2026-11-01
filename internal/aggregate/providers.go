@@ -50,24 +50,3 @@ func (a *Aggregator) ByProvider() []ProviderBucket {
 	})
 	return out
 }
-
-// AddRateLimitSamples keeps the latest sample inside the filter's window
-// from a provider the filter admits. Plan usage is account-wide, so the
-// project filter does not apply.
-func (a *Aggregator) AddRateLimitSamples(samples []parse.RateLimitSample) {
-	for _, s := range samples {
-		if !a.filter.inWindow(s.Timestamp) || !matchesProvider(s.Provider, a.filter.Provider) {
-			continue
-		}
-		if !a.planUsageOK || s.Timestamp.After(a.planUsage.Timestamp) {
-			a.planUsage = s
-			a.planUsageOK = true
-		}
-	}
-}
-
-// LatestRateLimit returns the sample AddRateLimitSamples kept; false when
-// no sample fell in the window.
-func (a *Aggregator) LatestRateLimit() (parse.RateLimitSample, bool) {
-	return a.planUsage, a.planUsageOK
-}

@@ -187,11 +187,8 @@ type Aggregator struct {
 
 	unknownModels map[string]*UnknownModel
 
-	// byProvider rolls the counted turns up per agent tool; planUsage is
-	// the latest in-window rate-limit sample (planUsageOK when one exists).
-	byProvider  map[string]*providerAccum
-	planUsage   parse.RateLimitSample
-	planUsageOK bool
+	// byProvider rolls the counted turns up per agent tool.
+	byProvider map[string]*providerAccum
 
 	// Cross-file dedup set, keyed by message.id. A resumed/forked session
 	// replays the prior transcript into a new file verbatim — same message.id,
