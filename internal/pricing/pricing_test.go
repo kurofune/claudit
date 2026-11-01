@@ -1049,7 +1049,7 @@ func TestCostAt_UnknownProviderModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pm := range [][2]string{{"codex", "gpt-6-astra"}, {"nope", "claude-opus-4-7"}, {ClaudeCode, "gpt-6-astra"}} {
+	for _, pm := range [][2]string{{"codex", "codex-auto-review"}, {"nope", "claude-opus-4-7"}, {ClaudeCode, "gpt-6-astra"}} {
 		cost, known := tab.CostAt(pm[0], pm[1], time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "")
 		if known || cost != 0 {
 			t.Errorf("%s/%s: cost=%v known=%v, want 0, false", pm[0], pm[1], cost, known)

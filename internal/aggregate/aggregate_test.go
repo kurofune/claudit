@@ -740,10 +740,10 @@ func TestAggregate_ContextCostAttributesReplayedToolResultsOnce(t *testing.T) {
 func TestCostAt_UnknownProviderModelWarning(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices)
-	codex := turn("gpt-6-astra", 1000, 0, false, "/p/foo", time.Now())
+	codex := turn("codex-auto-review", 1000, 0, false, "/p/foo", time.Now())
 	codex.Provider = "codex"
 	agg.Add(codex)
-	cc := turn("gpt-6-astra", 10, 0, false, "/p/foo", time.Now())
+	cc := turn("codex-auto-review", 10, 0, false, "/p/foo", time.Now())
 	cc.Provider = parse.ProviderClaudeCode
 	agg.Add(cc)
 	priced := turn("claude-sonnet-5", 500, 0, false, "/p/foo", time.Now())
@@ -755,11 +755,11 @@ func TestCostAt_UnknownProviderModelWarning(t *testing.T) {
 	for _, u := range uk {
 		names = append(names, u.Name())
 	}
-	want := []string{"codex/gpt-6-astra", "codex/claude-sonnet-5", "claude-code/gpt-6-astra"}
+	want := []string{"codex/codex-auto-review", "codex/claude-sonnet-5", "claude-code/codex-auto-review"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("unknown models = %v, want %v", names, want)
 	}
-	if uk[0].Provider != "codex" || uk[0].Model != "gpt-6-astra" {
-		t.Errorf("first warning = %+v, want provider codex, model gpt-6-astra", uk[0])
+	if uk[0].Provider != "codex" || uk[0].Model != "codex-auto-review" {
+		t.Errorf("first warning = %+v, want provider codex, model codex-auto-review", uk[0])
 	}
 }
