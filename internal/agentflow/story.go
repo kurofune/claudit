@@ -1,6 +1,7 @@
 package agentflow
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -289,13 +290,19 @@ func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
 	page.Page.HasMore = offset+limit < turns
 
 	for _, ch := range st.children {
-		afterStart := from == 0 || !ch.StartedAt.Before(st.steps[from].Timestamp)
-		beforeEnd := to >= len(st.steps) || ch.StartedAt.Before(st.steps[to].Timestamp)
-		if afterStart && beforeEnd {
+		if st.childOnPage(ch, from, to) {
 			page.Children = append(page.Children, ch)
 		}
 	}
 	return page, true
+}
+
+// childOnPage reports whether the page holding main-agent steps [from, to)
+// carries ch: the sub-agent started in that span.
+func (st *SessionStory) childOnPage(ch StoryChild, from, to int) bool {
+	afterStart := from == 0 || !ch.StartedAt.Before(st.steps[from].Timestamp)
+	beforeEnd := to >= len(st.steps) || ch.StartedAt.Before(st.steps[to].Timestamp)
+	return afterStart && beforeEnd
 }
 
 // Whole is the session's whole story as one page: every main-agent turn
@@ -336,8 +343,9 @@ func (page StoryPage) WithContextCost(byTurn map[string]float64) StoryPage {
 }
 
 // Locate finds the page that carries turn uuid: its prompt index and the
-// page offset into that prompt, a multiple of limit. ok is false when no
-// main-agent turn of the story has that uuid.
+// page offset into that prompt, a multiple of limit. A sub-agent's turn is
+// on the page its sub-agent sits on, the one it started in. ok is false
+// when no turn of the story has that uuid.
 func (st *SessionStory) Locate(uuid string, limit int) (prompt, offset int, ok bool) {
 	if uuid == "" || limit <= 0 {
 		return 0, 0, false
@@ -349,6 +357,24 @@ func (st *SessionStory) Locate(uuid string, limit int) (prompt, offset int, ok b
 		for p := len(st.promptStart) - 1; p >= 0; p-- {
 			if i >= st.promptStart[p] {
 				return p, (i - st.promptStart[p]) / limit * limit, true
+			}
+		}
+		return 0, 0, false
+	}
+	for _, ch := range st.children {
+		if !slices.ContainsFunc(ch.Steps, func(s StoryStep) bool { return s.UUID == uuid }) {
+			continue
+		}
+		if len(st.Prompts) == 0 {
+			return 0, 0, true
+		}
+		for p, pr := range st.Prompts {
+			for off := 0; off < pr.Turns; off += limit {
+				from := st.promptStart[p] + off
+				to := st.promptStart[p] + min(off+limit, pr.Turns)
+				if st.childOnPage(ch, from, to) {
+					return p, off, true
+				}
 			}
 		}
 		return 0, 0, false

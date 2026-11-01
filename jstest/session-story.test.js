@@ -177,6 +177,36 @@ test('a deep-linked turn opens the page that carries it and flashes its row', as
   assert.match(earlier.textContent, /^200 earlier turns in this prompt/);
 });
 
+test('a deep-linked sub-agent turn opens its sub-agent and flashes that turn\'s row', async () => {
+  const sub = (id, desc, start, steps) => ({ kind: 'subagent', agent_type: 'Explore', description: desc, parent_tool_use_id: id,
+    started_at: at(start), ended_at: at(start + 300), cost_usd: 0.1, error_count: 0, steps });
+  const pageWithChildren = () => {
+    const p = page0();
+    p.steps = [
+      step('a1', 0, { text: 'fan out', tools: [tool('ag1', 'Agent one', 'ok', 0, 400, { name: 'Agent' })] }),
+      step('a2', 10, { tools: [tool('ag2', 'Agent two', 'ok', 10, 400, { name: 'Agent' })] }),
+    ];
+    p.children = [
+      sub('ag1', 'scan web', 1, [step('k1', 2, { text: 'scanning web' }), step('k2', 290, { tools: [tool('kt', 'rg Login', 'error', 290, 291)] })]),
+      sub('ag2', 'scan api', 11, [step('m1', 12, { text: 'scanning api' }), step('m2', 280)]),
+    ];
+    return p;
+  };
+  const childNamed = (host, desc) => host.querySelectorAll('.story-child').find(c => c.querySelector('.story-child-h').textContent.includes(desc));
+  for (const [uuid, desc] of [['k2', 'scan web'], ['m1', 'scan api'], ['m2', 'scan api']]) {
+    const { host } = mount();
+    const calls = stubFetch(() => pageWithChildren());
+    await paintStory(host, 's1', uuid);
+    assert.ok(calls[0].includes(`turn=${uuid}`), calls[0]);
+    const child = childNamed(host, desc);
+    assert.ok(child, `${desc} is painted`);
+    assert.equal(child.querySelector('.story-child-h').getAttribute('aria-expanded'), 'true', `${uuid}'s sub-agent opens`);
+    const row = child.querySelector(`[data-turn="${uuid}"]`);
+    assert.ok(row && row.classList.contains('is-jumped'), `${uuid}'s row flashes`);
+    assert.equal(host.querySelectorAll('.is-jumped').length, 1);
+  }
+});
+
 test('an unknown deep-linked turn falls back to the first prompt', async () => {
   const { host } = mount();
   const calls = stubFetch((path, q) => (q.get('turn') ? { httpStatus: 404 } : page0()));

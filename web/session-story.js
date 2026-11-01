@@ -51,7 +51,8 @@ const fullTurn = new Map();
 // paintStory mounts the story of sessionId in host, replacing whatever
 // story host showed: every request the previous one still has in flight is
 // dropped when it lands. With turnUuid it opens the page that carries that
-// turn, scrolls its row into view and flashes it. Resolves once the first
+// turn, opens the sub-agent that ran it if a sub-agent did, scrolls its row
+// into view and flashes it. Resolves once the first
 // page (or its error state) has painted.
 /** @param {Element} host @param {string} sessionId @param {string} [turnUuid] */
 export async function paintStory(host, sessionId, turnUuid = '') {
@@ -118,7 +119,37 @@ async function load(host, st, req, flashTurn = '') {
   st.cursor = -1;
   st.pageError = '';
   paintPage(host, st);
-  if (flashTurn) jumpTo(host, `[data-turn="${cssEsc(flashTurn)}"]`);
+  if (flashTurn) revealTurn(host, st, flashTurn);
+}
+
+// revealTurn flashes the row of turn uuid, first opening the sub-agent that
+// ran it when it is a sub-agent's turn; a sub-agent turn with no row of its
+// own (no text, no call) flashes its sub-agent.
+/** @param {Element} host @param {StoryState} st @param {string} uuid */
+function revealTurn(host, st, uuid) {
+  const sel = `[data-turn="${cssEsc(uuid)}"]`;
+  const key = host.querySelector(sel) ? '' : childKeyOf(st, uuid);
+  if (key) {
+    st.open.add(key);
+    paintRows(host, st);
+    if (!host.querySelector(sel)) { jumpTo(host, `.story-rows [data-key="${cssEsc(key)}"]`); return; }
+  }
+  jumpTo(host, sel);
+}
+
+// childKeyOf is the key of the painted sub-agent whose steps hold turn
+// uuid, '' when none does.
+/** @param {StoryState} st @param {string} uuid */
+function childKeyOf(st, uuid) {
+  const holds = (/** @type {StoryChild} */ c) => (c.steps || []).some(s => s.uuid === uuid);
+  for (const r of st.byKey.values()) {
+    if (r.kind === 'child' && holds(r.child)) return r.key;
+    if (r.kind === 'parallel') {
+      const k = r.children.findIndex(e => holds(e.child));
+      if (k >= 0) return `${r.key}.${k}`;
+    }
+  }
+  return '';
 }
 
 /** @param {string} body */

@@ -276,3 +276,39 @@ func TestSessionStory_Locate(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionStory_LocateSubagentTurn: a sub-agent turn's uuid locates the
+// page its sub-agent sits on — the one bracketing its start — however long
+// after that page the turn ran, and that page carries the turn.
+func TestSessionStory_LocateSubagentTurn(t *testing.T) {
+	root := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	sub := writeSubagent(t, root, "s1", "k", `{"agentType":"Explore","description":"long scan"}`)
+	turns := make([]parse.Turn, 0, 452)
+	for i := 0; i < 450; i++ {
+		tr := mkTurn(fmt.Sprintf("a%03d", i), "s1", root+"/s1.jsonl", t0.Add(time.Duration(i)*time.Second))
+		tr.ParentUUID = "u1"
+		turns = append(turns, tr)
+	}
+	turns = append(turns,
+		mkTurn("k1", "s1", sub, t0.Add(50*time.Second+time.Millisecond)),
+		mkTurn("k2", "s1", sub, t0.Add(300*time.Second+time.Millisecond)),
+	)
+	st := mustStory(t, &corpus.Snapshot{Turns: turns, Users: []parse.UserMessage{{SessionID: "s1", UUID: "u1", Timestamp: t0, Text: "go"}}}, aggregate.Filter{}, "s1")
+	for _, uuid := range []string{"k1", "k2"} {
+		p, o, ok := st.Locate(uuid, StoryPageTurns)
+		if !ok || p != 0 || o != 0 {
+			t.Fatalf("Locate(%s) = %d %d %v, want 0 0 true (the page the sub-agent started on)", uuid, p, o, ok)
+		}
+		page := mustPage(t, st, p, o)
+		found := false
+		for _, ch := range page.Children {
+			for _, s := range ch.Steps {
+				found = found || s.UUID == uuid
+			}
+		}
+		if !found {
+			t.Errorf("page %d/%d does not carry %s", p, o, uuid)
+		}
+	}
+}
