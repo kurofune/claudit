@@ -227,11 +227,14 @@ func decodeUnder(dir, rest string) (string, bool) {
 }
 
 func encodeName(name string) string {
-	b := []byte(name)
-	for i, c := range b {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			b[i] = '-'
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, c := range name {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			b.WriteRune(c)
+		} else {
+			b.WriteByte('-')
 		}
 	}
-	return string(b)
+	return b.String()
 }

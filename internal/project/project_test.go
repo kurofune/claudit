@@ -126,6 +126,22 @@ func TestResolve_ScratchDecodable(t *testing.T) {
 	}
 }
 
+// A non-ASCII directory name encodes one '-' per rune, so café on disk
+// matches the caf- segment Claude Code writes for it.
+func TestResolve_ScratchDecodableNonASCII(t *testing.T) {
+	base := realDir(t, t.TempDir())
+	root := newRepo(t, filepath.Join(base, "Users", "me", "café"), "naïve-app")
+	enc := encode("/Users/me/café/naïve-app")
+	if enc != "-Users-me-caf--na-ve-app" {
+		t.Fatalf("encode fixture = %q", enc)
+	}
+
+	r := NewResolver(WithBase(base))
+	assertProject(t,
+		r.Resolve("/private/tmp/claude-501/"+enc+"/uuid/scratchpad"),
+		Project{Root: root, Name: "naïve-app", Kind: KindRepo})
+}
+
 func TestResolve_ScratchOpaque(t *testing.T) {
 	base := realDir(t, t.TempDir())
 	mkdir(t, filepath.Join(base, "Users", "me"))
