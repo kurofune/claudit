@@ -4,10 +4,10 @@
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` whose numbers can be trusted: Piece 2 makes each cost figure say what it actually measures, starting from per-tool-result context-cost attribution.
 
-**Last change:** v2.0.0 (2026-10-31) — report, diff, `--redact` and the static SPA mode removed; bare `claudit` runs serve; Spend replaces Cost/Tokens/Cache; projects grouped by git repo root.
+**Last change:** re-measured by-project rows with no name-based reassignment: 637 (1540 before repo grouping), 621 of them missing buckets for deleted worktrees (claudit-80r).
 
 **Assumptions:**
-- Projects key on the session cwd's git repo root (`internal/project/`): linked worktrees and subdirectories roll up into their repo; undecodable scratch dirs and deleted cwds land in `scratch` / `missing` buckets.
+- Projects key on the session cwd's git repo root (`internal/project/`): linked worktrees and subdirectories roll up into their repo; undecodable scratch dirs land in `scratch`; a deleted cwd outside any surviving repo is its own `missing` bucket named by basename (621 of 637 rows; DECISIONS).
 - Old `#cost` / `#tokens` / `#cache` bookmarks redirect to `#spend` (`web/router.js` `REDIRECTS`).
 - Sonnet 5.5 is the first bundled model with rate history (`rates:` until 2026-10-06); Haiku 5.5 is the first with a prompt-length tier (`long_prompt:`).
 
