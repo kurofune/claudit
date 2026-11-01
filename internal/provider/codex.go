@@ -2,11 +2,14 @@ package provider
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/kurofune/claudit/internal/parse"
 	"github.com/kurofune/claudit/internal/parse/codex"
@@ -15,7 +18,8 @@ import (
 var _ Source = (*Codex)(nil)
 
 // Codex reads Codex CLI rollouts under a sessions root (~/.codex/sessions by
-// default), laid out as YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl.
+// default), laid out as YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl, with older
+// rollouts archived as zstd-compressed rollout-<ts>-<uuid>.jsonl.zst.
 type Codex struct {
 	root string
 }
@@ -29,13 +33,23 @@ func (c *Codex) Name() string { return parse.ProviderCodex }
 // Root is the sessions root the Source walks.
 func (c *Codex) Root() string { return c.root }
 
-// ParseFile is codex.ParseFile.
+// ParseFile is codex.ParseFile, reading a path ending .zst through a zstd
+// decoder. The decoder runs single-threaded: the corpus already parses
+// GOMAXPROCS files at once, and each extra decoder goroutine costs memory.
 func (c *Codex) ParseFile(r io.Reader, path string) (parse.Result, error) {
-	return codex.ParseFile(r, path)
+	if !strings.HasSuffix(path, ".zst") {
+		return codex.ParseFile(r, path)
+	}
+	dec, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1))
+	if err != nil {
+		return parse.Result{}, fmt.Errorf("zstd: %w", err)
+	}
+	defer dec.Close()
+	return codex.ParseFile(dec, path)
 }
 
-// Walk invokes fn for every rollout-*.jsonl three date directories below the
-// root. When earliest is non-zero, files whose mtime predates it are
+// Walk invokes fn for every rollout-*.jsonl and rollout-*.jsonl.zst three
+// date directories below the root. When earliest is non-zero, files whose mtime predates it are
 // skipped. A missing root, or an entry that vanished mid-walk, yields
 // nothing for that entry. Any other failure (an unreadable date directory,
 // a failed stat) does not stop the walk, but Walk returns the first such
@@ -68,7 +82,7 @@ func (c *Codex) Walk(earliest time.Time, fn func(path string, mod time.Time, siz
 			return nil
 		}
 		name := parts[len(parts)-1]
-		if len(parts) != 4 || !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+		if len(parts) != 4 || !strings.HasPrefix(name, "rollout-") || !isRolloutExt(name) {
 			return nil
 		}
 		info, err := d.Info()
@@ -86,6 +100,10 @@ func (c *Codex) Walk(earliest time.Time, fn func(path string, mod time.Time, siz
 		return err
 	}
 	return walkErr
+}
+
+func isRolloutExt(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".jsonl.zst")
 }
 
 // datePartWidths are the widths of the YYYY, MM and DD directory names.

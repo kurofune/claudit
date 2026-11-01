@@ -293,7 +293,7 @@ var uuidPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // threadID is the uuid ending a rollout's file name, or fallback when the
 // name carries none.
 func threadID(path, fallback string) string {
-	name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), ".zst"), ".jsonl")
 	if id := uuidPattern.FindString(name); id != "" {
 		return id
 	}

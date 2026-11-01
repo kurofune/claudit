@@ -638,3 +638,50 @@ func TestCache_OwnerChangeReparsesUnchangedFile(t *testing.T) {
 	first.paths = []string{path}
 	check("owner moves back to the first source", "first", true)
 }
+
+func TestCodex_CorruptArchiveIsFileError(t *testing.T) {
+	root := t.TempDir()
+	day := filepath.Join(root, "2026", "04", "12")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	basic, err := os.ReadFile(filepath.Join("..", "parse", "codex", "testdata", "basic.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(day, "rollout-2026-04-12T09-01-44-01a1708b-04a3-75a1-a07c-92bbb16be66f.jsonl")
+	bad := filepath.Join(day, "rollout-2026-04-12T09-05-10-019d8a10-1b2c-7d3e-8f40-5a6b7c8d9e0f.jsonl.zst")
+	if err := os.WriteFile(good, basic, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, basic, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := provider.NewCodex(root)
+	f, err := os.Open(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, perr := src.ParseFile(f, bad)
+	_ = f.Close()
+	if perr == nil {
+		t.Error("ParseFile on a non-zstd .jsonl.zst = nil error, want an error")
+	}
+
+	snap, err := LoadConcurrent([]provider.Source{src}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.FileErrors) != 1 || !strings.Contains(snap.FileErrors[0].Error(), bad) {
+		t.Errorf("FileErrors = %v, want one naming %s", snap.FileErrors, bad)
+	}
+	if len(snap.Turns) != 2 {
+		t.Errorf("turns = %d, want basic.jsonl's 2", len(snap.Turns))
+	}
+	for _, tr := range snap.Turns {
+		if tr.SourceFile != good {
+			t.Errorf("turn from %s, want only %s", tr.SourceFile, good)
+		}
+	}
+}

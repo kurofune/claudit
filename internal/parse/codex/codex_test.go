@@ -320,6 +320,15 @@ func TestParseRollout_SubagentLinksParent(t *testing.T) {
 		t.Errorf("fallback SessionID = %q", got)
 	}
 
+	// An archived subagent rollout takes its SessionID from the uuid in its
+	// file name, past the .jsonl.zst suffix, even when session_meta says
+	// otherwise.
+	archived := filepath.Join("2026", "04", "12", "rollout-2026-04-12T09-01-44-019d8a10-1b2c-7d3e-8f40-5a6b7c8d9e0f.jsonl.zst")
+	res = parseFixture(t, "subagent.jsonl", archived)
+	if got := res.Turns[0].SessionID; got != "019d8a10-1b2c-7d3e-8f40-5a6b7c8d9e0f" {
+		t.Errorf("archived subagent SessionID = %q, want the file-name uuid", got)
+	}
+
 	g := parseFixture(t, "guardian.jsonl", "")
 	if len(g.Turns) != 1 {
 		t.Fatalf("guardian turns = %d, want 1", len(g.Turns))

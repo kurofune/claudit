@@ -3,15 +3,20 @@ package corpus
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/kurofune/claudit/internal/provider"
 )
 
-// TestLoadConcurrent_RealCodexCorpus is the dogfood check for Codex rollouts
-// priced from event_msg token_count: it loads a real ~/.codex/sessions tree
+// TestLoadConcurrent_RealCodexCorpus is the dogfood check for Codex rollouts,
+// plain and zstd-archived, including those priced from event_msg
+// token_count: it loads a real ~/.codex/sessions tree
 // and requires zero FileErrors and at least one turn from every rollout that
 // carries a non-null last_token_usage. A rollout written while the load ran
 // is skipped: its parse and its scan would see different contents. It runs
@@ -30,6 +35,7 @@ func TestLoadConcurrent_RealCodexCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	loadTime := time.Since(start)
 	for _, e := range snap.FileErrors {
 		t.Errorf("FileError: %v", e)
 	}
@@ -62,6 +68,7 @@ func TestLoadConcurrent_RealCodexCorpus(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("load took %s", loadTime.Round(time.Millisecond))
 	t.Logf("files=%d FileErrors=%d Malformed=%d turns=%d; skipped live=%d; with last_token_usage=%d; formerly zero-turn (no token_usage_record)=%d yielding %d turns",
 		snap.FileCount, len(snap.FileErrors), snap.Malformed, len(snap.Turns), live, withReading, legacyOnly, legacyTurns)
 }
@@ -85,7 +92,16 @@ func scanRollout(t *testing.T, path string) (reading, record bool) {
 			} `json:"info"`
 		} `json:"payload"`
 	}
-	sc := bufio.NewScanner(f)
+	var r io.Reader = f
+	if strings.HasSuffix(path, ".zst") {
+		dec, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		defer dec.Close()
+		r = dec
+	}
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<28)
 	for sc.Scan() {
 		line.Type, line.Payload.Type, line.Payload.Info = "", "", nil
