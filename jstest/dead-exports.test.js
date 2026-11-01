@@ -13,28 +13,31 @@ test('every web/*.js module is loaded from web/app.js or web/index.html', () => 
 });
 
 // The detector and model modules once served five lenses; what is left
-// serves the session header. An export no web/ module imports is live
-// only when the module's own code calls it (detectRetries, percentiles
-// and retryTarget feed the detectors and keep their correctness tests).
-test('every export of agents-model.js and agents-insights-logic.js is imported or called', () => {
-  assert.deepEqual(unimportedExports(modules, ['agents-model.js', 'agents-insights-logic.js'], true), []);
+// serves the session header, and every export must have a web/ importer.
+// A module's own calls do not keep an export alive: an export only its
+// module calls should not be exported.
+test('every export of agents-model.js and agents-insights-logic.js has a web/ importer', () => {
+  assert.deepEqual(unimportedExports(modules, ['agents-model.js', 'agents-insights-logic.js']), []);
 });
 
-test('every export of agents-model.js and agents-insights-logic.js but the detector helpers has a web/ importer', () => {
-  assert.deepEqual(unimportedExports(modules, ['agents-model.js', 'agents-insights-logic.js']), [
-    'agents-insights-logic.js: detectRetries',
-    'agents-insights-logic.js: percentiles',
-    'agents-insights-logic.js: retryTarget',
-  ]);
-});
-
-test('the scan flags an export nothing imports or calls', () => {
+test('the scan flags an export nothing imports, even one its own module calls', () => {
   const mods = new Map([
     ['app.js', parseModule("import { used } from './lib.js';\nused();\n")],
     ['lib.js', parseModule("export function used() { return helper(); }\nexport function helper() {}\nexport const dead = 1;\n// export function commented() {}\n")],
   ]);
-  assert.deepEqual(unimportedExports(mods, ['lib.js'], true), ['lib.js: dead']);
   assert.deepEqual(unimportedExports(mods, ['lib.js']), ['lib.js: dead', 'lib.js: helper']);
+});
+
+test('the scan reads every declarator of an export const, let or var', () => {
+  assert.deepEqual([...parseModule('export const used = 1, dead = 2;\n').exports], ['used', 'dead']);
+  assert.deepEqual([...parseModule("export let a = f(1, 2), b = { c: 3, d: [4, 5] },\n  e = 'x,y';\nexport var g;\n").exports],
+    ['a', 'b', 'e', 'g']);
+  assert.deepEqual([...parseModule('export const h = x\n  .y(1, 2)\nconst notExported = 1, alsoNot = 2;\n').exports], ['h']);
+  const mods = new Map([
+    ['app.js', parseModule("import { used } from './lib.js';\n")],
+    ['lib.js', parseModule('export const used = 1, dead = 2;\n')],
+  ]);
+  assert.deepEqual(unimportedExports(mods, ['lib.js']), ['lib.js: dead']);
 });
 
 test('the scan flags a module nothing loads, and follows multi-line, re-export and type imports', () => {

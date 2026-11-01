@@ -264,7 +264,7 @@ test('a sub-agent bar and note land on the sub-agent turn they describe', () => 
 test('explainPrompt is the fixed template over logs, unresolved failures and the costliest turns', () => {
   const st = story([
     step('a1', 0, [tool('rg login', 'ok')], { cost_usd: 0.4 }),
-    step('a2', 61, [tool('go test ./internal/...', 'error', { output: '\n--- FAIL: TestLogin (0.01s)\nlogin_test.go:12: want 200' })], { cost_usd: 1.25 }),
+    step('a2', 61, [tool('go test ./internal/...', 'error', { output: '\n--- FAIL: TestLogin (0.01s)\nlogin_test.go:12: want 200' })], { cost_usd: 1.25, duration_ms: 90000 }),
     step('a3', 122, [], { cost_usd: 0.05 }),
     step('a4', 183, [tool('make lint', 'error', { output: '' })], { cost_usd: 0.9 }),
   ], [], { source_files: ['/u/.claude/projects/p/s1.jsonl', '/u/.claude/projects/p/s1/subagents/agent-k.jsonl'] });
@@ -278,11 +278,42 @@ test('explainPrompt is the fixed template over logs, unresolved failures and the
     '10:01:01  go test ./internal/...  → --- FAIL: TestLogin (0.01s)',
     '10:03:03  make lint  → no output',
     '',
+    'Retried calls: none',
+    '',
     'Costliest turns:',
     '10:01:01  $1.25  go test ./internal/...',
     '10:03:03  $0.90  make lint',
     '10:00:00  $0.40  rg login',
+    '',
+    'Slowest turns (median 1s, p95 1m 16s):',
+    '10:01:01  1m 30s  go test ./internal/...',
   ].join('\n'));
+});
+
+test('explainPrompt lists each retried call once, in session order, with its attempts and errors', () => {
+  const st = story([
+    step('a1', 0, [tool('go test ./...', 'error'), tool('rg foo', 'ok')]),
+    step('a2', 10, [tool('go test ./...', 'error')]),
+    step('a3', 20, [tool('go test ./...', 'ok'), tool('rg foo', 'ok')]),
+    step('a4', 40, [tool('', 'error', { name: 'Read', kind: 'read', detail: 'main.go' })]),
+    step('a5', 50, [tool('', 'error', { name: 'Read', kind: 'read', detail: 'main.go' })]),
+  ], [child('Explore', [
+    step('k1', 5, [tool('npm test', 'error')]),
+    step('k2', 6, [tool('npm test', 'error')]),
+  ])]);
+  const lines = explainPrompt(st).split('\n');
+  const at = lines.indexOf('Retried calls:');
+  assert.ok(at > 0, 'the retried section is there');
+  assert.deepEqual(lines.slice(at + 1, lines.indexOf('', at)), [
+    '10:00:00  go test ./...  → 3 attempts, 2 errored',
+    '10:00:05  npm test  → 2 attempts, 2 errored',
+    '10:00:40  main.go  → 2 attempts, 2 errored',
+  ], 'a clean repeat (rg foo) is no retry; a call with no input names its detail');
+});
+
+test('explainPrompt lists no slowest turn when every turn took as long as the median', () => {
+  const st = story([step('a1', 0, [tool('ls', 'ok')]), step('a2', 5), step('a3', 9)]);
+  assert.match(explainPrompt(st), /\nSlowest turns: none$/);
 });
 
 test('explainPrompt of a clean session says none for each list', () => {
@@ -294,6 +325,10 @@ test('explainPrompt of a clean session says none for each list', () => {
     '',
     'Unresolved failures: none',
     '',
+    'Retried calls: none',
+    '',
     'Costliest turns: none',
+    '',
+    'Slowest turns: none',
   ].join('\n'));
 });

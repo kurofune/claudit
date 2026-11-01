@@ -15,13 +15,54 @@ function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1') + '\n' + imports;
 }
 
+// CONTINUES are the characters that, ending one line or starting the next,
+// carry a declaration across the line break instead of ending it.
+const CONTINUES = new Set([',', '=', '.', '?', ':', '+', '-', '*', '/', '%', '|', '&', '(', '[', '{']);
+
+// declarators lists the names an `export const|let|var` declaration binds,
+// reading from just after the keyword: the first name, then each name after
+// a comma outside brackets and strings, up to the statement's end (a `;` or
+// a line break neither side of which continues the expression).
+function declarators(code, from) {
+  const names = [];
+  let depth = 0, expectName = true, quote = '';
+  for (let i = from; i < code.length; i++) {
+    const c = code[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (expectName && depth === 0) {
+      const m = /^\s*([A-Za-z_$][\w$]*)/.exec(code.slice(i, i + 200));
+      if (m) { names.push(m[1]); i += m[0].length - 1; }
+      expectName = false;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (depth === 0 && c === ',') expectName = true;
+    else if (depth === 0 && c === ';') break;
+    else if (depth === 0 && c === '\n') {
+      const before = code.slice(from, i).trimEnd().slice(-1);
+      const after = code.slice(i + 1).trimStart()[0];
+      if (!CONTINUES.has(before) && !CONTINUES.has(after)) break;
+    }
+  }
+  return names;
+}
+
 // parseModule lists a module's exported names, the names it imports from
 // each sibling module, and the siblings it only type-imports.
 export function parseModule(src) {
   const code = stripComments(src);
   const exports = new Set();
-  for (const m of code.matchAll(/^\s*export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)) {
+  for (const m of code.matchAll(/^\s*export\s+(?:async\s+)?(?:function\*?|class)\s+([A-Za-z_$][\w$]*)/gm)) {
     exports.add(m[1]);
+  }
+  for (const m of code.matchAll(/^\s*export\s+(?:const|let|var)\s+/gm)) {
+    for (const name of declarators(code, m.index + m[0].length)) exports.add(name);
   }
   for (const m of code.matchAll(/^\s*export\s*\{([^}]*)\}\s*;?\s*$/gm)) {
     for (const part of m[1].split(',')) {
@@ -42,14 +83,9 @@ export function parseModule(src) {
     add(m[1], ['*']);
   }
   for (const m of code.matchAll(/^\s*import\s+['"]\.\/([\w.-]+\.js)['"]/gm)) add(m[1], []);
-  const calledInside = new Set();
-  for (const name of exports) {
-    const uses = code.match(new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`, 'g')) || [];
-    if (uses.length > 1) calledInside.add(name);
-  }
   const typeImports = new Set();
   for (const m of code.matchAll(/@import\s+\{[^}]*\}\s+from\s+['"]\.\/([\w.-]+\.js)['"]/g)) typeImports.add(m[1]);
-  return { exports, imports, typeImports, calledInside };
+  return { exports, imports, typeImports };
 }
 
 // htmlModules lists the web/ modules an HTML page loads by script src,
@@ -87,9 +123,7 @@ export function reachable(modules, roots) {
 
 // unimportedExports lists `<module>: <export>` for every export of the
 // named modules that no other module imports by name (or through *).
-// With insideCounts, an export the module's own code also uses is live
-// and not listed.
-export function unimportedExports(modules, only = [...modules.keys()], insideCounts = false) {
+export function unimportedExports(modules, only = [...modules.keys()]) {
   const used = new Map();
   for (const m of modules.values()) {
     for (const [file, names] of m.imports) {
@@ -102,7 +136,7 @@ export function unimportedExports(modules, only = [...modules.keys()], insideCou
     const names = used.get(f) || new Set();
     const m = modules.get(f);
     for (const e of m.exports) {
-      if (names.has(e) || names.has('*') || (insideCounts && m.calledInside.has(e))) continue;
+      if (names.has(e) || names.has('*')) continue;
       out.push(`${f}: ${e}`);
     }
   }

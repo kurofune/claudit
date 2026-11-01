@@ -4,7 +4,7 @@
 // (the /sessions/story?whole=1 payload). Every sentence here is a fixed
 // template over counted fields: claudit generates no prose.
 
-import { detectSignals, inputIdentity } from './agents-insights-logic.js';
+import { detectRetries, detectSignals, inputIdentity, percentiles, retryTarget } from './agents-insights-logic.js';
 import { agentLabel, parseRefKey, parseTime } from './agents-model.js';
 import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-story-logic.js';
 
@@ -282,10 +282,50 @@ export function worthALook(session, nowMs) {
   });
 }
 
+// retriedCalls lists each call detectRetries found repeated after an error,
+// once per group at its first call, as {turn, tool, attempts, errors}
+// (the group's peak attempt and its errored calls), in session turn order.
+/** @param {WholeStory} story @param {Turn[]} turns */
+function retriedCalls(story, turns) {
+  const turnAt = new Map(turns.map(t => [`${t.agentIndex}.${t.stepIndex}`, t]));
+  /** @type {{turn: Turn, tool: StoryTool, attempts: number, errors: number}[]} */
+  const out = [];
+  agentsOf(story).forEach((a, ai) => {
+    /** @type {Map<string, {attempts: number, errors: number}>} */
+    const groups = new Map();
+    for (const { attempt, ofRef, errors } of detectRetries(/** @type {any} */ (a)).values()) {
+      const g = groups.get(ofRef);
+      if (!g || attempt > g.attempts) groups.set(ofRef, { attempts: attempt, errors });
+    }
+    for (const [ref, g] of groups) {
+      const [si, ti] = ref.split(':').map(Number);
+      const turn = turnAt.get(`${ai}.${si}`);
+      const tool = (a.steps[si].tools || [])[ti];
+      if (turn && tool) out.push({ turn, tool, ...g });
+    }
+  });
+  return out.sort((x, y) => (x.turn.n - y.turn.n) || (x.turn.step.tools.indexOf(x.tool) - y.turn.step.tools.indexOf(y.tool)));
+}
+
+// slowestTurns is the median and p95 of the session's turn durations and
+// up to three turns that took longer than the median and at least the p95,
+// slowest first.
+/** @param {Turn[]} turns */
+function slowestTurns(turns) {
+  const [median, p95] = percentiles(turns.map(t => t.step.duration_ms || 0), [50, 95]);
+  const slow = turns
+    .filter(t => (t.step.duration_ms || 0) > median && (t.step.duration_ms || 0) >= p95)
+    .sort((a, b) => (b.step.duration_ms - a.step.duration_ms) || (a.n - b.n))
+    .slice(0, 3);
+  return { median, p95, slow };
+}
+
 // explainPrompt is the text the "Copy explain-this-session prompt" button
 // copies: addressed to the coding agent that ran the session, naming its
-// logs, each unresolved failure (time, command, first output line) and the
-// three costliest turns (time, cost, first command).
+// logs, each unresolved failure (time, command, first output line), each
+// call retried after an error (time, target, attempts), the three costliest
+// turns (time, cost, first command) and the turns at or over the session's
+// p95 turn time.
 /** @param {WholeStory} story */
 export function explainPrompt(story) {
   const turns = sessionTurns(story);
@@ -305,6 +345,16 @@ export function explainPrompt(story) {
     lines.push('Unresolved failures: none');
   }
   lines.push('');
+  const retried = retriedCalls(story, turns);
+  if (retried.length) {
+    lines.push('Retried calls:');
+    for (const r of retried) {
+      lines.push(`${clock(r.turn.step.timestamp)}  ${clip(retryTarget(r.tool) || r.tool.name || '', CMD_RUNES)}  → ${r.attempts} attempts, ${r.errors} errored`);
+    }
+  } else {
+    lines.push('Retried calls: none');
+  }
+  lines.push('');
   const costliest = [...turns]
     .filter(t => (t.step.cost_usd || 0) > 0)
     .sort((a, b) => (b.step.cost_usd - a.step.cost_usd) || (a.n - b.n))
@@ -316,6 +366,16 @@ export function explainPrompt(story) {
     }
   } else {
     lines.push('Costliest turns: none');
+  }
+  lines.push('');
+  const { median, p95, slow } = slowestTurns(turns);
+  if (slow.length) {
+    lines.push(`Slowest turns (median ${fmtDuration(median)}, p95 ${fmtDuration(p95)}):`);
+    for (const t of slow) {
+      lines.push(`${clock(t.step.timestamp)}  ${fmtDuration(t.step.duration_ms)}  ${firstCommand(t.step) || 'no command'}`);
+    }
+  } else {
+    lines.push('Slowest turns: none');
   }
   return lines.join('\n');
 }
