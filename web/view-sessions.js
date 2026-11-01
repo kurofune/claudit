@@ -11,7 +11,7 @@ import { parseAgentsSub } from './router.js';
 import { setLiveHandler, clearLiveHandler } from './sse.js';
 import { clearSkeletonFlag } from './skeleton.js';
 import { paintStory } from './session-story.js';
-import { listShellHTML, renderList, renderListLoading, renderListError, wireList } from './sessions-list.js';
+import { listShellHTML, renderList, renderListLoading, renderListError, renderRefreshError, clearRefreshError, wireList } from './sessions-list.js';
 
 /** @import { SessionIndexRow } from './api-types.js' */
 /** @import { ListUI } from './sessions-list.js' */
@@ -25,15 +25,33 @@ const ui = { query: '', filter: 'all', sort: 'newest', expanded: new Set() };
 let rows = null;
 /** @type {Promise<{sessions: SessionIndexRow[]}>|null} */
 let inFlight = null;
+/** @type {Promise<{sessions: SessionIndexRow[]}>|null} */
+let followUp = null;
+// refreshSeq numbers refreshes so only the latest one paints: an older
+// answer never lands over a newer one.
+let refreshSeq = 0;
 // gen bumps on every mount, so an index that lands after the user left
 // the list (or remounted it) paints nothing.
 let gen = 0;
 /** @type {Element|null} */
 let listRoot = null;
 
-const load = () => {
-  if (!inFlight) inFlight = fetchSessions().finally(() => { inFlight = null; });
-  return inFlight;
+// load fetches the index, sharing a request already in flight. fresh asks
+// for an index read after this call: when a request is already out (it may
+// have been answered before the change that prompted this call), it waits
+// for that one and fetches again. Every fresh call made while one request
+// is out shares the one follow-up.
+/** @param {boolean} [fresh] @returns {Promise<{sessions: SessionIndexRow[]}>} */
+const load = (fresh = false) => {
+  if (!inFlight) {
+    inFlight = fetchSessions().finally(() => { inFlight = null; });
+    return inFlight;
+  }
+  if (!fresh) return inFlight;
+  if (!followUp) {
+    followUp = inFlight.catch(() => undefined).then(() => { followUp = null; return load(); });
+  }
+  return followUp;
 };
 
 const container = () => document.getElementById('view-agents');
@@ -71,7 +89,10 @@ export async function paint(route) {
   const root = host.querySelector('.sessions-list');
   if (!root) return;
   listRoot = root;
-  wireList(root, ui, { onChange: () => repaint(root), onRetry: () => { fetchInto(root, my); } });
+  wireList(root, ui, {
+    onChange: () => repaint(root),
+    onRetry: () => { if (rows) refresh(root, my); else fetchInto(root, my); },
+  });
   setLiveHandler(liveUpdate);
   if (rows) {
     repaint(root);
@@ -104,14 +125,24 @@ async function fetchInto(root, my) {
   repaint(root);
 }
 
-// refresh refetches without the skeleton, keeping what is on screen when
-// the fetch fails.
+// refresh refetches without the skeleton. A failure keeps the rows on
+// screen and says so above them with a Retry; the next success clears it.
 /** @param {Element} root @param {number} my */
 async function refresh(root, my) {
+  const seq = ++refreshSeq;
+  const current = () => my === gen && listRoot === root && seq === refreshSeq;
   let data;
-  try { data = await load(); } catch { return; }
-  if (my !== gen || listRoot !== root) return;
+  try {
+    data = await load(true);
+  } catch (err) {
+    if (!current()) return;
+    if (rows) renderRefreshError(root, err);
+    else renderListError(root, err);
+    return;
+  }
+  if (!current()) return;
   rows = (data && data.sessions) || [];
+  clearRefreshError(root);
   updateNavMetric(rows);
   repaint(root);
 }

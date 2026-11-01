@@ -314,3 +314,104 @@ test('the list carries no filter bar, no drawer and no dollar figure below a ses
   const outside = view.querySelectorAll('.sl-family, .sl-count, .sl-active-title, .sl-chip, .sl-sort');
   assert.ok(outside.every(e => !/\$/.test(e.textContent)));
 });
+
+// liveList mounts the list, loads it once and starts SSE, returning a bump(gen) that delivers a generation frame.
+async function liveList(route) {
+  const calls = stubFetch(route);
+  let onMessage;
+  globalThis.EventSource = class { constructor() {} addEventListener(_t, fn) { onMessage = fn; } };
+  const env = await mount();
+  await env.done;
+  startSSE({});
+  onMessage({ data: JSON.stringify({ generation: 1 }) });
+  const bump = g => onMessage({ data: JSON.stringify({ generation: g }) });
+  return { ...env, calls, bump };
+}
+
+test('a refresh that fails after a good load keeps the rows and search, says HTTP 503 above them, and Retry recovers', async () => {
+  let answer = () => ({ sessions: THREE() });
+  const { view, calls, bump } = await liveList(() => answer());
+  const input = view.querySelector('.sl-search');
+  input.value = 'BEAD';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  const before = view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session'));
+
+  answer = () => ({ httpStatus: 503, statusText: 'Service Unavailable' });
+  bump(2);
+  await settle(); await settle();
+  assert.equal(calls.length, 2);
+  const banner = view.querySelector('.sl-status .sl-error');
+  assert.ok(banner, 'the refresh failure is on screen');
+  assert.equal(banner.getAttribute('role'), 'alert');
+  assert.match(banner.textContent, /Could not refresh sessions:\s+HTTP 503 Service Unavailable/);
+  assert.deepEqual(view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session')), before, 'the rows stay');
+  assert.equal(view.querySelector('.sl-search'), input);
+  assert.equal(input.value, 'BEAD');
+
+  answer = () => ({ sessions: [...THREE(), row('s-e', { family_key: 'work bead _ next', remainder: 'claudit-new', last_activity: at(-2) })] });
+  click(banner.querySelector('button.retry'));
+  await settle(); await settle();
+  assert.equal(calls.length, 3, 'Retry refetched');
+  assert.equal(view.querySelector('.sl-error'), null, 'the banner cleared');
+  assert.ok(view.querySelector('.sl-group [data-session="s-e"]'), 'the retried index painted');
+  assert.equal(input.value, 'BEAD');
+  clearLiveHandler();
+});
+
+test('a refresh that cannot reach the server says why with a Retry', async () => {
+  let answer = () => ({ sessions: THREE() });
+  const { view, bump } = await liveList(() => answer());
+  answer = () => new TypeError('Failed to fetch');
+  bump(2);
+  await settle(); await settle();
+  assert.match(view.querySelector('.sl-status .sl-error').textContent, /did not answer \(Failed to fetch\)/);
+  assert.ok(view.querySelector('.sl-status button.retry'));
+  assert.equal(view.querySelectorAll('.sl-group').length, 3);
+  clearLiveHandler();
+});
+
+test('returning to a cached list whose refresh fails shows the failure over the cached rows', async () => {
+  let answer = () => ({ sessions: THREE() });
+  stubFetch(() => answer());
+  const { view, mod, done } = await mount();
+  await done;
+  answer = () => ({ httpStatus: 503, statusText: 'Service Unavailable' });
+  await mod.paint({ view: 'agents', sub: 's-a', unit: 'dollars' }).catch(() => {});
+  await mod.paint({ view: 'agents', sub: '', unit: 'dollars' });
+  await settle(); await settle();
+  assert.equal(view.querySelectorAll('.sl-group').length, 3, 'the cached rows paint');
+  assert.match(view.querySelector('.sl-status .sl-error').textContent, /HTTP 503 Service Unavailable/);
+  clearLiveHandler();
+});
+
+test('a bump during an outstanding refresh fetches again once it settles and paints the newest index', async () => {
+  const releases = [];
+  let first = true;
+  const { view, calls, bump } = await liveList(() => {
+    if (first) { first = false; return { sessions: THREE() }; }
+    return new Promise(r => { releases.push(r); });
+  });
+  const input = view.querySelector('.sl-search');
+  input.value = 'BEAD';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  click(view.querySelector('.sl-sort[data-sort="cost"]'));
+
+  bump(2);
+  await settle();
+  assert.equal(calls.length, 2);
+  bump(3);
+  await settle();
+  assert.equal(calls.length, 2, 'the second bump waits for the outstanding request');
+
+  releases[0]({ sessions: THREE() });
+  await settle(); await settle();
+  assert.equal(calls.length, 3, 'a follow-up request went out after the first settled');
+  releases[1]({ sessions: [...THREE(), row('s-new', { family_key: 'work bead _ next', remainder: 'claudit-gen3', cost_usd: 5, last_activity: at(-2) })] });
+  await settle(); await settle();
+  assert.deepEqual(view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session')), ['s-b', 's-new', 's-a']);
+  assert.equal(input.value, 'BEAD');
+  assert.equal(view.querySelector('.sl-sort[data-sort="cost"]').getAttribute('aria-pressed'), 'true');
+  await settle();
+  assert.equal(calls.length, 3, 'no further requests once caught up');
+  clearLiveHandler();
+});

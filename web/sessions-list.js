@@ -36,6 +36,7 @@ export function listShellHTML(ui) {
       <div class="sl-filters" role="group" aria-label="Show sessions"></div>
       <div class="sl-sorts" role="group" aria-label="Order sessions within each family"></div>
     </div>
+    <div class="sl-status"></div>
     <div class="sl-body"></div>
   </div>`;
 }
@@ -134,16 +135,37 @@ export function renderListLoading(root) {
   if (body) body.innerHTML = `<div aria-busy="true" aria-label="Loading sessions">${sessionListSkeleton(8)}</div>`;
 }
 
+/** @param {any} err */
+function failureReason(err) {
+  return err && err.status
+    ? `HTTP ${err.status}${err.statusText ? ' ' + err.statusText : ''}`
+    : `the server did not answer (${(err && err.message) || 'network error'})`;
+}
+
 // renderListError paints the failed fetch with its HTTP status and a Retry.
 /** @param {Element} root @param {any} err */
 export function renderListError(root, err) {
   const body = root.querySelector('.sl-body');
   if (!body) return;
-  const reason = err && err.status
-    ? `HTTP ${err.status}${err.statusText ? ' ' + err.statusText : ''}`
-    : `the server did not answer (${(err && err.message) || 'network error'})`;
   body.innerHTML = `<div class="warning-card sl-error" role="alert"><strong class="danger">Could not load sessions:</strong>
-    ${escHtml(reason)} <button type="button" class="retry" data-retry data-focus-key="retry">Retry</button></div>`;
+    ${escHtml(failureReason(err))} <button type="button" class="retry" data-retry data-focus-key="retry">Retry</button></div>`;
+}
+
+// renderRefreshError says a refresh failed above the rows already on
+// screen, which stay as they were, with a Retry.
+/** @param {Element} root @param {any} err */
+export function renderRefreshError(root, err) {
+  const status = root.querySelector('.sl-status');
+  if (!status) return;
+  status.innerHTML = `<div class="warning-card sl-error sl-refresh-error" role="alert"><strong class="danger">Could not refresh sessions:</strong>
+    ${escHtml(failureReason(err))}; showing the list as last loaded.
+    <button type="button" class="retry" data-retry data-focus-key="retry">Retry</button></div>`;
+}
+
+/** @param {Element} root */
+export function clearRefreshError(root) {
+  const status = root.querySelector('.sl-status');
+  if (status && status.innerHTML) status.innerHTML = '';
 }
 
 /** @param {Element} root */
