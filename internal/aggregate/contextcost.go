@@ -130,6 +130,7 @@ type contextTurn struct {
 type resultContextCost struct {
 	tool, detail, sessionID string
 	input, sourceFile       string
+	provider                string
 	ContextCost
 }
 
@@ -180,8 +181,8 @@ func (a *Aggregator) AddCompactBoundaries(bs []parse.CompactBoundary) {
 
 // pendingResult is a tool result waiting for the turn that first carries it.
 type pendingResult struct {
-	tool, detail, sessionID, input string
-	bytes                          int
+	tool, detail, sessionID, input, provider string
+	bytes                                    int
 }
 
 func (a *Aggregator) invalidateContextCosts() {
@@ -244,7 +245,7 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 				if j >= len(turns) || compactedBetween(from, turns[j].ts) {
 					continue
 				}
-				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, input: tu.Input, bytes: r.OutputBytes})
+				carried[j] = append(carried[j], pendingResult{tool: tu.Name, detail: tu.Detail, sessionID: c.sessionID, input: tu.Input, provider: c.provider, bytes: r.OutputBytes})
 			}
 		}
 
@@ -284,6 +285,7 @@ func (a *Aggregator) computeContextCosts() contextWalk {
 					sessionID:  p.sessionID,
 					input:      p.input,
 					sourceFile: file,
+					provider:   p.provider,
 					ContextCost: ContextCost{
 						ContextTokens:  n,
 						WriteCostUSD:   write,
@@ -428,11 +430,12 @@ func (a *Aggregator) ContextCostTotal() ContextCost {
 }
 
 // ContextExample is one tool invocation behind a pattern: what was run,
-// where, and how much context its result added.
+// where, by which provider's agent, and how much context its result added.
 type ContextExample struct {
 	Input          string
 	SessionID      string
 	SourceFile     string
+	Provider       string
 	ContextTokens  int64
 	ContextCostUSD float64
 }
@@ -465,6 +468,7 @@ func (a *Aggregator) contextEvidence(n int) map[toolDetailKey]*detailEvidence {
 			Input:          r.input,
 			SessionID:      r.sessionID,
 			SourceFile:     r.sourceFile,
+			Provider:       r.provider,
 			ContextTokens:  r.ContextTokens,
 			ContextCostUSD: r.ContextCostUSD,
 		}, n)

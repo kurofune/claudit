@@ -279,6 +279,7 @@ func (a *Aggregator) cacheWriteExamples(session string, n int) []ContextExample 
 				Input:          fmt.Sprintf("turn at %s wrote %s cache tokens, %s", c.ts.UTC().Format("2006-01-02 15:04:05 UTC"), groupThousands(w), when),
 				SessionID:      session,
 				SourceFile:     file,
+				Provider:       c.provider,
 				ContextTokens:  w,
 				ContextCostUSD: a.cacheWriteCost(c),
 			}, n)

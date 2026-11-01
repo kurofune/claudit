@@ -36,6 +36,7 @@ type HotspotExample struct {
 	Input          string  `json:"input"`
 	SessionID      string  `json:"session_id"`
 	SourceFile     string  `json:"source_file"`
+	Provider       string  `json:"provider"`
 	ContextTokens  int64   `json:"context_tokens"`
 	ContextCostUSD float64 `json:"context_cost_usd"`
 }

@@ -2,11 +2,14 @@ package aggregate
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -266,6 +269,64 @@ func TestHotspotsExamplesFromParsedJSONL(t *testing.T) {
 		if h.Examples[0].SessionID != "s" || h.Examples[0].SourceFile != path {
 			t.Errorf("%s example = %+v, want session s in %s", c.title, h.Examples[0], path)
 		}
+	}
+	for _, h := range hs {
+		for _, e := range h.Examples {
+			if e.Provider != parse.ProviderClaudeCode {
+				t.Errorf("%s example %+v Provider = %q, want %q", h.Title, e, e.Provider, parse.ProviderClaudeCode)
+			}
+		}
+	}
+}
+
+// TestHotspotsExamplesFromCodexRollout runs a Codex rollout through
+// internal/parse/codex, so every example — tool-pattern and cache-write —
+// carries the codex provider the parser stamps on its turns.
+func TestHotspotsExamplesFromCodexRollout(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "parse", "codex", "testdata", "tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture writes no prompt cache; give the turn after the tool calls
+	// a cache write big enough to carry context cost and to count as a
+	// repeated cache write.
+	src := strings.Replace(string(raw),
+		`"usage":{"input_tokens":35082,"cached_input_tokens":33920,"cache_write_input_tokens":0`,
+		`"usage":{"input_tokens":35082,"cached_input_tokens":33920,"cache_write_input_tokens":1200000`, 1)
+	if src == string(raw) {
+		t.Fatal("fixture usage line not found")
+	}
+	const path = "/home/u/.codex/sessions/rollout.jsonl"
+	res, err := codex.ParseFile(strings.NewReader(src), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := ctxTable()
+	table.Providers = map[string]pricing.ProviderPrices{parse.ProviderCodex: {Models: map[string]pricing.ModelPrice{
+		"gpt-6.1-sol": {Rate: pricing.Rate{Input: 5, Output: 25, CacheRead: 1, CacheWrite5m: 6}},
+	}}}
+	agg := New(table)
+	for _, tr := range res.Turns {
+		agg.Add(tr)
+	}
+	agg.AddToolResults(res.ToolResults)
+
+	hs := agg.Hotspots(10)
+	var tool, cache int
+	for _, h := range hs {
+		for _, e := range h.Examples {
+			if e.Provider != parse.ProviderCodex {
+				t.Errorf("%s example %+v Provider = %q, want %q", h.Title, e, e.Provider, parse.ProviderCodex)
+			}
+		}
+		if h.Kind == HotspotRepeatedCacheWrite {
+			cache += len(h.Examples)
+		} else {
+			tool += len(h.Examples)
+		}
+	}
+	if tool == 0 || cache == 0 {
+		t.Fatalf("want tool-pattern and cache-write examples, got %d and %d in %+v", tool, cache, hs)
 	}
 }
 
