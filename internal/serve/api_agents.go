@@ -8,6 +8,7 @@ import (
 
 	"github.com/kurofune/claudit/internal/agentflow"
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 )
 
 // agentActiveWindow is how recently an agent must have acted (relative to
@@ -56,9 +57,10 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 //	?session=&tool=<tool_use id>  → UNTRUNCATED input/output for one tool_use
 //	?session=&turn=<turn uuid>    → UNTRUNCATED thinking/text for one turn
 //
-// Both read back from the session JSONL on disk (the default /agents payload
+// Both read back from the session log on disk (the default /agents payload
 // caps thinking/text to 2000-rune snippets and tool input/output to
-// agentSnippetRunes to stay lean).
+// agentSnippetRunes to stay lean); ?tool= reads it with the parser of the
+// provider that wrote the session.
 //
 // Serve-mode only: the static HTML report inlines no disk and never calls
 // this — its drawer falls back to the snippet. The source file is resolved
@@ -93,7 +95,7 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the on-disk source file from the snapshot by matching the
 	// tool_use id within the named session. Trusted input only.
-	sourceFile := ""
+	sourceFile, provider := "", ""
 	for i := range snap.Turns {
 		t := &snap.Turns[i]
 		if t.SessionID != session {
@@ -101,7 +103,7 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, u := range t.ToolUses {
 			if u.ID == toolID {
-				sourceFile = t.SourceFile
+				sourceFile, provider = t.SourceFile, t.Provider
 				break
 			}
 		}
@@ -121,7 +123,11 @@ func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = f.Close() }()
 
-	detail, ok := parse.FindToolUseDetail(f, toolID)
+	findDetail := parse.FindToolUseDetail
+	if provider == parse.ProviderCodex {
+		findDetail = codex.FindToolUseDetail
+	}
+	detail, ok := findDetail(f, toolID)
 	if !ok {
 		http.NotFound(w, r)
 		return

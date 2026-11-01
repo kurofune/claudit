@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kurofune/claudit/internal/corpus"
@@ -81,5 +82,91 @@ func TestAPICost_CodexModelRow(t *testing.T) {
 	}
 	if len(unknown) != 1 || unknown[0].Provider != "codex" || unknown[0].Model != "codex-auto-review" {
 		t.Errorf("unknown_models = %s, want only codex/codex-auto-review", ov["unknown_models"])
+	}
+}
+
+// TestAPIAgentsFull_CodexToolBetweenCaps: a Codex call whose input and output
+// run 501–2000 runes is capped in /agents and still expands in full through
+// /agents/full, which reads the rollout with the Codex parser.
+func TestAPIAgentsFull_CodexToolBetweenCaps(t *testing.T) {
+	const (
+		sessionID = "01a19999-0000-7000-8000-000000000001"
+		callID    = "call_between_caps"
+	)
+	bigIn := strings.Repeat("p", 1200)
+	bigOut := "Exit code: 0\nWall time: 1 seconds\nOutput:\n" + strings.Repeat("q", 1500)
+	line := func(ts, typ string, payload any) string {
+		b, err := json.Marshal(map[string]any{"timestamp": ts, "type": typ, "payload": payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "2026", "10", "31", "rollout-2026-10-31T10-00-00-"+sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, path,
+		line("2026-10-31T10:00:00.000Z", "session_meta", map[string]any{"session_id": sessionID, "id": sessionID, "cwd": "/p/codex", "originator": "codex_exec", "thread_source": "user"}),
+		line("2026-10-31T10:00:01.000Z", "turn_context", map[string]any{"cwd": "/p/codex", "model": "gpt-6-astra"}),
+		line("2026-10-31T10:00:02.000Z", "response_item", map[string]any{"type": "custom_tool_call", "call_id": callID, "name": "apply_patch", "input": bigIn}),
+		line("2026-10-31T10:00:03.000Z", "token_usage_record", map[string]any{"response_id": "resp_1", "usage": map[string]any{"input_tokens": 100, "output_tokens": 10}}),
+		line("2026-10-31T10:00:04.000Z", "response_item", map[string]any{"type": "custom_tool_call_output", "call_id": callID, "output": bigOut}),
+	)
+	cache := corpus.New(provider.NewClaudeCode(t.TempDir()), provider.NewCodex(root))
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
+
+	var sessions []struct {
+		Main struct {
+			Steps []struct {
+				Tools []struct{ ID, Input, Output string }
+			}
+		}
+	}
+	decodeField(t, getSection(t, srv, "/_claudit/api/agents", "codex"), "sessions", &sessions)
+	found := false
+	for _, s := range sessions {
+		for _, st := range s.Main.Steps {
+			for _, tool := range st.Tools {
+				if tool.ID != callID {
+					continue
+				}
+				found = true
+				if want := bigIn[:agentSnippetRunes] + "…"; tool.Input != want {
+					t.Errorf("/agents input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
+				}
+				if want := bigOut[:agentSnippetRunes] + "…"; tool.Output != want {
+					t.Errorf("/agents output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s missing from /agents payload", callID)
+	}
+
+	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session="+sessionID+"&tool="+callID, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("/agents/full status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var got struct{ ID, Name, Input, Output, Status string }
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+	}
+	if got.ID != callID || got.Name != "apply_patch" {
+		t.Errorf("ID/Name = %q/%q, want %s/apply_patch", got.ID, got.Name, callID)
+	}
+	if got.Input != bigIn {
+		t.Errorf("full input len = %d, want %d", len(got.Input), len(bigIn))
+	}
+	if got.Output != bigOut {
+		t.Errorf("full output len = %d, want %d", len(got.Output), len(bigOut))
+	}
+	if got.Status != "ok" {
+		t.Errorf("Status = %q, want ok", got.Status)
 	}
 }

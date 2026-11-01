@@ -267,8 +267,18 @@ func convertUsage(u rawUsage) parse.Usage {
 // custom tool, or the exec_command function) keeps its command string as
 // Input and buckets by its Bash pattern; any other call keeps its raw input.
 func toolUse(it rawItem) parse.ToolUse {
-	tu := parse.ToolUse{ID: it.CallID, Name: it.Name}
-	var cmd, input string
+	input, cmd := toolInput(it)
+	tu := parse.ToolUse{ID: it.CallID, Name: it.Name, Input: parse.ToolInputSnippet(input)}
+	if cmd != "" {
+		tu.Detail = parse.BashPattern(cmd)
+	}
+	return tu
+}
+
+// toolInput is a call's untruncated input as ToolUse.Input represents it —
+// the shell command when the call runs one (cmd, also returned), else the
+// call's raw input.
+func toolInput(it rawItem) (input, cmd string) {
 	switch {
 	case it.Type == "custom_tool_call" && it.Name == "exec":
 		if cmds, ok := execCommands(it.Input); ok {
@@ -289,12 +299,43 @@ func toolUse(it rawItem) parse.ToolUse {
 		input = it.Arguments
 	}
 	if cmd != "" {
-		tu.Input = parse.ToolInputSnippet(cmd)
-		tu.Detail = parse.BashPattern(cmd)
-		return tu
+		return cmd, cmd
 	}
-	tu.Input = parse.ToolInputSnippet(input)
-	return tu
+	return input, ""
+}
+
+// FindToolUseDetail streams r (one rollout) and returns the untruncated input
+// and output of the call whose call_id == callID, in the representation
+// ParseFile snippets. found is false when no call in r carried that id;
+// Output and Status stay empty when no output was recorded.
+func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
+	out := parse.ToolUseDetail{ID: callID}
+	found := false
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	for sc.Scan() {
+		var rec rawRecord
+		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Type != "response_item" {
+			continue
+		}
+		var it rawItem
+		if json.Unmarshal(rec.Payload, &it) != nil || it.CallID != callID {
+			continue
+		}
+		switch it.Type {
+		case "custom_tool_call", "function_call":
+			out.Name = it.Name
+			out.Input, _ = toolInput(it)
+			found = true
+		case "custom_tool_call_output", "function_call_output":
+			out.Output = outputText(it.Output)
+			out.Status = "ok"
+			if exitError(out.Output) {
+				out.Status = "error"
+			}
+		}
+	}
+	return out, found
 }
 
 // execCall matches the opening of a tools.exec_command({...}) call inside
