@@ -270,6 +270,9 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 		"text(await tools.exec_command({cmd:`go test ${pkg}`}));",
 		`text(await tools.exec_command({cmd:"git status", ...opts}));`,
 		`text(await tools.exec_command({cmd:'git status', re:/}/, cmd:'go test ./...'}));`,
+		`text(await tools.write_stdin({session_id:56642,chars:"",yield_time_ms:1000,max_output_tokens:3000}));`,
+		`const r=await tools.view_image({path:"/tmp/shot.png"});image(r.image_url);`,
+		"const q=s=>\"'\"+s+\"'\";\ntext(await tools.exec_command({cmd:\"herdr agent prompt w \"+q(msg)}));\ntext(await tools.exec_command({cmd:\"go test ./...\"}));",
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
 		if tu.Name != "exec" || tu.Input != src || tu.Detail != "" {
