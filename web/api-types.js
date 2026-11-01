@@ -146,4 +146,92 @@
  * @property {string} text
  */
 
+/**
+ * One row of /_claudit/api/sessions — a session in the filter window.
+ * Mirrors internal/agentflow/index.go (agentflow.SessionIndexRow).
+ * @typedef {Object} SessionIndexRow
+ * @property {string} session_id
+ * @property {string} family_key        exact-match group key; "(no prompt)" when the session has no textual prompt
+ * @property {string} remainder         what the key blanked, joined by " · " (e.g. a bead id); may be ""
+ * @property {string} title             first line of the first real prompt, ≤200 runes
+ * @property {string} outcome           first line of the main agent's last message, ≤200 runes
+ * @property {string} project
+ * @property {string} provider          "claude-code" | "codex"
+ * @property {string} model             the model that ran the most turns
+ * @property {number} cost_usd
+ * @property {number} duration_ms
+ * @property {number} turns
+ * @property {number} commands          tool calls
+ * @property {number} failed            errored tool calls whose exact input never later succeeded
+ * @property {string} last_activity     RFC3339
+ * @property {boolean} active           last activity within the last minute
+ * @property {string} started_at        RFC3339
+ */
+
+/**
+ * /_claudit/api/sessions payload, newest last_activity first.
+ * Mirrors internal/agentflow/index.go (agentflow.SessionIndex).
+ * @typedef {Object} SessionIndex
+ * @property {SessionIndexRow[]} sessions
+ */
+
+/**
+ * A tool call in a story step: ToolInvocation plus the split-off Codex exit code.
+ * Mirrors internal/agentflow/story.go (agentflow.StoryTool).
+ * @typedef {ToolInvocation & {exit_code: number|null}} StoryTool
+ */
+
+/**
+ * A story step: every AgentStep field, with StoryTool tools. uuid is the
+ * turn uuid /agents/full?turn= takes.
+ * Mirrors internal/agentflow/story.go (agentflow.StoryStep).
+ * @typedef {Omit<AgentStep, 'tools'> & {tools: StoryTool[]}} StoryStep
+ */
+
+/**
+ * One user prompt of a story and how many main-agent turns it drove.
+ * Mirrors internal/agentflow/story.go (agentflow.StoryPrompt).
+ * @typedef {Object} StoryPrompt
+ * @property {string} uuid              "" marks turns with no resolvable prompt
+ * @property {string} text
+ * @property {string} timestamp         RFC3339
+ * @property {number} turns
+ */
+
+/**
+ * Mirrors internal/agentflow/story.go (agentflow.StoryPageInfo).
+ * @typedef {Object} StoryPageInfo
+ * @property {number} prompt_index
+ * @property {number} turn_offset
+ * @property {number} turn_limit
+ * @property {boolean} has_more
+ */
+
+/**
+ * A sub-agent started within the page's span, with its own steps.
+ * Mirrors internal/agentflow/story.go (agentflow.StoryChild).
+ * @typedef {Object} StoryChild
+ * @property {string} kind              "subagent" | "main" (a further rollout sharing the session id)
+ * @property {string} agent_type
+ * @property {string} description
+ * @property {string} parent_tool_use_id  "" when the sub-agent's meta does not name it
+ * @property {string} started_at        RFC3339
+ * @property {string} ended_at          RFC3339
+ * @property {number} cost_usd
+ * @property {number} error_count
+ * @property {StoryStep[]} steps
+ */
+
+/**
+ * /_claudit/api/sessions/story payload — one page of one session's story.
+ * Mirrors internal/agentflow/story.go (agentflow.StoryPage).
+ * @typedef {Object} SessionStoryPage
+ * @property {string} session_id
+ * @property {StoryPrompt[]} prompts
+ * @property {StoryPageInfo} page
+ * @property {StoryStep[]} steps
+ * @property {StoryChild[]} children
+ * @property {{replays: number, outside_filter: number}} hidden
+ */
+
 export {};

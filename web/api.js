@@ -13,7 +13,7 @@
 // revalidation on each call; a 304 returns the cached body without
 // re-decoding the JSON payload.
 
-/** @import { AgentGraph, ToolUseDetail, TurnTextDetail } from './api-types.js' */
+/** @import { AgentGraph, SessionIndex, SessionStoryPage, ToolUseDetail, TurnTextDetail } from './api-types.js' */
 
 const apiBase = '/_claudit/api';
 
@@ -78,5 +78,20 @@ export const fetchAgentToolFull = (sessionId, toolId) =>
 export const fetchAgentTurnFull = (sessionId, turnUuid) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&turn=' + encodeURIComponent(turnUuid));
+// fetchSessions pulls the Sessions list's index: one light row per session
+// in the page's filter window, each with its prompt-family key.
+/** @returns {Promise<SessionIndex>} */
+export const fetchSessions = () => getJSON('/sessions');
+// fetchSessionStory pulls one page of a session's story: the turns of user
+// prompt `prompt` (default 0), 200 at a time from turn `offset` (default 0).
+/**
+ * @param {string} sessionId
+ * @param {{prompt?: number, offset?: number}} [page]
+ * @returns {Promise<SessionStoryPage>}
+ */
+export const fetchSessionStory = (sessionId, { prompt = 0, offset = 0 } = {}) =>
+  getJSON('/sessions/story?session=' + encodeURIComponent(sessionId) +
+    '&prompt=' + encodeURIComponent(String(prompt)) +
+    '&offset=' + encodeURIComponent(String(offset)));
 /** @param {string} dim */
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));
