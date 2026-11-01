@@ -144,6 +144,20 @@ planned or declined. Then add one comment on the item whose first line opens
 the operator can no longer withdraw it. A newer `answer:` line for the same
 item replaces the one before it.
 
+An answer on a bead labelled `review-follow-up` is never requeued: that label
+keeps it out of every drain, so reopened it waits forever. Take the answer as
+the ruling of `## Review follow-ups — proposals the lead re-authors`
+(`.djinn/lead/file.md`). When it names a fix, author a fresh bead through
+`/create-bead` from the answer and the follow-up's `**Finding:**` and
+`**Location:**` lines — type bug, priority 2, parent the source bead's parent
+epic, the `from:seat:lead` label, touches listing every file the fix and its
+tests change, notes `Source: re-authored from <id>; the operator's answer: <text>`
+— filed `seat-approved` when the charter's `## Self-approval` names it (a real
+defect in landed work), `proposed` otherwise; then
+`bd close <id> --reason "re-authored as <new-id>"`. When the answer is to do
+nothing, `bd close <id> --reason "won't do: <the operator's answer>"`. Then add
+the signed comment as above; `bd comments add` works on a closed bead.
+
 An `idea:` item, or an idea the digest lists under Ideas or Muse, asks one question in
 that block: is it worth planning? The operator's yes is the first approval, and
 never yours to give. The ops room answers an idea for the operator:
