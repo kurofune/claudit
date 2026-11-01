@@ -142,11 +142,14 @@ func toolErrors(snap *corpus.Snapshot) map[string]bool {
 }
 
 // countCommands counts a session's tool calls, and those that errored and
-// never later succeeded with the identical (name, input). turns are in
+// never later succeeded with the identical (name, whole input). turns are in
 // time order; errored maps a tool_use id with a result to whether it
 // errored.
 func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, failed int) {
-	type call struct{ name, input string }
+	type call struct {
+		name, input string
+		key         uint64
+	}
 	var pending map[call]int
 	for _, t := range turns {
 		for _, u := range t.ToolUses {
@@ -158,7 +161,7 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, fail
 			if !ok {
 				continue
 			}
-			k := call{u.Name, u.Input}
+			k := call{u.Name, u.Input, u.InputKey}
 			if isErr {
 				if pending == nil {
 					pending = map[call]int{}

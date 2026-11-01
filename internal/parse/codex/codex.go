@@ -348,11 +348,20 @@ func convertUsage(u rawUsage) parse.Usage {
 // pattern; any other call keeps its raw name and input.
 func toolUse(it rawItem) parse.ToolUse {
 	input, cmd := toolInput(it)
-	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: parse.ToolInputSnippet(input)}
+	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: parse.ToolInputSnippet(input), InputKey: parse.ToolInputKey(rawToolInput(it))}
 	if cmd != "" {
 		tu.Detail = parse.BashPattern(cmd)
 	}
 	return tu
+}
+
+// rawToolInput is a call's input as the rollout recorded it, before any
+// command is extracted from it.
+func rawToolInput(it rawItem) string {
+	if it.Type == "custom_tool_call" {
+		return it.Input
+	}
+	return it.Arguments
 }
 
 // toolName is Bash for a call that runs the shell command cmd, else the

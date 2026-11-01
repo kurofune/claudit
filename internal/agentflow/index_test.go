@@ -3,6 +3,7 @@ package agentflow
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -197,5 +198,61 @@ func TestBuildSessionIndex_EmptySnapshotIsEmptyList(t *testing.T) {
 	b, _ := json.Marshal(BuildSessionIndex(&corpus.Snapshot{}, prices, aggregate.Filter{}, IndexOptions{}))
 	if string(b) != `{"sessions":[]}` {
 		t.Errorf("empty index = %s, want {\"sessions\":[]}", b)
+	}
+}
+
+// TestBuildSessionIndex_FailedComparesWholeParsedInput: parsed Bash and
+// Edit calls compare by their whole input, not the capped snippet or the
+// file path ToolUse.Input keeps. Two long commands sharing the retained
+// prefix, or two different edits to one file, do not resolve one another;
+// an identical retry does.
+func TestBuildSessionIndex_FailedComparesWholeParsedInput(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	prefix := strings.Repeat("x", 2500)
+	bash := func(cmd string) string {
+		b, _ := json.Marshal(map[string]string{"command": cmd})
+		return string(b)
+	}
+	edit := func(old, new string) string {
+		b, _ := json.Marshal(map[string]string{"file_path": "/p/x/main.go", "old_string": old, "new_string": new})
+		return string(b)
+	}
+	cases := []struct {
+		name         string
+		first, retry string
+		tool         string
+		wantFailed   int
+	}{
+		{"long commands sharing the snippet", bash("echo " + prefix + " A"), bash("echo " + prefix + " B"), "Bash", 1},
+		{"identical long command", bash("echo " + prefix + " A"), bash("echo " + prefix + " A"), "Bash", 0},
+		{"different edits to one file", edit("a", "b"), edit("c", "d"), "Edit", 1},
+		{"identical edit", edit("a", "b"), edit("a", "b"), "Edit", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "/root/-p-x/s1.jsonl"
+			call := func(n int, id, input string) string {
+				return `{"type":"assistant","sessionId":"s1","uuid":"a` + strconv.Itoa(n) + `","timestamp":"2026-05-01T12:0` + strconv.Itoa(n) + `:00Z","message":{"id":"m` + strconv.Itoa(n) + `","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1},"content":[{"type":"tool_use","id":"` + id + `","name":"` + tc.tool + `","input":` + input + `}]}}`
+			}
+			result := func(n int, id string, isErr bool) string {
+				return `{"type":"user","sessionId":"s1","uuid":"r` + strconv.Itoa(n) + `","timestamp":"2026-05-01T12:0` + strconv.Itoa(n) + `:30Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + id + `","is_error":` + strconv.FormatBool(isErr) + `,"content":"out"}]}}`
+			}
+			lines := strings.Join([]string{call(1, "t1", tc.first), result(1, "t1", true), call(2, "t2", tc.retry), result(2, "t2", false)}, "\n")
+			res, err := parse.ParseFile(strings.NewReader(lines), src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Turns) != 2 || len(res.ToolResults) != 2 {
+				t.Fatalf("parsed %d turns, %d results; want 2, 2", len(res.Turns), len(res.ToolResults))
+			}
+			if a, b := res.Turns[0].ToolUses[0].Input, res.Turns[1].ToolUses[0].Input; tc.wantFailed == 1 && a != b {
+				t.Fatalf("fixture does not exercise the snippet: inputs %q and %q differ", a, b)
+			}
+			snap := &corpus.Snapshot{Turns: res.Turns, ToolResults: res.ToolResults}
+			idx := BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{})
+			if got := findRow(t, idx, "s1").Failed; got != tc.wantFailed {
+				t.Errorf("failed = %d, want %d", got, tc.wantFailed)
+			}
+		})
 	}
 }

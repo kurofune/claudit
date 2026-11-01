@@ -1,6 +1,9 @@
 package parse
 
-import "time"
+import (
+	"hash/fnv"
+	"time"
+)
 
 // BashPattern collapses a shell command to the drill-down key a Bash
 // ToolUse's Detail carries ("git status", "go test"), so another provider's
@@ -10,6 +13,17 @@ func BashPattern(cmd string) string { return bashPattern(cmd) }
 // ToolInputSnippet bounds a tool call's input to the snippet ToolUse.Input
 // retains.
 func ToolInputSnippet(s string) string { return truncateRunes(s, toolInputMaxChars) }
+
+// ToolInputKey is the identity of a tool call's whole raw input: an FNV-1a
+// hash of its bytes, or 0 for an empty input.
+func ToolInputKey[T ~string | ~[]byte](raw T) uint64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	h.Write([]byte(raw))
+	return h.Sum64()
+}
 
 // PromptSnippet bounds a user prompt's text to the snippet UserMessage.Text
 // retains.

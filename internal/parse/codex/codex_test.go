@@ -121,6 +121,10 @@ func TestParseRollout_ToolCalls(t *testing.T) {
 		{ID: "call_EzybDGOhTxzwKLutaKTDUNmf", Name: "list_agents", Input: "{}"},
 	}
 	for i, w := range wantUses {
+		if uses[i].InputKey == 0 {
+			t.Errorf("tool use %d has no InputKey", i)
+		}
+		uses[i].InputKey = 0
 		if uses[i] != w {
 			t.Errorf("tool use %d = %+v, want %+v", i, uses[i], w)
 		}
@@ -166,7 +170,8 @@ func TestParseRollout_ExecCmdAfterOtherProperties(t *testing.T) {
 	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
 		t.Fatalf("turns = %+v", res.Turns)
 	}
-	want := parse.ToolUse{ID: "c1", Name: "Bash", Input: "go test ./...", Detail: "go test"}
+	want := parse.ToolUse{ID: "c1", Name: "Bash", Input: "go test ./...", Detail: "go test",
+		InputKey: parse.ToolInputKey(`text(await tools.exec_command({workdir:"/home/u/proj",cmd:"go test ./..."}));`)}
 	if got := res.Turns[0].ToolUses[0]; got != want {
 		t.Errorf("tool use = %+v, want %+v", got, want)
 	}
@@ -328,7 +333,7 @@ func TestParseRollout_UnresolvedExecKeepsRawName(t *testing.T) {
 	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
 		t.Fatalf("turns = %+v", res.Turns)
 	}
-	want := parse.ToolUse{ID: "c1", Name: "exec", Input: src}
+	want := parse.ToolUse{ID: "c1", Name: "exec", Input: src, InputKey: parse.ToolInputKey(src)}
 	if got := res.Turns[0].ToolUses[0]; got != want {
 		t.Errorf("tool use = %+v, want %+v", got, want)
 	}
@@ -759,5 +764,23 @@ func TestParseRollout_CompactionItemIsNoBoundary(t *testing.T) {
 	}
 	if len(res.CompactBoundaries) != 0 {
 		t.Errorf("CompactBoundaries = %+v, want none", res.CompactBoundaries)
+	}
+}
+
+// TestToolUse_InputKeyIsTheRawArguments: two exec_command calls running the
+// same command in different workdirs share Input (the command) but not
+// InputKey, which identifies the whole recorded arguments.
+func TestToolUse_InputKeyIsTheRawArguments(t *testing.T) {
+	a := toolUse(rawItem{Type: "function_call", Name: "exec_command", Arguments: `{"cmd":"go test ./...","workdir":"/a"}`})
+	b := toolUse(rawItem{Type: "function_call", Name: "exec_command", Arguments: `{"cmd":"go test ./...","workdir":"/b"}`})
+	same := toolUse(rawItem{Type: "function_call", Name: "exec_command", Arguments: `{"cmd":"go test ./...","workdir":"/a"}`})
+	if a.Input != b.Input {
+		t.Fatalf("Input %q vs %q: want the shared command", a.Input, b.Input)
+	}
+	if a.InputKey == 0 || a.InputKey == b.InputKey {
+		t.Errorf("InputKey %d vs %d: want distinct non-zero keys", a.InputKey, b.InputKey)
+	}
+	if a.InputKey != same.InputKey {
+		t.Errorf("identical arguments keyed %d and %d", a.InputKey, same.InputKey)
 	}
 }

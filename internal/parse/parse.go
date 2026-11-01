@@ -56,6 +56,10 @@ type ToolUse struct {
 	// Agent/Task subagent, etc. (see extractToolInput). Empty for tools
 	// whose Detail already says everything useful. Capped to bound payload.
 	Input string
+	// InputKey identifies the call's whole input (ToolInputKey of the raw
+	// input), so two calls compare by exact input although Input is capped
+	// and reduces a file tool to its path. Zero when the call had no input.
+	InputKey uint64
 }
 
 // ToolResult is one tool_result block from a user turn — the outcome of a
@@ -642,6 +646,7 @@ func extractAssistantContent(content json.RawMessage) (thinking, text string, to
 			}
 			tu.Detail = extractDetail(e.Name, e.Input)
 			tu.Input = extractToolInput(e.Name, e.Input)
+			tu.InputKey = ToolInputKey(e.Input)
 			toolUses = append(toolUses, tu)
 		}
 	}
