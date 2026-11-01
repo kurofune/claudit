@@ -283,28 +283,130 @@ func toolUse(it rawItem) parse.ToolUse {
 	return tu
 }
 
-// execCall matches the start of a tools.exec_command({cmd: ...}) call inside
-// the JavaScript an exec custom tool runs, up to the cmd value.
-var execCall = regexp.MustCompile(`exec_command\(\s*\{\s*["']?cmd["']?\s*:\s*`)
+// execCall matches the opening of a tools.exec_command({...}) call inside
+// the JavaScript an exec custom tool runs, through the object's brace.
+var execCall = regexp.MustCompile(`exec_command\(\s*\{`)
 
 // execCommands returns the literal cmd string of every exec_command call in
-// an exec tool's JavaScript source. A cmd that is not a string literal (a
-// variable, an expression) is skipped.
+// an exec tool's JavaScript source, wherever cmd sits among the object's
+// properties. A cmd that is not a string literal (a variable, an
+// expression) is skipped.
 func execCommands(src string) []string {
 	var out []string
 	for _, loc := range execCall.FindAllStringIndex(src, -1) {
-		if s, ok := jsString(src[loc[1]:]); ok {
+		if s, ok := objectCmd(src[loc[1]:]); ok {
 			out = append(out, s)
 		}
 	}
 	return out
 }
 
+// objectCmd walks the top-level properties of the object literal whose body
+// starts at s and returns its cmd property when that is a string literal.
+// Any shape it cannot follow (a spread, a computed key) yields no command.
+func objectCmd(s string) (string, bool) {
+	i := 0
+	for {
+		i = skipSpace(s, i)
+		if i >= len(s) || s[i] == '}' {
+			return "", false
+		}
+		var key string
+		if c := s[i]; c == '"' || c == '\'' || c == '`' {
+			k, n, ok := jsString(s[i:])
+			if !ok {
+				return "", false
+			}
+			key, i = k, i+n
+		} else {
+			j := i
+			for j < len(s) && isIdentByte(s[j]) {
+				j++
+			}
+			if j == i {
+				return "", false
+			}
+			key, i = s[i:j], j
+		}
+		i = skipSpace(s, i)
+		if i >= len(s) {
+			return "", false
+		}
+		switch s[i] {
+		case ',':
+			i++
+			continue
+		case '}':
+			return "", false
+		case ':':
+		default:
+			return "", false
+		}
+		i = skipSpace(s, i+1)
+		if key == "cmd" {
+			v, _, ok := jsString(s[i:])
+			return v, ok
+		}
+		n, ok := skipValue(s[i:])
+		if !ok {
+			return "", false
+		}
+		i = skipSpace(s, i+n)
+		if i >= len(s) || s[i] != ',' {
+			return "", false
+		}
+		i++
+	}
+}
+
+// skipValue returns the length of the expression at the start of s: up to
+// the comma or closing brace that ends it at the top level, stepping over
+// string literals and nested brackets.
+func skipValue(s string) (int, bool) {
+	depth := 0
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '"', '\'', '`':
+			_, n, ok := jsString(s[i:])
+			if !ok {
+				return 0, false
+			}
+			i += n
+			continue
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			if depth == 0 {
+				return i, true
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				return i, true
+			}
+		}
+		i++
+	}
+	return 0, false
+}
+
+func skipSpace(s string, i int) int {
+	for i < len(s) && strings.ContainsRune(" \t\r\n", rune(s[i])) {
+		i++
+	}
+	return i
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
 // jsString decodes the JavaScript string literal at the start of s — single,
-// double or backtick quoted — and reports whether one was there.
-func jsString(s string) (string, bool) {
+// double or backtick quoted — returning its value and the bytes it spans,
+// and reports whether one was there.
+func jsString(s string) (string, int, bool) {
 	if s == "" || !strings.ContainsRune(`"'`+"`", rune(s[0])) {
-		return "", false
+		return "", 0, false
 	}
 	q := s[0]
 	var b strings.Builder
@@ -312,14 +414,14 @@ func jsString(s string) (string, bool) {
 		c := s[i]
 		switch {
 		case c == q:
-			return b.String(), true
+			return b.String(), i + 1, true
 		case c != '\\':
 			b.WriteByte(c)
 			continue
 		}
 		i++
 		if i >= len(s) {
-			return "", false
+			return "", 0, false
 		}
 		switch e := s[i]; e {
 		case 'n':
@@ -342,11 +444,11 @@ func jsString(s string) (string, bool) {
 				n = 2
 			}
 			if i+n >= len(s) {
-				return "", false
+				return "", 0, false
 			}
 			v, err := strconv.ParseUint(s[i+1:i+1+n], 16, 32)
 			if err != nil {
-				return "", false
+				return "", 0, false
 			}
 			b.WriteRune(rune(v))
 			i += n
@@ -356,7 +458,7 @@ func jsString(s string) (string, bool) {
 			b.WriteByte(e)
 		}
 	}
-	return "", false
+	return "", 0, false
 }
 
 // outputText flattens a tool output — a bare string, or an array of

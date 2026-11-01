@@ -154,6 +154,22 @@ func TestParseRollout_ToolCalls(t *testing.T) {
 	}
 }
 
+func TestParseRollout_ExecCmdAfterOtherProperties(t *testing.T) {
+	line := `{"timestamp":"2026-10-31T23:53:17.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"exec","input":"text(await tools.exec_command({workdir:\"/home/u/proj\",cmd:\"go test ./...\"}));"}}
+{"timestamp":"2026-10-31T23:53:18.000Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":1}}}`
+	res, err := ParseFile(strings.NewReader(line+"\n"), "x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
+		t.Fatalf("turns = %+v", res.Turns)
+	}
+	want := parse.ToolUse{ID: "c1", Name: "exec", Input: "go test ./...", Detail: "go test"}
+	if got := res.Turns[0].ToolUses[0]; got != want {
+		t.Errorf("tool use = %+v, want %+v", got, want)
+	}
+}
+
 func TestParseRollout_ToolCallsLongOutputIsSnippet(t *testing.T) {
 	long := strings.Repeat("x", 10_000)
 	line := `{"timestamp":"2026-10-31T23:53:19.294Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Exit code: 0\nWall time: 1 seconds\nOutput:\n` + long + `"}}`
@@ -203,6 +219,10 @@ func TestExecCommands(t *testing.T) {
 		{"text(await tools.exec_command({cmd:`go test ./...`}));", []string{"go test ./..."}},
 		{`await Promise.all([tools.exec_command({ cmd: "a" }), tools.exec_command({"cmd":"b A"})]);`, []string{"a", "b A"}},
 		{`const c = "x"; tools.exec_command({cmd:c});`, nil},
+		{`tools.exec_command({workdir:"/home/u/proj",cmd:"go test ./..."})`, []string{"go test ./..."}},
+		{`tools.exec_command({ "workdir": '/a,b}', yield_time_ms: 1000, env: {cmd: "no"}, args: [1, {x: "]"}], cmd: ` + "`make lint`" + ` })`, []string{"make lint"}},
+		{`tools.exec_command({workdir:"/w"})`, nil},
+		{`tools.exec_command(opts)`, nil},
 	}
 	for _, c := range cases {
 		got := execCommands(c.src)
