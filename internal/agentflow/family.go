@@ -72,15 +72,31 @@ func family(prompt string) (Family, bool) {
 		fam.Remainder = strings.Join(parts, " · ")
 		return fam, true
 	}
-	if strings.Contains(body, "-") {
-		for _, tok := range promptToken.FindAllString(body, -1) {
-			if core := trimTokenPunct(tok); isBeadID(core) {
-				fam.Remainder = core
-				break
-			}
+	fam.Remainder = namedBeadID(body)
+	return fam, true
+}
+
+// beadIDLine is the "ID: <bead>" line a bead block opens with.
+var beadIDLine = regexp.MustCompile(`(?m)^ID: (\S+)\s*$`)
+
+// namedBeadID is the bead a prompt body names when its key line names none:
+// the id on its first "ID:" line, else its first bead id whose suffix
+// carries a digit. Hyphenated words that merely look like ids
+// ("write-heavy") are not taken from running text.
+func namedBeadID(body string) string {
+	if !strings.Contains(body, "-") {
+		return ""
+	}
+	if m := beadIDLine.FindStringSubmatch(body); m != nil && isBeadID(m[1]) {
+		return m[1]
+	}
+	for _, tok := range promptToken.FindAllString(body, -1) {
+		core := trimTokenPunct(tok)
+		if m := beadID.FindStringSubmatch(core); m != nil && strings.ContainsAny(m[2], "0123456789") {
+			return core
 		}
 	}
-	return fam, true
+	return ""
 }
 
 // FamilyKey is the prompt-family key the Sessions list groups on by exact
@@ -94,7 +110,7 @@ func FamilyKey(prompt string) string {
 
 // Remainder is what FamilyKey blanked from the key line, joined by " · ",
 // so a row can show what tells two prompts of one family apart. When the
-// key line blanked nothing, it is the first bead id the prompt names.
+// key line blanked nothing, it is the bead the prompt names (namedBeadID).
 func Remainder(prompt string) string {
 	f, _ := family(prompt)
 	return f.Remainder
