@@ -3537,7 +3537,8 @@
                     background: var(--surface); border: 1px solid var(--border);
                     border-radius: var(--r-lg); padding: var(--s-4); box-shadow: var(--shadow-sm); }
   .sh-ident { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
-  .sh-title { margin: 0; font-size: var(--t-5); color: var(--ink); overflow-wrap: anywhere; }
+  .sh-title { display: block; margin: 0; padding: 0; border: none; font-size: var(--t-5); color: var(--ink);
+              overflow-wrap: anywhere; }
   .sh-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3);
              font-size: var(--t-2); color: var(--muted); }
   .sh-meta .sh-provider { margin-left: 0; }

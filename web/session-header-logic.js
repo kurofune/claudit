@@ -134,7 +134,7 @@ export function headerNumbers(story) {
   const cachePct = prompt > 0 ? Math.round(100 * read / prompt) : 0;
   const failures = unresolvedFailures(story, turns);
   const names = [...new Set(failures.map(f => commandOf(f.tool)).filter(Boolean))];
-  const shown = names.slice(0, 2).map(c => clip(c, 60));
+  const shown = names.slice(0, 2).map(c => clip(c, 40));
   const more = names.length > 2 ? ` +${names.length - 2} more` : '';
   return {
     costUSD: cost,
