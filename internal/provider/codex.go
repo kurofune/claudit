@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"path/filepath"
@@ -35,12 +36,24 @@ func (c *Codex) ParseFile(r io.Reader, path string) (parse.Result, error) {
 
 // Walk invokes fn for every rollout-*.jsonl three date directories below the
 // root. When earliest is non-zero, files whose mtime predates it are
-// skipped. Per-entry walk errors are tolerated, and a missing root yields
-// nothing.
+// skipped. A missing root, or an entry that vanished mid-walk, yields
+// nothing for that entry. Any other failure (an unreadable date directory,
+// a failed stat) does not stop the walk, but Walk returns the first such
+// error so callers know its enumeration may be incomplete.
 func (c *Codex) Walk(earliest time.Time, fn func(path string, mod time.Time, size int64)) error {
 	filter := !earliest.IsZero()
-	return filepath.WalkDir(c.root, func(path string, d fs.DirEntry, err error) error {
+	var walkErr error
+	record := func(err error) {
+		if walkErr == nil && !errors.Is(err, fs.ErrNotExist) {
+			walkErr = err
+		}
+	}
+	err := filepath.WalkDir(c.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			record(err)
+			if d != nil && d.IsDir() && path != c.root {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		rel, rerr := filepath.Rel(c.root, path)
@@ -60,6 +73,7 @@ func (c *Codex) Walk(earliest time.Time, fn func(path string, mod time.Time, siz
 		}
 		info, err := d.Info()
 		if err != nil {
+			record(err)
 			return nil
 		}
 		if filter && info.ModTime().Before(earliest) {
@@ -68,6 +82,10 @@ func (c *Codex) Walk(earliest time.Time, fn func(path string, mod time.Time, siz
 		fn(path, info.ModTime(), info.Size())
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return walkErr
 }
 
 // datePartWidths are the widths of the YYYY, MM and DD directory names.

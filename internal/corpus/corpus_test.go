@@ -542,3 +542,44 @@ func TestSnapshotsCarryRateLimitSamples(t *testing.T) {
 		t.Errorf("LoadConcurrent RateLimitSamples = %+v, want the one sample", got)
 	}
 }
+
+func TestCache_UnreadableCodexDateDirKeepsCachedSessions(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("..", "parse", "codex", "testdata", "basic.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	day := filepath.Join(root, "2026", "10", "25")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(day, "rollout-2026-10-25T00-52-01-01a1708b-04a3-75a1-a07c-92bbb16be66f.jsonl"), fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(provider.NewCodex(root))
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	loaded := c.Snapshot()
+	if loaded.FileCount != 1 || len(loaded.Turns) == 0 {
+		t.Fatalf("initial load: files=%d turns=%d, want one file with turns", loaded.FileCount, len(loaded.Turns))
+	}
+
+	if err := os.Chmod(day, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(day, 0o755) })
+	if _, err := os.ReadDir(day); err == nil {
+		t.Skip("directory permissions not enforced here (Windows or root); cannot simulate an unreadable date directory")
+	}
+
+	changed, err := c.Refresh()
+	if err == nil || changed {
+		t.Errorf("Refresh over an unreadable date directory: changed=%v err=%v, want unchanged with an error", changed, err)
+	}
+	snap := c.Snapshot()
+	if snap.FileCount != loaded.FileCount || len(snap.Turns) != len(loaded.Turns) || snap.Generation != loaded.Generation {
+		t.Errorf("after failed walk: files=%d turns=%d gen=%d, want %d/%d/%d kept",
+			snap.FileCount, len(snap.Turns), snap.Generation, loaded.FileCount, len(loaded.Turns), loaded.Generation)
+	}
+}
