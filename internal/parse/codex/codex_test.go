@@ -3,6 +3,7 @@ package codex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -391,5 +392,104 @@ func TestParseRollout_AssistantText(t *testing.T) {
 	}
 	if len(r.Turns) != 2 || r.Turns[0].Text != "First.\nSecond." || r.Turns[1].Text != "Third." {
 		t.Errorf("turn texts = %q / %q, want %q / %q", r.Turns[0].Text, r.Turns[1].Text, "First.\nSecond.", "Third.")
+	}
+}
+
+func TestParseRollout_LegacyTokenCount(t *testing.T) {
+	res := parseFixture(t, "legacy.jsonl", "")
+	const thread = "019e77f8-3d08-7371-bc87-6e200272fbeb"
+	// One turn per non-null last_token_usage reading that differs from the
+	// one before it: line 8 has info null, line 44 repeats line 43's usage
+	// with only rate_limits changed.
+	want := []struct {
+		line  int
+		ts    string
+		usage parse.Usage
+		calls []string
+	}{
+		{15, "2026-05-30T08:20:43.294Z", parse.Usage{InputTokens: 11746, CacheReadTokens: 7552, OutputTokens: 330, ReasoningOutputTokens: 119},
+			[]string{"call_sAX04vI4aehE5s7dZh9nbaDf", "call_EzybDGOhTxzwKLutaKTDUNmf", "call_IkGiwSN9X8YsMeuhSmha9OEx"}},
+		{23, "2026-05-30T08:20:53.704Z", parse.Usage{InputTokens: 1785, CacheReadTokens: 18816, OutputTokens: 516, ReasoningOutputTokens: 175},
+			[]string{"call_Wic1iE38l6GgDh8Z5PN4aNXV", "call_5F0d6mH3GhpKKzK8PpijbmMB", "call_16IsbDxbVcL3Og6rOZ5qHmF4"}},
+		{33, "2026-05-30T08:21:01.325Z", parse.Usage{InputTokens: 4941, CacheReadTokens: 20352, CacheCreate5mTokens: 256, OutputTokens: 333},
+			[]string{"call_EJmK3v6aRddSpks8ymldkJEH", "call_quMHNj7fJWUQd39kT6P43sAy", "call_Xt5EgtbWHdKdomRoKt9Ha4KR", "call_ojszUSj5ugEsIbnpDB7mA6lt"}},
+		{43, "2026-05-30T08:21:08.919Z", parse.Usage{InputTokens: 4806, CacheReadTokens: 24960, OutputTokens: 314, ReasoningOutputTokens: 16},
+			[]string{"call_oMk3oAK7KEaknM7DaI6kzMBe", "call_9PVr81TywJX5N7MYPa3zanjZ", "call_m0sEJxWoJ46n3wrtTskA73iD", "call_dCLA1BURLp2QAfgvNFJT7aFB"}},
+		{56, "2026-05-30T08:21:51.132Z", parse.Usage{InputTokens: 41443, CacheReadTokens: 3456, OutputTokens: 397, ReasoningOutputTokens: 19},
+			[]string{"call_PbY6ZoXSuB1f9yKt7aOVOzCY", "call_dWLFfw1QYhQ66JHnnSsKXauH", "call_6zedGmiNOff0nlBudJIv1VXV", "call_cAoR0nIguWXKM6y02yVioKAA"}},
+		{64, "2026-05-30T08:22:51.170Z", parse.Usage{InputTokens: 22518, CacheReadTokens: 44416, OutputTokens: 2357, ReasoningOutputTokens: 1034}, nil},
+	}
+	if len(res.Turns) != len(want) {
+		t.Fatalf("turns = %d, want %d: %+v", len(res.Turns), len(want), res.Turns)
+	}
+	for i, w := range want {
+		tr := res.Turns[i]
+		if tr.Provider != "codex" {
+			t.Errorf("turn %d Provider = %q, want codex", i, tr.Provider)
+		}
+		if tr.Model != "gpt-5.5" {
+			t.Errorf("turn %d Model = %q, want gpt-5.5", i, tr.Model)
+		}
+		if tr.SessionID != thread {
+			t.Errorf("turn %d SessionID = %q, want %s", i, tr.SessionID, thread)
+		}
+		if ts := mustTime(t, w.ts); !tr.Timestamp.Equal(ts) || !tr.EndTimestamp.Equal(ts) {
+			t.Errorf("turn %d Timestamp = %v / End %v, want %v", i, tr.Timestamp, tr.EndTimestamp, ts)
+		}
+		id := thread + ":" + strconv.Itoa(w.line)
+		if tr.MessageID != id || tr.UUID != id {
+			t.Errorf("turn %d MessageID/UUID = %q/%q, want %q", i, tr.MessageID, tr.UUID, id)
+		}
+		u, wu := tr.Usage, w.usage
+		if u.InputTokens != wu.InputTokens {
+			t.Errorf("turn %d InputTokens = %d, want %d", i, u.InputTokens, wu.InputTokens)
+		}
+		if u.CacheReadTokens != wu.CacheReadTokens {
+			t.Errorf("turn %d CacheReadTokens = %d, want %d", i, u.CacheReadTokens, wu.CacheReadTokens)
+		}
+		if u.CacheCreate5mTokens != wu.CacheCreate5mTokens {
+			t.Errorf("turn %d CacheCreate5mTokens = %d, want %d", i, u.CacheCreate5mTokens, wu.CacheCreate5mTokens)
+		}
+		if u.OutputTokens != wu.OutputTokens {
+			t.Errorf("turn %d OutputTokens = %d, want %d", i, u.OutputTokens, wu.OutputTokens)
+		}
+		if u.ReasoningOutputTokens != wu.ReasoningOutputTokens {
+			t.Errorf("turn %d ReasoningOutputTokens = %d, want %d", i, u.ReasoningOutputTokens, wu.ReasoningOutputTokens)
+		}
+		if u != wu {
+			t.Errorf("turn %d Usage = %+v, want %+v", i, u, wu)
+		}
+		var got []string
+		for _, tu := range tr.ToolUses {
+			got = append(got, tu.ID)
+		}
+		if strings.Join(got, ",") != strings.Join(w.calls, ",") {
+			t.Errorf("turn %d tool uses = %v, want %v", i, got, w.calls)
+		}
+	}
+	if res.Turns[0].ToolUses[0].Detail != "pwd" {
+		t.Errorf("first tool use Detail = %q, want pwd", res.Turns[0].ToolUses[0].Detail)
+	}
+
+	// The repeated reading still yields its own rate-limit sample.
+	if len(res.RateLimitSamples) != 8 {
+		t.Fatalf("rate-limit samples = %d, want 8 (one per token_count)", len(res.RateLimitSamples))
+	}
+	s43, s44 := res.RateLimitSamples[4], res.RateLimitSamples[5]
+	if !s43.Timestamp.Equal(mustTime(t, "2026-05-30T08:21:08.919Z")) || s43.UsedPercent != 10 {
+		t.Errorf("sample for line 43 = %+v, want 10%% at 08:21:08.919", s43)
+	}
+	if !s44.Timestamp.Equal(mustTime(t, "2026-05-30T08:21:08.925Z")) || s44.UsedPercent != 11 {
+		t.Errorf("sample for line 44 = %+v, want 11%% at 08:21:08.925", s44)
+	}
+	if res.Malformed != 0 {
+		t.Errorf("Malformed = %d, want 0", res.Malformed)
+	}
+
+	again := parseFixture(t, "legacy.jsonl", "")
+	for i := range res.Turns {
+		if a, b := res.Turns[i], again.Turns[i]; a.MessageID != b.MessageID || a.UUID != b.UUID {
+			t.Errorf("turn %d ids differ across parses: %q/%q vs %q/%q", i, a.MessageID, a.UUID, b.MessageID, b.UUID)
+		}
 	}
 }

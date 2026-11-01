@@ -5,8 +5,9 @@
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
 // model response — one Turn), the response_item assistant messages, tool
-// calls and their outputs, and event_msg token_count (plan-usage readings).
-// Every other record type is skipped.
+// calls and their outputs, and event_msg token_count (plan-usage readings,
+// and the per-response usage of rollouts written before token_usage_record
+// existed). Every other record type is skipped.
 package codex
 
 import (
@@ -74,6 +75,9 @@ type rawItem struct {
 }
 
 type rawEvent struct {
+	Info *struct {
+		LastTokenUsage *rawUsage `json:"last_token_usage"`
+	} `json:"info"`
 	RateLimits *struct {
 		Primary *struct {
 			UsedPercent   float64 `json:"used_percent"`
@@ -84,22 +88,66 @@ type rawEvent struct {
 	} `json:"rate_limits"`
 }
 
+// response gathers the tool calls and assistant text written before the
+// usage reading that closes a model response.
+type response struct {
+	tools []parse.ToolUse
+	text  string
+}
+
+// turn closes the gathered response into a Turn and starts the next one.
+func (rsp *response) turn(id string, ts time.Time, model, cwd string, u rawUsage, path string) parse.Turn {
+	t := parse.Turn{
+		Provider:     parse.ProviderCodex,
+		MessageID:    id,
+		UUID:         id,
+		Timestamp:    ts,
+		EndTimestamp: ts,
+		CWD:          cwd,
+		Model:        model,
+		Usage:        convertUsage(u),
+		ToolUses:     rsp.tools,
+		Text:         rsp.text,
+		SourceFile:   path,
+	}
+	*rsp = response{}
+	return t
+}
+
+// legacyTurn is a Turn read from an event_msg token_count's last_token_usage.
+// Its id needs the thread id, which session_meta may not have supplied yet,
+// so the token_count's line number is kept until the file ends.
+type legacyTurn struct {
+	line int
+	turn parse.Turn
+}
+
 // ParseFile streams one rollout. path is recorded on each Turn and names the
 // thread: a subagent rollout's SessionID is the uuid its file name carries.
+//
+// Turns come from token_usage_record. A rollout written before that record
+// existed prices from each token_count's last_token_usage instead; the two
+// never mix within one file, since a newer rollout carries both for the
+// same responses.
 func ParseFile(r io.Reader, path string) (parse.Result, error) {
 	var (
 		res     parse.Result
 		meta    rawSessionMeta
 		model   string
 		turnCWD string
-		pending []parse.ToolUse
-		text    string
+		// cur gathers toward the next token_usage_record, old toward the
+		// next token_count reading.
+		cur, old   response
+		legacy     []legacyTurn
+		lastUsage  *rawUsage
+		lineNumber int
 	)
 	sc := bufio.NewScanner(r)
 	// session_meta carries the full base instructions and tool outputs can
 	// run to megabytes, so lines routinely exceed bufio's 64 KB default.
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	for sc.Scan() {
+		lineNumber++
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
@@ -128,22 +176,9 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				res.Malformed++
 				continue
 			}
-			res.Turns = append(res.Turns, parse.Turn{
-				Provider:     parse.ProviderCodex,
-				MessageID:    tu.ResponseID,
-				UUID:         tu.ResponseID,
-				Timestamp:    ts,
-				EndTimestamp: ts,
-				CWD:          turnCWD,
-				Model:        model,
-				Usage:        convertUsage(*tu.Usage),
-				ToolUses:     pending,
-				Text:         text,
-				SourceFile:   path,
-			})
 			// A response's tool calls and messages are written before its
 			// usage record.
-			pending, text = nil, ""
+			res.Turns = append(res.Turns, cur.turn(tu.ResponseID, ts, model, turnCWD, *tu.Usage, path))
 		case "response_item":
 			var kind rawKind
 			if err := json.Unmarshal(rec.Payload, &kind); err != nil {
@@ -151,7 +186,9 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				continue
 			}
 			if kind.Type == "message" {
-				text = parse.JoinTurnText(text, assistantText(rec.Payload))
+				msg := assistantText(rec.Payload)
+				cur.text = parse.JoinTurnText(cur.text, msg)
+				old.text = parse.JoinTurnText(old.text, msg)
 				continue
 			}
 			call := kind.Type == "custom_tool_call" || kind.Type == "function_call"
@@ -165,7 +202,9 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				continue
 			}
 			if call {
-				pending = append(pending, toolUse(it))
+				use := toolUse(it)
+				cur.tools = append(cur.tools, use)
+				old.tools = append(old.tools, use)
 				continue
 			}
 			text := outputText(it.Output)
@@ -184,6 +223,14 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				res.Malformed++
 				continue
 			}
+			// Codex repeats a reading when only rate_limits change; a
+			// repeat is the same response, counted once.
+			if ev.Info != nil && ev.Info.LastTokenUsage != nil {
+				if u := *ev.Info.LastTokenUsage; lastUsage == nil || u != *lastUsage {
+					legacy = append(legacy, legacyTurn{lineNumber, old.turn("", ts, model, turnCWD, u, path)})
+					lastUsage = &u
+				}
+			}
 			if ev.RateLimits == nil || ev.RateLimits.Primary == nil {
 				continue
 			}
@@ -198,10 +245,19 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 			})
 		}
 	}
-	// A message after the last usage record still belongs to that response.
-	if text != "" && len(res.Turns) > 0 {
+	if len(res.Turns) == 0 && len(legacy) > 0 {
+		thread := threadID(path, meta.ID)
+		for _, l := range legacy {
+			l.turn.MessageID = thread + ":" + strconv.Itoa(l.line)
+			l.turn.UUID = l.turn.MessageID
+			res.Turns = append(res.Turns, l.turn)
+		}
+		cur = old
+	}
+	// A message after the last usage reading still belongs to that response.
+	if cur.text != "" && len(res.Turns) > 0 {
 		last := &res.Turns[len(res.Turns)-1]
-		last.Text = parse.JoinTurnText(last.Text, text)
+		last.Text = parse.JoinTurnText(last.Text, cur.text)
 	}
 	stampThread(&res, meta, path)
 	return res, sc.Err()
