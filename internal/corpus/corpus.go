@@ -157,12 +157,9 @@ func (c *Cache) Refresh() (changed bool, err error) {
 		// (mtime, size) is a good-enough change signal for append-only
 		// session logs: any new turn changes both. A pure mtime check
 		// can miss writes inside the FS mtime resolution window; size
-		// guards against that.
-		if ok && old.mtime.Equal(mod) && old.size == size {
-			if old.source != i {
-				old.source = i
-				c.files[path] = old
-			}
+		// guards against that. The owning Source is part of the key: its
+		// parser decides Provider and pricing, so a new owner re-parses.
+		if ok && old.mtime.Equal(mod) && old.size == size && old.source == i {
 			return
 		}
 		toParse = append(toParse, fileJob{src: c.sources[i], path: path})

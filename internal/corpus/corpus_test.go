@@ -583,3 +583,58 @@ func TestCache_UnreadableCodexDateDirKeepsCachedSessions(t *testing.T) {
 			snap.FileCount, len(snap.Turns), snap.Generation, loaded.FileCount, len(loaded.Turns), loaded.Generation)
 	}
 }
+
+// taggedSource is a flakySource whose turns carry its own Provider tag, so
+// two of them yielding one path parse it into distinguishable turns.
+type taggedSource struct {
+	flakySource
+	tag string
+}
+
+func (s *taggedSource) ParseFile(r io.Reader, path string) (parse.Result, error) {
+	res, err := s.flakySource.ParseFile(r, path)
+	for i := range res.Turns {
+		res.Turns[i].Provider = s.tag
+	}
+	return res, err
+}
+
+func TestCache_OwnerChangeReparsesUnchangedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.log")
+	if err := os.WriteFile(path, []byte("shared\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := &taggedSource{flakySource{paths: []string{path}, failAt: -1}, "first"}
+	second := &taggedSource{flakySource{paths: []string{path}, failAt: -1}, "second"}
+	sources := []provider.Source{first, second}
+	c := New(sources...)
+
+	check := func(step, want string, wantChanged bool) {
+		t.Helper()
+		changed, err := c.Refresh()
+		if err != nil || changed != wantChanged {
+			t.Errorf("%s: changed=%v err=%v, want changed=%v", step, changed, err, wantChanged)
+		}
+		snap := c.Snapshot()
+		if len(snap.Turns) != 1 || snap.Turns[0].Provider != want {
+			t.Fatalf("%s: turns=%+v, want one turn from %q", step, snap.Turns, want)
+		}
+		one, err := LoadConcurrent(sources, time.Time{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(one.Turns) != 1 || one.Turns[0].Provider != snap.Turns[0].Provider {
+			t.Errorf("%s: LoadConcurrent turns=%+v disagree with the cache's %+v", step, one.Turns, snap.Turns)
+		}
+	}
+
+	check("initial load", "first", true)
+	check("unchanged refresh", "first", false)
+
+	first.paths = nil
+	check("owner moves to the second source", "second", true)
+	check("unchanged under the new owner", "second", false)
+
+	first.paths = []string{path}
+	check("owner moves back to the first source", "first", true)
+}
