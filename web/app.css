@@ -36,15 +36,6 @@
     margin-right: 0;
   }
 
-  /* Hover lift on hotspots — soft elevation reflects the rounded language. */
-  .hotspot {
-    transition: box-shadow var(--motion-fast) var(--motion-ease),
-                transform var(--motion-fast) var(--motion-ease);
-  }
-  .hotspot:hover {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
-  }
 
   /* Ranked-list color rotation — hbar fills, per-row sparklines, and
      hotspot rank chips all pull from the 5-color palette so adjacent
@@ -1018,54 +1009,104 @@
     border-radius: 3px; font-size: var(--t-2);
   }
 
-  /* Hotspot cards */
-  .hotspots { display: grid; grid-template-columns: 1fr; gap: var(--s-2); }
+  /* Hotspot rows — a ranked list; each row's toggle opens its examples. */
+  .hotspots { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-1); }
   .hotspot {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r-lg); padding: var(--s-2) var(--s-3);
-    /* transition is set by the consolidated rule above (box-shadow + transform);
-       we add border-color here so the hover state animates that too. */
-    transition: box-shadow var(--motion-fast) var(--motion-ease),
-                transform var(--motion-fast) var(--motion-ease),
-                border-color var(--motion-fast) var(--motion-ease);
+    border-radius: var(--r-lg); min-width: 0;
+    transition: border-color var(--motion-fast) var(--motion-ease);
   }
-  .hotspot:hover { border-color: var(--border-strong); }
-
+  .hotspot:hover, .hotspot.is-open { border-color: var(--border-strong); }
   @media (prefers-reduced-motion: reduce) {
     .hotspot { transition: none; }
   }
-  .hotspot-head { display: flex; align-items: baseline; gap: var(--s-3);
-                  flex-wrap: wrap; }
-  .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.5em;
-                   font-variant-numeric: tabular-nums; }
-  .hotspot .h-title { font-weight: 600; flex: 1 1 16em; min-width: 0;
-                      margin: 0; font-size: inherit;
+  .hotspot-row { display: flex; align-items: center; gap: var(--s-2);
+                 padding-right: var(--s-2); min-width: 0; }
+  .hotspot-toggle {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: var(--s-2) var(--s-3);
+    font: inherit; color: inherit; text-align: left;
+    background: transparent; border: 0; margin: 0;
+    padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+    border-radius: var(--r-lg) 0 0 var(--r-lg);
+    cursor: pointer;
+    transition: background-color var(--motion-fast) var(--motion-ease);
+  }
+  .hotspot-toggle:hover { background: var(--surface-2); }
+  .hotspot-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .hotspot-toggle .chev { flex: none; width: 14px; height: 14px; color: var(--muted);
+                          transition: transform var(--motion-fast) var(--motion-ease); }
+  .hotspot-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); color: var(--ink); }
+  @media (prefers-reduced-motion: reduce) {
+    .hotspot-toggle, .hotspot-toggle .chev { transition: none; }
+  }
+  .hotspot .rank { color: var(--muted); font-weight: 600; min-width: 1.75em;
+                   font-variant-numeric: tabular-nums; flex: none; }
+  .hotspot .hotspot-kind { flex: none; white-space: nowrap; min-width: 9.5em; text-align: center; }
+  .hotspot .h-title { font-weight: 600; flex: 1 1 12em; min-width: 0;
                       overflow-wrap: anywhere; color: var(--ink); }
-  .hotspot .h-cost { font-weight: 600; color: var(--hot);
-                     font-variant-numeric: tabular-nums; }
-  .hotspot .h-pct { color: var(--muted); font-size: var(--t-2);
-                    font-variant-numeric: tabular-nums; }
-  .hotspot .h-trend { font-size: var(--t-2); font-weight: 600;
+  .hotspot .h-meta { flex: none; display: flex; align-items: center; gap: var(--s-3); }
+  .hotspot .h-share { display: block; width: 120px; height: 6px; border-radius: 3px;
+                      background: var(--surface-2); overflow: hidden; flex: none; }
+  .hotspot .h-share > span { display: block; height: 100%; border-radius: 3px;
+                             background: var(--hot); }
+  .hotspot .h-pct { color: var(--muted); font-size: var(--t-2); min-width: 3.5em;
+                    text-align: right; font-variant-numeric: tabular-nums; }
+  .hotspot .h-cost { font-weight: 600; color: var(--hot); min-width: 5em; text-align: right;
+                     font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hotspot .h-trend, .hotspot .h-notrend { font-size: var(--t-2); font-weight: 600; min-width: 6em;
                       font-variant-numeric: tabular-nums; white-space: nowrap; }
   .hotspot .h-trend.is-up { color: var(--hot); }
   .hotspot .h-trend.is-down { color: var(--accent-2); }
   .hotspot .h-trend.is-new { color: var(--muted); }
-  .hotspot-examples { margin: var(--s-2) 0; padding-left: var(--s-5, 1.5rem);
-                      display: grid; gap: var(--s-1); font-size: var(--t-2); }
-  .hotspot-example { color: var(--ink-2); min-width: 0; }
-  .hotspot-example .ex-input { font-family: var(--font-mono);
-                               overflow-wrap: anywhere;
-                               display: -webkit-box; -webkit-box-orient: vertical;
-                               -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
-  .hotspot-example .ex-meta { display: block; color: var(--muted);
-                              overflow-wrap: anywhere; }
-  .hotspot-example .ex-file { font-family: var(--font-mono); }
-  .hotspot-example a.ex-session { color: var(--accent); cursor: pointer;
-                                  text-decoration: underline;
-                                  text-underline-offset: 2px; }
-  .hotspot-example a.ex-session:hover { text-decoration-thickness: 2px; }
-  .hotspot-example a.ex-session:focus-visible { outline: 2px solid var(--accent);
-                                                outline-offset: 1px; }
+  .hotspot-row > button.copy { flex: none; white-space: nowrap; min-width: 8.5em; }
+  .hotspot-body { padding: 0 var(--s-3) var(--s-3); min-width: 0; }
+  /* Narrow: the share bar, cost and trend wrap onto their own line under
+     the title, with Copy prompt pinned at that line's right end. */
+  @media (max-width: 640px) {
+    .hotspot-row { position: relative; padding-right: 0; }
+    .hotspot-toggle { flex-wrap: wrap; border-radius: var(--r-lg);
+                      gap: var(--s-1) var(--s-2); padding-right: var(--s-2); }
+    .hotspot .hotspot-kind { min-width: 0; }
+    .hotspot .h-title { flex: 1 1 8em; }
+    .hotspot .h-meta { flex: 1 1 100%; gap: var(--s-2); min-height: 30px;
+                       padding-left: calc(14px + var(--s-2)); padding-right: 7.25rem; }
+    .hotspot .h-share { width: auto; flex: 1 1 24px; max-width: 120px; }
+    .hotspot .h-pct { display: none; }
+    .hotspot .h-cost, .hotspot .h-trend, .hotspot .h-notrend { min-width: 0; }
+    .hotspot-row > button.copy { position: absolute; right: var(--s-2); bottom: var(--s-2);
+                                 min-width: 0; width: 6.75rem; padding: var(--s-1) var(--s-2);
+                                 font-size: var(--t-2); }
+  }
+
+  table.hotspot-detail {
+    table-layout: fixed; width: 100%; margin: 0 0 var(--s-2);
+    box-shadow: none; font-size: var(--t-2);
+  }
+  table.hotspot-detail col.c-tokens { width: 8.5em; }
+  table.hotspot-detail col.c-session { width: 7em; }
+  table.hotspot-detail th { cursor: default; user-select: none; white-space: normal; vertical-align: bottom; }
+  table.hotspot-detail th:hover { background: var(--surface-2); color: inherit; }
+  table.hotspot-detail th, table.hotspot-detail td { padding: var(--s-1) var(--s-3); }
+  table.hotspot-detail td { font-variant-numeric: tabular-nums; }
+  table.hotspot-detail td.ex-cmd {
+    font-family: var(--font-mono); color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    user-select: text;
+  }
+  table.hotspot-detail td.ex-cmd code { font-size: inherit; }
+  table.hotspot-detail td.ex-cmd.is-empty, .hotspot-detail .ex-session.is-empty { color: var(--muted); font-family: inherit; }
+  .hotspot-detail a.ex-session { color: var(--accent); cursor: pointer;
+                                 font-family: var(--font-mono);
+                                 text-decoration: underline; text-underline-offset: 2px; }
+  .hotspot-detail a.ex-session:hover { text-decoration-thickness: 2px; }
+  .hotspot-detail a.ex-session:focus-visible { outline: 2px solid var(--accent);
+                                               outline-offset: 1px; }
+  @media (max-width: 640px) {
+    table.hotspot-detail col.c-tokens { width: 5.5em; }
+    table.hotspot-detail col.c-session { width: 5.5em; }
+    table.hotspot-detail th, table.hotspot-detail td { padding: var(--s-1) var(--s-2); }
+  }
   .hotspot .actions { display: flex; gap: var(--s-2); flex-wrap: wrap;
                       margin: var(--s-2) 0; align-items: center; }
   .hotspot-prompt > summary { cursor: pointer; color: var(--accent);

@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { installDOM, click } from './helpers/mini-dom.js';
+import { installDOM, click, keydown, Event } from './helpers/mini-dom.js';
 
 // A hotspot in the shape /_claudit/api/overview ships (HotspotForJSON).
 const hotspot = (title, cost, extra = {}) => ({
-  kind: 'bash_pattern', title, cost_usd: cost, pct_of_total: 40, prompt: `prompt for ${title}`,
+  kind: 'bash_pattern', title, cost_usd: cost, pct_of_total: 40, prompt: `prompt for ${title}\nsession 0f1e2d3c in /u/.claude/projects/p/0f1e2d3c.jsonl`,
   examples: [
     { input: 'go test ./...', session_id: '0f1e2d3c-aaaa-bbbb', source_file: '/u/.claude/projects/p/0f1e2d3c.jsonl', context_tokens: 42000, context_cost_usd: 1 },
     { input: 'go test -run X', session_id: '9a8b7c6d-cccc', source_file: '/u/.claude/projects/p/9a8b7c6d.jsonl', context_tokens: 900, context_cost_usd: 0.1 },
@@ -35,36 +35,190 @@ function stubFetch(responses) {
   return calls;
 }
 
+// A Map-backed sessionStorage: mini-dom has none.
+function stubStorage(init = {}) {
+  const m = new Map(Object.entries(init));
+  globalThis.sessionStorage = {
+    getItem: k => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: k => { m.delete(k); },
+  };
+  return m;
+}
+const OPEN_KEY = 'claudit.overview.openHotspots';
+
 let seq = 0;
-async function mount(responses) {
-  const dom = installDOM({ hash: '#overview' });
+async function mount(responses, { hash = '#overview', stored = {} } = {}) {
+  const dom = installDOM({ hash });
+  const storage = stubStorage(stored);
+  const scrolled = [];
+  Object.getPrototypeOf(dom.document.body).scrollIntoView = function () { scrolled.push(this.id); };
   dom.document.body.innerHTML = '<span id="nav-metric-overview"></span><section id="view-overview"></section>';
   const calls = stubFetch(responses);
   const view = await import(`../web/view-overview.js?mount=${++seq}`);
   await view.paint();
-  return { ...dom, view, calls, root: dom.document.getElementById('view-overview') };
+  return { ...dom, view, calls, storage, scrolled, root: dom.document.getElementById('view-overview') };
 }
 
 const overviewCalls = calls => calls.filter(u => u.includes('/overview')).length;
 
-test('hotspot cards show context cost, share, trend and examples that deep-link sessions', async () => {
+const SOURCE = /\.jsonl|\/u\/\.claude/;
+
+test('each hotspot renders collapsed as one row: rank, kind, title, share bar, cost, trend and Copy prompt', async () => {
   const { root } = await mount([OVERVIEW]);
   const cards = root.querySelectorAll('.hotspot');
   assert.equal(cards.length, 3);
+  cards.forEach((c, i) => {
+    const n = i + 1;
+    assert.equal(c.id, `hotspot-${n}`);
+    const t = c.querySelector('.hotspot-row > button.hotspot-toggle');
+    assert.ok(t, 'the header is a button');
+    assert.equal(t.getAttribute('type'), 'button');
+    assert.equal(t.getAttribute('aria-expanded'), 'false');
+    assert.equal(t.getAttribute('aria-controls'), `hotspot-${n}-detail`);
+    assert.equal(t.querySelector('.rank').textContent, `#${n}`);
+    assert.equal(t.querySelector('.hotspot-kind').textContent, 'bash pattern');
+    assert.ok(t.querySelector('.h-title'));
+    assert.ok(t.querySelector('.h-share > span'));
+    assert.ok(t.querySelector('.h-cost'));
+    assert.ok(t.querySelector('svg.chev'));
+    const copy = c.querySelector('.hotspot-row > button.copy');
+    assert.ok(copy, 'Copy prompt is a sibling of the toggle, not inside it');
+    assert.equal(t.querySelector('button.copy'), null);
+    const detail = c.querySelector(`#hotspot-${n}-detail`);
+    assert.ok(detail.hidden);
+    assert.equal(c.querySelectorAll('.hotspot-examples, pre, table, ol, li').length, 0, 'collapsed row holds no examples');
+    assert.doesNotMatch(c.innerHTML, SOURCE, 'collapsed row holds no source_file text');
+    assert.equal(c.querySelectorAll('em, i').length, 0, 'no italic text in a row');
+    assert.doesNotMatch(c.textContent, /\p{Extended_Pictographic}/u, 'no emoji in a row');
+  });
+  assert.equal(cards[0].querySelector('.h-title').textContent, 'Bash: `go test`');
   assert.equal(cards[0].querySelector('.h-cost').textContent, '$6.00');
-  assert.equal(cards[0].querySelector('.h-pct').textContent, '40.0% of context cost');
+  assert.equal(cards[0].querySelector('.h-pct').textContent, '40.0%');
   assert.deepEqual(cards.map(c => c.querySelector('.h-trend').textContent), ['▲ +100%', '▼ −50%', 'new']);
-  const ex = cards[0].querySelectorAll('.hotspot-example');
-  assert.equal(ex.length, 2);
-  assert.equal(ex[0].querySelector('.ex-input').textContent, 'go test ./...');
-  assert.equal(ex[0].querySelector('.ex-file').textContent, '/u/.claude/projects/p/0f1e2d3c.jsonl');
-  const link = ex[0].querySelector('a.ex-session');
-  assert.equal(link.getAttribute('href'), '#agents/tree/0f1e2d3c-aaaa-bbbb');
   assert.match(root.textContent, /coding agent working in this repo/);
-  for (const c of cards) {
-    assert.equal(c.querySelectorAll('em, i').length, 0, 'no italic text in a card');
-    assert.doesNotMatch(c.textContent, /\p{Extended_Pictographic}/u, 'no emoji in a card');
-  }
+});
+
+test('the share bar is barWidth: the largest hotspot fills its track, the rest scale, a missing pct is 0', async () => {
+  const hs = [
+    hotspot('a', 6, { pct_of_total: 50 }),
+    hotspot('b', 3, { pct_of_total: 20 }),
+    hotspot('c', 1, { pct_of_total: undefined }),
+  ];
+  const { root } = await mount([{ ...OVERVIEW, hotspots: hs }]);
+  const widths = root.querySelectorAll('.h-share > span').map(s => s.getAttribute('style'));
+  assert.deepEqual(widths, ['width:100.0%', 'width:40.0%', 'width:0.0%']);
+});
+
+async function expandedBy(activate) {
+  const m = await mount([OVERVIEW]);
+  const card = m.root.querySelector('#hotspot-1');
+  const t = card.querySelector('.hotspot-toggle');
+  activate(t);
+  return { ...m, card, t, detail: card.querySelector('#hotspot-1-detail') };
+}
+
+for (const [how, activate] of [
+  ['click', t => click(t)],
+  ['Enter', t => keydown(t, 'Enter')],
+  ['Space', t => keydown(t, ' ')],
+]) {
+  test(`${how} on the toggle opens the examples table, and a second ${how} collapses it`, async () => {
+    const { card, t, detail, storage } = await expandedBy(activate);
+    assert.equal(t.getAttribute('aria-expanded'), 'true');
+    assert.equal(detail.hidden, false);
+    const table = detail.querySelector('table.hotspot-detail');
+    assert.ok(table);
+    assert.deepEqual(table.querySelectorAll('thead th').map(th => th.textContent), ['Tokens added', 'Session', 'Command']);
+    const rows = table.querySelectorAll('tbody tr');
+    assert.equal(rows.length, 2);
+    const cells = rows[0].querySelectorAll('td');
+    assert.equal(cells[0].textContent, '42,000');
+    const link = cells[1].querySelector('a.ex-session');
+    assert.equal(link.getAttribute('href'), '#agents/tree/0f1e2d3c-aaaa-bbbb');
+    assert.equal(link.textContent, '0f1e2d3c');
+    assert.ok(cells[2].classList.contains('ex-cmd'));
+    assert.equal(cells[2].getAttribute('title'), 'go test ./...');
+    assert.equal(cells[2].textContent, 'go test ./...');
+    assert.doesNotMatch(detail.innerHTML, SOURCE, 'no source_file anywhere in the detail');
+    const details = detail.querySelector('details.hotspot-prompt');
+    const pre = details.querySelector('pre');
+    assert.ok(pre, 'the Show-prompt pre sits inside the detail');
+    assert.equal(pre.textContent, '', 'the prompt, with its JSONL paths, waits for Show prompt');
+    details.open = true;
+    details.dispatchEvent(new Event('toggle'));
+    assert.equal(pre.textContent, OVERVIEW.hotspots[0].prompt);
+    assert.equal(storage.get(OPEN_KEY), '[1]');
+
+    activate(t);
+    assert.equal(t.getAttribute('aria-expanded'), 'false');
+    assert.ok(detail.hidden);
+    assert.equal(card.querySelectorAll('table, pre').length, 0);
+    assert.equal(storage.get(OPEN_KEY), '[]');
+  });
+}
+
+test('a key other than Enter or Space leaves the row collapsed', async () => {
+  const { t } = await expandedBy(t => keydown(t, 'a'));
+  assert.equal(t.getAttribute('aria-expanded'), 'false');
+});
+
+test('a multi-line command renders on one line with the full input in its title', async () => {
+  const multi = hotspot('m', 1, { examples: [{ input: 'cat <<EOF\nline two\n  three\nEOF', session_id: 's1', source_file: '/x.jsonl', context_tokens: 5 }] });
+  const { root } = await mount([{ ...OVERVIEW, hotspots: [multi] }]);
+  click(root.querySelector('.hotspot-toggle'));
+  const cell = root.querySelector('td.ex-cmd');
+  assert.equal(cell.textContent, 'cat <<EOF line two three EOF');
+  assert.equal(cell.getAttribute('title'), 'cat <<EOF\nline two\n  three\nEOF');
+});
+
+test('paint with #overview/hotspot-2 opens row 2 only and scrolls it into view', async () => {
+  const { root, scrolled } = await mount([OVERVIEW], { hash: '#overview/hotspot-2' });
+  const expanded = root.querySelectorAll('.hotspot-toggle').map(t => t.getAttribute('aria-expanded'));
+  assert.deepEqual(expanded, ['false', 'true', 'false']);
+  assert.equal(root.querySelector('#hotspot-2-detail').hidden, false);
+  assert.ok(root.querySelector('#hotspot-2-detail table.hotspot-detail'));
+  assert.ok(root.querySelector('#hotspot-1-detail').hidden);
+  assert.deepEqual(scrolled, ['hotspot-2']);
+});
+
+test('rows stored as open before the SSE reload reopen on paint, merged with the deep link', async () => {
+  const { root, scrolled } = await mount([OVERVIEW], { hash: '#overview/hotspot-3', stored: { [OPEN_KEY]: '[1]' } });
+  const expanded = root.querySelectorAll('.hotspot-toggle').map(t => t.getAttribute('aria-expanded'));
+  assert.deepEqual(expanded, ['true', 'false', 'true']);
+  assert.deepEqual(scrolled, ['hotspot-3']);
+});
+
+test('a stored rank past the end of the list and malformed storage are ignored', async () => {
+  const { root } = await mount([OVERVIEW], { stored: { [OPEN_KEY]: '[2,9]' } });
+  assert.deepEqual(root.querySelectorAll('.hotspot-toggle').map(t => t.getAttribute('aria-expanded')), ['false', 'true', 'false']);
+  const bad = await mount([OVERVIEW], { stored: { [OPEN_KEY]: '{oops' } });
+  assert.equal(bad.root.querySelectorAll('.hotspot-toggle[aria-expanded="true"]').length, 0);
+});
+
+test('collapsing the deep-linked row drops the hotspot from the hash so the reload keeps it shut', async () => {
+  const { root, location } = await mount([OVERVIEW], { hash: '#overview/hotspot-2' });
+  click(root.querySelector('#hotspot-2 .hotspot-toggle'));
+  assert.equal(location.hash, '#overview');
+});
+
+test('30 hotspots of 15 examples render 30 collapsed rows, and 30 tables of 15 rows once all are open', async () => {
+  const many = Array.from({ length: 30 }, (_, i) => hotspot(`Bash: \`cmd${i}\``, 30 - i, {
+    pct_of_total: 30 - i,
+    examples: Array.from({ length: 15 }, (_, j) => ({
+      input: `cmd${i} --flag ${j} ${'x'.repeat(200)}`, session_id: `sess${i}-${j}-0000`,
+      source_file: `/u/.claude/projects/p/s${i}-${j}.jsonl`, context_tokens: 1000 * (15 - j), context_cost_usd: 0.1,
+    })),
+  }));
+  const { root } = await mount([{ ...OVERVIEW, hotspots: many }]);
+  const toggles = root.querySelectorAll('.hotspot-toggle');
+  assert.equal(root.querySelectorAll('.hotspot').length, 30);
+  assert.equal(root.querySelectorAll('.hotspots table, .hotspots pre').length, 0);
+  toggles.forEach(t => click(t));
+  const tables = root.querySelectorAll('table.hotspot-detail');
+  assert.equal(tables.length, 30);
+  for (const t of tables) assert.equal(t.querySelectorAll('tbody tr').length, 15);
+  assert.doesNotMatch(root.querySelector('.hotspots').innerHTML, SOURCE);
 });
 
 test('no trend badge when the server compared no previous window', async () => {
@@ -78,6 +232,18 @@ test('an empty hotspot list says so and hints at widening the range', async () =
   assert.ok(empty);
   assert.match(empty.textContent, /^No hotspots in this window/);
   assert.match(empty.textContent, /Widen the date range/);
+});
+
+test('while the overview loads, the section shows overviewSkeleton', async () => {
+  const dom = installDOM({ hash: '#overview' });
+  stubStorage();
+  dom.document.body.innerHTML = '<span id="nav-metric-overview"></span><section id="view-overview"></section>';
+  globalThis.fetch = () => new Promise(() => {});
+  const view = await import(`../web/view-overview.js?mount=${++seq}`);
+  view.paint();
+  const root = dom.document.getElementById('view-overview');
+  assert.equal(root.querySelectorAll('.skel-list .skel-hotspot').length, 5);
+  assert.equal(root.querySelectorAll('.hotspot').length, 0);
 });
 
 test('a non-2xx overview names the HTTP status, and Retry refetches', async () => {
@@ -104,8 +270,11 @@ test('Copy prompt copies the card prompt and reads "Copied"', async () => {
   assert.equal(btn.getAttribute('type'), 'button');
   click(btn);
   await new Promise(r => setTimeout(r, 0));
-  assert.equal(copied, 'prompt for Bash: `rg`');
+  assert.equal(copied, OVERVIEW.hotspots[1].prompt);
   assert.equal(btn.textContent, 'Copied');
+  const card = root.querySelector('#hotspot-2');
+  assert.equal(card.querySelector('.hotspot-toggle').getAttribute('aria-expanded'), 'false', 'copying does not expand the row');
+  assert.ok(card.querySelector('#hotspot-2-detail').hidden);
 });
 
 // Two daily buckets so the trend section renders; the forecast is the

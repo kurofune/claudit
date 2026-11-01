@@ -29,3 +29,36 @@ export function showForecastTab(forecast, period) {
   }
   return (forecast.projected_month_end_usd || 0) > 0;
 }
+
+// barWidth is a hotspot's share-bar width in percent: its pct_of_total
+// against the largest hotspot's, so the top row fills its track.
+export function barWidth(h, hotspots) {
+  const pct = h && h.pct_of_total > 0 ? h.pct_of_total : 0;
+  const max = Math.max(0, ...(hotspots || []).map(x => (x && x.pct_of_total > 0 ? x.pct_of_total : 0)));
+  if (pct === 0 || max === 0) return 0;
+  return Math.min(100, (100 * pct) / max);
+}
+
+const HOTSPOT_HASH = /^#?overview\/hotspot-([1-9]\d*)$/;
+
+// hashRank is the N of a #overview/hotspot-N deep link, or null.
+export function hashRank(hash) {
+  const m = HOTSPOT_HASH.exec(String(hash || ''));
+  return m ? Number(m[1]) : null;
+}
+
+const isRank = n => Number.isInteger(n) && n > 0;
+
+// restoreExpanded is the sorted set of hotspot ranks to open on paint:
+// the ranks stored (a JSON array, as written on every toggle) plus the
+// deep-linked rank. Malformed input contributes nothing.
+export function restoreExpanded({ hash, stored }) {
+  const ranks = new Set();
+  try {
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed)) parsed.filter(isRank).forEach(n => ranks.add(n));
+  } catch { /* nothing stored, or not JSON */ }
+  const linked = hashRank(hash);
+  if (linked != null) ranks.add(linked);
+  return [...ranks].sort((a, b) => a - b);
+}

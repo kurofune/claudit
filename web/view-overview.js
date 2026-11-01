@@ -1,5 +1,5 @@
 // Overview view — landing tab. Fetches /_claudit/api/overview, paints
-// totals tiles, hotspot card stack, and the headline trend chart into
+// totals tiles, the ranked hotspot list, and the headline trend chart into
 // the #view-overview section.
 //
 // SPA equivalent of the legacy SSR'd Overview chrome
@@ -11,7 +11,7 @@ import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
-import { hotspotTrend, showForecastTab } from './overview-logic.js';
+import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank } from './overview-logic.js';
 import {
   providerFromSearch, providerTiles, providerLabel, shareText,
   emptyProviderText, API_EQUIVALENT_TIP,
@@ -73,50 +73,72 @@ function providerTilesHTML(rows, provider) {
 
 const kindLabel = kind => String(kind).replace(/_/g, ' ');
 
-function exampleHTML(e) {
+// The detail table's Command cell keeps the full input in its title and
+// renders it on one line; the JSONL path stays in the copied prompt only.
+function exampleRowHTML(e) {
   const sid = e.session_id || '';
-  const input = e.input
-    ? `<code class="ex-input" title="${escHtml(e.input)}">${escHtml(e.input.replace(/\s+/g, ' ').trim())}</code>`
-    : '<span class="ex-input is-empty">(no input recorded)</span>';
+  const full = e.input || '';
+  const command = full
+    ? `<td class="ex-cmd" title="${escHtml(full)}"><code>${escHtml(full.replace(/\s+/g, ' ').trim())}</code></td>`
+    : '<td class="ex-cmd is-empty">(no input recorded)</td>';
   const session = sid
-    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)} in the Agents tree">session ${escHtml(sid.length > 8 ? sid.slice(0, 8) : sid)}</a>`
-    : '<span class="ex-session">no session</span>';
-  return `<li class="hotspot-example">
-      ${input}
-      <span class="ex-meta"><span class="ex-tokens">${escHtml(fmtNum(e.context_tokens || 0))} tokens</span> · ${session} · <span class="ex-file">${escHtml(e.source_file || '')}</span></span>
-    </li>`;
+    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)} in the Agents tree">${escHtml(sid.slice(0, 8))}</a>`
+    : '<span class="ex-session is-empty">none</span>';
+  return `<tr>
+      <td class="num ex-tokens">${escHtml(fmtNum(e.context_tokens || 0))}</td>
+      <td class="ex-sess">${session}</td>
+      ${command}
+    </tr>`;
 }
 
-function hotspotCard(h, idx) {
+function hotspotDetailHTML(h, rank) {
+  const examples = h.examples || [];
+  const table = examples.length
+    ? `<table class="hotspot-detail" aria-label="Biggest invocations by context added">
+        <colgroup><col class="c-tokens"><col class="c-session"><col class="c-command"></colgroup>
+        <thead><tr><th scope="col" class="num">Tokens added</th><th scope="col">Session</th><th scope="col">Command</th></tr></thead>
+        <tbody>${examples.map(exampleRowHTML).join('')}</tbody>
+      </table>`
+    : '<p class="small empty-state">No example invocations recorded for this hotspot.</p>';
+  return `${table}
+    <div class="actions">
+      <span class="small">Copy prompt hands the coding agent in this repo the evidence, one change to make, and a target.</span>
+      <a class="anchor-link" href="#overview/hotspot-${rank}" aria-label="Link to hotspot ${rank}">Link</a>
+    </div>
+    <details class="hotspot-prompt">
+      <summary>Show prompt</summary>
+      <pre></pre>
+    </details>`;
+}
+
+const chevron = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function hotspotRowHTML(h, idx, hotspots) {
   const rank = idx + 1;
   const anchorID = `hotspot-${rank}`;
   const trend = hotspotTrend(h);
   const trendHTML = trend
     ? `<span class="h-trend is-${trend.dir}" title="${escHtml(trend.title)}">${escHtml(trend.text)}</span>`
-    : '';
-  const examples = (h.examples || []);
-  const examplesHTML = examples.length
-    ? `<ol class="hotspot-examples" aria-label="Biggest invocations by context added">${examples.map(exampleHTML).join('')}</ol>`
-    : '';
+    : '<span class="h-notrend" aria-hidden="true"></span>';
+  const pct = (h.pct_of_total || 0).toFixed(1);
+  const basis = h.pct_basis || 'context cost';
   return `<article class="hotspot" id="${anchorID}" aria-labelledby="${anchorID}-title">
-    <header class="hotspot-head">
-      <span class="rank">#${rank}</span>
-      <span class="hotspot-kind">${escHtml(kindLabel(h.kind))}</span>
-      <h3 class="h-title" id="${anchorID}-title">${escHtml(h.title)}</h3>
-      <span class="h-cost" title="Context cost: writing this output into context and re-reading it on later turns">${escHtml(fmtMoney(h.cost_usd))}</span>
-      <span class="h-pct">${(h.pct_of_total || 0).toFixed(1)}% of ${escHtml(h.pct_basis || 'context cost')}</span>
-      ${trendHTML}
-      <a class="anchor-link" href="#overview/${anchorID}" title="Copy link to this hotspot" aria-label="Copy link to hotspot ${rank}">#</a>
-    </header>
-    ${examplesHTML}
-    <div class="actions">
+    <div class="hotspot-row">
+      <button type="button" class="hotspot-toggle" aria-expanded="false" aria-controls="${anchorID}-detail">
+        ${chevron}
+        <span class="rank">#${rank}</span>
+        <span class="hotspot-kind">${escHtml(kindLabel(h.kind))}</span>
+        <span class="h-title" id="${anchorID}-title">${escHtml(h.title)}</span>
+        <span class="h-meta">
+          <span class="h-share" title="${escHtml(`${pct}% of ${basis}`)}"><span style="width:${barWidth(h, hotspots).toFixed(1)}%"></span></span>
+          <span class="h-pct">${pct}%</span>
+          <span class="h-cost" title="Context cost: writing this output into context and re-reading it on later turns">${escHtml(fmtMoney(h.cost_usd))}</span>
+          ${trendHTML}
+        </span>
+      </button>
       <button type="button" class="copy" data-hotspot="${idx}">Copy prompt</button>
-      <span class="small">For the coding agent in this repo: the evidence, one change to make, and a target.</span>
     </div>
-    <details class="hotspot-prompt">
-      <summary>Show prompt</summary>
-      <pre>${escHtml(h.prompt)}</pre>
-    </details>
+    <div class="hotspot-body" id="${anchorID}-detail" role="region" aria-labelledby="${anchorID}-title" hidden></div>
   </article>`;
 }
 
@@ -124,7 +146,7 @@ function hotspotsHTML(hotspots) {
   if (!hotspots || hotspots.length === 0) {
     return `<p class="small empty-state">No hotspots in this window. Widen the date range to take in sessions whose tool calls put output into context.</p>`;
   }
-  return hotspots.map(hotspotCard).join('');
+  return hotspots.map((h, i) => hotspotRowHTML(h, i, hotspots)).join('');
 }
 
 function costPanelHTML(points, period, anomalies) {
@@ -202,36 +224,118 @@ export function warningsHTML(unknownModels) {
   return `<div class="warning-card" role="alert"><strong class="danger">Unpriced models:</strong> these turns count as $0, so the totals below are understated. Add them to <code>~/.config/claudit/prices.yaml</code>.<ul class="warning-list">${items}</ul></div>`;
 }
 
+// OPEN_KEY holds the open hotspot ranks across the SSE refresh, which
+// reloads the whole page.
+const OPEN_KEY = 'claudit.overview.openHotspots';
+
+function readOpen() {
+  try { return sessionStorage.getItem(OPEN_KEY); } catch { return null; }
+}
+
+function writeOpen(container) {
+  const ranks = Array.from(container.querySelectorAll('.hotspot-toggle[aria-expanded="true"]'))
+    .map(b => Number(b.closest('.hotspot').id.replace('hotspot-', '')));
+  try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(ranks)); } catch { /* storage off */ }
+}
+
+// setOpen renders the detail only while the row is open, so a collapsed
+// row carries none of the example evidence.
+function setOpen(card, h, open) {
+  const toggle = card.querySelector('.hotspot-toggle');
+  const body = card.querySelector('.hotspot-body');
+  if (!toggle || !body) return;
+  const rank = Number(card.id.replace('hotspot-', ''));
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  card.classList.toggle('is-open', open);
+  body.innerHTML = open && h ? hotspotDetailHTML(h, rank) : '';
+  body.hidden = !open;
+  const details = body.querySelector('details.hotspot-prompt');
+  if (details) {
+    details.addEventListener('toggle', () => { if (details.open) fillPrompt(details, h); });
+  }
+}
+
+// fillPrompt writes the prompt, JSONL paths and all, only once the user
+// asks to see it.
+function fillPrompt(details, h) {
+  const pre = details.querySelector('pre');
+  if (pre && !pre.textContent && h) pre.textContent = h.prompt;
+  return pre;
+}
+
+// openDeepLink opens the #overview/hotspot-N row and scrolls it into view.
+function openDeepLink(container, hotspots) {
+  const rank = hashRank(window.location.hash);
+  if (rank == null) return;
+  const card = container.querySelector(`#hotspot-${rank}`);
+  if (!card) return;
+  if (!card.classList.contains('is-open')) setOpen(card, hotspots[rank - 1], true);
+  if (typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'start' });
+}
+
+async function copyPrompt(btn, card, h) {
+  let pre = card ? card.querySelector('pre') : null;
+  const text = h ? h.prompt : '';
+  let ok = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch { ok = false; }
+  if (!ok && card) {
+    if (!pre) { setOpen(card, h, true); writeOpen(card.parentNode); pre = card.querySelector('pre'); }
+    const details = pre && pre.closest('details');
+    if (details) { details.open = true; fillPrompt(details, h); }
+    if (pre) {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+    }
+  }
+  btn.textContent = ok ? 'Copied' : 'Copy failed — select the prompt below';
+  btn.classList.toggle('copied', ok);
+  clearTimeout(btn._resetTimer);
+  btn._resetTimer = setTimeout(() => { btn.textContent = 'Copy prompt'; btn.classList.remove('copied'); }, 2200);
+}
+
 function wireHotspots(container, hotspots) {
+  const list = container.querySelector('.hotspots');
+  if (!list) return;
   container.querySelectorAll('button.copy').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
+    btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const card = btn.closest('.hotspot');
-      const pre = card ? card.querySelector('pre') : null;
-      const h = hotspots[Number(btn.dataset.hotspot)];
-      const text = h ? h.prompt : (pre ? pre.textContent : '');
-      let ok = false;
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
-          ok = true;
-        }
-      } catch { ok = false; }
-      if (!ok && pre) {
-        const details = pre.closest('details');
-        if (details) details.open = true;
-        const range = document.createRange();
-        range.selectNodeContents(pre);
-        const sel = window.getSelection();
-        sel.removeAllRanges(); sel.addRange(range);
-        try { ok = document.execCommand('copy'); } catch { ok = false; }
-      }
-      btn.textContent = ok ? 'Copied' : 'Copy failed — select the prompt below';
-      btn.classList.toggle('copied', ok);
-      clearTimeout(btn._resetTimer);
-      btn._resetTimer = setTimeout(() => { btn.textContent = 'Copy prompt'; btn.classList.remove('copied'); }, 2200);
+      copyPrompt(btn, btn.closest('.hotspot'), hotspots[Number(btn.dataset.hotspot)]);
     });
   });
+  const toggle = btn => {
+    const card = btn.closest('.hotspot');
+    const rank = Number(card.id.replace('hotspot-', ''));
+    const open = btn.getAttribute('aria-expanded') !== 'true';
+    setOpen(card, hotspots[rank - 1], open);
+    writeOpen(list);
+    if (!open && hashRank(window.location.hash) === rank) {
+      history.replaceState(history.state, '', '#overview');
+    }
+  };
+  container.querySelectorAll('button.hotspot-toggle').forEach(btn => {
+    btn.addEventListener('click', () => toggle(btn));
+    // Enter and Space toggle on keydown; cancelling the key stops the
+    // button's own synthesized click from toggling it back.
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      if (!e.repeat) toggle(btn);
+    });
+    btn.addEventListener('keyup', (e) => { if (e.key === ' ') e.preventDefault(); });
+  });
+  for (const rank of restoreExpanded({ hash: window.location.hash, stored: readOpen() })) {
+    const card = list.querySelector(`#hotspot-${rank}`);
+    if (card) setOpen(card, hotspots[rank - 1], true);
+  }
+  openDeepLink(container, hotspots);
 }
 
 function wireTrendTabs(container) {
@@ -270,11 +374,13 @@ function updateDateRange(first, last) {
 }
 
 let painted = false;
+let paintedHotspots = [];
 
 export async function paint() {
   const container = document.getElementById('view-overview');
   if (!container) return;
-  if (painted) return; // first-render only for Phase 5 — re-fetch comes with SSE-driven invalidation in a later phase.
+  // First render only; a later #overview/hotspot-N route opens its row.
+  if (painted) { openDeepLink(container, paintedHotspots); return; }
 
   container.innerHTML = `<div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
     ${overviewSkeleton()}`;
@@ -319,10 +425,11 @@ export async function paint() {
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
     <h2>${labelIcon('flame')}Top context-cost hotspots</h2>
-    <div class="small">Ranked by context cost: what each pattern's output cost to write into context and re-read on later turns. Each card's change is against the previous window of equal length. <strong>Copy prompt</strong> hands the evidence to the coding agent working in this repo (Claude Code or Codex).</div>
+    <div class="small">Ranked by context cost: what each pattern's output cost to write into context and re-read on later turns. Each row's change is against the previous window of equal length; open a row for its biggest invocations. <strong>Copy prompt</strong> hands the evidence to the coding agent working in this repo (Claude Code or Codex).</div>
     <div class="hotspots">${hotspotsHTML(overview.hotspots)}</div>`;
 
-  wireHotspots(container, overview.hotspots || []);
+  paintedHotspots = overview.hotspots || [];
+  wireHotspots(container, paintedHotspots);
   wireTrendTabs(container);
   wireChartInteractivity(container);
 
