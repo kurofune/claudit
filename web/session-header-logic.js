@@ -4,7 +4,7 @@
 // (the /sessions/story?whole=1 payload). Every sentence here is a fixed
 // template over counted fields: claudit generates no prose.
 
-import { detectSignals, retryTarget } from './agents-insights-logic.js';
+import { detectSignals, inputIdentity } from './agents-insights-logic.js';
 import { agentLabel, parseRefKey, parseTime } from './agents-model.js';
 import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-story-logic.js';
 
@@ -80,11 +80,10 @@ export function sessionTurns(story) {
   });
 }
 
-// callKey is a call's identity for matching a failure to a later success:
-// its name and whole-input key (input_key), else what retryTarget reads
-// when the call carried no input.
+// callKey is a call's identity for matching a failure to a later success,
+// the same identity detectRetries groups a retry storm by.
 /** @param {StoryTool} t */
-const callKey = t => `${t.name}\u0000${t.input_key ? `k:${t.input_key}` : `t:${retryTarget(t)}`}`;
+const callKey = t => `${t.kind || ''}\u0000${t.name || ''}\u0000${inputIdentity(t)}`;
 
 // succeeded lists every call that returned ok or has a later call of the
 // same callKey that returned ok in the same agent.

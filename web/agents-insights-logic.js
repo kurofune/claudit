@@ -466,12 +466,21 @@ export function retryTarget(tool) {
   return tool.input || tool.detail || '';
 }
 
+// inputIdentity is which input a call ran, for telling repeats apart: the
+// whole input's key (input_key) when the payload carries one, so two calls
+// whose capped inputs match but whose whole inputs differ are not repeats,
+// else retryTarget.
+/** @param {Partial<ToolInvocation> & {input_key?: string}} tool */
+export function inputIdentity(tool) {
+  return tool.input_key ? `k:${tool.input_key}` : `t:${retryTarget(tool)}`;
+}
+
 // detectRetries finds repeated tool calls where an earlier attempt errored,
 // returning a Map from each retry's agent-relative coord ("si:ti") to
 // { attempt, ofRef, errors } — attempt is the 1-based ordinal of the call within
 // its group, ofRef the coord of the group's first call, errors how many calls in
 // the group up to and including this one had status "error". Tool calls are
-// grouped by (kind, name, retryTarget) and walked in step-then-tool order (steps
+// grouped by (kind, name, inputIdentity) and walked in step-then-tool order (steps
 // are already chronological). A call is a retry only when some earlier call in
 // its group had status "error", so a clean repeat (ok → ok) is never flagged.
 // Coords are the suffix of the full tool refKey, composable via
@@ -488,7 +497,7 @@ export function detectRetries(agent) {
     (step.tools || []).forEach((tool, ti) => {
       if (!tool) return;
       const coord = `${si}:${ti}`;
-      const groupKey = `${tool.kind || ''}\u0000${tool.name || ''}\u0000${retryTarget(tool)}`;
+      const groupKey = `${tool.kind || ''}\u0000${tool.name || ''}\u0000${inputIdentity(tool)}`;
       let g = groups.get(groupKey);
       if (!g) {
         g = { firstRef: coord, count: 0, errors: 0 };

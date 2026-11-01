@@ -75,6 +75,15 @@ test('detectRetries: calls with a different (kind,name,input-or-detail) key are 
   assert.equal(detectRetries(agent).size, 0);
 });
 
+test('detectRetries groups by whole-input identity (input_key) when a call carries one, not by the capped input', () => {
+  const capped = 'go test ./internal/aggregate/... -run TestContextCost'.padEnd(500, 'x');
+  const call = (status, input_key) => ({ kind: 'exec', name: 'Bash', detail: 'go', input: capped, input_key, status });
+  const distinct = { steps: [{ tools: [call('error', 'aaaa')] }, { tools: [call('ok', 'bbbb')] }] };
+  assert.equal(detectRetries(distinct).size, 0, 'equal snippets with distinct input_key are two commands');
+  const same = { steps: [{ tools: [call('error', 'aaaa')] }, { tools: [call('ok', 'aaaa')] }] };
+  assert.deepEqual(detectRetries(same).get('1:0'), { attempt: 2, ofRef: '0:0', errors: 1 });
+});
+
 // ── detectSignals (Phase 3a — anomaly detection) ────────────────────
 // Signals are { kind, severity (number [0,1]), tier ('high'|'med'|'low'),
 // ref (a refKey), summary }. detectSignals(graph, opts) returns them sorted

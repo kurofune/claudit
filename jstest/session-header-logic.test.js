@@ -202,6 +202,23 @@ test('worthALook keeps a retry storm whose peak attempt has no result yet, and d
   assert.equal(headerNumbers(tries('ok')).failed, 0);
 });
 
+test('worthALook keeps a retry storm a different input_key succeeds after, and drops it once the same input_key does', () => {
+  const capped = 'go test ./internal/aggregate/... -run TestContextCost'.padEnd(500, 'x');
+  const tries = key => story([
+    step('a1', 0, [tool(capped, 'error', { input_key: 'aaaa' })]),
+    step('a2', 5, [tool(capped, 'error', { input_key: 'aaaa' })]),
+    step('a3', 10, [tool(capped, 'error', { input_key: 'aaaa' })]),
+    step('a4', 15, [tool(capped, 'ok', { input_key: key })]),
+  ]);
+  const other = worthALook(sessionFrom(tries('bbbb')), T0 + 16e3);
+  assert.deepEqual(other.map(n => [n.kind, n.link]), [['retry-storm', 'a3'], ['error-cascade', 'a1']],
+    'a success of another whole input is no recovery of the storm');
+  assert.match(other[0].body, /go test \.\/internal\/aggregate/, 'the note still names the readable command');
+  assert.equal(headerNumbers(tries('bbbb')).failed, 3);
+  assert.deepEqual(worthALook(sessionFrom(tries('aaaa')), T0 + 16e3), []);
+  assert.equal(headerNumbers(tries('aaaa')).failed, 0);
+});
+
 test('unresolvedFailures matches a later success by input_key, not the capped input', () => {
   const capped = 'go test ./internal/aggregate/... -run TestContextCost'.padEnd(500, 'x');
   const distinct = story([
