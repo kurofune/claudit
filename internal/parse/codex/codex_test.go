@@ -360,3 +360,36 @@ func TestParseRollout_SkipsUnknownAndCountsMalformed(t *testing.T) {
 		t.Errorf("2 MB line did not parse: results = %d", len(res.ToolResults))
 	}
 }
+
+// TestParseRollout_AssistantText: an assistant message's output_text lands
+// on the turn whose usage record follows it; text after the last usage
+// record belongs to that last response.
+func TestParseRollout_AssistantText(t *testing.T) {
+	res := parseFixture(t, "basic.jsonl", "")
+	if len(res.Turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(res.Turns))
+	}
+	if res.Turns[0].Text != "" {
+		t.Errorf("turn 0 text = %q, want empty", res.Turns[0].Text)
+	}
+	if got := res.Turns[1].Text; got != "Summary. (replaced)" {
+		t.Errorf("turn 1 text = %q, want the trailing assistant message", got)
+	}
+
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-10-29T10:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"s1","cwd":"/p"}}`,
+		`{"timestamp":"2026-10-29T10:00:01Z","type":"turn_context","payload":{"model":"gpt-6-astra"}}`,
+		`{"timestamp":"2026-10-29T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`,
+		`{"timestamp":"2026-10-29T10:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First."},{"type":"output_text","text":"Second."}]}}`,
+		`{"timestamp":"2026-10-29T10:00:04Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":2}}}`,
+		`{"timestamp":"2026-10-29T10:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Third."}]}}`,
+		`{"timestamp":"2026-10-29T10:00:06Z","type":"token_usage_record","payload":{"response_id":"r2","usage":{"input_tokens":10,"output_tokens":2}}}`,
+	}, "\n")
+	r, err := ParseFile(strings.NewReader(rollout), "rollout-x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Turns) != 2 || r.Turns[0].Text != "First.\nSecond." || r.Turns[1].Text != "Third." {
+		t.Errorf("turn texts = %q / %q, want %q / %q", r.Turns[0].Text, r.Turns[1].Text, "First.\nSecond.", "Third.")
+	}
+}

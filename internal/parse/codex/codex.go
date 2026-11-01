@@ -4,7 +4,8 @@
 // A rollout is one thread. Each line is {timestamp, type, payload}; the
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
-// model response — one Turn), the response_item tool calls and their
+// model response — one Turn), the response_item assistant messages, tool
+// calls and their
 // outputs, and event_msg token_count (plan-usage readings). Every other
 // record type is skipped.
 package codex
@@ -93,6 +94,7 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 		model   string
 		turnCWD string
 		pending []parse.ToolUse
+		text    string
 	)
 	sc := bufio.NewScanner(r)
 	// session_meta carries the full base instructions and tool outputs can
@@ -137,14 +139,20 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				Model:        model,
 				Usage:        convertUsage(*tu.Usage),
 				ToolUses:     pending,
+				Text:         text,
 				SourceFile:   path,
 			})
-			// A response's tool calls are written before its usage record.
-			pending = nil
+			// A response's tool calls and messages are written before its
+			// usage record.
+			pending, text = nil, ""
 		case "response_item":
 			var kind rawKind
 			if err := json.Unmarshal(rec.Payload, &kind); err != nil {
 				res.Malformed++
+				continue
+			}
+			if kind.Type == "message" {
+				text = parse.JoinTurnText(text, assistantText(rec.Payload))
 				continue
 			}
 			call := kind.Type == "custom_tool_call" || kind.Type == "function_call"
@@ -190,6 +198,11 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				PlanType:      ev.RateLimits.PlanType,
 			})
 		}
+	}
+	// A message after the last usage record still belongs to that response.
+	if text != "" && len(res.Turns) > 0 {
+		last := &res.Turns[len(res.Turns)-1]
+		last.Text = parse.JoinTurnText(last.Text, text)
 	}
 	stampThread(&res, meta, path)
 	return res, sc.Err()
@@ -486,6 +499,28 @@ func jsString(s string) (string, int, bool) {
 		}
 	}
 	return "", 0, false
+}
+
+// assistantText is an assistant message's output_text, joined; "" for a
+// message from any other role.
+func assistantText(payload json.RawMessage) string {
+	var m struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(payload, &m) != nil || m.Role != "assistant" {
+		return ""
+	}
+	out := ""
+	for _, c := range m.Content {
+		if c.Type == "output_text" && c.Text != "" {
+			out = parse.JoinTurnText(out, c.Text)
+		}
+	}
+	return out
 }
 
 // outputText flattens a tool output — a bare string, or an array of
