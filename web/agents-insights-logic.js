@@ -1,23 +1,20 @@
 // @ts-check
-// Insights-lens aggregations and anomaly detection: tool mix, percentiles,
-// latency histogram, cost Pareto, error rates, token/context series,
-// group-by, retry detection, and the Phase 3 signal detectors + timeline
-// pip bucketing. Split out of agents-logic.js (re-exported by the facade).
+// The five per-session anomaly detectors behind the session header's
+// "Worth a look" notes (retry storm, cost whale, slow tool, error cascade,
+// idle stall), run through detectSignals, with the retry grouping and
+// percentile math they share.
 
-import {
-  agentLabel, agentTokens, flattenSession, parseRefKey, parseTime, projectName,
-} from './agents-model.js';
-import { agentTimeRollup, sessionTimeRollup } from './agents-timeline-logic.js';
+import { flattenSession, parseTime } from './agents-model.js';
 
-/** @import { AgentGraph, AgentNode, AgentSession, AgentStep, ToolInvocation } from './api-types.js' */
+/** @import { AgentGraph, AgentNode, AgentStep, ToolInvocation } from './api-types.js' */
 
 /**
- * One Phase 3 anomaly finding from detectSignals.
+ * One anomaly finding from detectSignals.
  * @typedef {Object} Signal
  * @property {string} kind      'retry-storm'|'cost-whale'|'slow-tool'|'error-cascade'|'idle-stall'
  * @property {number} severity  [0,1] badness magnitude (cross-kind sort key)
  * @property {string} tier      'high'|'med'|'low'
- * @property {string} ref       refKey (sid#ai / sid#ai.si / sid#ai.si:ti)
+ * @property {string} ref       agent, turn or call it points at (sid#ai / sid#ai.si / sid#ai.si:ti)
  * @property {string} summary
  * @property {string} reason    the measured value against the threshold that fired
  */
@@ -30,43 +27,6 @@ const fmtMin = ms => `${(ms / 60000).toFixed(1)} min`;
 const pct = x => `${Math.round(x * 100)}%`;
 /** @param {string} s @param {number} max */
 const clip = (s, max) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
-
-// toolMix aggregates an array of agent nodes (already scoped by the caller —
-// whole graph, one session, or one agent) into per-kind tool totals for the
-// Insights "Tool mix" panel: count · wall-clock · cost, grouped by ToolKind.
-// Pure and scope-agnostic. Returns [] for a null/empty input.
-/**
- * @param {AgentNode[]|null|undefined} agents
- * @returns {{kind: string, count: number, durationMs: number, costUSD: number}[]}
- */
-export function toolMix(agents) {
-  if (!Array.isArray(agents)) return [];
-  const byKind = new Map();
-  for (const a of agents) {
-    for (const step of (a && a.steps) || []) {
-      const tools = (step && step.tools) || [];
-      // Cost lives only at the turn level, so spread it across the turn's tools
-      // by call-share — the honest split that sums back to the step cost. A
-      // tool-less turn (pure text) contributes no per-kind cost, by design.
-      const stepCalls = tools.reduce((n, t) => n + ((t && t.count) || (t ? 1 : 0)), 0);
-      const stepCost = (step && step.cost_usd) || 0;
-      for (const t of tools) {
-        if (!t) continue;
-        const kind = t.kind || 'other';
-        const calls = t.count || 1;
-        const row = byKind.get(kind) || { kind, count: 0, durationMs: 0, costUSD: 0 };
-        row.count += calls;
-        const start = parseTime(t.started_at);
-        const end = parseTime(t.ended_at);
-        if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) row.durationMs += end - start;
-        if (stepCalls > 0) row.costUSD += stepCost * (calls / stepCalls);
-        byKind.set(kind, row);
-      }
-    }
-  }
-  return [...byKind.values()].sort((a, b) =>
-    b.costUSD - a.costUSD || b.count - a.count || a.kind.localeCompare(b.kind));
-}
 
 // percentiles returns one value per requested point.
 /** @param {number[]|null|undefined} values @param {number[]|null|undefined} ps @returns {number[]} */
@@ -82,380 +42,6 @@ export function percentiles(values, ps) {
     if (lo === hi) return nums[lo];
     return nums[lo] + (rank - lo) * (nums[hi] - nums[lo]);
   });
-}
-
-// DURATION_EDGES are the default upper bounds (ms) for the latency histogram —
-// a log-ish progression tuned for tool wall-clock (sub-100ms reads up to
-// multi-minute execs). Each edge opens a [prev, edge) bucket; a trailing
-// [lastEdge, ∞) bucket catches the long tail.
-export const DURATION_EDGES = [100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000];
-
-// durationHistogram buckets per-tool wall-clock.
-/** @param {AgentNode[]|null|undefined} agents @param {{edges?: number[]}} [opts] */
-export function durationHistogram(agents, opts = {}) {
-  const edges = (Array.isArray(opts.edges) && opts.edges.length)
-    ? opts.edges.slice().sort((a, b) => a - b)
-    : DURATION_EDGES;
-  const buckets = [];
-  let lo = 0;
-  for (const e of edges) { buckets.push({ lo, hi: e, count: 0, kinds: [] }); lo = e; }
-  buckets.push({ lo, hi: Infinity, count: 0, kinds: [] });
-  const values = [];
-  for (const a of (Array.isArray(agents) ? agents : [])) {
-    for (const step of (a && a.steps) || []) {
-      for (const t of (step && step.tools) || []) {
-        if (!t) continue;
-        const start = parseTime(t.started_at), end = parseTime(t.ended_at);
-        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) continue;
-        const d = end - start;
-        const b = buckets.find(bk => d < bk.hi);
-        b.count += 1;
-        const kind = t.kind || 'other';
-        if (!b.kinds.includes(kind)) b.kinds.push(kind);
-        values.push(d);
-      }
-    }
-  }
-  return { buckets, values };
-}
-
-// costPareto ranks an agent array's costed turns (steps with positive cost_usd)
-// worst-first for the Insights "Cost Pareto" panel and measures how concentrated
-// the spend is. Cost lives only at the turn level (same convention toolMix uses),
-// so a turn is the honest unit. Pure and scope-agnostic — the caller passes the
-// already-scoped agents (whole graph, one session, or one agent). Returns:
-//   { total, count, rows, headline }
-//   total      — summed cost over every costed turn
-//   count      — how many costed turns there are
-//   rows       — top-N turns (opts.topN, default 10), each
-//                { rank (1-based), cost, agentLabel, share, cumShare }; share is
-//                the turn's fraction of total, cumShare the running cumulative
-//                fraction over the FULL ranking (so the curve is honest even
-//                though rows are truncated)
-//   headline   — the concentration callout, null when there are no costed turns:
-//                { turnsPct, turnCount, spendShare, thresholdCost } — the top
-//                `turnsPct`% of turns (rounded up, ≥1) account for spendShare of
-//                spend; thresholdCost is the cheapest turn still inside that slice
-//                (the minCostUSD cut that isolates the whales).
-/** @param {AgentNode[]|null|undefined} agents @param {{topN?: number, headlinePct?: number}} [opts] */
-export function costPareto(agents, opts = {}) {
-  const topN = opts.topN != null ? opts.topN : 10;
-  const headlinePct = opts.headlinePct != null ? opts.headlinePct : 10;
-  const turns = [];
-  let total = 0;
-  for (const a of (Array.isArray(agents) ? agents : [])) {
-    for (const step of (a && a.steps) || []) {
-      const cost = (step && step.cost_usd) || 0;
-      if (!(cost > 0)) continue;
-      turns.push({ cost, agentLabel: agentLabel(a) });
-      total += cost;
-    }
-  }
-  turns.sort((x, y) => y.cost - x.cost);
-  let cumCost = 0;
-  const rows = turns.map((t, i) => {
-    cumCost += t.cost;
-    return {
-      rank: i + 1, cost: t.cost, agentLabel: t.agentLabel,
-      share: t.cost / total, cumShare: cumCost / total,
-    };
-  });
-  // Headline: the top `headlinePct`% of turns (rounded UP, at least one) and the
-  // share of spend they concentrate. thresholdCost is the cheapest turn still
-  // inside that slice — the minCostUSD cut that isolates the whales.
-  let headline = null;
-  if (rows.length) {
-    const turnCount = Math.max(1, Math.ceil(rows.length * headlinePct / 100));
-    const edge = rows[turnCount - 1];
-    headline = { turnsPct: headlinePct, turnCount, spendShare: edge.cumShare, thresholdCost: edge.cost };
-  }
-  return { total, count: turns.length, rows: rows.slice(0, topN), headline };
-}
-
-// errorRates measures how often tools fail, for the Insights "Error breakdown"
-// panel. Pure and scope-agnostic — the caller passes the already-scoped agents
-// (whole graph, one session, or one agent). The unit is the tool ROW, not the
-// collapsed Count: distinctToolInvocations keys the collapse on (name, detail,
-// input) and stamps one Status per surviving row (sessions.go), so a row is the
-// only honest carrier of an outcome. An errored row is `status === 'error'`;
-// every other status (ok / '' / missing) counts toward the denominator only.
-// Returns:
-//   { total, errors, rate, rows, worst }
-//   total   — tool rows observed
-//   errors  — rows whose status is 'error'
-//   rate    — errors / total (0 when total is 0)
-//   rows    — per-ToolKind breakdown, ONLY kinds with >=1 error, each
-//             { kind, total, errors, rate } (total spans that kind's clean rows
-//             too), sorted errors desc → rate desc → kind asc
-//   worst   — the failing-tools list: per tool NAME, only names with >=1 error,
-//             each { name, kind, total, errors, rate }, same sort by name, capped
-//             at opts.topN (default 8). A name with no kind folds to 'other',
-//             a nameless tool to '(unnamed)'.
-/** @param {AgentNode[]|null|undefined} agents @param {{topN?: number}} [opts] */
-export function errorRates(agents, opts = {}) {
-  const topN = opts.topN != null ? opts.topN : 8;
-  let total = 0, errors = 0;
-  const byKind = new Map();
-  const byName = new Map();
-  for (const a of (Array.isArray(agents) ? agents : [])) {
-    for (const step of (a && a.steps) || []) {
-      for (const t of (step && step.tools) || []) {
-        if (!t) continue;
-        const errored = t.status === 'error';
-        total += 1;
-        if (errored) errors += 1;
-        const kind = t.kind || 'other';
-        const kr = byKind.get(kind) || { kind, total: 0, errors: 0, rate: 0 };
-        kr.total += 1;
-        if (errored) kr.errors += 1;
-        byKind.set(kind, kr);
-        const name = t.name || '(unnamed)';
-        const nr = byName.get(name) || { name, kind, total: 0, errors: 0, rate: 0 };
-        nr.total += 1;
-        if (errored) nr.errors += 1;
-        byName.set(name, nr);
-      }
-    }
-  }
-  const rows = [...byKind.values()]
-    .filter(r => r.errors > 0)
-    .map(r => ({ ...r, rate: r.errors / r.total }))
-    .sort((a, b) => b.errors - a.errors || b.rate - a.rate || a.kind.localeCompare(b.kind));
-  const worst = [...byName.values()]
-    .filter(r => r.errors > 0)
-    .map(r => ({ ...r, rate: r.errors / r.total }))
-    .sort((a, b) => b.errors - a.errors || b.rate - a.rate || a.name.localeCompare(b.name))
-    .slice(0, topN);
-  return { total, errors, rate: total ? errors / total : 0, rows, worst };
-}
-
-// contextSeries summarizes token usage and context-window growth across the
-// scoped agents, for the Insights "Token & context" panel. Pure and scope-
-// agnostic (whole graph, one session, or one agent) — same contract as the
-// sibling aggregations (toolMix / costPareto / errorRates). It flattens every
-// agent's steps into ONE series ordered by step timestamp (NaN timestamps sort
-// stably to the end), each point carrying that turn's context size and token
-// breakdown. Token field names are the Go-marshalled (untagged) Tokens shape —
-// InputTokens etc. — folded to {input, output, cacheWrite, cacheRead} via
-// agentTokens (5m + 1h cache-creation combine into cacheWrite).
-//
-// "context" is the step's context_tokens (input + cache_read: the prompt size
-// fed to the model that turn). It grows as the conversation accumulates and
-// drops at compaction, so the series traces the context window over the run.
-// "cacheHit" is cacheRead / (cacheRead + input + cacheWrite): the share of the
-// prompt served cheaply from cache — the same formula the Cache view uses. The
-// overall cacheHit aggregates the totals; it is NOT the mean of per-turn ratios
-// (a cheap turn shouldn't weigh the same as an expensive one).
-//
-// Returns:
-//   { turns, series, peakContext, cacheHit, totals }
-//   turns       — number of steps in the series (points plotted)
-//   series      — chronological, each { t, context, input, output, cacheWrite,
-//                 cacheRead, total, cacheHit, agentLabel }; t is epoch ms (NaN
-//                 when the step had no parseable timestamp). total is the four-
-//                 band sum (matches agentTokens).
-//   peakContext — max context across the series (0 when empty), an ABSOLUTE
-//                 prompt size. We deliberately do NOT derive a "% of window":
-//                 the transcript records neither the context-window size nor the
-//                 1M-beta flag, so any denominator would be a guess that
-//                 overstates fill whenever a run's prompts stayed under 200k.
-//   cacheHit    — overall cacheRead / (cacheRead + input + cacheWrite), 0 when
-//                 the denominator is 0
-//   totals      — summed { input, output, cacheWrite, cacheRead, total }
-
-/** @param {AgentNode[]|null|undefined} agents @param {Object} [opts] */
-export function contextSeries(agents, opts = {}) {
-  const series = [];
-  let peakContext = 0;
-  const totals = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
-  for (const a of (Array.isArray(agents) ? agents : [])) {
-    const label = agentLabel(a);
-    for (const step of (a && a.steps) || []) {
-      const tok = agentTokens(step);
-      const context = (step && step.context_tokens) || 0;
-      if (context > peakContext) peakContext = context;
-      totals.input += tok.input; totals.output += tok.output;
-      totals.cacheWrite += tok.cacheWrite; totals.cacheRead += tok.cacheRead;
-      totals.total += tok.total;
-      const promptTokens = tok.cacheRead + tok.input + tok.cacheWrite;
-      const cacheHit = promptTokens ? tok.cacheRead / promptTokens : 0;
-      series.push({ t: parseTime(step && step.timestamp), context, input: tok.input, output: tok.output, cacheWrite: tok.cacheWrite, cacheRead: tok.cacheRead, total: tok.total, cacheHit, agentLabel: label });
-    }
-  }
-  // Chronological across agents; NaN timestamps sort stably to the end. JS sort
-  // is stable, so equal-t points keep agent-then-step insertion order.
-  series.sort((x, y) => {
-    if (Number.isNaN(x.t)) return Number.isNaN(y.t) ? 0 : 1;
-    if (Number.isNaN(y.t)) return -1;
-    return x.t - y.t;
-  });
-  const promptTotal = totals.cacheRead + totals.input + totals.cacheWrite;
-  return {
-    turns: series.length, series, peakContext,
-    cacheHit: promptTotal ? totals.cacheRead / promptTotal : 0,
-    totals,
-  };
-}
-
-// binSeries downsamples a contextSeries result to at most maxBins points so the
-// Token panel's per-turn bars and context sparkline stay legible (and cheap to
-// render) at graph scope, where a run can hold tens of thousands of turns. Each
-// bin aggregates consecutive turns: context is the MAX in the bin (preserving the
-// growth envelope and compaction peaks the line should show), the token bands SUM
-// (so the bars represent that slice's real volume), and count records how many
-// turns folded in. When the series already fits, every turn is its own bin
-// (count 1). No turn is dropped — render code must not silently truncate.
-/**
- * @param {{context: number, input: number, output: number, cacheWrite: number,
- *   cacheRead: number, total: number}[]|null|undefined} series
- * @param {number} maxBins
- */
-export function binSeries(series, maxBins) {
-  const src = Array.isArray(series) ? series : [];
-  const cap = maxBins > 0 ? maxBins : 1;
-  if (src.length <= cap) {
-    return src.map(p => ({
-      context: p.context, input: p.input, output: p.output,
-      cacheWrite: p.cacheWrite, cacheRead: p.cacheRead, total: p.total, count: 1,
-    }));
-  }
-  const binSize = Math.ceil(src.length / cap);
-  const bins = [];
-  for (let i = 0; i < src.length; i += binSize) {
-    const slice = src.slice(i, i + binSize);
-    const bin = { context: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0, count: 0 };
-    for (const p of slice) {
-      if (p.context > bin.context) bin.context = p.context;  // max preserves the growth envelope
-      bin.input += p.input; bin.output += p.output;
-      bin.cacheWrite += p.cacheWrite; bin.cacheRead += p.cacheRead;
-      bin.total += p.total; bin.count += 1;
-    }
-    bins.push(bin);
-  }
-  return bins;
-}
-
-// groupBy is the lightweight BubbleUp slice for the Insights "Group-by" panel:
-// it buckets tool rows along ONE dimension and reports, per group, how many
-// calls / how long / how much. Pure and scope-agnostic — the caller passes the
-// already-scoped agents (whole graph, one session, or one agent). The unit is
-// the tool ROW, generalizing toolMix: count sums t.count (calls), durationMs/
-// medianMs are over tool wall-clock (started_at→ended_at, same source as
-// durationHistogram — rows without a parseable span are uncounted there but
-// still counted in `count`), and cost is the turn cost_usd apportioned across
-// the turn's tools by call-share (the honest split toolMix uses; a tool-less
-// turn contributes no cost).
-//
-// opts.dimension selects the bucket key:
-//   'kind'   — tool.kind (missing → 'other')           [default]
-//   'status' — tool.status (missing/'' → 'none')
-//   'model'  — parent step.model (missing → '(none)')
-//   'agent'  — agentLabel(parent) ('main' or agent_type)
-//
-// Returns:
-//   { dimension, total, rows }
-//   total — summed { count, durationMs, costUSD } across all groups
-//   rows  — per group, sorted cost desc → count desc → key asc, each
-//           { key, count, durationMs, medianMs, costUSD, costShare, countShare }.
-//           medianMs is the median tool-row wall-clock (NaN when the group has
-//           no measured rows); costShare/countShare are the group's fraction of
-//           the totals (0 when the total is 0).
-/**
- * @param {AgentNode[]|null|undefined} agents
- * @param {{dimension?: 'kind'|'status'|'model'|'agent'}} [opts]
- */
-export function groupBy(agents, opts = {}) {
-  const dimension = opts.dimension || 'kind';
-  const dimKey = (t, step, aLabel) => {
-    switch (dimension) {
-      case 'status': return t.status || 'none';
-      case 'model': return (step && step.model) || '(none)';
-      case 'agent': return aLabel;
-      case 'kind':
-      default: return t.kind || 'other';
-    }
-  };
-  const groups = new Map();
-  for (const a of (Array.isArray(agents) ? agents : [])) {
-    const aLabel = agentLabel(a);
-    for (const step of (a && a.steps) || []) {
-      const tools = (step && step.tools) || [];
-      const stepCalls = tools.reduce((n, t) => n + ((t && t.count) || (t ? 1 : 0)), 0);
-      const stepCost = (step && step.cost_usd) || 0;
-      for (const t of tools) {
-        if (!t) continue;
-        const calls = t.count || 1;
-        const key = dimKey(t, step, aLabel);
-        const g = groups.get(key) || { key, count: 0, durationMs: 0, costUSD: 0, durs: [] };
-        g.count += calls;
-        const start = parseTime(t.started_at), end = parseTime(t.ended_at);
-        if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
-          const ms = end - start;
-          g.durationMs += ms;
-          g.durs.push(ms);
-        }
-        if (stepCalls > 0) g.costUSD += stepCost * (calls / stepCalls);
-        groups.set(key, g);
-      }
-    }
-  }
-  const base = [...groups.values()].map(g => {
-    const { durs, ...rest } = g;
-    return { ...rest, medianMs: percentiles(durs, [50])[0] };
-  });
-  const total = base.reduce(
-    (acc, r) => ({ count: acc.count + r.count, durationMs: acc.durationMs + r.durationMs, costUSD: acc.costUSD + r.costUSD }),
-    { count: 0, durationMs: 0, costUSD: 0 });
-  const rows = base
-    .map(r => ({
-      ...r,
-      costShare: total.costUSD ? r.costUSD / total.costUSD : 0,
-      countShare: total.count ? r.count / total.count : 0,
-    }))
-    .sort((a, b) => b.costUSD - a.costUSD || b.count - a.count || a.key.localeCompare(b.key));
-  return { dimension, total, rows };
-}
-
-// agentTimeRows aggregates the Insights "Time" panel's per-agent rows for the
-// session/agent scopes: one row per agent — its label plus the agentTimeRollup
-// buckets — sorted by totalMs desc.
-/**
- * @param {AgentNode[]|null|undefined} agents
- * @param {{nowMs?: number, topN?: number}} [opts]
- */
-export function agentTimeRows(agents, opts = {}) {
-  const topN = opts.topN != null ? opts.topN : 10;
-  const rows = (Array.isArray(agents) ? agents : [])
-    .map(a => ({ label: agentLabel(a), ...agentTimeRollup(a, opts) }))
-    .filter(r => r.totalMs > 0)
-    .sort((a, b) => b.totalMs - a.totalMs);
-  const total = rows.reduce(
-    (acc, r) => ({ genMs: acc.genMs + r.genMs, toolMs: acc.toolMs + r.toolMs, idleMs: acc.idleMs + r.idleMs, totalMs: acc.totalMs + r.totalMs }),
-    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
-  return { rows: rows.slice(0, topN), overflow: Math.max(0, rows.length - topN), total };
-}
-
-// sessionTimeRows is agentTimeRows' graph-scope sibling: one row per SESSION
-// (its whole main+children sessionTimeRollup), so the panel stays legible when
-// the scope spans hundreds of agents. Same shape/contract as agentTimeRows —
-// zero-total sessions drop, rows sort by totalMs desc, the list caps at topN
-// (default 10) with the remainder reported as overflow, and total sums every
-// kept row (including the truncated ones — never just the shown slice).
-/**
- * @param {AgentSession[]|null|undefined} sessions
- * @param {{nowMs?: number, topN?: number}} [opts]
- */
-export function sessionTimeRows(sessions, opts = {}) {
-  const topN = opts.topN != null ? opts.topN : 10;
-  const rows = (Array.isArray(sessions) ? sessions : [])
-    .filter(s => s)
-    .map(s => ({ sessionId: s.session_id || '', cwd: s.cwd || '', project: projectName(s), ...sessionTimeRollup(s, opts) }))
-    .filter(r => r.totalMs > 0)
-    .sort((a, b) => b.totalMs - a.totalMs);
-  const total = rows.reduce(
-    (acc, r) => ({ genMs: acc.genMs + r.genMs, toolMs: acc.toolMs + r.toolMs, idleMs: acc.idleMs + r.idleMs, totalMs: acc.totalMs + r.totalMs }),
-    { genMs: 0, toolMs: 0, idleMs: 0, totalMs: 0 });
-  return { rows: rows.slice(0, topN), overflow: Math.max(0, rows.length - topN), total };
 }
 
 // retryTarget is what a call was aimed at: its input (the Bash command, the
@@ -512,14 +98,14 @@ export function detectRetries(agent) {
   return out;
 }
 
-// detectSignals is the single entry point for Phase 3 anomaly detection: it runs
-// the pure detectors over the whole graph and returns their findings sorted
-// worst-first. Each signal is { kind, severity, tier, ref, summary, reason }: severity is
-// a [0,1] "badness" magnitude (the cross-kind sort key), tier ('high'|'med'|'low')
-// is the detector's own banding for pip styling, ref is a refKey (sid#ai /
-// sid#ai.si / sid#ai.si:ti) so the existing select()/filter machinery can land on
-// it, summary is a self-contained sentence for the panel, and reason states the
-// measured value against the threshold that fired, so a reader can judge it.
+// detectSignals runs the five detectors over every session in graph and
+// returns their findings sorted worst-first. Each signal is { kind,
+// severity, tier, ref, summary, reason }: severity is a [0,1] "badness"
+// magnitude (the cross-kind sort key), tier ('high'|'med'|'low') is the
+// detector's own banding, ref locates the agent, turn or call (sid#ai /
+// sid#ai.si / sid#ai.si:ti, read back with parseRefKey), summary is a
+// self-contained sentence and reason states the measured value against the
+// threshold that fired, so a reader can judge it.
 /**
  * @param {AgentGraph|null|undefined} graph
  * @param {{whaleShare?: number, whaleMinUSD?: number, retryStormMin?: number, slowToolMin?: number,
@@ -599,7 +185,7 @@ function retryStormSignals(agents, sid, retryStormMin) {
  * @returns {Signal[]}
  */
 function slowToolSignals(agents, sid, slowToolMin, slowMultiple) {
-  // Collect every tool with a real wall-clock (NaN-guarded like durationHistogram).
+  // Collect every tool with a real wall-clock (NaN-guarded).
   const tools = []; // { ai, si, ti, kind, name, dur }
   agents.forEach((a, ai) => {
     (a.steps || []).forEach((step, si) => {
@@ -783,39 +369,4 @@ function costWhaleSignals(agents, sid, whaleShare, whaleMinUSD) {
     });
   });
   return out;
-}
-
-// signalPipsByAgent buckets detectSignals output into per-agent pip lists for the
-// Timeline gutter: it keeps only signals whose ref belongs to `sessionId` (the one
-// Gantt being plotted) and groups them by agentIndex. Because detectSignals already
-// returns findings worst-first by severity, the grouping preserves that order — so
-// each agent's kept pips are its worst. A heavy agent can flag many anomalies, so
-// each list is capped at `cap`; the remainder is reported as `overflow` (never
-// silently dropped — the Insights → Signals panel holds the full list). Malformed
-// or cross-session refs are skipped, and each pip's tier is normalized to
-// high|med|low so the renderer always has a color class. Returns
-// Map<agentIndex, { pips: [{ ref, tier, summary, reason, kind }], overflow }>.
-/**
- * @param {Signal[]|null|undefined} signals
- * @param {string|null|undefined} sessionId
- * @param {number} [cap]
- * @returns {Map<number, {pips: {ref: string, tier: string, summary: string, reason: string, kind: string}[], overflow: number}>}
- */
-export function signalPipsByAgent(signals, sessionId, cap = 3) {
-  const byAgent = new Map();
-  if (!Array.isArray(signals) || !sessionId) return byAgent;
-  const lim = cap > 0 ? cap : 3;
-  for (const s of signals) {
-    const p = parseRefKey(s && s.ref);
-    if (!p || p.sessionId !== sessionId) continue;
-    let e = byAgent.get(p.agentIndex);
-    if (!e) { e = { pips: [], overflow: 0 }; byAgent.set(p.agentIndex, e); }
-    if (e.pips.length < lim) {
-      const tier = s.tier === 'high' || s.tier === 'med' ? s.tier : 'low';
-      e.pips.push({ ref: s.ref, tier, summary: s.summary, reason: s.reason || '', kind: s.kind });
-    } else {
-      e.overflow += 1;
-    }
-  }
-  return byAgent;
 }

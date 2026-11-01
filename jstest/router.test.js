@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, redirectHash, spendHash, REDIRECTS, agentsSessionHash, sessionHash, parseAgentsSub, onChange } from '../web/router.js';
+import { parseHash, redirectHash, spendHash, REDIRECTS, RETIRED_LENSES, sessionHash, parseAgentsSub, onChange } from '../web/router.js';
 import { installDOM } from './helpers/mini-dom.js';
 
 test('parseHash reads the Spend tab and Tokens unit from the hash', () => {
@@ -11,7 +11,7 @@ test('parseHash defaults the Spend unit to dollars', () => {
   assert.deepEqual(parseHash('#spend'), { view: 'spend', sub: '', unit: 'dollars' });
 });
 test('parseHash keeps multi-segment subs for other views', () => {
-  assert.deepEqual(parseHash('#agents/timeline'), { view: 'agents', sub: 'timeline', unit: 'dollars' });
+  assert.deepEqual(parseHash('#agents/s1/turn-9'), { view: 'agents', sub: 's1/turn-9', unit: 'dollars' });
 });
 test('parseHash falls back to overview for an empty or unknown hash', () => {
   assert.equal(parseHash('').view, 'overview');
@@ -63,7 +63,7 @@ for (const [from, to] of REDIRECT_CASES) {
   });
 }
 test('redirectHash leaves current hashes alone', () => {
-  for (const h of ['', '#overview', '#overview/all', '#spend', '#spend/project/tokens', '#agents/timeline', '#costly', '#toolsy']) {
+  for (const h of ['', '#overview', '#overview/all', '#spend', '#spend/project/tokens', '#agents', '#agents/3f2a-session', '#agents/3f2a-session/turn-9', '#agents/feeds', '#costly', '#toolsy']) {
     assert.equal(redirectHash(h), null, h);
   }
 });
@@ -87,6 +87,12 @@ for (const [from, to, view, sub] of [
   ['#cost/model', '#spend/model', 'spend', 'model'],
   ['#tokens', '#spend/model/tokens', 'spend', 'model'],
   ['#cache', '#spend', 'spend', ''],
+  ['#agents/feed', '#agents', 'agents', ''],
+  ['#agents/tree', '#agents', 'agents', ''],
+  ['#agents/timeline', '#agents', 'agents', ''],
+  ['#agents/conversation', '#agents', 'agents', ''],
+  ['#agents/insights', '#agents', 'agents', ''],
+  ['#agents/tree/3f2a-session', '#agents/3f2a-session', 'agents', '3f2a-session'],
 ]) {
   test(`onChange rewrites ${from} to ${to} with replaceState before the callback fires`, () => {
     const { location, replaceCalls, window } = installDOM({ hash: from });
@@ -119,14 +125,29 @@ test('sessionHash builds #agents/<id>[/<turn>] with each part encoded', () => {
   assert.equal(sessionHash('3f2a-session', 'turn-9'), '#agents/3f2a-session/turn-9');
   assert.equal(sessionHash('a b/c', 't/1 x'), '#agents/a%20b%2Fc/t%2F1%20x');
 });
-test('agentsSessionHash deep-links a session to its session page', () => {
-  const h = agentsSessionHash('3f2a-session');
-  assert.equal(h, '#agents/3f2a-session');
-  assert.equal(h, sessionHash('3f2a-session'));
-  const route = parseHash(h);
+test('sessionHash deep-links a session to its session page', () => {
+  const route = parseHash(sessionHash('3f2a-session'));
   assert.equal(route.view, 'agents');
   assert.deepEqual(parseAgentsSub(route.sub), { sessionId: '3f2a-session', turnUuid: '' });
 });
+
+test('the retired Agents lenses are exactly feed, tree, timeline, conversation and insights', () => {
+  assert.deepEqual([...RETIRED_LENSES].sort(), ['conversation', 'feed', 'insights', 'timeline', 'tree']);
+});
+for (const [from, to] of [
+  ['#agents/feed', '#agents'],
+  ['#agents/tree', '#agents'],
+  ['#agents/timeline', '#agents'],
+  ['#agents/conversation', '#agents'],
+  ['#agents/insights', '#agents'],
+  ['#agents/insights/signals', '#agents'],
+  ['#agents/tree/3f2a-session', '#agents/3f2a-session'],
+  ['#agents/tree/a%20b%2Fc', '#agents/a%20b%2Fc'],
+]) {
+  test(`redirectHash ${from} → ${to}`, () => {
+    assert.equal(redirectHash(from), to);
+  });
+}
 test('parseAgentsSub reads the session and turn of #agents/<id>/<turn>', () => {
   const route = parseHash('#agents/3f2a-session/turn-9');
   assert.equal(route.view, 'agents');

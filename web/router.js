@@ -8,7 +8,9 @@
 //
 // Retired views redirect through REDIRECTS so old bookmarks still land:
 // #cost, #tokens and #cache on the Spend view, #tools on the Overview's
-// tool-patterns table.
+// tool-patterns table. Links to the retired Agents lenses (RETIRED_LENSES)
+// land on the Sessions list, and a Tree link naming a session opens that
+// session's page.
 
 const KNOWN_VIEWS = new Set(['overview', 'spend', 'agents']);
 
@@ -32,6 +34,11 @@ export const REDIRECTS = [
   { from: 'tools', to: '#overview/all' },
 ];
 
+// RETIRED_LENSES are the Agents view's former lenses, each once the first
+// segment after #agents.
+export const RETIRED_LENSES = new Set(['feed', 'tree', 'timeline', 'conversation', 'insights']);
+const TREE_LENS = 'tree';
+
 function splitHash(raw) {
   const s = raw == null ? '' : String(raw);
   const body = s.startsWith('#') ? s.slice(1) : s;
@@ -43,6 +50,9 @@ function splitHash(raw) {
 // with, or null when the hash is current.
 export function redirectHash(raw) {
   const { head, rest } = splitHash(raw);
+  if (head === 'agents' && RETIRED_LENSES.has(rest[0])) {
+    return rest[0] === TREE_LENS && rest[1] ? `#agents/${rest[1]}` : '#agents';
+  }
   const rule = REDIRECTS.find(r => r.from === head);
   if (!rule) return null;
   if (rule.to) return rule.to;
@@ -55,11 +65,6 @@ export function redirectHash(raw) {
 export function sessionHash(sessionId, turnUuid = '') {
   const base = `#agents/${encodeURIComponent(sessionId)}`;
   return turnUuid ? `${base}/${encodeURIComponent(turnUuid)}` : base;
-}
-
-// agentsSessionHash is the hash that opens sessionId's session page.
-export function agentsSessionHash(sessionId) {
-  return sessionHash(sessionId);
 }
 
 // parseAgentsSub splits an Agents route's sub into the session it opens

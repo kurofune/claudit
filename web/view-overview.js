@@ -11,7 +11,7 @@ import { fetchOverview, fetchAnomalies } from './api.js';
 import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
-import { agentsSessionHash } from './router.js';
+import { sessionHash } from './router.js';
 import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, hashShowAll, promptPreview } from './overview-logic.js';
 import { toolPatternsHTML, wireToolPatterns } from './overview-tools.js';
 import {
@@ -83,7 +83,7 @@ function exampleRowHTML(e) {
     ? `<td class="ex-cmd" title="${escHtml(full)}"><code>${escHtml(full.replace(/\s+/g, ' ').trim())}</code></td>`
     : '<td class="ex-cmd is-empty">(no input recorded)</td>';
   const session = sid
-    ? `<a class="ex-session" href="${escHtml(agentsSessionHash(sid))}" title="Open session ${escHtml(sid)}">${escHtml(sid.slice(0, 8))}</a>`
+    ? `<a class="ex-session" href="${escHtml(sessionHash(sid))}" title="Open session ${escHtml(sid)}">${escHtml(sid.slice(0, 8))}</a>`
     : '<span class="ex-session is-empty">none</span>';
   return `<tr>
       <td class="num ex-tokens">${escHtml(fmtNum(e.context_tokens || 0))}</td>

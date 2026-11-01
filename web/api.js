@@ -13,7 +13,7 @@
 // revalidation on each call; a 304 returns the cached body without
 // re-decoding the JSON payload.
 
-/** @import { AgentGraph, SessionIndex, SessionStoryPage, SessionStoryWhole, ToolUseDetail, TurnTextDetail } from './api-types.js' */
+/** @import { SessionIndex, SessionStoryPage, SessionStoryWhole, ToolUseDetail, TurnTextDetail } from './api-types.js' */
 
 const apiBase = '/_claudit/api';
 
@@ -55,10 +55,8 @@ export const fetchTokens = () => getJSON('/tokens');
 export const fetchTools = () => getJSON('/tools');
 export const fetchSubagents = () => getJSON('/subagents');
 export const fetchAnomalies = () => getJSON('/anomalies');
-/** @returns {Promise<AgentGraph>} */
-export const fetchAgents = () => getJSON('/agents');
 // fetchAgentToolFull pulls the untruncated input/output for one tool_use back
-// from disk (the drawer's "show full" action).
+// from disk (the story's "show full" action).
 /**
  * @param {string} sessionId
  * @param {string} toolId
@@ -68,8 +66,8 @@ export const fetchAgentToolFull = (sessionId, toolId) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&tool=' + encodeURIComponent(toolId));
 // fetchAgentTurnFull pulls the untruncated thinking/text for one turn back
-// from disk (the drawer's "show full" action on Reasoning/Message). Serve-mode
-// only, same as fetchAgentToolFull — the drawer guards on serve mode.
+// from disk (the story's "show full" action on a turn's text). Serve-mode
+// only, same as fetchAgentToolFull.
 /**
  * @param {string} sessionId
  * @param {string} turnUuid
