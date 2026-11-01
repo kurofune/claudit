@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   PROVIDERS, providerFromSearch, searchWithProvider, providerLabel,
   providerTiles, shareText,
-  emptyProviderText, busyPainter,
+  emptyProviderText, busyPainter, API_EQUIVALENT_TIP,
 } from '../web/provider-filter.js';
 
 test('PROVIDERS lists All, Claude Code and Codex in that order', () => {
@@ -75,6 +75,12 @@ test('emptyProviderText names the provider and where claudit reads it', () => {
   assert.equal(emptyProviderText('codex'), 'No Codex sessions in this range (claudit reads ~/.codex/sessions)');
   assert.equal(emptyProviderText('claude-code'), 'No Claude Code sessions in this range (claudit reads ~/.claude/projects)');
   assert.equal(emptyProviderText('all'), '');
+});
+
+test('API_EQUIVALENT_TIP says API list rates and that the subscription bills differently, naming no provider', () => {
+  assert.match(API_EQUIVALENT_TIP, /priced at API list rates/);
+  assert.match(API_EQUIVALENT_TIP, /subscription bills differently/);
+  assert.doesNotMatch(API_EQUIVALENT_TIP, /Codex|Claude/);
 });
 
 function deferred() {

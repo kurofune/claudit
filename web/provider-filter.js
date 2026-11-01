@@ -66,9 +66,10 @@ export function emptyProviderText(id) {
   return `No ${providerLabel(id)} sessions in this range (claudit reads ${SOURCES[id]})`;
 }
 
-// API_EQUIVALENT_TIP explains why Codex dollars are API-equivalent.
+// API_EQUIVALENT_TIP explains what kind of dollars the Overview shows, the
+// same way for every provider.
 export const API_EQUIVALENT_TIP =
-  'These are the tokens priced at API list rates. Plan usage is billed by the subscription, not per token.';
+  'These are the tokens priced at API list rates. Your subscription bills differently, not per token.';
 
 // ─── DOM ───────────────────────────────────────────────────────────────
 

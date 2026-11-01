@@ -19,20 +19,19 @@ import {
 
 const labelIcon = id => `<svg class="icon" aria-hidden="true"><use href="#icon-${id}"/></svg>`;
 
-// apiEquivalentHTML labels Codex dollars: Codex is billed by subscription,
-// so its dollars are the same tokens at API list prices. Focusable so the
-// tooltip opens from the keyboard too.
+// apiEquivalentHTML marks every dollar figure on the Overview: claudit prices
+// each provider's tokens at API list rates while the plans bill by
+// subscription. Focusable so the tooltip opens from the keyboard too.
 const apiEquivalentHTML = () =>
   `<span class="api-eq" tabindex="0" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span>`;
 
-function totalsHTML(totals, overallHitRatio, totalTokens, provider) {
+function totalsHTML(totals, overallHitRatio, totalTokens) {
   const cost = totals.CostUSD || 0;
   const sessions = totals.Sessions || 0;
   const turns = totals.Turns || 0;
-  const costLabel = provider === 'codex' ? `Total cost ${apiEquivalentHTML()}` : 'Total cost';
   return `
     <div class="headline">
-      <div class="label">${labelIcon('cost')}${costLabel}</div>
+      <div class="label">${labelIcon('cost')}Total cost ${apiEquivalentHTML()}</div>
       <div class="value">${escHtml(fmtMoney(cost))}</div>
     </div>
     <div class="metric">
@@ -62,7 +61,7 @@ function providerTilesHTML(rows, provider) {
     <div class="provider-tile" data-provider="${escHtml(r.provider)}">
       <div class="provider-tile-head">
         <span class="provider-tile-name">${escHtml(providerLabel(r.provider))}</span>
-        ${r.provider === 'codex' ? apiEquivalentHTML() : ''}
+        ${apiEquivalentHTML()}
         <span class="provider-tile-share" title="Share of this window's dollars">${escHtml(shareText(r.share))}</span>
       </div>
       <div class="provider-tile-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</div>
@@ -428,7 +427,7 @@ export async function paint() {
 
   container.innerHTML = `
     <div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
-    <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0, provider)}</div>
+    <div class="totals">${totalsHTML(totals, overallHitRatio, overview.total_tokens || 0)}</div>
     ${providerTilesHTML(overview.providers, provider)}
     ${warningsHTML(overview.unknown_models)}
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>

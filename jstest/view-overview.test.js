@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installDOM, click, keydown, Event } from './helpers/mini-dom.js';
+import { API_EQUIVALENT_TIP } from '../web/provider-filter.js';
 
 // A hotspot in the shape /_claudit/api/overview ships (HotspotForJSON).
 const hotspot = (title, cost, extra = {}) => ({
@@ -19,6 +20,10 @@ const OVERVIEW = {
     hotspot('Bash: `go test`', 6, { prev_cost_usd: 3, trend_pct: 100 }),
     hotspot('Bash: `rg`', 3, { prev_cost_usd: 6, trend_pct: -50 }),
     hotspot('Read of `.go` files', 1, { prev_cost_usd: 0 }),
+  ],
+  providers: [
+    { provider: 'claude-code', sessions: 1, turns: 6, cost_usd: 7, share: 70 },
+    { provider: 'codex', sessions: 1, turns: 3, cost_usd: 3, share: 30 },
   ],
 };
 
@@ -48,8 +53,8 @@ function stubStorage(init = {}) {
 const OPEN_KEY = 'claudit.overview.openHotspots';
 
 let seq = 0;
-async function mount(responses, { hash = '#overview', stored = {} } = {}) {
-  const dom = installDOM({ hash });
+async function mount(responses, { hash = '#overview', search = '', stored = {} } = {}) {
+  const dom = installDOM({ hash, search });
   const storage = stubStorage(stored);
   const scrolled = [];
   Object.getPrototypeOf(dom.document.body).scrollIntoView = function () { scrolled.push(this.id); };
@@ -393,3 +398,45 @@ test('forecastChart keeps the generic empty text when the payload names no month
   assert.match(forecastChart(null, []), generic);
   assert.match(forecastChart({ projected_month_end_usd: 0, month_start: '2026-02-01T00:00:00+09:00' }, []), /No projection for February yet/);
 });
+
+const SELECTIONS = [
+  { name: 'All', search: '', tiles: ['claude-code', 'codex'] },
+  { name: 'Claude Code', search: '?provider=claude-code', tiles: ['claude-code'] },
+  { name: 'Codex', search: '?provider=codex', tiles: ['codex'] },
+];
+
+for (const sel of SELECTIONS) {
+  test(`under ${sel.name} every provider tile carries one API-equivalent marker beside its name`, async () => {
+    const { root } = await mount([OVERVIEW], { search: sel.search });
+    const tiles = root.querySelectorAll('.provider-tile');
+    assert.deepEqual(tiles.map(t => t.getAttribute('data-provider')), sel.tiles);
+    for (const t of tiles) {
+      const head = t.querySelector('.provider-tile-head');
+      const marks = t.querySelectorAll('.api-eq');
+      assert.equal(marks.length, 1, `${t.getAttribute('data-provider')} tile has one marker`);
+      assert.equal(head.querySelectorAll('.api-eq').length, 1, 'the marker sits in the tile head, beside the name');
+    }
+  });
+
+  test(`under ${sel.name} the headline Total cost carries one marker and no other metric does`, async () => {
+    const { root } = await mount([OVERVIEW], { search: sel.search });
+    const totals = root.querySelector('.totals');
+    const headline = totals.querySelector('.headline .label');
+    assert.match(headline.textContent, /Total cost/);
+    assert.equal(headline.querySelectorAll('.api-eq').length, 1);
+    const metrics = totals.querySelectorAll('.metric');
+    assert.deepEqual(metrics.map(m => m.querySelector('.label').textContent.trim()),
+      ['Sessions', 'Assistant turns', 'Total tokens', 'Cache hit ratio']);
+    for (const m of metrics) assert.equal(m.querySelectorAll('.api-eq').length, 0);
+  });
+
+  test(`under ${sel.name} every marker is focusable and carries the generic tooltip`, async () => {
+    const { root } = await mount([OVERVIEW], { search: sel.search });
+    const marks = root.querySelectorAll('.api-eq');
+    assert.equal(marks.length, sel.tiles.length + 1, 'one per tile plus the headline');
+    for (const m of marks) {
+      assert.equal(m.getAttribute('tabindex'), '0');
+      assert.equal(m.getAttribute('data-tooltip'), API_EQUIVALENT_TIP);
+    }
+  });
+}
