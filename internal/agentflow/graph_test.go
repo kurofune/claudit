@@ -12,6 +12,7 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -1126,5 +1127,98 @@ func TestBuildAgentGraph_PathToolsCarryFilePathInput(t *testing.T) {
 	}
 	if reads[0].Status != "error" || reads[1].Status != "ok" {
 		t.Errorf("statuses = %q, %q; want error, ok", reads[0].Status, reads[1].Status)
+	}
+}
+
+// TestBuildAgentGraph_CodexSubagentNestsUnderParent: a Codex subagent rollout
+// carries its own thread uuid as SessionID and a ParentLink to the spawning
+// thread. The Agents graph must nest it under the parent session as a child,
+// not show it as a second main session, and roll its cost into the parent's.
+func TestBuildAgentGraph_CodexSubagentNestsUnderParent(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "subagent.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	childSrc := "/codex/2026/10/31/rollout-2026-10-31T06-12-26-01a19217-0c60-71a2-ab13-917397bf7ed1.jsonl"
+	child, err := codex.ParseFile(f, childSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const parentID = "01a15d72-75c8-7ec1-bff4-4d487e6488ad"
+	parent := mkTurn("resp_parent", parentID, "/codex/2026/10/31/rollout-2026-10-31T06-00-00-"+parentID+".jsonl",
+		time.Date(2026, 10, 31, 13, 0, 0, 0, time.UTC))
+	parent.Provider = parse.ProviderCodex
+	parent.Model = "gpt-6-sol"
+	parent.Entrypoint = "codex-tui"
+	snap := &corpus.Snapshot{
+		Turns: append([]parse.Turn{parent}, child.Turns...),
+		Links: child.ParentLinks,
+	}
+
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (the child nests under the parent)", len(g.Sessions))
+	}
+	s := g.Sessions[0]
+	if s.SessionID != parentID {
+		t.Errorf("SessionID = %q, want the parent's %q", s.SessionID, parentID)
+	}
+	if s.Main == nil || len(s.Main.Steps) != 1 || s.Main.Steps[0].UUID != "resp_parent" {
+		t.Fatalf("Main = %+v, want the parent's one step", s.Main)
+	}
+	if len(s.Children) != 1 {
+		t.Fatalf("children = %d, want 1", len(s.Children))
+	}
+	c := s.Children[0]
+	if c.Kind != "subagent" || len(c.Steps) != 1 || c.Steps[0].UUID != child.Turns[0].UUID {
+		t.Errorf("child = Kind %q steps %+v, want the subagent rollout's step", c.Kind, c.Steps)
+	}
+	if c.CostUSD <= 0 || s.Main.CostUSD <= 0 {
+		t.Fatalf("costs main %v child %v, want both > 0", s.Main.CostUSD, c.CostUSD)
+	}
+	if got, want := s.CostUSD, s.Main.CostUSD+c.CostUSD; got != want {
+		t.Errorf("session CostUSD = %v, want main+child %v", got, want)
+	}
+	if s.Entrypoint != "codex-tui" {
+		t.Errorf("Entrypoint = %q", s.Entrypoint)
+	}
+}
+
+// TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot: a subagent spawned by
+// a subagent nests under the root session, and a Claude-shaped turn whose
+// SessionID happens to appear as a link UUID without being a sidechain stays
+// its own session.
+func TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 10, 31, 13, 0, 0, 0, time.UTC)
+	root := mkTurn("r1", "root", "/codex/rollout-root.jsonl", t0)
+	kid := mkTurn("k1", "kid", "/codex/rollout-kid.jsonl", t0.Add(time.Second))
+	kid.Sidechain = true
+	grand := mkTurn("g1", "grand", "/codex/rollout-grand.jsonl", t0.Add(2*time.Second))
+	grand.Sidechain = true
+	plain := mkTurn("p1", "plain", "/codex/rollout-plain.jsonl", t0.Add(3*time.Second))
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{root, kid, grand, plain},
+		Links: []parse.ParentLink{
+			{UUID: "kid", ParentUUID: "root"},
+			{UUID: "grand", ParentUUID: "kid"},
+			{UUID: "plain", ParentUUID: "root"},
+		},
+	}
+	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]AgentSession{}
+	for _, s := range g.Sessions {
+		byID[s.SessionID] = s
+	}
+	if len(g.Sessions) != 2 || len(byID["root"].Children) != 2 || byID["plain"].Main == nil {
+		t.Errorf("sessions = %+v, want root with 2 children and plain on its own", g.Sessions)
 	}
 }

@@ -159,9 +159,11 @@ type nodeAccum struct {
 }
 
 // BuildAgentGraph groups a snapshot's turns into per-session agent trees.
-// All turns of a session — main and sub-agents — share the same SessionID
-// (a sub-agent's JSONL carries its parent's sessionId); the individual agents
-// are distinguished by SourceFile. parse.IsSubagentFile classifies each file.
+// A Claude Code sub-agent's JSONL carries its parent's sessionId and is
+// classified by parse.IsSubagentFile; a Codex sub-agent rollout carries its
+// own thread id and a ParentLink to the spawning thread, and threadRoots
+// folds it into the root session. The individual agents are distinguished by
+// SourceFile.
 func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts Options) (AgentGraph, error) {
 	if snap == nil || len(snap.Turns) == 0 {
 		return AgentGraph{}, nil
@@ -192,6 +194,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	// the canonical occurrence, so skip the replays here or the per-session and
 	// per-agent figures would inflate above the deduped headline.
 	replays := aggregate.BuildReplaySet(snap.Turns)
+	roots := threadRoots(snap)
 
 	for _, t := range snap.Turns {
 		if !aggregate.MatchesFilter(t, f) {
@@ -200,10 +203,14 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		if replays.IsReplay(t) {
 			continue
 		}
-		s, ok := sessions[t.SessionID]
+		sessionID := t.SessionID
+		if root, ok := roots[t.SessionID]; ok {
+			sessionID = root
+		}
+		s, ok := sessions[sessionID]
 		if !ok {
-			s = &sessionAccum{sessionID: t.SessionID, nodes: map[string]*nodeAccum{}}
-			sessions[t.SessionID] = s
+			s = &sessionAccum{sessionID: sessionID, nodes: map[string]*nodeAccum{}}
+			sessions[sessionID] = s
 		}
 		if s.cwd == "" && t.CWD != "" {
 			s.cwd = t.CWD
@@ -216,7 +223,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		if !ok {
 			n = &nodeAccum{
 				sourceFile: t.SourceFile,
-				subagent:   parse.IsSubagentFile(t.SourceFile),
+				subagent:   sessionID != t.SessionID || parse.IsSubagentFile(t.SourceFile),
 				started:    t.Timestamp,
 				ended:      t.Timestamp,
 			}
@@ -322,6 +329,43 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		return out[i].SessionID < out[j].SessionID
 	})
 	return AgentGraph{Sessions: out}, nil
+}
+
+// threadRoots maps the SessionID of every sub-agent thread that names its
+// own parent (a Codex sub-agent rollout: a sidechain whose SessionID is the
+// UUID of a ParentLink) to the root session it descends from, climbing
+// through sub-agents that spawned sub-agents. Only sidechain sessions are
+// remapped, so a message-level link never moves an ordinary session.
+func threadRoots(snap *corpus.Snapshot) map[string]string {
+	sidechain := map[string]bool{}
+	for _, t := range snap.Turns {
+		if t.Sidechain && t.SessionID != "" {
+			sidechain[t.SessionID] = true
+		}
+	}
+	if len(sidechain) == 0 {
+		return nil
+	}
+	parent := map[string]string{}
+	for _, l := range snap.Links {
+		if sidechain[l.UUID] && l.ParentUUID != "" && l.ParentUUID != l.UUID {
+			parent[l.UUID] = l.ParentUUID
+		}
+	}
+	roots := make(map[string]string, len(parent))
+	for id := range parent {
+		root, seen := id, map[string]bool{id: true}
+		for {
+			next, ok := parent[root]
+			if !ok || seen[next] {
+				break
+			}
+			seen[next] = true
+			root = next
+		}
+		roots[id] = root
+	}
+	return roots
 }
 
 // finalizeNode turns an accumulator into a presentable AgentNode: it orders
