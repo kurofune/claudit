@@ -3330,3 +3330,106 @@
   .ins-sig-clean { color: var(--accent-2); }
   .ins-sig-more { font-size: 11px; color: var(--ink-2); padding: var(--s-2) var(--s-2) 0;
     border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); margin-top: 2px; }
+
+  /* ─── Session story ("What happened") ─────────────────────────────────
+     A CI-log reading of one prompt: You / Agent rows with the text as
+     written, each agent message's commands under a counted group header,
+     one-line step rows (clock · ✓/✕/… · command · duration) that expand in
+     place, idle gaps, and sub-agents nested at the step that spawned them. */
+  .story { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
+  .story-title { font-size: var(--t-3); margin: 0; }
+  .story-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+  .story-pos { color: var(--ink-2); font-size: var(--t-2); font-variant-numeric: tabular-nums; }
+  .story-nav, .story-page-row, .story-disclose, .story-full, .story-child-h, .story-jump-item {
+    font: inherit; cursor: pointer; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  }
+  .story-nav { padding: var(--s-1) var(--s-3); font-weight: 500; }
+  .story-nav:hover:not(:disabled), .story-page-row:hover:not(:disabled),
+  .story-full:hover, .story-child-h:hover, .story-jump-item:hover { border-color: var(--accent); }
+  .story-nav:disabled { cursor: default; opacity: 0.5; }
+  .story :is(button, [role="button"], input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .story-find { margin-left: auto; }
+  .story-search { font: inherit; font-size: var(--t-2); width: 22rem; max-width: 100%;
+    padding: var(--s-1) var(--s-2); color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm); }
+  .story-find-status { color: var(--ink-2); font-size: var(--t-2); min-width: 7em; }
+  .story-jump > summary { cursor: pointer; color: var(--accent); font-size: var(--t-2); padding: var(--s-1) var(--s-2); }
+  .story-jump > summary:hover { text-decoration: underline; }
+  .story-jump-list { list-style: none; margin: 0; padding: var(--s-1) var(--s-2) var(--s-2);
+    display: flex; flex-direction: column; gap: 2px; max-height: 22rem; overflow-y: auto; }
+  .story-jump-item { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-3);
+    align-items: baseline; text-align: left; padding: var(--s-1) var(--s-2); border-color: transparent; }
+  .story-jump-item[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .story-jump-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .story-jump-turns { color: var(--ink-2); font-size: var(--t-1); font-variant-numeric: tabular-nums; }
+  .story-notice { font-size: var(--t-2); color: var(--ink-2); padding: var(--s-1) var(--s-3);
+    border-left: 3px solid var(--warn); background: var(--warn-soft); border-radius: var(--r-sm); }
+  .story-rows { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+  .story-row { padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); min-width: 0; }
+  .story-you { background: var(--accent-soft); }
+  .story-agent { background: var(--surface); border: 1px solid var(--border); }
+  .story-who { font-size: var(--t-1); font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums;
+    display: flex; gap: var(--s-2); align-items: baseline; }
+  .story-cost { font-family: var(--font-mono); font-weight: 500; color: var(--ink-2); }
+  .story-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--s-1); color: var(--ink); }
+  .story-text.is-quiet { color: var(--muted); font-style: italic; }
+  .story-disclose, .story-full { margin-top: var(--s-1); padding: 1px var(--s-2); font-size: var(--t-1); color: var(--accent);
+    border-color: transparent; background: transparent; }
+  .story-disclose:hover, .story-full:hover { text-decoration: underline; }
+  .story-full { margin: 0 0 0 var(--s-2); }
+  .story-pre { margin: var(--s-1) 0 0; padding: var(--s-2); font-family: var(--font-mono); font-size: var(--t-1);
+    white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: var(--r-sm);
+    max-height: 28rem; overflow-y: auto; }
+  .story-group { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); min-width: 0; }
+  .story-group-h { display: flex; justify-content: space-between; gap: var(--s-3); padding: var(--s-1) var(--s-3);
+    font-size: var(--t-1); font-weight: 600; color: var(--ink-2); border-bottom: 1px solid var(--border);
+    background: var(--surface-2); font-variant-numeric: tabular-nums; }
+  .story-items { display: flex; flex-direction: column; min-width: 0; }
+  .story-step { display: grid; grid-template-columns: 5.5em 1.4em minmax(0, 1fr) auto; gap: var(--s-2);
+    align-items: baseline; padding: 3px var(--s-3); cursor: pointer; font-size: var(--t-2); min-width: 0; }
+  .story-step + .story-step, .story-detail + .story-step { border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent); }
+  .story-step:hover { background: color-mix(in oklch, var(--accent) 7%, transparent); }
+  .story-step[aria-expanded="true"] { background: color-mix(in oklch, var(--accent) 10%, transparent); }
+  .story-clock, .story-dur { font-family: var(--font-mono); font-size: var(--t-1); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .story-mark { text-align: center; font-weight: 700; }
+  .story-step.is-ok .story-mark { color: var(--accent-2); }
+  .story-step.is-error .story-mark { color: var(--hot); }
+  .story-step.is-pending .story-mark { color: var(--muted); }
+  .story-cmd { font-family: var(--font-mono); font-size: var(--t-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .story-detail { padding: var(--s-1) var(--s-3) var(--s-3) calc(5.5em + 1.4em + var(--s-3) + 2 * var(--s-2));
+    display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+  .story-sec-h { font-size: var(--t-1); font-weight: 600; color: var(--ink-2); display: flex; align-items: center; gap: var(--s-2); }
+  .story-none { color: var(--muted); font-size: var(--t-1); }
+  .story-chip { display: inline-block; font-size: var(--t-1); font-weight: 500; padding: 0 var(--s-2);
+    border-radius: 999px; background: var(--surface-3); color: var(--ink-2); white-space: nowrap; }
+  .story-exit { font-family: var(--font-mono); }
+  .story-note { margin-left: var(--s-2); }
+  .story-idle { align-self: center; font-size: var(--t-1); color: var(--muted); padding: 2px var(--s-3);
+    border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); width: 100%; text-align: center; }
+  .story-items > .story-idle { border: 0; background: var(--surface-2); }
+  .story-child, .story-parallel { margin: var(--s-1) var(--s-3) var(--s-2) calc(5.5em + var(--s-3)); min-width: 0; }
+  .story-rows > .story-child, .story-rows > .story-parallel { margin-left: var(--s-4); }
+  .story-parallel { border-left: 2px solid var(--accent); padding-left: var(--s-2); }
+  .story-parallel > .story-child { margin-left: 0; }
+  .story-parallel-h { font-size: var(--t-1); font-weight: 600; color: var(--ink-2); margin-bottom: var(--s-1); }
+  .story-child-h { padding: 2px var(--s-2); font-size: var(--t-2); text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+  .story-caret { display: inline-block; width: 1em; color: var(--ink-2); }
+  .story-child-body { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-2);
+    padding-left: var(--s-3); border-left: 2px solid var(--border); }
+  .story-page-row { padding: var(--s-2) var(--s-3); text-align: center; color: var(--accent); font-weight: 500; }
+  .story-page-error { color: var(--hot); font-size: var(--t-2); }
+  .story-empty { color: var(--ink-2); padding: var(--s-4); text-align: center; }
+  .story-back { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .story-skel { display: flex; flex-direction: column; gap: var(--s-3); }
+  .story-skel .story-skel-a { width: 55%; height: 2.4em; }
+  .story-skel .story-skel-b { width: 85%; height: 1.4em; }
+  .story-skel .story-skel-c { width: 70%; height: 5em; }
+  @keyframes story-jump-flash {
+    0%   { box-shadow: 0 0 0 3px var(--accent); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  .story .is-jumped { animation: story-jump-flash 0.6s ease-out 3; }
+  @media (prefers-reduced-motion: reduce) {
+    .story .is-jumped { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+  }
