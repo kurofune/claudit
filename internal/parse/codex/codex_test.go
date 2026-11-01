@@ -230,6 +230,19 @@ func TestExecCommands(t *testing.T) {
 		{`tools.exec_command({ "workdir": '/a,b}', yield_time_ms: 1000, env: {cmd: "no"}, args: [1, {x: "]"}], cmd: ` + "`make lint`" + ` })`, []string{"make lint"}},
 		{`tools.exec_command({workdir:"/w"})`, nil},
 		{`tools.exec_command(opts)`, nil},
+		{`tools.exec_command({cmd:'git status', cmd:'go test ./...'})`, []string{"go test ./..."}},
+		{`tools.exec_command({cmd:"go test ./...", workdir:"/w", "cmd":'git status'})`, []string{"git status"}},
+		{`tools.exec_command({cmd:"git status", cmd:c})`, nil},
+		{`tools.exec_command({cmd:"git status", cmd})`, nil},
+		{`tools.exec_command({cmd:c, cmd:"git status"})`, []string{"git status"}},
+		{`tools.exec_command({cmd:"git status", ...opts})`, nil},
+		{`tools.exec_command({cmd:"git status", ...{cmd: "go test ./..."}})`, nil},
+		{`tools.exec_command({cmd:"git status", [k]: "go test ./..."})`, nil},
+		{`tools.exec_command({...opts, cmd:"git status"})`, []string{"git status"}},
+		{`tools.exec_command({[k]: "x", cmd:"git status"})`, []string{"git status"}},
+		{`tools.exec_command({cmd:"git status", workdir:"/w", ...opts})`, nil},
+		{`tools.exec_command({cmd:"git status", get cmd() { return "x" }})`, nil},
+		{`tools.exec_command({cmd:"git status", workdir:"/w"`, nil},
 	}
 	for _, c := range cases {
 		got, ok := execCommands(c.src)
@@ -243,15 +256,21 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 	for _, src := range []string{
 		`text(await tools.exec_command({cmd:"go test " + pkg}));`,
 		"text(await tools.exec_command({cmd:`go test ${pkg}`}));",
+		`text(await tools.exec_command({cmd:"git status", ...opts}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
 		if tu.Input != src || tu.Detail != "" {
 			t.Errorf("toolUse(%q) = Input %q Detail %q, want the original input and no Bash pattern", src, tu.Input, tu.Detail)
 		}
 	}
-	tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: `text(await tools.exec_command({cmd:"go test ./..."}));`})
-	if tu.Input != "go test ./..." || tu.Detail == "" {
-		t.Errorf("static cmd: Input %q Detail %q, want the command and its Bash pattern", tu.Input, tu.Detail)
+	for _, src := range []string{
+		`text(await tools.exec_command({cmd:"go test ./..."}));`,
+		`text(await tools.exec_command({cmd:"git status", cmd:"go test ./..."}));`,
+	} {
+		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
+		if tu.Input != "go test ./..." || tu.Detail != "go test" {
+			t.Errorf("toolUse(%q) = Input %q Detail %q, want the final cmd and its Bash pattern", src, tu.Input, tu.Detail)
+		}
 	}
 }
 

@@ -398,7 +398,7 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 // the JavaScript an exec custom tool runs, through the object's brace.
 var execCall = regexp.MustCompile(`exec_command\(\s*\{`)
 
-// execCommands returns the cmd string of every exec_command call in an exec
+// execCommands returns the final cmd string of every exec_command call in an exec
 // tool's JavaScript source, wherever cmd sits among the object's properties,
 // and reports whether every call's cmd resolved. A cmd that is anything but
 // one complete static string literal (a variable, a concatenation, an
@@ -415,17 +415,36 @@ func execCommands(src string) (cmds []string, ok bool) {
 	return cmds, len(cmds) > 0
 }
 
-// objectCmd walks the top-level properties of the object literal whose body
-// starts at s and returns its cmd property when that is one complete static
-// string literal: the literal must end the property's value, and a template
-// literal must not interpolate.
-// Any shape it cannot follow (a spread, a computed key) yields no command.
+// objectCmd walks every top-level property of the object literal whose body
+// starts at s and returns the cmd value JavaScript would see: the last cmd
+// property wins, as it does at runtime. That value resolves only when it is
+// one complete static string literal (the literal must end the property's
+// value, and a template literal must not interpolate) and nothing after it
+// can override it. A spread or a computed key may set cmd, so either one
+// leaves cmd unresolved until a later static cmd property overrides it. Any
+// shape it cannot follow (a method, an accessor, an unclosed object) yields
+// no command.
 func objectCmd(s string) (string, bool) {
+	cmd, resolved := "", false
 	i := 0
 	for {
 		i = skipSpace(s, i)
-		if i >= len(s) || s[i] == '}' {
+		if i >= len(s) {
 			return "", false
+		}
+		if s[i] == '}' {
+			return cmd, resolved
+		}
+		if strings.HasPrefix(s[i:], "...") || s[i] == '[' {
+			n, ok := skipValue(s[i:])
+			if !ok {
+				return "", false
+			}
+			cmd, resolved = "", false
+			if i = skipSpace(s, i+n); i < len(s) && s[i] == ',' {
+				i++
+			}
+			continue
 		}
 		var key string
 		if c := s[i]; c == '"' || c == '\'' || c == '`' {
@@ -449,35 +468,35 @@ func objectCmd(s string) (string, bool) {
 			return "", false
 		}
 		switch s[i] {
-		case ',':
-			i++
+		case ',', '}':
+			if key == "cmd" {
+				cmd, resolved = "", false
+			}
+			if s[i] == ',' {
+				i++
+			}
 			continue
-		case '}':
-			return "", false
 		case ':':
 		default:
 			return "", false
 		}
 		i = skipSpace(s, i+1)
 		if key == "cmd" {
-			v, n, ok := jsString(s[i:])
-			if !ok || s[i] == '`' && interpolates(s[i:i+n]) {
-				return "", false
+			cmd, resolved = "", false
+			if v, n, ok := jsString(s[i:]); ok && !(s[i] == '`' && interpolates(s[i:i+n])) {
+				if j := skipSpace(s, i+n); j < len(s) && (s[j] == ',' || s[j] == '}') {
+					cmd, resolved = v, true
+				}
 			}
-			if j := skipSpace(s, i+n); j >= len(s) || s[j] != ',' && s[j] != '}' {
-				return "", false
-			}
-			return v, true
 		}
 		n, ok := skipValue(s[i:])
 		if !ok {
 			return "", false
 		}
 		i = skipSpace(s, i+n)
-		if i >= len(s) || s[i] != ',' {
-			return "", false
+		if i < len(s) && s[i] == ',' {
+			i++
 		}
-		i++
 	}
 }
 
