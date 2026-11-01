@@ -244,3 +244,77 @@ test('sub-agents with unknown parents that overlap share one header even when th
   assert.equal(rows[1].header, '2 agents in parallel · longest: a 8m 15s');
   assert.deepEqual(rows[1].children.map(x => x.note), ['parent step unknown', 'parent step unknown']);
 });
+
+test('splitWrappers keeps the written whitespace and the wrappers in source order', () => {
+  const raw = '<environment_context>\n  <cwd>/r</cwd>\n</environment_context>\n<system-reminder>r</system-reminder>\n\n  keep  indented\n\n\n\nlines\tend  ';
+  const { visible, hidden } = splitWrappers(raw);
+  assert.equal(visible, '  keep  indented\n\n\n\nlines\tend  ');
+  assert.equal(hidden, '<environment_context>\n  <cwd>/r</cwd>\n</environment_context>\n\n<system-reminder>r</system-reminder>');
+  const between = splitWrappers('before  \n<system-reminder>r</system-reminder>\n  after');
+  assert.deepEqual(between, { visible: 'before  \n  after', hidden: '<system-reminder>r</system-reminder>' });
+  assert.equal(splitWrappers('  untouched\n\n\n\nprompt  ').visible, '  untouched\n\n\n\nprompt  ');
+});
+
+test('a long wrapper never hides the request that follows it', () => {
+  const wrapper = '# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\n' + 'r'.repeat(5000) + '\n</INSTRUCTIONS>';
+  const rows = storyRows({ uuid: 'u', text: `${wrapper}\nship the fix`, timestamp: at(0), turns: 0 }, []);
+  assert.equal(rows[0].text, 'ship the fix');
+  assert.equal(rows[0].hidden, wrapper);
+});
+
+test('retries compare whole inputs: commands that differ past the snippet cap stay distinct', () => {
+  const cut = 'echo ' + 'x'.repeat(495) + '…';
+  const failed = tool('t1', cut, 'error', 0, 1, { input_key: 'aaa', input_full: 'echo ' + 'x'.repeat(600) + ' A' });
+  const other = tool('t2', cut, 'ok', 2, 3, { input_key: 'bbb', input_full: 'echo ' + 'x'.repeat(600) + ' B' });
+  const rerun = tool('t3', cut, 'ok', 4, 5, { input_key: 'aaa', input_full: failed.input_full });
+  assert.deepEqual([...unresolvedTools([step('a', 0, { tools: [failed, other] })])].map(t => t.id), ['t1']);
+  assert.deepEqual([...unresolvedTools([step('a', 0, { tools: [failed, other, rerun] })])], []);
+  const g = storyRows(null, [step('a', 0, { text: 'go', tools: [failed, other] })])[1];
+  assert.equal(g.header.text, '2 commands · 1 unresolved · 3s');
+  assert.equal(g.items[0].title, failed.input_full);
+  assert.equal(g.items[0].label, cut);
+});
+
+test('group header counts every run of a counted row and the lead turn\'s cost and start', () => {
+  const counted = tool('t1', 'go test ./...', 'ok', 10, 12, { count: 7 });
+  const g = storyRows(null, [step('a1', 0, { text: 'plan', cost_usd: 0.2 }), step('a2', 10, { cost_usd: 0.3, tools: [counted] })])[1];
+  assert.equal(g.kind, 'group');
+  assert.equal(g.header.commands, 7);
+  assert.equal(g.header.cost.toFixed(2), '0.50');
+  assert.equal(g.header.text, '7 commands · 12s');
+  assert.equal(g.items[0].count, 7);
+  const each = Array.from({ length: 7 }, (_, i) => tool(`e${i}`, 'go test ./...', i < 2 ? 'error' : 'ok', 10 + i, 11 + i));
+  const g2 = storyRows(null, [step('a1', 0, { text: 'plan', cost_usd: 0.2 }), step('a2', 10, { cost_usd: 0.3, tools: each })])[1];
+  assert.equal(g2.header.text, '7 commands · 17s');
+  assert.equal(g2.items.map(i => i.mark).join(''), '✕✕✓✓✓✓✓');
+});
+
+test('a text-only lead keeps the orphan child and idle gap before its first tool turn', () => {
+  const orphan = child({ description: 'lost', started_at: at(5), ended_at: at(6) });
+  const steps = [step('a1', 0, { text: 'thinking aloud' }), step('a2', 10, { tools: [tool('t1', 'ls', 'ok', 10, 11)] })];
+  const rows = storyRows(null, steps, [orphan]);
+  assert.deepEqual(rows.map(r => r.kind), ['agent', 'group']);
+  assert.deepEqual(rows[1].items.map(i => i.kind), ['child', 'step']);
+  assert.equal(rows[1].items[0].note, 'parent step unknown');
+  const idleSteps = [step('a1', 0, { text: 'wait' }), step('a2', 301, { tools: [tool('t1', 'ls', 'ok', 301, 302)] })];
+  const idleRows = storyRows(null, idleSteps);
+  assert.deepEqual(idleRows[1].items.map(i => (i.kind === 'idle' ? i.text : i.kind)), ['5 min idle', 'step']);
+});
+
+test('children spawned by successive turns whose spans overlap share one parallel header', () => {
+  const steps = [
+    step('a1', 0, { text: 'first', tools: [tool('ag1', 'Agent one', 'ok', 0, 200, { name: 'Agent' })] }),
+    step('a2', 10, { tools: [tool('ag2', 'Agent two', 'ok', 10, 200, { name: 'Agent' })] }),
+  ];
+  const a = child({ parent_tool_use_id: 'ag1', description: 'scan web', started_at: at(1), ended_at: at(150) });
+  const b = child({ parent_tool_use_id: 'ag2', description: 'scan api', started_at: at(11), ended_at: at(100) });
+  const rows = storyRows(null, steps, [a, b]);
+  const items = rows[1].items;
+  assert.deepEqual(items.map(i => i.kind), ['step', 'step', 'parallel']);
+  assert.equal(items[2].header, '2 agents in parallel · longest: scan web 2m 29s');
+  assert.deepEqual(items[2].children.map(x => [x.child.description, x.spawnKey, x.spawnClock]),
+    [['scan web', 's0.0', '09:00:00'], ['scan api', '', '']]);
+  const later = child({ parent_tool_use_id: 'ag2', description: 'later', started_at: at(300), ended_at: at(310) });
+  const apart = storyRows(null, steps, [a, later])[1].items;
+  assert.deepEqual(apart.map(i => i.kind), ['step', 'child', 'step', 'child']);
+});

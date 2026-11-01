@@ -305,3 +305,86 @@ test('a sub-agent nests collapsed under its spawning step and expands to its own
   click(body.querySelector('.story-step'));
   assert.ok(host.querySelector('.story-child-body .story-detail'));
 });
+
+// deferred is a promise with its resolve exposed, to land a response late.
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  return { promise, resolve };
+}
+
+const pageOf = (sid, text) => ({ ...page0(), session_id: sid, prompts: [{ uuid: 'u', text, timestamp: at(0), turns: 1 }],
+  steps: [step(`${sid}-a`, 1, { text: `${sid} message`, tools: [tool(`${sid}-t`, 'ls', 'ok', 1, 2, { output: 'cut…' })] })] });
+
+test('a remount drops the previous story\'s page when it lands late', async () => {
+  const { host } = mount();
+  const old = deferred();
+  stubFetch((path, q) => (q.get('session') === 'OLD' ? old.promise : pageOf('NEW', 'new prompt')));
+  const first = paintStory(host, 'OLD');
+  await paintStory(host, 'NEW');
+  assert.equal(host.querySelector('.story-you .story-text').textContent, 'new prompt');
+  old.resolve(pageOf('OLD', 'old prompt'));
+  await first; await settle();
+  assert.equal(host.querySelector('.story-you .story-text').textContent, 'new prompt');
+  assert.equal(host.querySelector('.story-agent .story-text').textContent, 'NEW message');
+});
+
+test('a Show full answer after a remount or a page change does not repaint the stale story', async () => {
+  const { host } = mount();
+  const full = deferred();
+  stubFetch((path, q) => {
+    if (path === '/agents/full') return full.promise;
+    return pageOf(q.get('session'), `${q.get('session')} prompt`);
+  });
+  await paintStory(host, 'OLD');
+  click(host.querySelector('.story-step'));
+  click(host.querySelector('.story-detail .story-full'));
+  await paintStory(host, 'NEW');
+  full.resolve({ id: 'OLD-t', name: 'Bash', input: 'ls', output: 'OLD FULL', status: 'ok' });
+  await settle(); await settle();
+  assert.equal(host.querySelector('.story-you .story-text').textContent, 'NEW prompt');
+  assert.ok(!host.textContent.includes('OLD'), 'nothing of the old story repainted');
+});
+
+test('a step row shows a counted call\'s runs and the whole input in its title and detail', async () => {
+  const { host } = mount();
+  const whole = 'echo ' + 'x'.repeat(600) + ' END';
+  stubFetch(() => {
+    const p = page0();
+    p.steps = [step('a1', 1, { text: 'go', tools: [
+      tool('t1', 'go test ./...', 'ok', 1, 2, { count: 7 }),
+      tool('t2', 'echo ' + 'x'.repeat(495) + '…', 'ok', 2, 3, { input_full: whole, input_key: 'k2' })] })];
+    return p;
+  });
+  await paintStory(host, 's1');
+  const rows = host.querySelectorAll('.story-step');
+  assert.equal(rows[0].querySelector('.story-runs').textContent, '×7');
+  assert.match(host.querySelector('.story-group-count').textContent, /^8 commands · /);
+  assert.equal(rows[1].querySelector('.story-cmd').getAttribute('title'), whole);
+  click(rows[1]);
+  const detail = host.querySelector('[data-detail="s0.1"]');
+  assert.equal(detail.querySelectorAll('.story-pre')[0].textContent, whole);
+});
+
+test('a parallel member spawned by an earlier turn links back to its spawning call', async () => {
+  const { host } = mount();
+  stubFetch(() => {
+    const p = page0();
+    p.steps = [
+      step('a1', 0, { text: 'fan out', tools: [tool('ag1', 'Agent one', 'ok', 0, 200, { name: 'Agent' })] }),
+      step('a2', 10, { tools: [tool('ag2', 'Agent two', 'ok', 10, 200, { name: 'Agent' })] }),
+    ];
+    p.children = [
+      { kind: 'subagent', agent_type: 'Explore', description: 'scan web', parent_tool_use_id: 'ag1', started_at: at(1), ended_at: at(150), cost_usd: 0.1, error_count: 0, steps: [] },
+      { kind: 'subagent', agent_type: 'Explore', description: 'scan api', parent_tool_use_id: 'ag2', started_at: at(11), ended_at: at(100), cost_usd: 0.1, error_count: 0, steps: [] },
+    ];
+    return p;
+  });
+  await paintStory(host, 's1');
+  const par = host.querySelector('.story-parallel');
+  assert.match(par.querySelector('.story-parallel-h').textContent, /^2 agents in parallel · longest: scan web/);
+  const link = par.querySelector('.story-spawn');
+  assert.equal(link.textContent, 'spawned at 09:00:00');
+  click(link);
+  assert.ok(host.querySelector('[data-key="s0.0"]').classList.contains('is-jumped'));
+});

@@ -9,8 +9,9 @@ import { escHtml } from './format.js';
 import { skelLine } from './skeleton.js';
 import {
   storyRows, searchEntries, searchSteps, hiddenNotice, moreTurns, fmtDuration, fmtUSD,
-  looksTruncated, unwrapExit, clock, firstLineOf, WRAPPER_LABEL, PAGE_TURNS,
+  looksTruncated, unwrapExit, clock, firstLineOf, fullInput, WRAPPER_LABEL, PAGE_TURNS,
 } from './session-story-logic.js';
+/** @import { ChildEntry } from './session-story-logic.js' */
 
 /** @import { SessionStoryPage, StoryStep, StoryTool, StoryChild, StoryPrompt } from './api-types.js' */
 /** @import { StoryRow, StoryItem } from './session-story-logic.js' */
@@ -20,7 +21,7 @@ const FLASH_MS = 1900;
 /**
  * @typedef {Object} StoryState
  * @property {string} sessionId
- * @property {number} gen                 bumps on every load, so a stale fetch drops
+ * @property {number} gen                 bumps on every load and page change, so a stale fetch drops
  * @property {StoryPrompt[]} prompts
  * @property {number} promptIndex
  * @property {number} from                first loaded turn offset into the prompt
@@ -47,9 +48,11 @@ const fullTool = new Map();
 /** @type {Map<string, {thinking: string, text: string}>} */
 const fullTurn = new Map();
 
-// paintStory mounts the story of sessionId in host. With turnUuid it opens
-// the page that carries that turn, scrolls its row into view and flashes
-// it. Resolves once the first page (or its error state) has painted.
+// paintStory mounts the story of sessionId in host, replacing whatever
+// story host showed: every request the previous one still has in flight is
+// dropped when it lands. With turnUuid it opens the page that carries that
+// turn, scrolls its row into view and flashes it. Resolves once the first
+// page (or its error state) has painted.
 /** @param {Element} host @param {string} sessionId @param {string} [turnUuid] */
 export async function paintStory(host, sessionId, turnUuid = '') {
   wire(host);
@@ -58,11 +61,14 @@ export async function paintStory(host, sessionId, turnUuid = '') {
     sessionId, gen: 0, prompts: [], promptIndex: 0, from: 0, to: 0, steps: [], children: [],
     hidden: { replays: 0, outside_filter: 0 }, open: new Set(), byKey: new Map(), entries: [], cursor: -1, pageError: '',
   };
-  const prev = states.get(host);
-  if (prev) st.gen = prev.gen + 1;
   states.set(host, st);
   await load(host, st, turnUuid ? { turn: turnUuid } : { prompt: 0, offset: 0 }, turnUuid);
 }
+
+// current reports whether st is still the story host shows and gen still
+// its latest page, so an answer that arrives later may paint.
+/** @param {Element} host @param {StoryState} st @param {number} gen */
+const current = (host, st, gen) => states.get(host) === st && st.gen === gen;
 
 /** @param {any} err */
 const reasonOf = err => (err && err.status
@@ -75,6 +81,7 @@ const reasonOf = err => (err && err.status
  * @param {string} [flashTurn]
  */
 async function load(host, st, req, flashTurn = '') {
+  if (states.get(host) !== st) return;
   const gen = ++st.gen;
   host.innerHTML = shellHTML(`<div class="story-skel" aria-busy="true" aria-label="Loading the session">
       ${skelLine('story-skel-a')}${skelLine('story-skel-b')}${skelLine('story-skel-c')}${skelLine('story-skel-b')}</div>`);
@@ -83,7 +90,7 @@ async function load(host, st, req, flashTurn = '') {
   try {
     page = await fetchSessionStory(st.sessionId, req);
   } catch (err) {
-    if (gen !== st.gen) return;
+    if (!current(host, st, gen)) return;
     if (err && err.status === 404 && req.turn) {
       await load(host, st, { prompt: 0, offset: 0 });
       return;
@@ -99,7 +106,7 @@ async function load(host, st, req, flashTurn = '') {
     if (retry) retry.addEventListener('click', () => { load(host, st, req, flashTurn); });
     return;
   }
-  if (gen !== st.gen) return;
+  if (!current(host, st, gen)) return;
   st.prompts = page.prompts || [];
   st.promptIndex = page.page ? page.page.prompt_index : 0;
   st.from = page.page ? page.page.turn_offset : 0;
@@ -200,10 +207,10 @@ function rowHTML(r, st) {
         <div class="story-items">${r.items.map(it => rowHTML(it, st)).join('')}</div></div>`;
     case 'idle': return `<div class="story-idle" data-key="${escHtml(r.key)}">${escHtml(r.text)}</div>`;
     case 'step': return stepHTML(r, st);
-    case 'child': return childHTML(r.key, r.child, r.header, r.note, st);
+    case 'child': return childHTML(r.key, r, st);
     case 'parallel': return `<div class="story-parallel" data-key="${escHtml(r.key)}">
         <div class="story-parallel-h">${escHtml(r.header)}</div>
-        ${r.children.map((c, k) => childHTML(`${r.key}.${k}`, c.child, c.header, c.note, st)).join('')}</div>`;
+        ${r.children.map((c, k) => childHTML(`${r.key}.${k}`, c, st)).join('')}</div>`;
     default: return '';
   }
 }
@@ -257,7 +264,8 @@ function stepHTML(r, st) {
   const row = `<div class="story-step${cls}" role="button" tabindex="0" aria-expanded="${open}" data-step="${escHtml(r.key)}" data-key="${escHtml(r.key)}"${turn}>
       <span class="story-clock">${escHtml(r.clock)}</span>
       <span class="story-mark" role="img" aria-label="${status}">${r.mark}</span>
-      <span class="story-cmd" title="${escHtml(r.title)}">${escHtml(r.label)}</span>
+      <span class="story-cmd-cell"><span class="story-cmd" title="${escHtml(r.title)}">${escHtml(r.label)}</span>${r.count > 1
+        ? `<span class="story-chip story-runs" title="This call ran ${r.count} times with the same input; the log kept one outcome">×${r.count}</span>` : ''}</span>
       <span class="story-dur">${escHtml(fmtDuration(r.durationMs))}</span>
     </div>`;
   return open ? row + detailHTML(r) : row;
@@ -267,10 +275,10 @@ function stepHTML(r, st) {
 function detailHTML(r) {
   const t = r.tool;
   const full = t.id ? fullTool.get(t.id) : undefined;
-  const input = full ? full.input : t.input || '';
+  const input = full ? full.input : fullInput(t);
   const output = full ? full.output : t.output || '';
   const canFull = t.id && !full;
-  const btn = field => (canFull && looksTruncated(field === 'input' ? t.input || '' : t.output || '')
+  const btn = field => (canFull && looksTruncated(field === 'input' ? fullInput(t) : t.output || '')
     ? `<button type="button" class="story-full" data-full-tool="${escHtml(r.key)}">Show full</button>` : '');
   const chip = t.exit_code != null ? `<span class="story-chip story-exit">exit code ${t.exit_code}</span>` : '';
   const think = r.step.thinking ? thinkingHTML(r.key, r.step) : '';
@@ -284,12 +292,13 @@ function detailHTML(r) {
   </div>`;
 }
 
-/**
- * @param {string} key @param {StoryChild} c @param {string} header @param {string} note @param {StoryState} st
- */
-function childHTML(key, c, header, note, st) {
+/** @param {string} key @param {ChildEntry} e @param {StoryState} st */
+function childHTML(key, e, st) {
+  const { child: c, header, note } = e;
   const open = st.open.has(key);
   const noteChip = note ? `<span class="story-chip story-note">${escHtml(note)}</span>` : '';
+  const spawn = e.spawnKey
+    ? `<button type="button" class="story-spawn" data-goto="${escHtml(e.spawnKey)}" title="Go to the call that spawned this agent">spawned at ${escHtml(e.spawnClock)}</button>` : '';
   let body = '';
   if (open) {
     const rows = storyRows(null, c.steps || [], [], `${key}/`);
@@ -298,7 +307,7 @@ function childHTML(key, c, header, note, st) {
   }
   return `<div class="story-child" data-key="${escHtml(key)}">
     <button type="button" class="story-child-h" data-toggle="${escHtml(key)}" aria-expanded="${open}">
-      <span class="story-caret" aria-hidden="true">${open ? '▾' : '▸'}</span>${escHtml(header)}</button>${noteChip}${body}</div>`;
+      <span class="story-caret" aria-hidden="true">${open ? '▾' : '▸'}</span>${escHtml(header)}</button>${noteChip}${spawn}${body}</div>`;
 }
 
 // ── interaction ──────────────────────────────────────────────────────────
@@ -310,7 +319,7 @@ function wire(host) {
   host.addEventListener('click', ev => {
     const st = states.get(host);
     const el = ev.target && /** @type {Element} */ (ev.target).closest
-      ? /** @type {Element} */ (ev.target).closest('[data-step], [data-toggle], [data-full-tool], [data-full-turn], [data-more], [data-earlier], [data-prev], [data-next], [data-jump]')
+      ? /** @type {Element} */ (ev.target).closest('[data-step], [data-toggle], [data-full-tool], [data-full-turn], [data-more], [data-earlier], [data-prev], [data-next], [data-jump], [data-goto]')
       : null;
     if (!st || !el || !host.contains(el)) return;
     onAction(host, st, el);
@@ -348,6 +357,7 @@ function onAction(host, st, el) {
     repaint(host, st, el);
     return;
   }
+  if (d.goto !== undefined) { jumpTo(host, `.story-rows [data-key="${cssEsc(d.goto)}"]`); return; }
   if (d.fullTool !== undefined) { showFullTool(host, st, el, d.fullTool); return; }
   if (d.fullTurn !== undefined) { showFullTurn(host, st, el, d.fullTurn); return; }
   if (d.more !== undefined) { loadMore(host, st, el); return; }
@@ -385,6 +395,7 @@ function repaint(host, st, el) {
 async function showFullTool(host, st, btn, key) {
   const r = st.byKey.get(key);
   if (!r || r.kind !== 'step' || !r.tool.id) return;
+  const gen = st.gen;
   const b = /** @type {HTMLButtonElement} */ (btn);
   b.disabled = true;
   b.textContent = 'Loading…';
@@ -392,8 +403,9 @@ async function showFullTool(host, st, btn, key) {
     const d = await fetchAgentToolFull(st.sessionId, r.tool.id);
     const output = r.tool.exit_code != null ? unwrapExit(d.output || '') : d.output || '';
     fullTool.set(r.tool.id, { input: d.input || '', output });
-    paintRows(host, st);
+    if (current(host, st, gen)) paintRows(host, st);
   } catch (err) {
+    if (!current(host, st, gen)) return;
     b.disabled = false;
     b.textContent = `Failed (${reasonOf(err)}) · retry`;
   }
@@ -404,14 +416,16 @@ async function showFullTurn(host, st, btn, key) {
   const r = st.byKey.get(key);
   const step = r && (r.kind === 'agent' || r.kind === 'step') ? r.step : null;
   if (!step || !step.uuid) return;
+  const gen = st.gen;
   const b = /** @type {HTMLButtonElement} */ (btn);
   b.disabled = true;
   b.textContent = 'Loading…';
   try {
     const d = await fetchAgentTurnFull(st.sessionId, step.uuid);
     fullTurn.set(step.uuid, { thinking: d.thinking || '', text: d.text || '' });
-    paintRows(host, st);
+    if (current(host, st, gen)) paintRows(host, st);
   } catch (err) {
+    if (!current(host, st, gen)) return;
     b.disabled = false;
     b.textContent = `Failed (${reasonOf(err)}) · retry`;
   }
@@ -426,20 +440,20 @@ function mergeChildren(have, more) {
 
 /** @param {Element} host @param {StoryState} st @param {Element} btn */
 async function loadMore(host, st, btn) {
-  const gen = st.gen;
+  const gen = ++st.gen;
   const b = /** @type {HTMLButtonElement} */ (btn);
   b.disabled = true;
   b.textContent = 'Loading…';
   try {
     const page = await fetchSessionStory(st.sessionId, { prompt: st.promptIndex, offset: st.to });
-    if (gen !== st.gen) return;
+    if (!current(host, st, gen)) return;
     st.steps = st.steps.concat(page.steps || []);
     st.to += (page.steps || []).length;
     st.children = mergeChildren(st.children, page.children);
     st.pageError = '';
     paintRows(host, st);
   } catch (err) {
-    if (gen !== st.gen) return;
+    if (!current(host, st, gen)) return;
     st.pageError = `Could not load more turns: ${reasonOf(err)}. Select the row to retry.`;
     paintRows(host, st);
   }
@@ -447,7 +461,7 @@ async function loadMore(host, st, btn) {
 
 /** @param {Element} host @param {StoryState} st @param {Element} btn */
 async function loadEarlier(host, st, btn) {
-  const gen = st.gen;
+  const gen = ++st.gen;
   const offset = Math.max(0, st.from - PAGE_TURNS);
   const b = /** @type {HTMLButtonElement} */ (btn);
   b.disabled = true;
@@ -456,7 +470,7 @@ async function loadEarlier(host, st, btn) {
   const anchorKey = anchor ? anchor.getAttribute('data-turn') : null;
   try {
     const page = await fetchSessionStory(st.sessionId, { prompt: st.promptIndex, offset });
-    if (gen !== st.gen) return;
+    if (!current(host, st, gen)) return;
     const got = (page.steps || []).slice(0, st.from - offset);
     st.steps = got.concat(st.steps);
     st.from = offset;
@@ -468,7 +482,7 @@ async function loadEarlier(host, st, btn) {
     const again = anchorKey ? host.querySelector(`[data-turn="${cssEsc(anchorKey)}"]`) : null;
     if (again && again.scrollIntoView) again.scrollIntoView({ block: 'start' });
   } catch (err) {
-    if (gen !== st.gen) return;
+    if (!current(host, st, gen)) return;
     st.pageError = `Could not load earlier turns: ${reasonOf(err)}. Select the row to retry.`;
     paintRows(host, st);
   }

@@ -176,9 +176,13 @@
  */
 
 /**
- * A tool call in a story step: ToolInvocation plus the split-off Codex exit code.
+ * A tool call in a story step: ToolInvocation plus the split-off Codex exit
+ * code, the whole input's identity (input_key, "" for no input; two calls
+ * ran the same input exactly when name and input_key match) and the whole
+ * input when `input` is a cut snippet (input_full, omitted when whole). A
+ * story lists each call on its own row, so count is 1.
  * Mirrors internal/agentflow/story.go (agentflow.StoryTool).
- * @typedef {ToolInvocation & {exit_code: number|null}} StoryTool
+ * @typedef {ToolInvocation & {exit_code: number|null, input_key: string, input_full?: string}} StoryTool
  */
 
 /**
@@ -193,7 +197,7 @@
  * Mirrors internal/agentflow/story.go (agentflow.StoryPrompt).
  * @typedef {Object} StoryPrompt
  * @property {string} uuid              "" marks turns with no resolvable prompt
- * @property {string} text
+ * @property {string} text              whole, read back from the session log
  * @property {string} timestamp         RFC3339
  * @property {number} turns
  */

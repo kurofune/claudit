@@ -25,15 +25,39 @@ const WRAPPERS = [
 export const WRAPPER_LABEL = 'AGENTS.md and environment context hidden';
 
 // splitWrappers separates a prompt into the text the person wrote and the
-// raw wrapper blocks, in the order they appeared.
+// raw wrapper blocks, both in the order they appeared. The written text
+// keeps its whitespace; only the blank lines at a seam with a wrapper go,
+// and the pieces a wrapper split apart rejoin on a line break.
 /** @param {string} text @returns {{visible: string, hidden: string}} */
 export function splitWrappers(text) {
-  const blocks = [];
-  let visible = String(text || '');
+  const src = String(text || '');
+  /** @type {{start: number, end: number}[]} */
+  const found = [];
   for (const re of WRAPPERS) {
-    visible = visible.replace(re, m => { blocks.push(m); return '\n'; });
+    for (const m of src.matchAll(re)) found.push({ start: m.index || 0, end: (m.index || 0) + m[0].length });
   }
-  return { visible: visible.replace(/\n{3,}/g, '\n\n').trim(), hidden: blocks.join('\n\n') };
+  found.sort((a, b) => a.start - b.start || b.end - a.end);
+  const blocks = [];
+  let at = 0;
+  for (const b of found) {
+    if (b.start < at || b.end === b.start) continue;
+    blocks.push(b);
+    at = b.end;
+  }
+  const pieces = [];
+  let from = 0;
+  blocks.forEach((b, k) => {
+    pieces.push({ text: src.slice(from, b.start), afterWrap: k > 0, beforeWrap: true });
+    from = b.end;
+  });
+  pieces.push({ text: src.slice(from), afterWrap: blocks.length > 0, beforeWrap: false });
+  const visible = pieces.map(p => {
+    let t = p.text;
+    if (p.afterWrap) t = t.replace(/^(?:[ \t]*\r?\n)+/, '');
+    if (p.beforeWrap) t = t.replace(/(?:\r?\n[ \t]*)+$/, '');
+    return t;
+  }).filter(t => t.trim() !== '');
+  return { visible: visible.join('\n'), hidden: blocks.map(b => src.slice(b.start, b.end)).join('\n\n') };
 }
 
 const pad = n => String(n).padStart(2, '0');
@@ -100,7 +124,10 @@ export function idleGaps(steps) {
   return steps.map((s, i) => (i === 0 ? '' : idleText(ms(s.timestamp) - stepEnd(steps[i - 1]))));
 }
 
-const callKey = t => `${t.name}\u0000${t.input}`;
+// callKey is a call's identity: its name and its whole input, by the
+// payload's input_key when it has one, else the whole input text.
+/** @param {StoryTool} t */
+const callKey = t => `${t.name}\u0000${t.input_key ? `#${t.input_key}` : (t.input_full || t.input || '')}`;
 
 // unresolvedTools is the set of errored calls whose exact input never
 // later succeeded among the loaded steps.
@@ -133,6 +160,12 @@ export function toolLabel(t) {
   return line || t.detail || t.name || '';
 }
 
+// fullInput is a call's whole input: input_full when the snippet was cut.
+/** @param {StoryTool} t */
+export function fullInput(t) {
+  return t.input_full || t.input || '';
+}
+
 // statusMark is ✓ / ✕ / … for a call that succeeded, errored or has no result.
 /** @param {StoryTool} t */
 export function statusMark(t) {
@@ -160,9 +193,10 @@ export function groupCommands(steps) {
   return out;
 }
 
-// groupHeader is a command group's counts: its commands, how many stayed
-// unresolved, its wall span from its first turn to its last call's end,
-// and the model cost of the turns that ran it.
+// groupHeader is a command group's counts over every turn of the group,
+// its lead included: its commands (a counted row counts each run), how many
+// stayed unresolved, its wall span from its first turn to its last call's
+// end, and the model cost of its turns.
 /** @param {StoryStep[]} steps @param {Set<StoryTool>} unresolved */
 export function groupHeader(steps, unresolved) {
   const tools = steps.flatMap(s => s.tools || []);
@@ -172,7 +206,7 @@ export function groupHeader(steps, unresolved) {
     ? Math.max(stepEnd(s), ms(s.timestamp) + (s.duration_ms || 0)) : stepEnd(s))));
   const durationMs = end > start ? end - start : 0;
   const cost = steps.reduce((a, s) => a + (s.cost_usd || 0), 0);
-  const commands = tools.length;
+  const commands = tools.reduce((a, t) => a + (t.count > 1 ? t.count : 1), 0);
   const bad = unresolvedCount(tools, unresolved);
   const parts = [`${commands} ${commands === 1 ? 'command' : 'commands'}`];
   if (bad) parts.push(`${bad} unresolved`);
@@ -247,13 +281,20 @@ export function nestChildren(steps, children) {
   return { byStep, before };
 }
 
-// childBlocks turns placed children into render blocks: a lone child, or
-// a parallel header over two or more whose spans overlap.
-/** @param {StoryChild[]} children @param {string} [note] */
-export function childBlocks(children, note = '') {
-  return parallelClusters(children).map(cluster => (cluster.length > 1
-    ? { kind: 'parallel', header: parallelHeader(cluster), children: cluster.map(c => ({ child: c, header: childHeader(c), note })) }
-    : { kind: 'child', child: cluster[0], header: childHeader(cluster[0]), note }));
+/**
+ * A placed child: its note, and when it sits away from the call that
+ * spawned it, that call's step row key and clock.
+ * @typedef {{child: StoryChild, header: string, note: string, spawnKey: string, spawnClock: string}} ChildEntry
+ */
+
+// clusterBlock is the render block of one run of overlapping children: a
+// lone child, or a parallel header over two or more.
+/** @param {Omit<ChildEntry, 'header'>[]} entries */
+function clusterBlock(entries) {
+  const list = entries.map(e => ({ ...e, header: childHeader(e.child) }));
+  return list.length > 1
+    ? { kind: 'parallel', header: parallelHeader(list.map(e => e.child)), children: list }
+    : { kind: 'child', ...list[0] };
 }
 
 // hiddenNotice discloses what the window and replay dedup left out.
@@ -290,13 +331,13 @@ export function moreTurns(turns, to, loaded) {
  *   | {kind: 'agent', key: string, index: number, step: StoryStep, clock: string, text: string, cost: number}
  *   | {kind: 'group', key: string, header: ReturnType<typeof groupHeader>, items: StoryItem[]}
  *   | {kind: 'idle', key: string, text: string}
- *   | {kind: 'child', key: string, child: StoryChild, header: string, note: string}
- *   | {kind: 'parallel', key: string, header: string, children: {child: StoryChild, header: string, note: string}[]}} StoryRow
+ *   | ({kind: 'child', key: string} & ChildEntry)
+ *   | {kind: 'parallel', key: string, header: string, children: ChildEntry[]}} StoryRow
  * @typedef {{kind: 'step', key: string, index: number, step: StoryStep, tool: StoryTool, toolIndex: number,
- *   clock: string, mark: string, label: string, title: string, durationMs: number}
+ *   clock: string, mark: string, label: string, title: string, durationMs: number, count: number}
  *   | {kind: 'idle', key: string, text: string}
- *   | {kind: 'child', key: string, child: StoryChild, header: string, note: string}
- *   | {kind: 'parallel', key: string, header: string, children: {child: StoryChild, header: string, note: string}[]}} StoryItem
+ *   | ({kind: 'child', key: string} & ChildEntry)
+ *   | {kind: 'parallel', key: string, header: string, children: ChildEntry[]}} StoryItem
  */
 
 // storyRows lays out a prompt's loaded steps: the prompt, then each agent
@@ -320,10 +361,35 @@ export function storyRows(prompt, steps, children = [], keyPrefix = '') {
   const idle = idleGaps(steps);
   const { byStep, before } = nestChildren(steps, children);
   let blockSeq = 0;
-  const blocks = (list, note) => childBlocks(list, note).map(b => ({ ...b, key: `${keyPrefix}c${blockSeq++}` }));
-  // Children with no loaded parent step cluster first, so overlapping ones
-  // share a header, and each run sits before the first step that started
-  // after its earliest member.
+  /** @param {Omit<ChildEntry, 'header'>[]} entries @returns {StoryRow} */
+  const block = entries => /** @type {StoryRow} */ ({ ...clusterBlock(entries), key: `${keyPrefix}c${blockSeq++}` });
+  const stepKey = (i, ti) => `${keyPrefix}s${i}.${ti}`;
+
+  // Children whose spawning call is on the page cluster across the whole
+  // page, so overlapping ones share a header even when successive turns
+  // spawned them. A run sits after the last of its spawning calls' steps;
+  // a member spawned by an earlier step names that step's call.
+  /** @type {Map<number, StoryRow[]>} */
+  const linkedRows = new Map();
+  const ownerOf = new Map();
+  for (const [i, list] of byStep) for (const c of list) ownerOf.set(c, i);
+  for (const cluster of parallelClusters([...ownerOf.keys()])) {
+    const at = Math.max(...cluster.map(c => ownerOf.get(c)));
+    const entries = cluster.map(c => {
+      const i = ownerOf.get(c);
+      const ti = (steps[i].tools || []).findIndex(t => t.id === c.parent_tool_use_id);
+      const t = steps[i].tools[ti];
+      return i === at
+        ? { child: c, note: '', spawnKey: '', spawnClock: '' }
+        : { child: c, note: '', spawnKey: stepKey(i, ti), spawnClock: clock(t.started_at || steps[i].timestamp) };
+    });
+    if (!linkedRows.has(at)) linkedRows.set(at, []);
+    linkedRows.get(at).push(block(entries));
+  }
+  const linkedAt = i => linkedRows.get(i) || [];
+
+  // Children with no loaded parent step cluster among themselves, and each
+  // run sits before the first step that started after its earliest member.
   /** @type {Map<number, StoryRow[]>} */
   const orphanRows = new Map();
   const orphans = [...before.values()].flat();
@@ -333,43 +399,46 @@ export function storyRows(prompt, steps, children = [], keyPrefix = '') {
     if (k < 0) k = steps.length;
     const notes = [...new Set(cluster.map(c => orphans.find(x => x.child === c).note))].join(' · ');
     if (!orphanRows.has(k)) orphanRows.set(k, []);
-    orphanRows.get(k).push(...blocks(cluster, notes));
+    orphanRows.get(k).push(block(cluster.map(c => ({ child: c, note: notes, spawnKey: '', spawnClock: '' }))));
   }
   const orphansAt = i => orphanRows.get(i) || [];
 
   for (const g of groupCommands(steps)) {
     const first = g.steps[0];
     const idleRow = idle[first] ? [{ kind: 'idle', key: `${keyPrefix}i${first}`, text: idle[first] }] : [];
-    rows.push(...orphansAt(first), ...idleRow);
+    rows.push(...orphansAt(first), .../** @type {StoryRow[]} */ (idleRow));
     if (g.lead >= 0) {
       const s = steps[g.lead];
       rows.push({ kind: 'agent', key: `${keyPrefix}a${g.lead}`, index: g.lead, step: s, clock: clock(s.timestamp), text: s.text || '', cost: s.cost_usd || 0 });
     }
     const groupSteps = g.steps.filter(i => (steps[i].tools || []).length > 0);
     if (groupSteps.length === 0) {
-      for (const b of blocks(byStep.get(g.lead) || [], '')) rows.push(b);
+      rows.push(...linkedAt(first));
       continue;
     }
     /** @type {StoryItem[]} */
     const items = [];
-    groupSteps.forEach((i, n) => {
-      if (n > 0) {
-        items.push(...orphansAt(i));
+    for (const i of groupSteps) {
+      // The group's first turn had its orphans and idle gap placed above
+      // the lead; every later turn carries its own inside the group.
+      if (i !== first) {
+        items.push(.../** @type {StoryItem[]} */ (orphansAt(i)));
         if (idle[i]) items.push({ kind: 'idle', key: `${keyPrefix}i${i}`, text: idle[i] });
       }
       const s = steps[i];
       (s.tools || []).forEach((t, ti) => {
         const span = toolSpanMs(t);
         items.push({
-          kind: 'step', key: `${keyPrefix}s${i}.${ti}`, index: i, step: s, tool: t, toolIndex: ti,
+          kind: 'step', key: stepKey(i, ti), index: i, step: s, tool: t, toolIndex: ti,
           clock: clock(t.started_at || s.timestamp), mark: statusMark(t), label: toolLabel(t),
-          title: t.input || t.detail || t.name || '',
+          title: fullInput(t) || t.detail || t.name || '',
           durationMs: isNaN(span) ? (s.duration_ms || 0) : Math.max(0, span),
+          count: t.count > 1 ? t.count : 1,
         });
       });
-      items.push(...blocks(byStep.get(i) || [], ''));
-    });
-    rows.push({ kind: 'group', key: `${keyPrefix}g${first}`, header: groupHeader(groupSteps.map(i => steps[i]), unresolved), items });
+      items.push(.../** @type {StoryItem[]} */ (linkedAt(i)));
+    }
+    rows.push({ kind: 'group', key: `${keyPrefix}g${first}`, header: groupHeader(g.steps.map(i => steps[i]), unresolved), items });
   }
   rows.push(...orphansAt(steps.length));
   return rows;
@@ -386,7 +455,7 @@ export function searchEntries(rows) {
     else if (r.kind === 'agent') out.push({ key: r.key, text: r.text });
     else if (r.kind === 'group') {
       for (const it of r.items) {
-        if (it.kind === 'step') out.push({ key: it.key, text: `${it.tool.input || ''}\n${it.tool.detail || ''}` });
+        if (it.kind === 'step') out.push({ key: it.key, text: `${fullInput(it.tool)}\n${it.tool.detail || ''}` });
       }
     }
   }
