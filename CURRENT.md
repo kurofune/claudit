@@ -1,21 +1,20 @@
 # CURRENT
 
-**Mode:** v2 initiative. Piece 1 (serve-first) shipped as v2.0.0; Piece 2 (honest numbers) is next.
+**Mode:** v3 landed (one Sessions surface; Tools folded into Overview). Polish from dogfooding is next.
 
-**Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` whose numbers can be trusted: Piece 2 makes each cost figure say what it actually measures, starting from per-tool-result context-cost attribution.
+**Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
-**Last change:** re-measured by-project rows with no name-based reassignment: 637 (1540 before repo grouping), 621 of them missing buckets for deleted worktrees (claudit-80r).
+**Last change:** v3 drain closed 7/7: Sessions list + story replace the Agents lenses, Insights, drawer and `/api/agents`; Tools page became Overview's "Show all"; Codex tool output carries context cost (claudit-fw1, claudit-fdr).
 
 **Assumptions:**
-- Projects key on the session cwd's git repo root (`internal/project/`): linked worktrees and subdirectories roll up into their repo; undecodable scratch dirs land in `scratch`; a deleted cwd outside any surviving repo is its own `missing` bucket named by basename (621 of 637 rows; DECISIONS).
-- Old `#cost` / `#tokens` / `#cache` bookmarks redirect to `#spend` (`web/router.js` `REDIRECTS`).
-- Sonnet 5.5 is the first bundled model with rate history (`rates:` until 2026-10-06); Haiku 5.5 is the first with a prompt-length tier (`long_prompt:`).
+- Projects key on the session cwd's git repo root (`internal/project/`); a deleted cwd outside any surviving repo is its own `missing` bucket (DECISIONS).
+- Sessions group by a deterministic prompt-family key (wrapper blocks stripped, first line, ids/paths/numbers blanked); no LLM runs inside claudit.
+- Old `#cost` / `#tokens` / `#cache` redirect to `#spend`; `#tools` to `#overview/all`; old `#agents/<lens>` links to the list or session (`web/router.js`).
 
-**Open questions:** see DECISIONS.md → Open questions.
+**Open questions:** see DECISIONS.md → Open questions. Unfiled: "Worth a look" slow-call notes read as alarms (red, 1.9× p95); unresolved Codex `exec`/`js`/`bash` calls stay separate tool rows (`internal/parse/codex/codex.go:406`).
 
-**Next checkpoint:** Piece 2's first slice lands — context-cost attribution (in `internal/aggregate/` since claudit-ucr) surfaced in hotspots and the Tools view.
+**Next checkpoint:** operator decides on the two unfiled polish items above.
 
 **Stop conditions:**
-- Claude Code changes the JSONL schema → parser catch-up becomes the priority.
-- Anthropic publishes new model rates → refresh `internal/pricing/default.yaml`
-  and cut a release.
+- Claude Code or Codex changes the log schema → parser catch-up becomes the priority.
+- Anthropic or OpenAI publishes new model rates → refresh `internal/pricing/default.yaml` and cut a release.
