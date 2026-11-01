@@ -116,8 +116,8 @@ func TestParseRollout_ToolCalls(t *testing.T) {
 		t.Errorf("second turn tool uses = %+v, want none", res.Turns[1].ToolUses)
 	}
 	wantUses := []parse.ToolUse{
-		{ID: "call_686ff4004f1041329f3b312b349d352c", Name: "exec", Input: "git log -8 --oneline && git status --short", Detail: "git status"},
-		{ID: "call_sAX04vI4aehE5s7dZh9nbaDf", Name: "exec_command", Input: "go test -short ./...", Detail: "go test"},
+		{ID: "call_686ff4004f1041329f3b312b349d352c", Name: "Bash", Input: "git log -8 --oneline && git status --short", Detail: "git status"},
+		{ID: "call_sAX04vI4aehE5s7dZh9nbaDf", Name: "Bash", Input: "go test -short ./...", Detail: "go test"},
 		{ID: "call_EzybDGOhTxzwKLutaKTDUNmf", Name: "list_agents", Input: "{}"},
 	}
 	for i, w := range wantUses {
@@ -166,7 +166,7 @@ func TestParseRollout_ExecCmdAfterOtherProperties(t *testing.T) {
 	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
 		t.Fatalf("turns = %+v", res.Turns)
 	}
-	want := parse.ToolUse{ID: "c1", Name: "exec", Input: "go test ./...", Detail: "go test"}
+	want := parse.ToolUse{ID: "c1", Name: "Bash", Input: "go test ./...", Detail: "go test"}
 	if got := res.Turns[0].ToolUses[0]; got != want {
 		t.Errorf("tool use = %+v, want %+v", got, want)
 	}
@@ -272,8 +272,8 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 		`text(await tools.exec_command({cmd:'git status', re:/}/, cmd:'go test ./...'}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
-		if tu.Input != src || tu.Detail != "" {
-			t.Errorf("toolUse(%q) = Input %q Detail %q, want the original input and no Bash pattern", src, tu.Input, tu.Detail)
+		if tu.Name != "exec" || tu.Input != src || tu.Detail != "" {
+			t.Errorf("toolUse(%q) = Name %q Input %q Detail %q, want the raw name exec, the original input and no Bash pattern", src, tu.Name, tu.Input, tu.Detail)
 		}
 	}
 	for _, src := range []string{
@@ -282,8 +282,54 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 		`text(await tools.exec_command({cmd:'git status', workdir:null /* } */, cmd:'go test ./...'}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
-		if tu.Input != "go test ./..." || tu.Detail != "go test" {
-			t.Errorf("toolUse(%q) = Input %q Detail %q, want the final cmd and its Bash pattern", src, tu.Input, tu.Detail)
+		if tu.Name != parse.BashToolName || tu.Input != "go test ./..." || tu.Detail != "go test" {
+			t.Errorf("toolUse(%q) = Name %q Input %q Detail %q, want Bash, the final cmd and its Bash pattern", src, tu.Name, tu.Input, tu.Detail)
+		}
+	}
+}
+
+// TestParseRollout_UnresolvedExecKeepsRawName: an exec call whose cmd is not
+// a static string parses as the raw exec tool with its JavaScript as Input.
+func TestParseRollout_UnresolvedExecKeepsRawName(t *testing.T) {
+	src := `text(await tools.exec_command({cmd:"go test " + pkg}));`
+	line := `{"timestamp":"2026-10-31T23:53:17.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"exec","input":` + strconv.Quote(src) + `}}
+{"timestamp":"2026-10-31T23:53:18.000Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":1}}}`
+	res, err := ParseFile(strings.NewReader(line+"\n"), "x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
+		t.Fatalf("turns = %+v", res.Turns)
+	}
+	want := parse.ToolUse{ID: "c1", Name: "exec", Input: src}
+	if got := res.Turns[0].ToolUses[0]; got != want {
+		t.Errorf("tool use = %+v, want %+v", got, want)
+	}
+}
+
+// TestFindToolUseDetail_NameMatchesParseFile: the drawer's detail lookup
+// names a call exactly as ParseFile names its ToolUse.
+func TestFindToolUseDetail_NameMatchesParseFile(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := parseFixture(t, "tools.jsonl", "")
+	names := map[string]string{}
+	for _, tu := range res.Turns[0].ToolUses {
+		names[tu.ID] = tu.Name
+	}
+	for _, c := range []struct{ id, name string }{
+		{"call_686ff4004f1041329f3b312b349d352c", "Bash"},
+		{"call_sAX04vI4aehE5s7dZh9nbaDf", "Bash"},
+		{"call_EzybDGOhTxzwKLutaKTDUNmf", "list_agents"},
+	} {
+		d, ok := FindToolUseDetail(strings.NewReader(string(raw)), c.id)
+		if !ok {
+			t.Fatalf("FindToolUseDetail(%s) found=false", c.id)
+		}
+		if d.Name != c.name || d.Name != names[c.id] {
+			t.Errorf("FindToolUseDetail(%s).Name = %q, ParseFile name %q, want both %q", c.id, d.Name, names[c.id], c.name)
 		}
 	}
 }

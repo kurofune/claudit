@@ -12,6 +12,10 @@ import (
 	"strings"
 )
 
+// BashToolName is the tool name every shell call carries, whichever agent
+// ran it, so a Codex shell call groups with Claude Code's Bash calls.
+const BashToolName = "Bash"
+
 // extractDetail returns a per-tool drill-down key (or "" if none applies).
 // The goal: bucket Bash by command pattern, file tools by extension,
 // WebFetch by host — i.e. anything that lets the user see "git on Opus
@@ -21,7 +25,7 @@ func extractDetail(name string, raw json.RawMessage) string {
 		return ""
 	}
 	switch name {
-	case "Bash", "Monitor":
+	case BashToolName, "Monitor":
 		var in struct {
 			Command string `json:"command"`
 		}

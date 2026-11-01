@@ -1,10 +1,13 @@
 package aggregate
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 )
 
 func TestDistinctToolInvocations_DedupsByNameAndDetail(t *testing.T) {
@@ -209,6 +212,31 @@ func TestDistinctToolInvocations_PopulatesKind(t *testing.T) {
 	for i, w := range want {
 		if got[i].Kind != w {
 			t.Errorf("invocation[%d] (%s) Kind = %q, want %q", i, got[i].Name, got[i].Kind, w)
+		}
+	}
+
+	// A Codex rollout's shell calls (exec and exec_command) are exec, like
+	// Bash; its non-shell list_agents stays other.
+	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	res, err := codex.ParseFile(f, "rollout.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, inv := range DistinctToolInvocations(res.Turns[0].ToolUses, nil, time.Time{}) {
+		kinds[inv.ID] = inv.Kind
+	}
+	for id, w := range map[string]string{
+		"call_686ff4004f1041329f3b312b349d352c": "exec",
+		"call_sAX04vI4aehE5s7dZh9nbaDf":         "exec",
+		"call_EzybDGOhTxzwKLutaKTDUNmf":         "other",
+	} {
+		if kinds[id] != w {
+			t.Errorf("codex invocation %s Kind = %q, want %q", id, kinds[id], w)
 		}
 	}
 }

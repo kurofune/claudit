@@ -110,7 +110,8 @@ func sameSet(a, b map[string]bool) bool {
 func TestAPICost_ProviderFilter(t *testing.T) {
 	srv := mixedProviderServer(t)
 	// Fixture facts: three Claude Code sessions (s-alpha, s-beta, s-gamma)
-	// with four turns; Codex tools.jsonl calls exec, Claude Code calls only Skill.
+	// with four turns; Codex tools.jsonl calls Bash (its exec / exec_command
+	// shell calls) and list_agents, Claude Code calls only Skill.
 	allOV := getSection(t, srv, "/_claudit/api/overview", "")
 	var all struct{ Sessions, Turns int }
 	decodeField(t, allOV, "totals", &all)
@@ -301,5 +302,116 @@ func TestAPIAgents_ProviderFilter(t *testing.T) {
 				t.Errorf("session providers = %v, want %v; sessions %+v", got, want, sessions)
 			}
 		})
+	}
+}
+
+// mkBashLine builds an assistant JSONL line carrying one Bash tool_use.
+func mkBashLine(sessionID, uuid, parentUUID, cwd, id, command string, ts time.Time) string {
+	return fmt.Sprintf(
+		`{"type":"assistant","uuid":%q,"parentUuid":%q,"timestamp":%q,"sessionId":%q,"cwd":%q,"message":{"model":"claude-opus-4-7","role":"assistant","content":[{"type":"tool_use","id":%q,"name":"Bash","input":{"command":%q}}],"usage":{"input_tokens":1000,"output_tokens":100}}}`,
+		uuid, parentUUID, ts.Format(time.RFC3339), sessionID, cwd, id, command,
+	)
+}
+
+// TestAPITools_CodexShellFoldsIntoBash: a Claude Code session's Bash calls
+// and the Codex rollouts' exec / exec_command calls share one Bash row and
+// one Bash + pattern row per shared pattern; no row keeps a raw Codex shell
+// tool name. The Codex fixtures run three shell calls: basic.jsonl's
+// `cat README.md\ngit status --short` and tools.jsonl's `git log … && git
+// status --short` and `go test -short ./...`.
+func TestAPITools_CodexShellFoldsIntoBash(t *testing.T) {
+	claude := fixtureCorpus(t)
+	t0 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, filepath.Join(claude, "s-delta.jsonl"),
+		mkUserLineWithSession("s-delta", "u5", "/p/delta", "run the tests", t0),
+		mkBashLine("s-delta", "a5", "u5", "/p/delta", "toolu_gotest", "go test ./...", t0.Add(time.Second)),
+		mkBashLine("s-delta", "a6", "a5", "/p/delta", "toolu_gitstatus", "git status", t0.Add(2*time.Second)),
+	)
+	cache := corpus.New(provider.NewClaudeCode(claude), provider.NewCodex(codexFixtureRoot(t)))
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
+
+	type row struct {
+		Tool    string
+		Pattern string
+		Calls   int
+	}
+	for _, c := range []struct {
+		provider  string
+		bashCalls int
+		patterns  map[string]int
+	}{
+		{"", 5, map[string]int{"go test": 2, "git status": 3}},
+		{"claude-code", 2, map[string]int{"go test": 1, "git status": 1}},
+		{"codex", 3, map[string]int{"go test": 1, "git status": 2}},
+	} {
+		t.Run("provider="+c.provider, func(t *testing.T) {
+			body := getSection(t, srv, "/_claudit/api/tools", c.provider)
+			var byTool []row
+			decodeField(t, body, "by_tool", &byTool)
+			var byDetail map[string][]row
+			decodeField(t, body, "by_tool_detail", &byDetail)
+			bash := -1
+			for _, r := range byTool {
+				if r.Tool == "exec" || r.Tool == "exec_command" {
+					t.Errorf("by_tool has raw Codex shell row %+v", r)
+				}
+				if r.Tool == "Bash" {
+					bash = r.Calls
+				}
+			}
+			if bash != c.bashCalls {
+				t.Errorf("Bash calls = %d, want %d; by_tool %+v", bash, c.bashCalls, byTool)
+			}
+			for tool := range byDetail {
+				if tool == "exec" || tool == "exec_command" {
+					t.Errorf("by_tool_detail has raw Codex shell tool %q", tool)
+				}
+			}
+			for pattern, want := range c.patterns {
+				var rows []row
+				for _, r := range byDetail["Bash"] {
+					if r.Pattern == pattern {
+						rows = append(rows, r)
+					}
+				}
+				if len(rows) != 1 || rows[0].Calls != want {
+					t.Errorf("Bash %q rows = %+v, want one with %d calls", pattern, rows, want)
+				}
+			}
+		})
+	}
+}
+
+// TestAPIAgents_CodexShellKindExec: under ?provider=codex the Agents feed
+// names a Codex shell call Bash with kind exec, and list_agents other.
+func TestAPIAgents_CodexShellKindExec(t *testing.T) {
+	srv := mixedProviderServer(t)
+	var sessions []struct {
+		Main struct {
+			Steps []struct {
+				Tools []struct{ ID, Name, Kind string }
+			}
+		}
+	}
+	decodeField(t, getSection(t, srv, "/_claudit/api/agents", "codex"), "sessions", &sessions)
+	got := map[string][2]string{}
+	for _, s := range sessions {
+		for _, st := range s.Main.Steps {
+			for _, tool := range st.Tools {
+				got[tool.ID] = [2]string{tool.Name, tool.Kind}
+			}
+		}
+	}
+	for id, want := range map[string][2]string{
+		"call_686ff4004f1041329f3b312b349d352c": {"Bash", "exec"},
+		"call_sAX04vI4aehE5s7dZh9nbaDf":         {"Bash", "exec"},
+		"call_EzybDGOhTxzwKLutaKTDUNmf":         {"list_agents", "other"},
+	} {
+		if got[id] != want {
+			t.Errorf("tool %s name/kind = %v, want %v", id, got[id], want)
+		}
 	}
 }

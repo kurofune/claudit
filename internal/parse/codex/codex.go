@@ -335,15 +335,25 @@ func convertUsage(u rawUsage) parse.Usage {
 }
 
 // toolUse maps a custom_tool_call or function_call. A shell call (the exec
-// custom tool, or the exec_command function) keeps its command string as
-// Input and buckets by its Bash pattern; any other call keeps its raw input.
+// custom tool with a resolvable command, or the exec_command function) is
+// named Bash, keeps its command string as Input and buckets by its Bash
+// pattern; any other call keeps its raw name and input.
 func toolUse(it rawItem) parse.ToolUse {
 	input, cmd := toolInput(it)
-	tu := parse.ToolUse{ID: it.CallID, Name: it.Name, Input: parse.ToolInputSnippet(input)}
+	tu := parse.ToolUse{ID: it.CallID, Name: toolName(it, cmd), Input: parse.ToolInputSnippet(input)}
 	if cmd != "" {
 		tu.Detail = parse.BashPattern(cmd)
 	}
 	return tu
+}
+
+// toolName is Bash for a call that runs the shell command cmd, else the
+// call's raw name.
+func toolName(it rawItem, cmd string) string {
+	if cmd != "" {
+		return parse.BashToolName
+	}
+	return it.Name
 }
 
 // toolInput is a call's untruncated input as ToolUse.Input represents it —
@@ -395,8 +405,9 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 		}
 		switch it.Type {
 		case "custom_tool_call", "function_call":
-			out.Name = it.Name
-			out.Input, _ = toolInput(it)
+			var cmd string
+			out.Input, cmd = toolInput(it)
+			out.Name = toolName(it, cmd)
 			found = true
 		case "custom_tool_call_output", "function_call_output":
 			out.Output = outputText(it.Output)

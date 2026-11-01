@@ -330,6 +330,68 @@ func TestHotspotsExamplesFromCodexRollout(t *testing.T) {
 	}
 }
 
+// TestHotspotsFoldCodexShellIntoBash: a Claude Code Bash `go test` and a
+// Codex exec_command `go test` land on one Bash pattern card whose examples
+// name both providers, and no card is keyed on a raw Codex shell tool name.
+func TestHotspotsFoldCodexShellIntoBash(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "parse", "codex", "testdata", "tools.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.Replace(string(raw),
+		`"usage":{"input_tokens":35082,"cached_input_tokens":33920,"cache_write_input_tokens":0`,
+		`"usage":{"input_tokens":35082,"cached_input_tokens":33920,"cache_write_input_tokens":1200000`, 1)
+	if src == string(raw) {
+		t.Fatal("fixture usage line not found")
+	}
+	cx, err := codex.ParseFile(strings.NewReader(src), "/home/u/.codex/sessions/rollout.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := parse.ParseFile(strings.NewReader(strings.Join([]string{
+		`{"type":"assistant","sessionId":"s","uuid":"a1","timestamp":"2026-05-10T10:00:00Z","message":{"id":"m1","model":"m","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[` +
+			`{"type":"tool_use","id":"tu-bash","name":"Bash","input":{"command":"go test ./internal/..."}}]}}`,
+		`{"type":"user","sessionId":"s","uuid":"u1","timestamp":"2026-05-10T10:00:01Z","message":{"role":"user","content":[` +
+			`{"type":"tool_result","tool_use_id":"tu-bash","content":"` + strings.Repeat("o", 4000) + `"}]}}`,
+		`{"type":"assistant","sessionId":"s","uuid":"a2","timestamp":"2026-05-10T10:00:02Z","message":{"id":"m2","model":"m","role":"assistant","usage":{"input_tokens":1,"cache_creation_input_tokens":200000,"output_tokens":1}}}`,
+	}, "\n")+"\n"), "/p/sess.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := ctxTable()
+	table.Providers = map[string]pricing.ProviderPrices{parse.ProviderCodex: {Models: map[string]pricing.ModelPrice{
+		"gpt-6.1-sol": {Rate: pricing.Rate{Input: 5, Output: 25, CacheRead: 1, CacheWrite5m: 6}},
+	}}}
+	agg := New(table)
+	for _, res := range []parse.Result{cc, cx} {
+		for _, tr := range res.Turns {
+			agg.Add(tr)
+		}
+		agg.AddToolResults(res.ToolResults)
+	}
+
+	hs := agg.Hotspots(10)
+	var goTest []Hotspot
+	for _, h := range hs {
+		if tool, _ := h.Context["tool"].(string); tool == "exec" || tool == "exec_command" {
+			t.Errorf("card %q keyed on raw Codex tool %q", h.Title, tool)
+		}
+		if h.Title == "Bash: `go test`" {
+			goTest = append(goTest, h)
+		}
+	}
+	if len(goTest) != 1 || goTest[0].Kind != HotspotBashPattern {
+		t.Fatalf("Bash `go test` cards = %+v, want exactly one bash_pattern card in %+v", goTest, hs)
+	}
+	providers := map[string]int{}
+	for _, e := range goTest[0].Examples {
+		providers[e.Provider]++
+	}
+	if len(goTest[0].Examples) != 2 || providers[parse.ProviderClaudeCode] != 1 || providers[parse.ProviderCodex] != 1 {
+		t.Errorf("Bash `go test` examples = %+v, want one claude-code and one codex", goTest[0].Examples)
+	}
+}
+
 // TestHotspotsCacheWritePctBasis: a repeated-cache-write card's share is of
 // every session's cache-write cost, so it stays within 0–100% whether the
 // window has no attributed tool results or only a tiny one; tool-pattern

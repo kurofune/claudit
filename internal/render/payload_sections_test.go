@@ -417,7 +417,7 @@ func TestBuildOverview_HotspotExampleProvider(t *testing.T) {
 	a := aggregate.New(prices)
 	addContextPattern(a, "claude.jsonl", "go test", 200_000, t0)
 	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-a", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0, SourceFile: "cx.jsonl",
-		ToolUses: []parse.ToolUse{{ID: "cx-tu", Name: "exec_command", Detail: "rg", Input: "rg x"}}})
+		ToolUses: []parse.ToolUse{{ID: "cx-tu", Name: "Bash", Detail: "rg", Input: "rg x"}}})
 	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-b", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0.Add(time.Second), SourceFile: "cx.jsonl",
 		Usage: parse.Usage{CacheCreate5mTokens: 200_000}})
 	a.AddToolResults([]parse.ToolResult{{ToolUseID: "cx-tu", OutputBytes: 100}})
@@ -433,7 +433,7 @@ func TestBuildOverview_HotspotExampleProvider(t *testing.T) {
 	if err := json.Unmarshal(raw, &hs); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"Bash: `go test`": "claude-code", "exec_command: `rg`": "codex"}
+	want := map[string]string{"Bash: `go test`": "claude-code", "Bash: `rg`": "codex"}
 	seen := 0
 	for _, h := range hs {
 		p, ok := want[h.Title]
