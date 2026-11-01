@@ -311,6 +311,7 @@ func TestToolUse_UnresolvedExecCmdIsBashWithoutPattern(t *testing.T) {
 		`text(await tools.exec_command({cmd:"go test ./..."}));`,
 		`text(await tools.exec_command({cmd:"git status", cmd:"go test ./..."}));`,
 		`text(await tools.exec_command({cmd:'git status', workdir:null /* } */, cmd:'go test ./...'}));`,
+		`if (true) /"/.test(s); text(await tools.exec_command({cmd:"go test ./..."}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
 		if tu.Name != parse.BashToolName || tu.Input != "go test ./..." || tu.Detail != "go test" {
@@ -343,6 +344,15 @@ func TestExecFunction(t *testing.T) {
 		{`const r = a / b; const s = "tools.web__run("; const t = c / d;`, ""},
 		{`const r = (a) / 2; tools.view_image({path:'/x'})`, "view_image"},
 		{"return /tools.web__run(/.test(s) && tools.view_image({})", "view_image"},
+		{`if (true) /"/.test(s); tools.view_image({path:"/tmp/x"});`, "view_image"},
+		{`if (ok(a)) /"/.test(s); text(await tools.exec_command({cmd:"ls"}));`, "exec_command"},
+		{`while (x) /'/.exec(s); tools.view_image({path:'/tmp/x'});`, "view_image"},
+		{`for (;;) /"/.test(s); tools.view_image({path:"/tmp/x"});`, "view_image"},
+		{`with (o) /"/.test(s); tools.view_image({path:"/tmp/x"});`, "view_image"},
+		{`const r = f(a) / 2; const s = "tools.web__run("; const t = g(b) / 3;`, ""},
+		{`const r = (a + b) / 2; tools.view_image({path:'/x'})`, "view_image"},
+		{`const r = ifx(a) / 2; const s = "tools.web__run("; const t = c / d;`, ""},
+		{`const r = o.if(a) / 2; const s = "tools.web__run("; const t = c / d;`, ""},
 	}
 	for _, c := range cases {
 		if got := execFunction(c.src); got != c.want {

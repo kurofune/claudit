@@ -591,30 +591,79 @@ var regexKeywords = map[string]bool{
 	"new": true, "delete": true, "void": true, "throw": true, "instanceof": true, "yield": true, "await": true,
 }
 
+// controlKeywords are the keywords whose parenthesized condition is followed
+// by a statement, so a slash right after the closing paren opens a regular
+// expression.
+var controlKeywords = map[string]bool{"if": true, "while": true, "for": true, "with": true}
+
 // regexAllowed reports whether a slash after the code before (comments
 // blanked, literals reduced to their delimiters) opens a regular expression:
-// at the start, after an operator or punctuator, or after a keyword such as
-// return; never after an operand (an identifier, a number, a literal, a
+// at the start, after an operator or punctuator, after a keyword such as
+// return, or after the closing paren of an if, while, for or with condition;
+// never after an operand (an identifier, a number, a literal, any other
 // closing paren or bracket), where it divides.
 func regexAllowed(before []byte) bool {
-	j := len(before) - 1
-	for j >= 0 && strings.IndexByte(" \t\r\n", before[j]) >= 0 {
-		j--
-	}
+	j := lastCode(before, len(before)-1)
 	if j < 0 {
 		return true
 	}
 	switch c := before[j]; {
 	case isIdentByte(c):
-		k := j
-		for k >= 0 && isIdentByte(before[k]) {
-			k--
-		}
-		return regexKeywords[string(before[k+1:j+1])]
-	case strings.IndexByte(")]\"'`/", c) >= 0:
+		return regexKeywords[string(before[identStart(before, j):j+1])]
+	case c == ')':
+		return closesControl(before, j)
+	case strings.IndexByte("]\"'`/", c) >= 0:
 		return false
 	}
 	return true
+}
+
+// closesControl reports whether the paren at before[j] closes the condition
+// of an if, while, for or with statement: its matching open paren follows
+// one of those keywords, written as a keyword and not a property name.
+func closesControl(before []byte, j int) bool {
+	depth := 0
+	for ; j >= 0; j-- {
+		switch before[j] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+		}
+		if depth == 0 {
+			break
+		}
+	}
+	if j < 0 {
+		return false
+	}
+	k := lastCode(before, j-1)
+	if k < 0 || !isIdentByte(before[k]) {
+		return false
+	}
+	start := identStart(before, k)
+	if !controlKeywords[string(before[start:k+1])] {
+		return false
+	}
+	p := lastCode(before, start-1)
+	return p < 0 || before[p] != '.'
+}
+
+// lastCode returns the index of the last byte at or before j in b that is
+// not whitespace, or -1.
+func lastCode(b []byte, j int) int {
+	for j >= 0 && strings.IndexByte(" \t\r\n", b[j]) >= 0 {
+		j--
+	}
+	return j
+}
+
+// identStart returns the index where the identifier ending at b[j] starts.
+func identStart(b []byte, j int) int {
+	for j >= 0 && isIdentByte(b[j]) {
+		j--
+	}
+	return j + 1
 }
 
 // skipRegex returns the length of the regular expression literal at the
