@@ -170,3 +170,54 @@ func TestAPIAgentsFull_CodexToolBetweenCaps(t *testing.T) {
 		t.Errorf("Status = %q, want ok", got.Status)
 	}
 }
+
+// TestAPISessionsStory_CodexSubagentWithoutParentTurn: a Codex sub-agent
+// rollout whose spawning thread's transcript is gone folds into the root
+// session id in the Sessions index, and the story endpoint finds that same
+// listed id and serves its child, not a 404.
+func TestAPISessionsStory_CodexSubagentWithoutParentTurn(t *testing.T) {
+	const rootID = "01a15d72-75c8-7ec1-bff4-4d487e6488ad"
+	const childID = "01a19217-0c60-71a2-ab13-917397bf7ed1"
+	root := t.TempDir()
+	b, err := os.ReadFile(filepath.Join("..", "parse", "codex", "testdata", "subagent.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "2026", "10", "31", "rollout-2026-10-31T06-12-26-"+childID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := corpus.New(provider.NewClaudeCode(t.TempDir()), provider.NewCodex(root))
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
+
+	rows := getSessions(t, srv, "?scope=all")
+	if got := sessionIDs(rows, func(r indexRowWire) string { return r.SessionID }); len(got) != 1 || got[0] != rootID {
+		t.Fatalf("index session ids = %v, want [%s]", got, rootID)
+	}
+
+	body := getStory(t, srv, "?scope=all&session="+rootID)
+	var sid string
+	if err := json.Unmarshal(body["session_id"], &sid); err != nil || sid != rootID {
+		t.Errorf("story session_id = %s (%v), want %q", body["session_id"], err, rootID)
+	}
+	var children []struct {
+		Kind  string            `json:"kind"`
+		Steps []json.RawMessage `json:"steps"`
+	}
+	if err := json.Unmarshal(body["children"], &children); err != nil {
+		t.Fatalf("children: %v", err)
+	}
+	if len(children) != 1 || children[0].Kind != "subagent" || len(children[0].Steps) == 0 {
+		t.Errorf("children = %s, want the one sub-agent with its steps", body["children"])
+	}
+
+	if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+"?scope=all&session="+childID, nil); w.Code != http.StatusNotFound {
+		t.Errorf("story for the folded child thread id: status %d, want 404", w.Code)
+	}
+}

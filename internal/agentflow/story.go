@@ -157,6 +157,27 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	return st, true
 }
 
+// HasSession reports whether any turn of the snapshot belongs to the
+// session under the grouping BuildSessionIndex and BuildSessionStory use:
+// a Codex sub-agent thread counts toward its root session, so a root whose
+// own transcript is gone is still found through its children.
+func HasSession(snap *corpus.Snapshot, sessionID string) bool {
+	if snap == nil || sessionID == "" {
+		return false
+	}
+	roots := threadRoots(snap)
+	for i := range snap.Turns {
+		id := snap.Turns[i].SessionID
+		if root, ok := roots[id]; ok {
+			id = root
+		}
+		if id == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
 // Page cuts the story at prompt index prompt, turns [offset, offset+limit)
 // of it. Its children are the sub-agents started from the page's first
 // turn up to the turn after its last; the session's first page also takes

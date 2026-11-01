@@ -91,7 +91,7 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if !snapshotHasSession(s.cache.Snapshot(), session) {
+	if !agentflow.HasSession(s.cache.Snapshot(), session) {
 		http.NotFound(w, r)
 		return
 	}
@@ -123,20 +123,6 @@ func nonNegativeParam(raw string) (int, error) {
 		return 0, fmt.Errorf("must be a non-negative integer, got %q", raw)
 	}
 	return n, nil
-}
-
-// snapshotHasSession reports whether any turn of the snapshot belongs to
-// the session.
-func snapshotHasSession(snap *Snapshot, session string) bool {
-	if snap == nil {
-		return false
-	}
-	for i := range snap.Turns {
-		if snap.Turns[i].SessionID == session {
-			return true
-		}
-	}
-	return false
 }
 
 // filterQueryKey is the canonical form of what an Aggregator reads from a
