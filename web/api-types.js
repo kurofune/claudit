@@ -59,7 +59,7 @@
 
 /**
  * One assistant turn within an agent's timeline.
- * Mirrors internal/agentflow/graph.go:93 (agentflow.AgentStep).
+ * Mirrors internal/agentflow/graph.go:92 (agentflow.AgentStep).
  * @typedef {Object} AgentStep
  * @property {string} [uuid]            omitempty — absent for legacy lines without one
  * @property {string} timestamp         RFC3339
@@ -76,7 +76,7 @@
 
 /**
  * One agent — the main session agent or a sub-agent.
- * Mirrors internal/agentflow/graph.go:65 (agentflow.AgentNode).
+ * Mirrors internal/agentflow/graph.go:69 (agentflow.AgentNode).
  * @typedef {Object} AgentNode
  * @property {string} kind              "main" | "subagent"
  * @property {string} agent_type        empty for the main agent
@@ -86,15 +86,14 @@
  * @property {string} ended_at          RFC3339
  * @property {number} cost_usd
  * @property {Tokens} tokens
- * @property {string} status            "running" | "done"
- * @property {string} current_tool      only meaningful while running
+ * @property {string} [status]          "running" marks a live agent; no payload sends it today
  * @property {number} error_count
  * @property {AgentStep[]|null} steps   nil slice marshals to null
  */
 
 /**
  * One user prompt anchored to where its turns begin in Main.Steps.
- * Mirrors internal/agentflow/graph.go:55 (agentflow.PromptMarker).
+ * Mirrors internal/agentflow/graph.go:59 (agentflow.PromptMarker).
  * @typedef {Object} PromptMarker
  * @property {string} uuid              "" marks orphan turns with no resolvable prompt
  * @property {string} text
@@ -104,7 +103,7 @@
 
 /**
  * One session's agent tree: the main agent plus the sub-agents it spawned.
- * Mirrors internal/agentflow/graph.go:26 (agentflow.AgentSession).
+ * Mirrors internal/agentflow/graph.go:23 (agentflow.AgentSession).
  * @typedef {Object} AgentSession
  * @property {string} session_id
  * @property {string} cwd
@@ -121,8 +120,8 @@
  */
 
 /**
- * Top-level /_claudit/api/agents payload.
- * Mirrors internal/agentflow/graph.go:20 (agentflow.AgentGraph).
+ * The session graph detectSignals reads: session-header-logic's sessionOf
+ * builds a one-session graph from a whole story.
  * @typedef {Object} AgentGraph
  * @property {AgentSession[]|null} sessions nil slice (empty snapshot) marshals to null
  */

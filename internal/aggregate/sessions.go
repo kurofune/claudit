@@ -13,7 +13,7 @@ import (
 // tool has nothing useful to qualify it.
 type ToolInvocation struct {
 	// ID is the tool_use id of the (first, when deduped) call this row
-	// represents. Lets the drawer fetch the untruncated input/output back
+	// represents. Lets the story fetch the untruncated input/output back
 	// from disk on demand. Omitted for older sessions that lack tool_use ids.
 	ID     string `json:"id,omitempty"`
 	Name   string `json:"name"`

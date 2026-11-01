@@ -7,9 +7,9 @@ import (
 )
 
 // PromptResolver maps any turn (or intermediate) UUID to the UUID of the user
-// prompt that originated its parentUuid chain. The Agents Conversation lens
-// (agentflow.BuildAgentGraph) uses it to attribute a turn back to the prompt
-// that produced it, climbing through non-content lines (system events,
+// prompt that originated its parentUuid chain. A session's story
+// (agentflow.BuildSessionStory) uses it to attribute a turn back to the
+// prompt that produced it, climbing through non-content lines (system events,
 // file-history snapshots) via parse.ParentLink edges.
 //
 // Build once over a corpus's turns + user messages + parent links; Resolve
