@@ -132,6 +132,18 @@ below. A
 `bd close <message-id> --reason "<what the operator decided>"`. The hook is the
 only way new items reach you; nothing else checks for them.
 
+An `answer: <id> → <answer text> — bd show <id>` line is the operator's ruling,
+recorded on the item with `djinn needs-you answer <id> <a|b|own words>`: `a`
+or `b` picks that answer from the item's deferral notes, any other words are
+their own answer. Ask the operator nothing back: handle it from step 4 of the
+conversation above exactly like `rule on <id>: <answer>` — the bead rewritten
+from the answer and requeued, a `mail:` item closed with it, an `idea:` item
+planned or declined. Then add one comment on the item whose first line opens
+`<your seat's display name>:` and says what you did with the answer
+(`bd comments add <id> -f <file>`): from then on the answer reads as ruled and
+the operator can no longer withdraw it. A newer `answer:` line for the same
+item replaces the one before it.
+
 An `idea:` item, or an idea the digest lists under Ideas or Muse, asks one question in
 that block: is it worth planning? The operator's yes is the first approval, and
 never yours to give. The ops room answers an idea for the operator:
