@@ -1,0 +1,231 @@
+package agentflow
+
+import (
+	"time"
+
+	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/internal/corpus"
+	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
+	"github.com/kurofune/claudit/internal/pricing"
+)
+
+// StoryPageTurns is how many main-agent turns one story page carries.
+const StoryPageTurns = 200
+
+// StoryOptions tunes the story. Zero values are sensible defaults.
+type StoryOptions struct {
+	// SnippetRunes caps each tool call's input and output, as
+	// Options.SnippetRunes does; 0 keeps the parse-time snippet whole.
+	SnippetRunes int
+}
+
+// SessionStory is one session's whole story: its prompts, the main agent's
+// steps under them, its sub-agents and what the window or replay dedup hid.
+// Page cuts it into the /_claudit/api/sessions/story payload.
+type SessionStory struct {
+	SessionID string
+	Prompts   []StoryPrompt
+	Hidden    StoryHidden
+	steps     []StoryStep
+	// promptStart[i] is the index in steps of prompt i's first turn.
+	promptStart []int
+	children    []StoryChild
+}
+
+// StoryPrompt is one user prompt and how many main-agent turns it drove.
+// An empty UUID marks turns with no resolvable prompt.
+type StoryPrompt struct {
+	UUID      string    `json:"uuid"`
+	Text      string    `json:"text"`
+	Timestamp time.Time `json:"timestamp"`
+	Turns     int       `json:"turns"`
+}
+
+// StoryPageInfo places a page: the prompt it belongs to and its turn range
+// within that prompt.
+type StoryPageInfo struct {
+	PromptIndex int  `json:"prompt_index"`
+	TurnOffset  int  `json:"turn_offset"`
+	TurnLimit   int  `json:"turn_limit"`
+	HasMore     bool `json:"has_more"`
+}
+
+// StoryHidden discloses the session's turns the story leaves out: replays
+// of another session's turns, and turns outside the request's filter.
+type StoryHidden struct {
+	Replays       int `json:"replays"`
+	OutsideFilter int `json:"outside_filter"`
+}
+
+// StoryTool is a tool call with the exit code Codex writes above a
+// command's output split off: ExitCode is nil when the output carries no
+// such envelope, and Output then is unchanged.
+type StoryTool struct {
+	aggregate.ToolInvocation
+	ExitCode *int `json:"exit_code"`
+}
+
+// StoryStep is an AgentStep whose tools carry their exit code. UUID is the
+// turn uuid /_claudit/api/agents/full?turn= takes.
+type StoryStep struct {
+	AgentStep
+	Tools []StoryTool `json:"tools"`
+}
+
+// StoryChild is one sub-agent (or further rollout sharing the session id,
+// kind "main") with its own steps. ParentToolUseID is the spawning call's
+// id, "" when the sub-agent's meta does not name it.
+type StoryChild struct {
+	Kind            string      `json:"kind"`
+	AgentType       string      `json:"agent_type"`
+	Description     string      `json:"description"`
+	ParentToolUseID string      `json:"parent_tool_use_id"`
+	StartedAt       time.Time   `json:"started_at"`
+	EndedAt         time.Time   `json:"ended_at"`
+	CostUSD         float64     `json:"cost_usd"`
+	ErrorCount      int         `json:"error_count"`
+	Steps           []StoryStep `json:"steps"`
+}
+
+// StoryPage is the /_claudit/api/sessions/story payload: one prompt's
+// turns, at most a page of them, and the sub-agents started in that span.
+type StoryPage struct {
+	SessionID string        `json:"session_id"`
+	Prompts   []StoryPrompt `json:"prompts"`
+	Page      StoryPageInfo `json:"page"`
+	Steps     []StoryStep   `json:"steps"`
+	Children  []StoryChild  `json:"children"`
+	Hidden    StoryHidden   `json:"hidden"`
+}
+
+// BuildSessionStory assembles one session's story with the grouping
+// BuildAgentGraph uses. ok is false when the snapshot holds no turn of the
+// session at all; a session whose turns the filter all excluded is found,
+// with no prompts.
+func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, sessionID string, opts StoryOptions) (*SessionStory, bool) {
+	if snap == nil || sessionID == "" {
+		return nil, false
+	}
+	c := collectSessions(snap, prices, f, sessionID)
+	st := &SessionStory{
+		SessionID: sessionID,
+		Prompts:   []StoryPrompt{},
+		Hidden:    StoryHidden{Replays: c.replays, OutsideFilter: c.outsideFilter},
+		steps:     []StoryStep{},
+		children:  []StoryChild{},
+	}
+	s, ok := c.sessions[sessionID]
+	if !ok {
+		return st, c.replays+c.outsideFilter > 0
+	}
+
+	var turns []parse.Turn
+	for _, n := range s.nodes {
+		for _, r := range n.turns {
+			turns = append(turns, *r.t)
+		}
+	}
+	resolver := aggregate.NewPromptResolver(turns, snap.Users, snap.Links)
+	as := assembleSession(s, toolResults(snap), resolver, Options{})
+	codexOutput := s.provider == parse.ProviderCodex
+
+	if as.Main != nil {
+		st.steps = storySteps(as.Main.Steps, codexOutput, opts.SnippetRunes)
+	}
+	for i, m := range as.Prompts {
+		end := len(st.steps)
+		if i+1 < len(as.Prompts) {
+			end = as.Prompts[i+1].FirstStepIndex
+		}
+		st.Prompts = append(st.Prompts, StoryPrompt{UUID: m.UUID, Text: m.Text, Timestamp: m.Timestamp, Turns: end - m.FirstStepIndex})
+		st.promptStart = append(st.promptStart, m.FirstStepIndex)
+	}
+	for _, ch := range as.Children {
+		st.children = append(st.children, StoryChild{
+			Kind:            ch.Kind,
+			AgentType:       ch.AgentType,
+			Description:     ch.Description,
+			ParentToolUseID: ch.ParentToolUseID,
+			StartedAt:       ch.StartedAt,
+			EndedAt:         ch.EndedAt,
+			CostUSD:         ch.CostUSD,
+			ErrorCount:      ch.ErrorCount,
+			Steps:           storySteps(ch.Steps, codexOutput, opts.SnippetRunes),
+		})
+	}
+	return st, true
+}
+
+// Page cuts the story at prompt index prompt, turns [offset, offset+limit)
+// of it. Its children are the sub-agents started from the page's first
+// turn up to the turn after its last; the session's first page also takes
+// those started before any turn, and its last those started after. ok is
+// false for a prompt index or offset past the end. A story with no prompts
+// has one empty page.
+func (st *SessionStory) Page(prompt, offset, limit int) (StoryPage, bool) {
+	page := StoryPage{
+		SessionID: st.SessionID,
+		Prompts:   st.Prompts,
+		Page:      StoryPageInfo{PromptIndex: prompt, TurnOffset: offset, TurnLimit: limit},
+		Steps:     []StoryStep{},
+		Children:  []StoryChild{},
+		Hidden:    st.Hidden,
+	}
+	if limit <= 0 || prompt < 0 || offset < 0 {
+		return StoryPage{}, false
+	}
+	if len(st.Prompts) == 0 {
+		if prompt != 0 || offset != 0 {
+			return StoryPage{}, false
+		}
+		page.Children = st.children
+		return page, true
+	}
+	if prompt >= len(st.Prompts) {
+		return StoryPage{}, false
+	}
+	turns := st.Prompts[prompt].Turns
+	if offset > 0 && offset >= turns {
+		return StoryPage{}, false
+	}
+	from := st.promptStart[prompt] + offset
+	to := st.promptStart[prompt] + min(offset+limit, turns)
+	page.Steps = st.steps[from:to]
+	page.Page.HasMore = offset+limit < turns
+
+	for _, ch := range st.children {
+		afterStart := from == 0 || !ch.StartedAt.Before(st.steps[from].Timestamp)
+		beforeEnd := to >= len(st.steps) || ch.StartedAt.Before(st.steps[to].Timestamp)
+		if afterStart && beforeEnd {
+			page.Children = append(page.Children, ch)
+		}
+	}
+	return page, true
+}
+
+// storySteps converts an agent's steps, splitting each Codex tool output's
+// exit-code envelope off before capping the snippets.
+func storySteps(steps []AgentStep, codexOutput bool, snippetRunes int) []StoryStep {
+	out := make([]StoryStep, len(steps))
+	for i, s := range steps {
+		tools := make([]StoryTool, len(s.Tools))
+		for j, inv := range s.Tools {
+			tool := StoryTool{ToolInvocation: inv}
+			if codexOutput {
+				if code, body, ok := codex.ExitEnvelope(inv.Output); ok {
+					tool.ExitCode = &code
+					tool.Output = body
+				}
+			}
+			if snippetRunes > 0 {
+				tool.Input = truncateRunes(tool.Input, snippetRunes)
+				tool.Output = truncateRunes(tool.Output, snippetRunes)
+			}
+			tools[j] = tool
+		}
+		s.Tools = nil
+		out[i] = StoryStep{AgentStep: s, Tools: tools}
+	}
+	return out
+}

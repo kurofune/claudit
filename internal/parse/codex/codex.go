@@ -816,6 +816,30 @@ var (
 	exitField  = regexp.MustCompile(`"exit_code"\s*:\s*(-?\d+)`)
 )
 
+// ExitEnvelope splits the header Codex writes above a command's output:
+// an "Exit code: N" (or "Process exited with code N") line, perhaps with
+// others such as "Wall time:", then an "Output:" line. It returns N and the
+// text after the "Output:" line; ok is false when text carries no such
+// envelope.
+func ExitEnvelope(text string) (code int, body string, ok bool) {
+	head, body, found := strings.Cut(text, "\nOutput:\n")
+	if !found {
+		head, found = strings.CutSuffix(text, "\nOutput:")
+		if !found {
+			return 0, "", false
+		}
+	}
+	m := exitHeader.FindStringSubmatch(head)
+	if m == nil {
+		return 0, "", false
+	}
+	code, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return code, body, true
+}
+
 // exitError reports whether a tool output records a failure. Codex writes
 // the outcome three ways: an "Exit code: N" (or "Process exited with code
 // N") header above the "Output:" line; for the exec tool, a JSON result

@@ -211,6 +211,30 @@ func TestExitError(t *testing.T) {
 	}
 }
 
+func TestExitEnvelope(t *testing.T) {
+	cases := []struct {
+		text string
+		code int
+		body string
+		ok   bool
+	}{
+		{"Exit code: 1\nWall time: 3.2 seconds\nOutput:\n--- FAIL: TestSomething\nFAIL\n", 1, "--- FAIL: TestSomething\nFAIL\n", true},
+		{"Exit code: 1\nOutput:\nboom", 1, "boom", true},
+		{"Chunk ID: 2e0e43\nWall time: 0.0000 seconds\nProcess exited with code 127\nOutput:\n", 127, "", true},
+		{"Exit code: 0\nWall time: 1 seconds\nOutput:", 0, "", true},
+		{"Script failed\nWall time 0.1 seconds\nOutput:\nTypeError", 0, "", false},
+		{"total 0\nOutput:\nx", 0, "", false},
+		{"plain output", 0, "", false},
+		{"", 0, "", false},
+	}
+	for _, c := range cases {
+		code, body, ok := ExitEnvelope(c.text)
+		if code != c.code || body != c.body || ok != c.ok {
+			t.Errorf("ExitEnvelope(%q) = (%d, %q, %v), want (%d, %q, %v)", c.text, code, body, ok, c.code, c.body, c.ok)
+		}
+	}
+}
+
 func TestExecCommands(t *testing.T) {
 	cases := []struct {
 		src  string
