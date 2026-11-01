@@ -44,6 +44,13 @@ const TOOLS = {
   },
 };
 
+// deferred is a /tools response that settles with TOOLS on resolve().
+function deferred() {
+  let resolve;
+  const promise = new Promise(r => { resolve = () => r(TOOLS); });
+  return { deferred: true, promise, resolve };
+}
+
 // stubFetch answers /overview and /anomalies, and /tools from toolsResponses
 // in turn (the last one repeats). { pending: true } never settles.
 function stubFetch(toolsResponses) {
@@ -56,6 +63,7 @@ function stubFetch(toolsResponses) {
     if (path === '/overview') return ok(OVERVIEW);
     const r = toolsResponses.length > 1 ? toolsResponses.shift() : toolsResponses[0];
     if (r.pending) return new Promise(() => {});
+    if (r.deferred) return r.promise.then(ok);
     if (r.status) return { ok: false, status: r.status, statusText: r.statusText || '', json: async () => ({}) };
     return ok(r);
   };
@@ -289,6 +297,39 @@ test('a deep-linked open scrolls only once the table has painted, so a short ske
   done.location.hash = '#overview/all';
   await done.view.paint();
   assert.deepEqual(done.scrolled, ['tool-patterns', 'tool-patterns'], 'a later route to a loaded table scrolls at once');
+});
+
+test('a route to a hotspot while the deep-linked table loads drops the table scroll', async () => {
+  const tools = deferred();
+  const m = await mount([tools], { hash: '#overview/all' });
+  m.location.hash = '#overview/hotspot-2';
+  await m.view.paint();
+  assert.deepEqual(m.scrolled, ['hotspot-2']);
+  tools.resolve();
+  await settle();
+  assert.ok(table(m.root), 'the table still paints');
+  assert.deepEqual(m.scrolled, ['hotspot-2'], 'the newer hotspot destination stands');
+});
+
+test('closing the deep-linked table while it loads drops the scroll, and a plain reopen does not revive it', async () => {
+  const tools = deferred();
+  const m = await mount([tools], { hash: '#overview/all' });
+  click(m.button);
+  assert.equal(m.button.getAttribute('aria-expanded'), 'false');
+  tools.resolve();
+  await settle();
+  assert.deepEqual(m.scrolled, [], 'a closed section does not scroll');
+
+  const again = deferred();
+  const r = await mount([again], { hash: '#overview/all' });
+  click(r.button);
+  click(r.button);
+  assert.equal(r.button.getAttribute('aria-expanded'), 'true');
+  assert.equal(r.location.hash, '#overview/all');
+  again.resolve();
+  await settle();
+  assert.ok(table(r.root));
+  assert.deepEqual(r.scrolled, [], 'the cancelled deep-link scroll stays cancelled');
 });
 
 test('a deep-linked open that fails still scrolls to the failure', async () => {

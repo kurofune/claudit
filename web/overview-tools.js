@@ -175,10 +175,12 @@ export function wireToolPatterns(section) {
   };
 
   // settle scrolls a deep-linked section into view once its content is in:
-  // scrolling while the table is a few skeleton rows stops short of it.
+  // scrolling while the table is a few skeleton rows stops short of it. A
+  // route that moved on, or a section closed meanwhile, drops the scroll.
   function settle() {
     if (!scrollPending) return;
     scrollPending = false;
+    if (body.hidden || !hashShowAll(window.location.hash)) return;
     scrollToSection();
   }
 
@@ -220,6 +222,7 @@ export function wireToolPatterns(section) {
   }
 
   function close() {
+    scrollPending = false;
     button.setAttribute('aria-expanded', 'false');
     section.classList.remove('is-open');
     body.hidden = true;
