@@ -133,7 +133,7 @@ test('a bar tooltip names the turn, its clock, the sub-agent, the mode value and
   keydown(host.querySelectorAll('.turn-bar')[3], 'Enter');
   assert.equal(location.hash, `#agents/${SID}/a3`);
   keydown(host.querySelectorAll('.turn-bar')[1], 'Enter');
-  assert.equal(location.hash, `#agents/${SID}/a1`, 'a sub-agent turn lands on the main turn before it');
+  assert.equal(location.hash, `#agents/${SID}/k1`, 'a sub-agent bar lands on the sub-agent turn it describes');
 });
 
 test('the strip is one tab stop; arrows move between bars', async () => {
@@ -181,6 +181,14 @@ test('a session with no tool calls reads Failed 0, has no Worth a look section a
   assert.equal(host.querySelector('.sh-notes'), null);
   assert.equal(host.querySelectorAll('.turn-bar').length, 3);
   assert.deepEqual(heights(host), ['height: max(2px, 0%)', 'height: max(2px, 0%)', 'height: max(2px, 0%)'], 'the 2px floor keeps zero-cost turns visible');
+});
+
+test('a tool-free session with a turn over the cost-whale floor still has no Worth a look section', async () => {
+  const { host, done } = await mount(story([step('a1', 0, [], { cost_usd: 1, context_cost_usd: 0.3 })]));
+  await done;
+  assert.equal(text(host.querySelector('[data-tile="failed"] .sh-value')), '0');
+  assert.equal(host.querySelector('.sh-notes'), null);
+  assert.equal(host.querySelectorAll('.turn-bar').length, 1);
 });
 
 test('skeleton tiles and an empty strip show while the story loads', async () => {

@@ -19,7 +19,8 @@ import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-sto
  * @property {number} agentIndex          0 = main, else 1 + the child's index
  * @property {number} stepIndex
  * @property {string} label               '' for the main agent, else the sub-agent's label
- * @property {string} link                the main-agent turn uuid a deep link lands on
+ * @property {string} link                the turn uuid a deep link lands on: its own, else
+ *                                        the latest main-agent turn's at or before it
  */
 
 export const MAX_BARS = 120;
@@ -59,8 +60,8 @@ export function sessionOf(story) {
 }
 
 // sessionTurns orders every turn of the main agent and its sub-agents by
-// timestamp (main first on a tie). A sub-agent turn links to the latest
-// main turn at or before it, since the story pages main-agent turns.
+// timestamp (main first on a tie). Each turn links to its own uuid; one
+// with none links to the latest main turn at or before it.
 /** @param {WholeStory} story @returns {Turn[]} */
 export function sessionTurns(story) {
   /** @type {Omit<Turn, 'n'|'link'>[]} */
@@ -72,34 +73,47 @@ export function sessionTurns(story) {
   const key = (/** @type {Omit<Turn, 'n'|'link'>} */ t) => { const v = ts.get(t); return Number.isNaN(v) ? Infinity : v; };
   all.sort((a, b) => (key(a) - key(b)) || (a.agentIndex - b.agentIndex) || (a.stepIndex - b.stepIndex));
   const firstMain = all.find(t => t.agentIndex === 0 && t.step.uuid);
-  let link = firstMain ? firstMain.step.uuid || '' : '';
+  let mainLink = firstMain ? firstMain.step.uuid || '' : '';
   return all.map((t, i) => {
-    if (t.agentIndex === 0 && t.step.uuid) link = t.step.uuid;
-    return { ...t, n: i + 1, link };
+    if (t.agentIndex === 0 && t.step.uuid) mainLink = t.step.uuid;
+    return { ...t, n: i + 1, link: t.step.uuid || mainLink };
   });
 }
 
-// unresolvedFailures lists every errored call with no later call of the
-// same name and input (or detail, lacking one) that returned ok in the same
-// agent, as {turn, tool}, in session turn order.
-/** @param {WholeStory} story @param {Turn[]} [turns] */
-export function unresolvedFailures(story, turns = sessionTurns(story)) {
+// callKey is a call's identity for matching a failure to a later success:
+// its name and whole-input key (input_key), else what retryTarget reads
+// when the call carried no input.
+/** @param {StoryTool} t */
+const callKey = t => `${t.name}\u0000${t.input_key ? `k:${t.input_key}` : `t:${retryTarget(t)}`}`;
+
+// succeeded lists every call that returned ok or has a later call of the
+// same callKey that returned ok in the same agent.
+/** @param {WholeStory} story @returns {Set<StoryTool>} */
+function succeeded(story) {
   /** @type {Set<StoryTool>} */
-  const failed = new Set();
+  const out = new Set();
   for (const a of agentsOf(story)) {
-    const later = new Set();
+    const ok = new Set();
     const tools = a.steps.flatMap(s => s.tools || []);
     for (let i = tools.length - 1; i >= 0; i--) {
       const t = tools[i];
-      const k = `${t.name}\u0000${retryTarget(t)}`;
-      if (t.status === 'ok') later.add(k);
-      else if (t.status === 'error' && !later.has(k)) failed.add(t);
+      const k = callKey(t);
+      if (t.status === 'ok') ok.add(k);
+      if (ok.has(k)) out.add(t);
     }
   }
+  return out;
+}
+
+// unresolvedFailures lists every errored call with no later call of the
+// same name and whole input (input_key; detail when it had no input) that
+// returned ok in the same agent, as {turn, tool}, in session turn order.
+/** @param {WholeStory} story @param {Turn[]} [turns] @param {Set<StoryTool>} [ok] */
+export function unresolvedFailures(story, turns = sessionTurns(story), ok = succeeded(story)) {
   /** @type {{turn: Turn, tool: StoryTool}[]} */
   const out = [];
   for (const turn of turns) {
-    for (const tool of turn.step.tools || []) if (failed.has(tool)) out.push({ turn, tool });
+    for (const tool of turn.step.tools || []) if (tool.status === 'error' && !ok.has(tool)) out.push({ turn, tool });
   }
   return out;
 }
@@ -211,10 +225,11 @@ export function stripBars(story, mode, maxBars = MAX_BARS) {
  */
 
 // worthALook runs the five per-session detectors over the one-session
-// graph with their default thresholds, drops a retry storm or error
-// cascade whose failing command later returned ok in the same agent, ranks
-// first a note on the main agent's last turn (the session ended on it) and
-// keeps at most MAX_NOTES.
+// graph with their default thresholds, drops a retry storm whose peak
+// attempt or a later one of the same call returned ok in the same agent
+// and an error cascade every one of whose errors did, ranks first a note on
+// the main agent's last turn (the session ended on it) and keeps at most
+// MAX_NOTES. A session with no tool calls has no notes.
 /**
  * @param {{session_id: string, main: {steps: StoryStep[]}, children: StoryChild[]}} session
  * @param {number} [nowMs]
@@ -225,8 +240,9 @@ export function worthALook(session, nowMs) {
     session_id: session.session_id, steps: (session.main && session.main.steps) || [], children: session.children || [],
   }));
   const agents = agentsOf(story);
+  if (!agents.some(a => a.steps.some(s => (s.tools || []).length > 0))) return [];
   const turns = sessionTurns(story);
-  const unresolved = new Set(unresolvedFailures(story, turns).map(f => f.tool));
+  const ok = succeeded(story);
   const turnAt = new Map(turns.map(t => [`${t.agentIndex}.${t.stepIndex}`, t]));
   const mainLast = agents[0].steps.length - 1;
   const opts = typeof nowMs === 'number' && !Number.isNaN(nowMs) ? { nowMs } : {};
@@ -239,12 +255,12 @@ export function worthALook(session, nowMs) {
     const steps = (agents[r.agentIndex] || { steps: [] }).steps;
     const tool = ((steps[r.stepIndex] || { tools: [] }).tools || [])[r.toolIndex];
     if (!tool) return false;
-    if (s.kind === 'retry-storm') return !unresolved.has(tool);
+    if (s.kind === 'retry-storm') return ok.has(tool);
     // error-cascade: the run of consecutive errors starting at ref.
     const flat = steps.flatMap(st => st.tools || []);
     let i = flat.indexOf(tool);
     for (; i >= 0 && i < flat.length && flat[i].status === 'error'; i++) {
-      if (unresolved.has(flat[i])) return false;
+      if (!ok.has(flat[i])) return false;
     }
     return true;
   };

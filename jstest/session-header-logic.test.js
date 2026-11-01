@@ -83,7 +83,7 @@ test('stripBars: one bar per turn in timestamp order, heights by context cost or
   const cost = stripBars(st, 'cost');
   assert.deepEqual(cost.map(b => [b.first, b.value, b.heightPct, b.failed, b.link]), [
     [1, 0.2, 100, false, 'a1'],
-    [2, 0.1, 50, false, 'a1'],
+    [2, 0.1, 50, false, 'k1'],
     [3, 0.05, 25, true, 'a2'],
   ]);
   assert.equal(cost[0].tip, 'Turn 1 · 10:00:00 · $0.20 added to context · go test ./...');
@@ -178,15 +178,70 @@ test('worthALook: an incomplete session idle 10 minutes past its unanswered call
 });
 
 test('worthALook keeps at most three notes', () => {
-  const st = story([1, 2, 3, 4].map(i => step(`a${i}`, i, [], { cost_usd: 1 })));
+  const st = story([1, 2, 3, 4].map(i => step(`a${i}`, i, [tool(`echo ${i}`, 'ok')], { cost_usd: 1 })));
   assert.equal(worthALook(sessionFrom(st), T0).length, 3);
 });
 
-test('sessionTurns links a sub-agent turn to the latest main turn before it', () => {
-  const st = story([step('a1', 0), step('a2', 20)], [child('Plan', [step('k1', 5), step('k2', 25)])]);
-  assert.deepEqual(sessionTurns(st).map(t => [t.n, t.step.uuid, t.label, t.link]), [
-    [1, 'a1', '', 'a1'], [2, 'k1', 'Plan', 'a1'], [3, 'a2', '', 'a2'], [4, 'k2', 'Plan', 'a2'],
+test('worthALook: a session with no tool calls has no notes, even with a turn over the cost-whale floor', () => {
+  const st = story([step('a1', 0, [], { cost_usd: 1 })]);
+  assert.deepEqual(worthALook(sessionFrom(st), T0 + 3600e3), []);
+});
+
+test('worthALook keeps a retry storm whose peak attempt has no result yet, and drops it once that attempt succeeds', () => {
+  const tries = last => story([
+    step('a1', 0, [tool('go test ./...', 'error')]),
+    step('a2', 5, [tool('go test ./...', 'error')]),
+    step('a3', 10, [tool('go test ./...', 'error')]),
+    step('a4', 15, [tool('go test ./...', last)]),
   ]);
+  const pending = worthALook(sessionFrom(tries(undefined)), T0 + 16e3);
+  assert.deepEqual(pending.map(n => [n.kind, n.link]), [['retry-storm', 'a4'], ['error-cascade', 'a1']],
+    'three unresolved failures and an unanswered fourth attempt are no recovery');
+  assert.equal(headerNumbers(tries(undefined)).failed, 3);
+  assert.deepEqual(worthALook(sessionFrom(tries('ok')), T0 + 16e3), []);
+  assert.equal(headerNumbers(tries('ok')).failed, 0);
+});
+
+test('unresolvedFailures matches a later success by input_key, not the capped input', () => {
+  const capped = 'go test ./internal/aggregate/... -run TestContextCost'.padEnd(500, 'x');
+  const distinct = story([
+    step('a1', 0, [tool(capped, 'error', { input_key: 'aaaa' })]),
+    step('a2', 5, [tool(capped, 'ok', { input_key: 'bbbb' })]),
+  ]);
+  assert.deepEqual(unresolvedFailures(distinct).map(f => f.tool.input_key), ['aaaa'],
+    'equal snippets with distinct input_key are two commands');
+  const n = headerNumbers(distinct);
+  assert.equal(n.failed, 1);
+  assert.match(explainPrompt(distinct), /Unresolved failures:\n10:00:00  go test /);
+  assert.deepEqual(stripBars(distinct, 'cost').map(b => b.failed), [true, false]);
+
+  const same = story([
+    step('a1', 0, [tool(capped, 'error', { input_key: 'aaaa' })]),
+    step('a2', 5, [tool(capped, 'ok', { input_key: 'aaaa' })]),
+  ]);
+  assert.deepEqual(unresolvedFailures(same), [], 'the same input_key later ok recovers it');
+  assert.equal(headerNumbers(same).failed, 0);
+});
+
+test('sessionTurns links each turn to its own uuid, a uuid-less one to the latest main turn before it', () => {
+  const st = story([step('a1', 0), step('a2', 20)], [child('Plan', [step('k1', 5), step('k2', 25), step('', 30)])]);
+  assert.deepEqual(sessionTurns(st).map(t => [t.n, t.step.uuid, t.label, t.link]), [
+    [1, 'a1', '', 'a1'], [2, 'k1', 'Plan', 'k1'], [3, 'a2', '', 'a2'], [4, 'k2', 'Plan', 'k2'], [5, '', 'Plan', 'a2'],
+  ]);
+});
+
+test('a sub-agent bar and note land on the sub-agent turn they describe', () => {
+  const st = story([step('a1', 0, [tool('git status', 'ok')]), step('a2', 30, [tool('git diff', 'ok')])], [child('Explore', [
+    step('k1', 5, [tool('npm test', 'error')]),
+    step('k2', 6, [tool('make lint', 'error')]),
+    step('k3', 7, [tool('go vet ./...', 'error')]),
+  ])]);
+  const bars = stripBars(st, 'cost');
+  assert.deepEqual(bars.map(b => b.link), ['a1', 'k1', 'k2', 'k3', 'a2']);
+  const cascade = worthALook(sessionFrom(st), T0 + 31e3).find(n => n.kind === 'error-cascade');
+  assert.ok(cascade, 'the sub-agent cascade is a note');
+  assert.equal(cascade.link, 'k1');
+  assert.equal(cascade.turn, 2);
 });
 
 test('explainPrompt is the fixed template over logs, unresolved failures and the costliest turns', () => {
