@@ -2,33 +2,58 @@ package aggregate
 
 import "time"
 
-// Forecast is a linear month-to-date projection of cost for the calendar
-// month containing AsOf. Zero value means "no forecast available" — the
-// renderer skips display when ProjectedMonthEnd is zero.
+// Forecast is a linear month-to-date projection of cost for the local
+// calendar month containing AsOf. ProjectedMonthEnd is zero when no
+// projection is possible; Reason then says why, and AsOf, MonthStart,
+// MonthEnd and DaysInMonth still name the month.
 type Forecast struct {
 	AsOf              time.Time `json:"as_of"`
-	MonthStart        time.Time `json:"month_start"`
-	MonthEnd          time.Time `json:"month_end"`    // first of next month (exclusive)
-	WindowStart       time.Time `json:"window_start"` // chart left edge (UTC); honors filter.Since across months
+	MonthStart        time.Time `json:"month_start"`  // local midnight on the 1st
+	MonthEnd          time.Time `json:"month_end"`    // local midnight on the 1st of next month (exclusive)
+	WindowStart       time.Time `json:"window_start"` // chart left edge; honors filter.Since across months
 	DaysElapsed       float64   `json:"days_elapsed"` // length of the internal rate window (current month only)
 	DaysInMonth       int       `json:"days_in_month"`
 	MTDCostUSD        float64   `json:"mtd_cost_usd"`    // current month only
 	WindowCostUSD     float64   `json:"window_cost_usd"` // total cost across filter (may span months)
 	DailyRateUSD      float64   `json:"daily_rate_usd"`
 	ProjectedMonthEnd float64   `json:"projected_month_end_usd"`
+	Reason            string    `json:"reason"` // "" with a projection, else a ForecastReason* value
 }
 
+// Why a Forecast carries no projection.
+const (
+	ForecastReasonNotDaily   = "not_daily"    // trend is not bucketed by day
+	ForecastReasonHistorical = "historical"   // filter.Until ends more than 24h before now
+	ForecastReasonTooFewDays = "too_few_days" // under two costed days, or two days of rate window, this month
+)
+
 // MonthEndForecast returns a linear month-to-date cost projection for the
-// calendar month containing now. Returns a zero Forecast when the period
-// is not PeriodDay, when there's insufficient current-month data, or
-// when too little of the month has elapsed.
+// local calendar month containing now — the same local-midnight calendar
+// the ?since/?until filters use. Trend day buckets are UTC midnights; each
+// counts toward the local month containing its start instant.
 func (a *Aggregator) MonthEndForecast(now time.Time) Forecast {
-	if a.period != PeriodDay {
-		return Forecast{}
-	}
 	nowUTC := now.UTC()
-	monthStart := time.Date(nowUTC.Year(), nowUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
-	monthEnd := monthStart.AddDate(0, 1, 0)
+	nowLocal := now.In(time.Local)
+	monthStart := time.Date(nowLocal.Year(), nowLocal.Month(), 1, 0, 0, 0, 0, time.Local)
+	monthEnd := time.Date(nowLocal.Year(), nowLocal.Month()+1, 1, 0, 0, 0, 0, time.Local)
+	daysInMonth := time.Date(nowLocal.Year(), nowLocal.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
+	none := func(reason string) Forecast {
+		return Forecast{AsOf: nowUTC, MonthStart: monthStart, MonthEnd: monthEnd, DaysInMonth: daysInMonth, Reason: reason}
+	}
+
+	if a.period != PeriodDay {
+		return none(ForecastReasonNotDaily)
+	}
+
+	// effectiveNow = min(now, filter.Until). A filter.Until more than 24h
+	// before now is a historical view: nothing left to project.
+	effectiveNow := nowLocal
+	if !a.filter.Until.IsZero() && a.filter.Until.Before(effectiveNow) {
+		effectiveNow = a.filter.Until.In(time.Local)
+	}
+	if nowUTC.Sub(effectiveNow) > 24*time.Hour {
+		return none(ForecastReasonHistorical)
+	}
 
 	// Sum MTD cost (current month only), find the earliest current-month
 	// bucket with cost (used for the internal rate-window start clamp), and
@@ -45,7 +70,7 @@ func (a *Aggregator) MonthEndForecast(now time.Time) Forecast {
 		if firstBucketOverall.IsZero() || bucket.Before(firstBucketOverall) {
 			firstBucketOverall = bucket
 		}
-		if bucket.Year() != nowUTC.Year() || bucket.Month() != nowUTC.Month() {
+		if b := bucket.In(time.Local); b.Year() != nowLocal.Year() || b.Month() != nowLocal.Month() {
 			continue
 		}
 		mtd += tp.CostUSD
@@ -55,7 +80,7 @@ func (a *Aggregator) MonthEndForecast(now time.Time) Forecast {
 		}
 	}
 	if distinctDays < 2 {
-		return Forecast{}
+		return none(ForecastReasonTooFewDays)
 	}
 
 	// rateStart (internal): max(monthStart, filter.Since, firstCurrentMonthBucketWithCost).
@@ -63,26 +88,15 @@ func (a *Aggregator) MonthEndForecast(now time.Time) Forecast {
 	// activity even when Since is in a prior month.
 	rateStart := monthStart
 	if !a.filter.Since.IsZero() && a.filter.Since.After(rateStart) {
-		rateStart = a.filter.Since.UTC()
+		rateStart = a.filter.Since.In(time.Local)
 	}
-	if !firstCurrentMonthBucket.IsZero() && firstCurrentMonthBucket.After(rateStart) {
-		rateStart = firstCurrentMonthBucket
-	}
-
-	// effectiveNow = min(now, filter.Until). Skip forecast if filter.Until cuts
-	// off more than 24h before now — that's a historical view.
-	effectiveNow := nowUTC
-	if !a.filter.Until.IsZero() && a.filter.Until.Before(effectiveNow) {
-		effectiveNow = a.filter.Until.UTC()
-	}
-	if nowUTC.Sub(effectiveNow) > 24*time.Hour {
-		return Forecast{}
+	if firstCurrentMonthBucket.After(rateStart) {
+		rateStart = firstCurrentMonthBucket.In(time.Local)
 	}
 
-	daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
 	daysInRateWindow := effectiveNow.Sub(rateStart).Hours() / 24
 	if daysInRateWindow < 2.0 {
-		return Forecast{}
+		return none(ForecastReasonTooFewDays)
 	}
 
 	// WindowStart (chart left edge): honor Since when set; else fall back to
@@ -98,7 +112,7 @@ func (a *Aggregator) MonthEndForecast(now time.Time) Forecast {
 		windowStart = monthStart
 	}
 	if windowStart.After(monthEnd) {
-		return Forecast{}
+		return none(ForecastReasonTooFewDays)
 	}
 
 	windowCost := a.Totals().CostUSD

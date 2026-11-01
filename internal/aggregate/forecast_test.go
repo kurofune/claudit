@@ -8,6 +8,7 @@ import (
 )
 
 func TestMonthEndForecast_ZeroWhenNoPeriod(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices) // no WithPeriod
 
@@ -19,13 +20,11 @@ func TestMonthEndForecast_ZeroWhenNoPeriod(t *testing.T) {
 	agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", d1))
 	agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", d2))
 
-	got := agg.MonthEndForecast(now)
-	if got != (Forecast{}) {
-		t.Errorf("expected zero Forecast, got %+v", got)
-	}
+	assertNoProjection(t, agg.MonthEndForecast(now), "not_daily", now)
 }
 
 func TestMonthEndForecast_ZeroWhenWeeklyOrMonthly(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	d1 := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
@@ -35,13 +34,14 @@ func TestMonthEndForecast_ZeroWhenWeeklyOrMonthly(t *testing.T) {
 		agg := New(prices).WithPeriod(p)
 		agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", d1))
 		agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", d2))
-		if got := agg.MonthEndForecast(now); got != (Forecast{}) {
-			t.Errorf("period=%s: expected zero Forecast, got %+v", p, got)
-		}
+		t.Run(string(p), func(t *testing.T) {
+			assertNoProjection(t, agg.MonthEndForecast(now), "not_daily", now)
+		})
 	}
 }
 
 func TestMonthEndForecast_ZeroWhenNoCurrentMonthData(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -54,12 +54,11 @@ func TestMonthEndForecast_ZeroWhenNoCurrentMonthData(t *testing.T) {
 	agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", apr3))
 
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
-	if got := agg.MonthEndForecast(now); got != (Forecast{}) {
-		t.Errorf("expected zero Forecast, got %+v", got)
-	}
+	assertNoProjection(t, agg.MonthEndForecast(now), "too_few_days", now)
 }
 
 func TestMonthEndForecast_ZeroWhenOnlyOneDayOfCurrentMonthData(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -70,12 +69,11 @@ func TestMonthEndForecast_ZeroWhenOnlyOneDayOfCurrentMonthData(t *testing.T) {
 	agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", may5b))
 
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
-	if got := agg.MonthEndForecast(now); got != (Forecast{}) {
-		t.Errorf("expected zero Forecast, got %+v", got)
-	}
+	assertNoProjection(t, agg.MonthEndForecast(now), "too_few_days", now)
 }
 
 func TestMonthEndForecast_ZeroWhenDaysElapsedBelowTwo(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -100,12 +98,11 @@ func TestMonthEndForecast_ZeroWhenDaysElapsedBelowTwo(t *testing.T) {
 
 	// 0.75 days elapsed.
 	now := time.Date(2026, 5, 1, 18, 0, 0, 0, time.UTC)
-	if got := agg.MonthEndForecast(now); got != (Forecast{}) {
-		t.Errorf("expected zero Forecast (days_elapsed=0.75), got %+v", got)
-	}
+	assertNoProjection(t, agg.MonthEndForecast(now), "too_few_days", now)
 }
 
 func TestMonthEndForecast_HappyPath(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -168,6 +165,7 @@ func TestMonthEndForecast_HappyPath(t *testing.T) {
 }
 
 func TestMonthEndForecast_RespectsProjectFilter(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).
 		WithPeriod(PeriodDay).
@@ -192,7 +190,12 @@ func TestMonthEndForecast_RespectsProjectFilter(t *testing.T) {
 	}
 }
 
-func TestMonthEndForecast_AsOfAndMonthStartAreUTC(t *testing.T) {
+func TestMonthEndForecast_AsOfIsUTCAndMonthIsLocal(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load LA tz: %v", err)
+	}
+	pinLocal(t, la)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -201,24 +204,78 @@ func TestMonthEndForecast_AsOfAndMonthStartAreUTC(t *testing.T) {
 		agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", ts))
 	}
 
-	// now in America/Los_Angeles.
-	la, err := time.LoadLocation("America/Los_Angeles")
-	if err != nil {
-		t.Fatalf("load LA tz: %v", err)
-	}
 	now := time.Date(2026, 5, 20, 5, 0, 0, 0, la) // 12:00 UTC
 
 	got := agg.MonthEndForecast(now)
 
-	if got.MonthStart.Location() != time.UTC {
-		t.Errorf("MonthStart.Location: got %v, want UTC", got.MonthStart.Location())
-	}
 	if got.AsOf.Location() != time.UTC {
 		t.Errorf("AsOf.Location: got %v, want UTC", got.AsOf.Location())
+	}
+	if !got.AsOf.Equal(now) {
+		t.Errorf("AsOf: got %v, want %v", got.AsOf, now)
+	}
+	if want := time.Date(2026, 5, 1, 0, 0, 0, 0, la); !got.MonthStart.Equal(want) {
+		t.Errorf("MonthStart: got %v, want %v", got.MonthStart, want)
+	}
+	if want := time.Date(2026, 6, 1, 0, 0, 0, 0, la); !got.MonthEnd.Equal(want) {
+		t.Errorf("MonthEnd: got %v, want %v", got.MonthEnd, want)
+	}
+}
+
+// At 22:43 PDT on Oct 31 it is already Nov 1 in UTC; the forecast must
+// still project October, the month the user's date filters live in.
+func TestMonthEndForecast_LocalMonthOnLastEvening(t *testing.T) {
+	pdt := time.FixedZone("PDT", -7*3600)
+	pinLocal(t, pdt)
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithPeriod(PeriodDay)
+
+	for day := 5; day <= 30; day++ {
+		ts := time.Date(2026, 10, day, 9, 0, 0, 0, time.UTC)
+		agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", ts))
+	}
+
+	now := time.Date(2026, 10, 31, 22, 43, 0, 0, pdt)
+	got := agg.MonthEndForecast(now)
+
+	if !(got.ProjectedMonthEnd > got.MTDCostUSD && got.MTDCostUSD > 0) {
+		t.Errorf("want ProjectedMonthEnd > MTDCostUSD > 0, got projected=%v mtd=%v (reason %q)",
+			got.ProjectedMonthEnd, got.MTDCostUSD, got.Reason)
+	}
+	if got.Reason != "" {
+		t.Errorf("Reason: got %q, want empty", got.Reason)
+	}
+	if want := time.Date(2026, 10, 1, 0, 0, 0, 0, pdt); !got.MonthStart.Equal(want) {
+		t.Errorf("MonthStart: got %v, want %v", got.MonthStart, want)
+	}
+	if want := time.Date(2026, 11, 1, 0, 0, 0, 0, pdt); !got.MonthEnd.Equal(want) {
+		t.Errorf("MonthEnd: got %v, want %v", got.MonthEnd, want)
+	}
+	if got.DaysInMonth != 31 {
+		t.Errorf("DaysInMonth: got %d, want 31", got.DaysInMonth)
+	}
+}
+
+// A zone whose month holds a DST shift still counts whole calendar days.
+func TestMonthEndForecast_DaysInMonthAcrossDST(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load LA tz: %v", err)
+	}
+	pinLocal(t, la)
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithPeriod(PeriodDay)
+	for day := 1; day <= 10; day++ {
+		agg.Add(turn("claude-opus-4-7", 2_000_000, 0, false, "/p/foo", time.Date(2026, 3, day, 18, 0, 0, 0, time.UTC)))
+	}
+	got := agg.MonthEndForecast(time.Date(2026, 3, 11, 12, 0, 0, 0, la))
+	if got.DaysInMonth != 31 {
+		t.Errorf("DaysInMonth: got %d, want 31", got.DaysInMonth)
 	}
 }
 
 func TestMonthEndForecast_SinceClampsWindowStart(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).
 		WithPeriod(PeriodDay).
@@ -262,6 +319,7 @@ func TestMonthEndForecast_SinceClampsWindowStart(t *testing.T) {
 }
 
 func TestMonthEndForecast_FirstBucketAfterSince(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay) // no Since filter
 
@@ -285,6 +343,7 @@ func TestMonthEndForecast_FirstBucketAfterSince(t *testing.T) {
 }
 
 func TestMonthEndForecast_UntilCutsHistorical(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).
 		WithPeriod(PeriodDay).
@@ -298,12 +357,11 @@ func TestMonthEndForecast_UntilCutsHistorical(t *testing.T) {
 
 	// now is May 21 — Until=May 10 cuts off > 24h before now → historical view.
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	if got := agg.MonthEndForecast(now); got != (Forecast{}) {
-		t.Errorf("expected zero Forecast (Until > 24h before now), got %+v", got)
-	}
+	assertNoProjection(t, agg.MonthEndForecast(now), "historical", now)
 }
 
 func TestMonthEndForecast_UntilWithinADay(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	// Until = May 21 00:00 UTC, now = May 21 12:00 UTC → cutoff is 12h before now (< 24h).
 	agg := New(prices).
@@ -319,8 +377,8 @@ func TestMonthEndForecast_UntilWithinADay(t *testing.T) {
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	got := agg.MonthEndForecast(now)
 
-	if got == (Forecast{}) {
-		t.Fatalf("expected non-zero Forecast (Until cutoff < 24h), got zero")
+	if got.ProjectedMonthEnd <= 0 || got.Reason != "" {
+		t.Fatalf("expected a projection (Until cutoff < 24h), got %+v", got)
 	}
 	// Sanity: forecast should compute against effectiveNow = Until = May 21 00:00.
 	// daysInWindow = 21 - 1 = 20 days.
@@ -331,6 +389,7 @@ func TestMonthEndForecast_UntilWithinADay(t *testing.T) {
 }
 
 func TestMonthEndForecast_WindowStartHonorsSinceAcrossMonths(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).
 		WithPeriod(PeriodDay).
@@ -392,6 +451,7 @@ func TestMonthEndForecast_WindowStartHonorsSinceAcrossMonths(t *testing.T) {
 }
 
 func TestMonthEndForecast_WindowStartFallsBackToFirstBucketWhenSinceUnset(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay) // no Since filter
 
@@ -404,8 +464,8 @@ func TestMonthEndForecast_WindowStartFallsBackToFirstBucketWhenSinceUnset(t *tes
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	got := agg.MonthEndForecast(now)
 
-	if got == (Forecast{}) {
-		t.Fatalf("expected non-zero Forecast, got zero")
+	if got.ProjectedMonthEnd <= 0 || got.Reason != "" {
+		t.Fatalf("expected a projection, got %+v", got)
 	}
 	wantWindowStart := time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
 	if !got.WindowStart.Equal(wantWindowStart) {
@@ -414,6 +474,7 @@ func TestMonthEndForecast_WindowStartFallsBackToFirstBucketWhenSinceUnset(t *tes
 }
 
 func TestMonthEndForecast_WindowCostMatchesMTDWhenFilterStaysInMonth(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay) // no filter
 
@@ -426,8 +487,8 @@ func TestMonthEndForecast_WindowCostMatchesMTDWhenFilterStaysInMonth(t *testing.
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	got := agg.MonthEndForecast(now)
 
-	if got == (Forecast{}) {
-		t.Fatalf("expected non-zero Forecast, got zero")
+	if got.ProjectedMonthEnd <= 0 || got.Reason != "" {
+		t.Fatalf("expected a projection, got %+v", got)
 	}
 	const eps = 0.01
 	if diff := got.WindowCostUSD - got.MTDCostUSD; diff < -eps || diff > eps {
@@ -436,6 +497,7 @@ func TestMonthEndForecast_WindowCostMatchesMTDWhenFilterStaysInMonth(t *testing.
 }
 
 func TestMonthEndForecast_February(t *testing.T) {
+	pinLocal(t, time.UTC)
 	prices, _ := pricing.LoadDefault()
 	agg := New(prices).WithPeriod(PeriodDay)
 
@@ -450,5 +512,40 @@ func TestMonthEndForecast_February(t *testing.T) {
 
 	if got.DaysInMonth != 28 {
 		t.Errorf("DaysInMonth: got %d, want 28", got.DaysInMonth)
+	}
+}
+
+// pinLocal sets time.Local for one test, since MonthEndForecast reads the
+// local calendar month. Tests that call it must not run in parallel.
+func pinLocal(t *testing.T, loc *time.Location) {
+	t.Helper()
+	prev := time.Local
+	time.Local = loc
+	t.Cleanup(func() { time.Local = prev })
+}
+
+// assertNoProjection checks a no-projection Forecast still names its
+// local month so the UI can say which month lacks data.
+func assertNoProjection(t *testing.T, got Forecast, reason string, now time.Time) {
+	t.Helper()
+	if got.ProjectedMonthEnd != 0 {
+		t.Errorf("ProjectedMonthEnd: got %v, want 0", got.ProjectedMonthEnd)
+	}
+	if got.Reason != reason {
+		t.Errorf("Reason: got %q, want %q", got.Reason, reason)
+	}
+	nl := now.In(time.Local)
+	wantStart := time.Date(nl.Year(), nl.Month(), 1, 0, 0, 0, 0, time.Local)
+	if !got.MonthStart.Equal(wantStart) {
+		t.Errorf("MonthStart: got %v, want %v", got.MonthStart, wantStart)
+	}
+	if want := wantStart.AddDate(0, 1, 0); !got.MonthEnd.Equal(want) {
+		t.Errorf("MonthEnd: got %v, want %v", got.MonthEnd, want)
+	}
+	if !got.AsOf.Equal(now) {
+		t.Errorf("AsOf: got %v, want %v", got.AsOf, now)
+	}
+	if want := time.Date(nl.Year(), nl.Month()+1, 0, 0, 0, 0, 0, time.Local).Day(); got.DaysInMonth != want {
+		t.Errorf("DaysInMonth: got %d, want %d", got.DaysInMonth, want)
 	}
 }
