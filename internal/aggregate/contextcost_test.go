@@ -292,7 +292,7 @@ func TestContextCostReconciles(t *testing.T) {
 		}
 		return sum
 	}
-	check := func(path string, res parse.Result) float64 {
+	check := func(path string, res parse.Result) (flatSum, defaultSum float64) {
 		flat := &pricing.Table{Models: map[string]pricing.ModelPrice{}, Providers: map[string]pricing.ProviderPrices{}}
 		for _, tn := range res.Turns {
 			prov := pricing.PriceProvider(tn.Provider)
@@ -301,28 +301,41 @@ func TestContextCostReconciles(t *testing.T) {
 			}
 			flat.Providers[prov].Models[tn.Model] = pricing.ModelPrice{Rate: flatRate}
 		}
-		sum := attributed(flat, res)
-		if b := budget(flat, res.Turns); sum > b+ctxEps {
-			t.Errorf("%s: attributed $%v > prompt budget $%v", path, sum, b)
+		flatSum = attributed(flat, res)
+		if b := budget(flat, res.Turns); flatSum > b+ctxEps {
+			t.Errorf("%s: attributed $%v > prompt budget $%v", path, flatSum, b)
 		}
-		if real, b := attributed(defaults, res), budget(defaults, res.Turns); real > b+ctxEps {
-			t.Errorf("%s (default prices): attributed $%v > prompt budget $%v", path, real, b)
+		defaultSum = attributed(defaults, res)
+		if b := budget(defaults, res.Turns); defaultSum > b+ctxEps {
+			t.Errorf("%s (default prices): attributed $%v > prompt budget $%v", path, defaultSum, b)
 		}
-		return sum
+		return flatSum, defaultSum
 	}
 
-	var claudeSum, codexSum float64
+	var claudeSum float64
 	for _, path := range claude {
-		claudeSum += check(path, loadFixture(t, path))
-	}
-	for _, path := range cx {
-		codexSum += check(path, loadCodexFixture(t, path))
+		s, _ := check(path, loadFixture(t, path))
+		claudeSum += s
 	}
 	if claudeSum == 0 {
 		t.Error("no Claude Code fixture attributed any context cost; the reconciliation is vacuous")
 	}
-	if codexSum == 0 {
-		t.Error("no Codex fixture attributed any context cost; the reconciliation is vacuous")
+	// tools.jsonl writes no cache, so only uncached-input attribution can
+	// make its sums positive; a cache-write fixture would mask its loss.
+	for _, path := range cx {
+		res := loadCodexFixture(t, path)
+		flatSum, defaultSum := check(path, res)
+		if filepath.Base(path) != "tools.jsonl" {
+			continue
+		}
+		for _, tn := range res.Turns {
+			if u := tn.Usage; u.CacheCreate5mTokens+u.CacheCreate1hTokens != 0 {
+				t.Fatalf("%s: turn %s writes cache; the fixture no longer isolates uncached-input attribution", path, tn.UUID)
+			}
+		}
+		if flatSum <= 0 || defaultSum <= 0 {
+			t.Errorf("%s: attributed flat $%v, default $%v; want both positive from uncached input alone", path, flatSum, defaultSum)
+		}
 	}
 }
 
