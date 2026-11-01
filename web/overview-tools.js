@@ -102,11 +102,14 @@ export function wireToolPatterns(section) {
 
   let tools = null;
   let loading = false;
+  let scrollPending = false;
   let sort = { ...DEFAULT_SORT };
   let query = '';
   let openByDefault = true;
   const expanded = new Map();
-  const isExpanded = tool => (expanded.has(tool) ? expanded.get(tool) : openByDefault);
+  // A tool the user has not toggled follows the default, except that a
+  // filter opens it so its matching patterns show.
+  const isExpanded = tool => (expanded.has(tool) ? expanded.get(tool) : (query.trim() !== '' || openByDefault));
 
   function renderRows() {
     const tbody = body.querySelector('table.tool-patterns tbody');
@@ -167,6 +170,18 @@ export function wireToolPatterns(section) {
     });
   }
 
+  const scrollToSection = () => {
+    if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+  };
+
+  // settle scrolls a deep-linked section into view once its content is in:
+  // scrolling while the table is a few skeleton rows stops short of it.
+  function settle() {
+    if (!scrollPending) return;
+    scrollPending = false;
+    scrollToSection();
+  }
+
   async function load() {
     loading = true;
     body.innerHTML = tableHTML(tableBodySkeleton(COLUMNS.length, 6));
@@ -178,6 +193,7 @@ export function wireToolPatterns(section) {
       body.innerHTML = `<div class="warning-card" role="alert"><strong class="danger">Failed to load tool patterns:</strong> ${escHtml(errorReason(err))}
         <button type="button" class="retry" data-retry>Retry</button></div>`;
       body.querySelector('[data-retry]').addEventListener('click', () => { load(); });
+      settle();
       return;
     }
     loading = false;
@@ -190,6 +206,7 @@ export function wireToolPatterns(section) {
     } else {
       paintTable();
     }
+    settle();
   }
 
   function open({ scroll = false } = {}) {
@@ -197,7 +214,8 @@ export function wireToolPatterns(section) {
     section.classList.add('is-open');
     body.hidden = false;
     if (!hashShowAll(window.location.hash)) history.replaceState(history.state, '', SHOW_ALL);
-    if (scroll && typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+    if (scroll && tools) scrollToSection();
+    else if (scroll) scrollPending = true;
     if (!tools && !loading) load();
   }
 

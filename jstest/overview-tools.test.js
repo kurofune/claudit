@@ -279,6 +279,24 @@ test('#overview/all on first paint opens the table and scrolls it into view', as
   assert.deepEqual(root.querySelectorAll('.hotspot-toggle').map(t => t.getAttribute('aria-expanded')), ['false', 'false', 'false']);
 });
 
+test('a deep-linked open scrolls only once the table has painted, so a short skeleton page does not stop short', async () => {
+  const m = await mount([{ pending: true }], { hash: '#overview/all' });
+  assert.equal(m.button.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(m.scrolled, [], 'no scroll while the skeleton stands in for the table');
+
+  const done = await mount(undefined, { hash: '#overview/all' });
+  assert.deepEqual(done.scrolled, ['tool-patterns']);
+  done.location.hash = '#overview/all';
+  await done.view.paint();
+  assert.deepEqual(done.scrolled, ['tool-patterns', 'tool-patterns'], 'a later route to a loaded table scrolls at once');
+});
+
+test('a deep-linked open that fails still scrolls to the failure', async () => {
+  const { scrolled, root } = await mount([{ status: 503 }], { hash: '#overview/all' });
+  assert.match(root.querySelector('.tool-patterns-body [role="alert"]').textContent, /HTTP 503/);
+  assert.deepEqual(scrolled, ['tool-patterns']);
+});
+
 test('#overview/hotspot-N still opens hotspot N, and the table stays closed', async () => {
   const { root, button, scrolled, calls } = await mount(undefined, { hash: '#overview/hotspot-2' });
   assert.deepEqual(root.querySelectorAll('.hotspot-toggle').map(t => t.getAttribute('aria-expanded')), ['false', 'true', 'false']);
@@ -371,7 +389,14 @@ test('400 pattern rows start collapsed and every one renders once its parent is 
   assert.equal(parents.length, 25);
   assert.ok(parents.every(tr => tr.getAttribute('aria-expanded') === 'false'));
   assert.equal(table(root).querySelectorAll('tr.tool-pattern').filter(tr => !tr.hidden).length, 0);
-  parents.forEach(tr => click(tr));
+  const input = root.querySelector('input.tp-filter');
+  input.value = 'pattern-15';
+  input.dispatchEvent(new Event('input'));
+  assert.equal(visible(root).filter(tr => tr.classList.contains('tool-pattern')).length, 25, 'a filter opens the collapsed tools to show their matches');
+  input.value = '';
+  input.dispatchEvent(new Event('input'));
+  assert.equal(table(root).querySelectorAll('tr.tool-pattern').filter(tr => !tr.hidden).length, 0, 'clearing the filter folds them again');
+  table(root).querySelectorAll('tr.tool-parent').forEach(tr => click(tr));
   const shown = table(root).querySelectorAll('tr.tool-pattern').filter(tr => !tr.hidden);
   assert.equal(shown.length, 400);
   assert.equal(new Set(shown.map(tr => `${tr.dataset.tool}/${tr.children[0].textContent.trim()}`)).size, 400);

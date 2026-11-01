@@ -1154,7 +1154,8 @@
     button.show-all .chev, table.tool-patterns tr.tool-parent .chev { transition: none; }
   }
   .tool-patterns-body { margin-top: var(--s-3); }
-  .tool-patterns-head { margin: 0 0 var(--s-1); }
+  .tool-patterns-head { display: flex; align-items: center; gap: 10px; margin: 0 0 var(--s-1); }
+  .tool-patterns-head .icon { width: 18px; height: 18px; color: var(--accent); stroke-width: 2; }
   .tool-patterns-body .tp-controls { margin: var(--s-2) 0; }
   table.tool-patterns td.num { white-space: nowrap; }
   table.tool-patterns td.tp-name { overflow-wrap: anywhere; }
