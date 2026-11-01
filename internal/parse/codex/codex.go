@@ -259,7 +259,9 @@ func toolUse(it rawItem) parse.ToolUse {
 	var cmd, input string
 	switch {
 	case it.Type == "custom_tool_call" && it.Name == "exec":
-		cmd = strings.Join(execCommands(it.Input), "\n")
+		if cmds, ok := execCommands(it.Input); ok {
+			cmd = strings.Join(cmds, "\n")
+		}
 		input = it.Input
 	case it.Type == "custom_tool_call":
 		input = it.Input
@@ -287,22 +289,27 @@ func toolUse(it rawItem) parse.ToolUse {
 // the JavaScript an exec custom tool runs, through the object's brace.
 var execCall = regexp.MustCompile(`exec_command\(\s*\{`)
 
-// execCommands returns the literal cmd string of every exec_command call in
-// an exec tool's JavaScript source, wherever cmd sits among the object's
-// properties. A cmd that is not a string literal (a variable, an
-// expression) is skipped.
-func execCommands(src string) []string {
-	var out []string
+// execCommands returns the cmd string of every exec_command call in an exec
+// tool's JavaScript source, wherever cmd sits among the object's properties,
+// and reports whether every call's cmd resolved. A cmd that is anything but
+// one complete static string literal (a variable, a concatenation, an
+// interpolated template) cannot be resolved, so the source has no faithful
+// command list and ok is false.
+func execCommands(src string) (cmds []string, ok bool) {
 	for _, loc := range execCall.FindAllStringIndex(src, -1) {
-		if s, ok := objectCmd(src[loc[1]:]); ok {
-			out = append(out, s)
+		s, ok := objectCmd(src[loc[1]:])
+		if !ok {
+			return nil, false
 		}
+		cmds = append(cmds, s)
 	}
-	return out
+	return cmds, len(cmds) > 0
 }
 
 // objectCmd walks the top-level properties of the object literal whose body
-// starts at s and returns its cmd property when that is a string literal.
+// starts at s and returns its cmd property when that is one complete static
+// string literal: the literal must end the property's value, and a template
+// literal must not interpolate.
 // Any shape it cannot follow (a spread, a computed key) yields no command.
 func objectCmd(s string) (string, bool) {
 	i := 0
@@ -344,8 +351,14 @@ func objectCmd(s string) (string, bool) {
 		}
 		i = skipSpace(s, i+1)
 		if key == "cmd" {
-			v, _, ok := jsString(s[i:])
-			return v, ok
+			v, n, ok := jsString(s[i:])
+			if !ok || s[i] == '`' && interpolates(s[i:i+n]) {
+				return "", false
+			}
+			if j := skipSpace(s, i+n); j >= len(s) || s[j] != ',' && s[j] != '}' {
+				return "", false
+			}
+			return v, true
 		}
 		n, ok := skipValue(s[i:])
 		if !ok {
@@ -388,6 +401,20 @@ func skipValue(s string) (int, bool) {
 		i++
 	}
 	return 0, false
+}
+
+// interpolates reports whether the template literal lit holds an unescaped
+// ${ substitution.
+func interpolates(lit string) bool {
+	for i := 1; i < len(lit)-1; i++ {
+		switch {
+		case lit[i] == '\\':
+			i++
+		case lit[i] == '$' && lit[i+1] == '{':
+			return true
+		}
+	}
+	return false
 }
 
 func skipSpace(s string, i int) int {

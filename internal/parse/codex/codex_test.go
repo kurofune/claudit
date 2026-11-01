@@ -219,16 +219,38 @@ func TestExecCommands(t *testing.T) {
 		{"text(await tools.exec_command({cmd:`go test ./...`}));", []string{"go test ./..."}},
 		{`await Promise.all([tools.exec_command({ cmd: "a" }), tools.exec_command({"cmd":"b A"})]);`, []string{"a", "b A"}},
 		{`const c = "x"; tools.exec_command({cmd:c});`, nil},
+		{`tools.exec_command({cmd:"go test " + pkg})`, nil},
+		{`tools.exec_command({cmd: "go test " + "./..."})`, nil},
+		{`tools.exec_command({cmd:"ls".trim(), workdir:"/w"})`, nil},
+		{"tools.exec_command({cmd:`go test ${pkg}`})", nil},
+		{"tools.exec_command({cmd:`echo \\${HOME}`})", []string{"echo ${HOME}"}},
+		{`tools.exec_command({cmd:"a"}); tools.exec_command({cmd:"b " + x})`, nil},
 		{`tools.exec_command({workdir:"/home/u/proj",cmd:"go test ./..."})`, []string{"go test ./..."}},
 		{`tools.exec_command({ "workdir": '/a,b}', yield_time_ms: 1000, env: {cmd: "no"}, args: [1, {x: "]"}], cmd: ` + "`make lint`" + ` })`, []string{"make lint"}},
 		{`tools.exec_command({workdir:"/w"})`, nil},
 		{`tools.exec_command(opts)`, nil},
 	}
 	for _, c := range cases {
-		got := execCommands(c.src)
-		if strings.Join(got, "|") != strings.Join(c.want, "|") {
-			t.Errorf("execCommands(%q) = %q, want %q", c.src, got, c.want)
+		got, ok := execCommands(c.src)
+		if ok != (c.want != nil) || strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("execCommands(%q) = %q, %v; want %q", c.src, got, ok, c.want)
 		}
+	}
+}
+
+func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
+	for _, src := range []string{
+		`text(await tools.exec_command({cmd:"go test " + pkg}));`,
+		"text(await tools.exec_command({cmd:`go test ${pkg}`}));",
+	} {
+		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
+		if tu.Input != src || tu.Detail != "" {
+			t.Errorf("toolUse(%q) = Input %q Detail %q, want the original input and no Bash pattern", src, tu.Input, tu.Detail)
+		}
+	}
+	tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: `text(await tools.exec_command({cmd:"go test ./..."}));`})
+	if tu.Input != "go test ./..." || tu.Detail == "" {
+		t.Errorf("static cmd: Input %q Detail %q, want the command and its Bash pattern", tu.Input, tu.Detail)
 	}
 }
 
