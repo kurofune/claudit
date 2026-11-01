@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   PROVIDERS, providerFromSearch, searchWithProvider, providerLabel,
   windowLabel, planUsageText, providerTiles, shareText, planCardState,
-  emptyProviderText,
+  emptyProviderText, busyPainter,
 } from '../web/provider-filter.js';
 
 test('PROVIDERS lists All, Claude Code and Codex in that order', () => {
@@ -105,4 +105,53 @@ test('emptyProviderText names the provider and where claudit reads it', () => {
   assert.equal(emptyProviderText('codex'), 'No Codex sessions in this range (claudit reads ~/.codex/sessions)');
   assert.equal(emptyProviderText('claude-code'), 'No Claude Code sessions in this range (claudit reads ~/.claude/projects)');
   assert.equal(emptyProviderText('all'), '');
+});
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test('busyPainter: an earlier paint settling does not clear the current paint\'s busy', async () => {
+  const calls = [];
+  const run = busyPainter(b => calls.push(b));
+  const overview = deferred();
+  const agents = deferred();
+  const first = run(() => overview.promise);
+  const second = run(() => agents.promise);
+  overview.resolve();
+  await first;
+  assert.deepEqual(calls, [true, true], 'Overview finishing cleared busy while Agents is loading');
+  agents.resolve();
+  await second;
+  assert.deepEqual(calls, [true, true, false]);
+});
+
+test('busyPainter: a superseded paint that fails leaves busy on; the current failure clears it', async () => {
+  const calls = [];
+  const run = busyPainter(b => calls.push(b));
+  const errLog = console.error;
+  console.error = () => {};
+  try {
+    const a = deferred();
+    const b = deferred();
+    const first = run(() => a.promise);
+    const second = run(() => b.promise);
+    a.reject(new Error('overview down'));
+    await first;
+    assert.deepEqual(calls, [true, true]);
+    b.reject(new Error('agents down'));
+    await second;
+    assert.deepEqual(calls, [true, true, false]);
+  } finally {
+    console.error = errLog;
+  }
+});
+
+test('busyPainter: a lone paint sets busy then clears it', async () => {
+  const calls = [];
+  const run = busyPainter(b => calls.push(b));
+  await run(() => {});
+  assert.deepEqual(calls, [true, false]);
 });

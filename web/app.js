@@ -12,7 +12,7 @@ import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js'
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
-import { wireProviderFilter, setProviderBusy } from './provider-filter.js';
+import { wireProviderFilter, setProviderBusy, busyPainter } from './provider-filter.js';
 import { paintNavSkeletons, skeletonResetIfPending } from './skeleton.js';
 import { init as initThemes } from './themes.js';
 import { init as initTooltips } from './tooltip.js';
@@ -24,6 +24,8 @@ const VIEW_PAINTERS = {
   agents: paintAgents,
 };
 
+const paintBusy = busyPainter(setProviderBusy);
+
 onChange(async (route) => {
   activate(route);
   // The Agents view registers an in-place SSE updater while it's active;
@@ -31,12 +33,9 @@ onChange(async (route) => {
   if (route.view !== 'agents') clearLiveHandler();
   const painter = VIEW_PAINTERS[route.view];
   if (painter) {
-    // The provider radiogroup stays disabled while the view's fetch is in
-    // flight; each painter renders its own error state, so finally re-enables.
-    setProviderBusy(true);
-    try { await painter(route); }
-    catch (err) { console.error('paint failed:', err); }
-    finally { setProviderBusy(false); }
+    // The provider radiogroup stays disabled while the current route's fetch
+    // is in flight; each painter renders its own error state.
+    await paintBusy(() => painter(route));
   }
 });
 

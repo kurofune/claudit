@@ -135,6 +135,25 @@ export function setProviderBusy(busy) {
   if (checked) checked.focus(/** @type {any} */ ({ focusVisible: true }));
 }
 
+// busyPainter runs each route's paint with the radiogroup busy. Only the
+// latest paint owns completion: an earlier paint that settles after a newer
+// one started leaves busy alone, so the group stays disabled until the
+// current route's fetch lands.
+/**
+ * @param {(busy: boolean) => void} setBusy
+ * @returns {(paint: () => any) => Promise<void>}
+ */
+export function busyPainter(setBusy) {
+  let generation = 0;
+  return async (paint) => {
+    const mine = ++generation;
+    setBusy(true);
+    try { await paint(); }
+    catch (err) { console.error('paint failed:', err); }
+    finally { if (mine === generation) setBusy(false); }
+  };
+}
+
 export function wireProviderFilter() {
   const g = group();
   if (!g) return;
