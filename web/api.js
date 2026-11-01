@@ -13,7 +13,7 @@
 // revalidation on each call; a 304 returns the cached body without
 // re-decoding the JSON payload.
 
-/** @import { AgentGraph, SessionIndex, SessionStoryPage, ToolUseDetail, TurnTextDetail } from './api-types.js' */
+/** @import { AgentGraph, SessionIndex, SessionStoryPage, SessionStoryWhole, ToolUseDetail, TurnTextDetail } from './api-types.js' */
 
 const apiBase = '/_claudit/api';
 
@@ -96,5 +96,10 @@ export const fetchSessionStory = (sessionId, { prompt = 0, offset = 0, turn = ''
       ? '&turn=' + encodeURIComponent(turn)
       : '&prompt=' + encodeURIComponent(String(prompt)) +
         '&offset=' + encodeURIComponent(String(offset))));
+// fetchSessionWhole pulls every turn of a session in one payload, with its
+// title, project, provider, model and span: what the session header reads.
+/** @param {string} sessionId @returns {Promise<SessionStoryWhole>} */
+export const fetchSessionWhole = (sessionId) =>
+  getJSON('/sessions/story?session=' + encodeURIComponent(sessionId) + '&whole=1');
 /** @param {string} dim */
 export const fetchTrends = (dim) => getJSON('/trends?dim=' + encodeURIComponent(dim));

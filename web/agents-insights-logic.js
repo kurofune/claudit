@@ -462,7 +462,7 @@ export function sessionTimeRows(sessions, opts = {}) {
 // file path) when it has one, else its detail. Two Reads of different .go files
 // share a detail but are not repeats of each other.
 /** @param {Partial<ToolInvocation>} tool */
-function retryTarget(tool) {
+export function retryTarget(tool) {
   return tool.input || tool.detail || '';
 }
 

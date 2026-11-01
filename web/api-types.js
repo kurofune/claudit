@@ -187,9 +187,10 @@
 
 /**
  * A story step: every AgentStep field, with StoryTool tools. uuid is the
- * turn uuid /agents/full?turn= takes.
+ * turn uuid /agents/full?turn= takes; context_cost_usd is the write cost of
+ * the tool results the turn carried into context (what it added).
  * Mirrors internal/agentflow/story.go (agentflow.StoryStep).
- * @typedef {Omit<AgentStep, 'tools'> & {tools: StoryTool[]}} StoryStep
+ * @typedef {Omit<AgentStep, 'tools'> & {tools: StoryTool[], context_cost_usd: number}} StoryStep
  */
 
 /**
@@ -236,6 +237,16 @@
  * @property {StoryStep[]} steps
  * @property {StoryChild[]} children
  * @property {{replays: number, outside_filter: number}} hidden
+ * @property {string[]} source_files    every session log the session's turns came from
+ */
+
+/**
+ * /_claudit/api/sessions/story?whole=1 payload — every turn of one session
+ * as one page, with its index row's title, project, provider, model and
+ * span (ended_at is its last activity).
+ * Mirrors internal/serve/api_sessions.go (sessionWhole).
+ * @typedef {SessionStoryPage & {title: string, project: string, provider: string, model: string,
+ *   started_at: string, ended_at: string}} SessionStoryWhole
  */
 
 export {};
