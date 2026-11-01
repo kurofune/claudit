@@ -104,10 +104,12 @@ export function buildLiveFeed(graph, nowMs = Date.now()) {
     const sid = (s && s.session_id) || '';
     const cwd = (s && s.cwd) || '';
     const project = projectName(s);
+    const entrypoint = (s && s.entrypoint) || '';
+    const provider = (s && s.provider) || '';
     flattenSession(s).forEach((a, idx) => {
       if (!a || a.status !== 'running') return;
       live.push({
-        sessionId: sid, cwd, project, agentIndex: idx,
+        sessionId: sid, cwd, project, entrypoint, provider, agentIndex: idx,
         agentLabel: agentLabel(a), kind: a.kind || '',
         description: a.description || '',
         currentTool: a.current_tool || '', currentToolKind: currentToolKind(a),
