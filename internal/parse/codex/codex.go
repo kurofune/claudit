@@ -502,14 +502,30 @@ func objectCmd(s string) (string, bool) {
 
 // skipValue returns the length of the expression at the start of s: up to
 // the comma or closing brace that ends it at the top level, stepping over
-// string literals and nested brackets.
+// string and template literals, comments and nested brackets. A slash that
+// opens no comment starts a regular expression or a division, which it cannot
+// tell apart without parsing, so the expression cannot be followed.
 func skipValue(s string) (int, bool) {
 	depth := 0
 	for i := 0; i < len(s); {
 		switch s[i] {
-		case '"', '\'', '`':
+		case '"', '\'':
 			_, n, ok := jsString(s[i:])
 			if !ok {
+				return 0, false
+			}
+			i += n
+			continue
+		case '`':
+			n, ok := skipTemplate(s[i:])
+			if !ok {
+				return 0, false
+			}
+			i += n
+			continue
+		case '/':
+			n, ok := skipComment(s[i:])
+			if !ok || n == 0 {
 				return 0, false
 			}
 			i += n
@@ -531,6 +547,48 @@ func skipValue(s string) (int, bool) {
 	return 0, false
 }
 
+// skipTemplate returns the length of the template literal at the start of s,
+// following each ${...} substitution as an expression so a brace, quote or
+// backtick inside one does not end the literal early.
+func skipTemplate(s string) (int, bool) {
+	for i := 1; i < len(s); i++ {
+		switch {
+		case s[i] == '\\':
+			i++
+		case s[i] == '`':
+			return i + 1, true
+		case s[i] == '$' && i+1 < len(s) && s[i+1] == '{':
+			n, ok := skipValue(s[i+2:])
+			if !ok || s[i+2+n] != '}' {
+				return 0, false
+			}
+			i += 2 + n
+		}
+	}
+	return 0, false
+}
+
+// skipComment returns the length of the comment at the start of s, 0 when
+// none starts there, and false when a block comment never closes.
+func skipComment(s string) (int, bool) {
+	switch {
+	case strings.HasPrefix(s, "//"):
+		for i := 2; i < len(s); i++ {
+			if s[i] == '\n' || s[i] == '\r' || strings.HasPrefix(s[i:], "\u2028") || strings.HasPrefix(s[i:], "\u2029") {
+				return i, true
+			}
+		}
+		return len(s), true
+	case strings.HasPrefix(s, "/*"):
+		end := strings.Index(s[2:], "*/")
+		if end < 0 {
+			return 0, false
+		}
+		return end + 4, true
+	}
+	return 0, true
+}
+
 // interpolates reports whether the template literal lit holds an unescaped
 // ${ substitution.
 func interpolates(lit string) bool {
@@ -545,9 +603,23 @@ func interpolates(lit string) bool {
 	return false
 }
 
+// skipSpace returns the index of the first byte at or after i that is
+// neither whitespace nor inside a comment; len(s) when a block comment never
+// closes, so the caller sees the source end there.
 func skipSpace(s string, i int) int {
-	for i < len(s) && strings.ContainsRune(" \t\r\n", rune(s[i])) {
-		i++
+	for i < len(s) {
+		if strings.ContainsRune(" \t\r\n", rune(s[i])) {
+			i++
+			continue
+		}
+		n, ok := skipComment(s[i:])
+		if !ok {
+			return len(s)
+		}
+		if n == 0 {
+			return i
+		}
+		i += n
 	}
 	return i
 }

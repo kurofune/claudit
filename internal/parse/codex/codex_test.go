@@ -243,6 +243,17 @@ func TestExecCommands(t *testing.T) {
 		{`tools.exec_command({cmd:"git status", workdir:"/w", ...opts})`, nil},
 		{`tools.exec_command({cmd:"git status", get cmd() { return "x" }})`, nil},
 		{`tools.exec_command({cmd:"git status", workdir:"/w"`, nil},
+		{`tools.exec_command({cmd:'git status', workdir:null /* } */, cmd:'go test ./...'})`, []string{"go test ./..."}},
+		{"tools.exec_command({cmd:'git status', workdir:null // }\n, cmd:'go test ./...'})", []string{"go test ./..."}},
+		{`tools.exec_command({/* } */ cmd: 'go test ./...' /* , */ })`, []string{"go test ./..."}},
+		{"tools.exec_command({cmd:'git status', // cmd:'x' }\n})", []string{"git status"}},
+		{`tools.exec_command({cmd:'git status', /* cmd:'x' } */})`, []string{"git status"}},
+		{`tools.exec_command({cmd:'git status', workdir:null /* }, cmd:'go test ./...'})`, nil},
+		{`tools.exec_command({cmd:'git status', re:/}/, cmd:'go test ./...'})`, nil},
+		{`tools.exec_command({cmd:'git status', n: 4 / 2, cmd:'go test ./...'})`, nil},
+		{"tools.exec_command({cmd:'git status', w:`${ {a:'}'}.a }`, cmd:'go test ./...'})", []string{"go test ./..."}},
+		{"tools.exec_command({cmd:'git status', w:`${\"`\"}}`, cmd:'go test ./...'})", []string{"go test ./..."}},
+		{"tools.exec_command({cmd:`a${\"`\"}b`})", nil},
 	}
 	for _, c := range cases {
 		got, ok := execCommands(c.src)
@@ -257,6 +268,7 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 		`text(await tools.exec_command({cmd:"go test " + pkg}));`,
 		"text(await tools.exec_command({cmd:`go test ${pkg}`}));",
 		`text(await tools.exec_command({cmd:"git status", ...opts}));`,
+		`text(await tools.exec_command({cmd:'git status', re:/}/, cmd:'go test ./...'}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
 		if tu.Input != src || tu.Detail != "" {
@@ -266,6 +278,7 @@ func TestToolUse_UnresolvedExecCmdKeepsInput(t *testing.T) {
 	for _, src := range []string{
 		`text(await tools.exec_command({cmd:"go test ./..."}));`,
 		`text(await tools.exec_command({cmd:"git status", cmd:"go test ./..."}));`,
+		`text(await tools.exec_command({cmd:'git status', workdir:null /* } */, cmd:'go test ./...'}));`,
 	} {
 		tu := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: src})
 		if tu.Input != "go test ./..." || tu.Detail != "go test" {
