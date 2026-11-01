@@ -416,7 +416,8 @@ providers:
   # Codex (OpenAI). Every rate is copied from OpenAI's pricing page,
   # https://platform.openai.com/docs/pricing (it now redirects to
   # https://developers.openai.com/api/docs/pricing), fetched 2026-10-31:
-  # the Standard tier, short-context (≤272K input tokens) card.
+  # the Standard tier card, short-context (≤272K input tokens) rates at the
+  # top level and long-context (>272K input tokens) rates under long_prompt.
   #
   # Field mapping: the page's Input → input_per_mtok (Codex's uncached
   # input), Cached input → cache_read_per_mtok, Output → output_per_mtok
@@ -425,10 +426,15 @@ providers:
   # cache_write_1h_per_mtok. A model the page lists no write charge for
   # carries 0 there.
   #
-  # Long context: the page prices requests over 272K input tokens higher, but
-  # Codex runs these models with a 258,400-token context window
-  # (token_count.info.model_context_window), so no Codex turn reaches that
-  # tier and no long_prompt: block is listed.
+  # Long context: the page's "Long context: >272K input tokens" columns. A
+  # turn's prompt (uncached input plus cache reads and writes, i.e. Codex's
+  # input_tokens) over 272,000 prices every token of that turn at the
+  # long-context rates, as long_prompt does for Claude models; the page does
+  # not say whether output in such a request also bills long, so that part
+  # is claudit's reading. Codex context windows vary by model and plan
+  # (rollouts report 258,400 and 475,000 in token_count.info
+  # .model_context_window), so long-context turns do occur. These are
+  # API-equivalent prices: claudit models no subscription exemption.
   #
   # Models the page does not list (e.g. codex-auto-review, the guardian
   # reviewer) have no entry and stay in the unknown-models warning.
@@ -440,6 +446,13 @@ providers:
         cache_read_per_mtok: 1.00
         cache_write_5m_per_mtok: 12.50
         cache_write_1h_per_mtok: 25.00
+        long_prompt:                # >272K input tokens — Standard long context $20 / $75
+          threshold_tokens: 272000
+          input_per_mtok: 20.00
+          output_per_mtok: 75.00
+          cache_read_per_mtok: 2.00
+          cache_write_5m_per_mtok: 25.00
+          cache_write_1h_per_mtok: 50.00
 
       gpt-6-sol:                    # https://platform.openai.com/docs/pricing fetched 2026-10-31 — Standard $2 / $10
         input_per_mtok: 2.00
@@ -447,6 +460,13 @@ providers:
         cache_read_per_mtok: 0.20
         cache_write_5m_per_mtok: 2.50
         cache_write_1h_per_mtok: 5.00
+        long_prompt:                # >272K input tokens — Standard long context $4 / $15
+          threshold_tokens: 272000
+          input_per_mtok: 4.00
+          output_per_mtok: 15.00
+          cache_read_per_mtok: 0.40
+          cache_write_5m_per_mtok: 5.00
+          cache_write_1h_per_mtok: 10.00
 
       gpt-6.1-sol:                  # https://platform.openai.com/docs/pricing fetched 2026-10-31 — Standard $2 / $10
         input_per_mtok: 2.00
@@ -454,6 +474,13 @@ providers:
         cache_read_per_mtok: 0.10
         cache_write_5m_per_mtok: 2.50
         cache_write_1h_per_mtok: 5.00
+        long_prompt:                # >272K input tokens — Standard long context $4 / $15
+          threshold_tokens: 272000
+          input_per_mtok: 4.00
+          output_per_mtok: 15.00
+          cache_read_per_mtok: 0.20
+          cache_write_5m_per_mtok: 5.00
+          cache_write_1h_per_mtok: 10.00
 
       gpt-5.5:                      # https://platform.openai.com/docs/pricing fetched 2026-10-31 — Standard $5 / $30 (<272K context)
         # The page lists no cache-write charge ("-") for gpt-5.5.
@@ -462,3 +489,10 @@ providers:
         cache_read_per_mtok: 0.50
         cache_write_5m_per_mtok: 0
         cache_write_1h_per_mtok: 0
+        long_prompt:                # >272K input tokens — Standard long context $10 / $45, no cache-write charge listed
+          threshold_tokens: 272000
+          input_per_mtok: 10.00
+          output_per_mtok: 45.00
+          cache_read_per_mtok: 1.00
+          cache_write_5m_per_mtok: 0
+          cache_write_1h_per_mtok: 0

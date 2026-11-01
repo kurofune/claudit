@@ -6,8 +6,8 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ### Added
 
-- **Codex sessions.** `claudit serve` reads Codex CLI rollouts (`$CODEX_HOME/sessions`, else `~/.codex/sessions`; `--codex-root` overrides, an empty value turns it off) beside Claude Code's logs. Each model response is one turn with provider `codex`; `exec` / `exec_command` calls bucket by their shell command like Bash, and a non-zero exit code marks the call failed. A subagent rollout is its own session, flagged sidechain and linked to its parent thread. Compressed `rollout-*.jsonl.zst` archives are not read yet.
-- **GPT-6 prices.** The bundled table prices `codex/gpt-6-astra`, `codex/gpt-6-sol`, `codex/gpt-6.1-sol` and `codex/gpt-5.5` at OpenAI's Standard rates (fetched 2026-10-31). `codex-auto-review`, which OpenAI lists no price for, stays in the unpriced-model warning.
+- **Codex sessions.** `claudit serve` reads Codex CLI rollouts (`$CODEX_HOME/sessions`, else `~/.codex/sessions`; `--codex-root` overrides, an empty value turns it off) beside Claude Code's logs. Each model response is one turn with provider `codex`; `exec` / `exec_command` calls bucket by their shell command like Bash, and a non-zero exit code marks the call failed. A subagent rollout is flagged sidechain and nests under its parent thread's session in the Agents view. Compressed `rollout-*.jsonl.zst` archives are not read yet.
+- **GPT-6 prices.** The bundled table prices `codex/gpt-6-astra`, `codex/gpt-6-sol`, `codex/gpt-6.1-sol` and `codex/gpt-5.5` at OpenAI's Standard rates (fetched 2026-10-31), with the long-context rates for a turn whose prompt exceeds 272K input tokens. `codex-auto-review`, which OpenAI lists no price for, stays in the unpriced-model warning.
 - **Prices per provider.** `prices.yaml` accepts a `providers:` map (provider name → `models:`), so a provider other than Claude Code can carry its own prices; a user entry replaces or adds one (provider, model) pair. Files in today's bare `models:` form keep working and price Claude Code.
 
 ### Changed

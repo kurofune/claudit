@@ -78,28 +78,60 @@ func TestDefault_CodexEntriesCiteSource(t *testing.T) {
 }
 
 // The bundled Codex rates are OpenAI's Standard-tier card as published on
-// the pricing page on 2026-10-31.
+// the pricing page on 2026-10-31: short-context rates up to 272K input
+// tokens, long-context rates for a prompt over 272K.
 func TestDefault_CodexRates(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := map[string]Rate{
-		"gpt-6-astra": {Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 25},
-		"gpt-6-sol":   {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite5m: 2.5, CacheWrite1h: 5},
-		"gpt-6.1-sol": {Input: 2, Output: 10, CacheRead: 0.1, CacheWrite5m: 2.5, CacheWrite1h: 5},
-		"gpt-5.5":     {Input: 5, Output: 30, CacheRead: 0.5},
+	cases := map[string]struct{ short, long Rate }{
+		"gpt-6-astra": {
+			Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 25},
+			Rate{Input: 20, Output: 75, CacheRead: 2, CacheWrite5m: 25, CacheWrite1h: 50},
+		},
+		"gpt-6-sol": {
+			Rate{Input: 2, Output: 10, CacheRead: 0.2, CacheWrite5m: 2.5, CacheWrite1h: 5},
+			Rate{Input: 4, Output: 15, CacheRead: 0.4, CacheWrite5m: 5, CacheWrite1h: 10},
+		},
+		"gpt-6.1-sol": {
+			Rate{Input: 2, Output: 10, CacheRead: 0.1, CacheWrite5m: 2.5, CacheWrite1h: 5},
+			Rate{Input: 4, Output: 15, CacheRead: 0.2, CacheWrite5m: 5, CacheWrite1h: 10},
+		},
+		"gpt-5.5": {
+			Rate{Input: 5, Output: 30, CacheRead: 0.5},
+			Rate{Input: 10, Output: 45, CacheRead: 1},
+		},
 	}
 	for model, want := range cases {
-		got, ok := tab.EffectiveRate("codex", model, time.Time{}, 0, "")
-		if !ok || got != want {
-			t.Errorf("codex/%s = %+v (known %v), want %+v", model, got, ok, want)
+		for _, prompt := range []int{0, 272_000} {
+			if got, ok := tab.EffectiveRate("codex", model, time.Time{}, prompt, ""); !ok || got != want.short {
+				t.Errorf("codex/%s at %d prompt tokens = %+v (known %v), want short context %+v", model, prompt, got, ok, want.short)
+			}
+		}
+		for _, prompt := range []int{272_001, 475_000} {
+			if got, ok := tab.EffectiveRate("codex", model, time.Time{}, prompt, ""); !ok || got != want.long {
+				t.Errorf("codex/%s at %d prompt tokens = %+v (known %v), want long context %+v", model, prompt, got, ok, want.long)
+			}
 		}
 	}
-	// 1M input + 1M cache read + 1M output on gpt-6-astra.
-	cost, known := tab.CostAt("codex", "gpt-6-astra", time.Time{}, 1_000_000, 1_000_000, 0, 0, 1_000_000, "")
-	if !known || math.Abs(cost-61) > 1e-9 {
-		t.Errorf("codex/gpt-6-astra cost = %v, %v; want 61, true", cost, known)
+	// A 300,000-token uncached gpt-6.1-sol request with 1,000 output tokens
+	// bills at long-context rates: 0.3 × $4 + 0.001 × $15.
+	cost, known := tab.CostAt("codex", "gpt-6.1-sol", time.Time{}, 300_000, 1_000, 0, 0, 0, "")
+	if !known || math.Abs(cost-1.215) > 1e-9 {
+		t.Errorf("codex/gpt-6.1-sol 300K uncached cost = %v, %v; want 1.215, true", cost, known)
+	}
+	// 200K input + 50K cache read + 10K output on gpt-6-astra stays short:
+	// 0.2 × $10 + 0.05 × $1 + 0.01 × $50.
+	cost, known = tab.CostAt("codex", "gpt-6-astra", time.Time{}, 200_000, 10_000, 0, 0, 50_000, "")
+	if !known || math.Abs(cost-2.55) > 1e-9 {
+		t.Errorf("codex/gpt-6-astra short cost = %v, %v; want 2.55, true", cost, known)
+	}
+	// 1M input + 1M cache read + 1M output on gpt-6-astra is long context:
+	// $20 + $2 + $75.
+	cost, known = tab.CostAt("codex", "gpt-6-astra", time.Time{}, 1_000_000, 1_000_000, 0, 0, 1_000_000, "")
+	if !known || math.Abs(cost-97) > 1e-9 {
+		t.Errorf("codex/gpt-6-astra long cost = %v, %v; want 97, true", cost, known)
 	}
 	if _, known := tab.CostAt("codex", "codex-auto-review", time.Time{}, 1, 1, 0, 0, 0, ""); known {
 		t.Error("codex/codex-auto-review is priced; it must stay unknown")
