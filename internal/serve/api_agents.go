@@ -15,6 +15,13 @@ import (
 // serve poll interval so a live agent doesn't flicker to "done" between polls.
 const agentActiveWindow = 60 * time.Second
 
+// agentSnippetRunes caps each tool call's input and output in the /agents
+// payload. Over the real corpus (3,500 sessions) the 2000-rune parse snippets
+// made the payload 329 MB and its JSON.parse alone took 900 ms; every lens
+// clips a snippet to at most 160 runes, and the drawer's "show full" reads the
+// untruncated text from /agents/full.
+const agentSnippetRunes = 500
+
 // handleAPIAgents serves /_claudit/api/agents — the agent-observability tab's
 // data. Reconstructs the per-session agent tree (main + sub-agents) and each
 // agent's tool-call timeline straight from the snapshot. Reuses the shared
@@ -37,6 +44,7 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 				Now:          time.Now(),
 				ActiveWindow: agentActiveWindow,
 				TopN:         topN,
+				SnippetRunes: agentSnippetRunes,
 			})
 		},
 	})
@@ -49,7 +57,8 @@ func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
 //	?session=&turn=<turn uuid>    → UNTRUNCATED thinking/text for one turn
 //
 // Both read back from the session JSONL on disk (the default /agents payload
-// caps all of these to 2000-rune snippets to stay lean).
+// caps thinking/text to 2000-rune snippets and tool input/output to
+// agentSnippetRunes to stay lean).
 //
 // Serve-mode only: the static HTML report inlines no disk and never calls
 // this — its drawer falls back to the snippet. The source file is resolved

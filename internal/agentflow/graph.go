@@ -151,6 +151,12 @@ type Options struct {
 	// --sessions cap) so a busy corpus doesn't ship thousands of sessions. Recency (not cost) so a running session is never
 	// capped out. 0 means unlimited. Survivors are returned newest-first.
 	TopN int
+	// SnippetRunes shortens every tool call's Input and Output snippet to
+	// this many runes, ending a cut one with "…". The snippets dominate the
+	// payload, and the browser's JSON.parse of it is the Agents repaint's
+	// cost; the drawer's "show full" reads the untruncated text from disk.
+	// 0 keeps the parse-time snippet whole.
+	SnippetRunes int
 }
 
 // nodeAccum is the in-progress per-agent state during graph construction —
@@ -268,7 +274,7 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 			Tokens:        stepTokens,
 			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
 			GenMs:         genMs,
-			Tools:         aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp),
+			Tools:         capToolSnippets(aggregate.DistinctToolInvocations(t.ToolUses, results, t.Timestamp), opts.SnippetRunes),
 			Thinking:      t.Thinking,
 			Text:          t.Text,
 			parentUUID:    t.ParentUUID,
@@ -355,6 +361,31 @@ func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		return out[i].SessionID < out[j].SessionID
 	})
 	return AgentGraph{Sessions: out}, nil
+}
+
+// capToolSnippets applies Options.SnippetRunes to a step's freshly built
+// tool calls in place.
+func capToolSnippets(tools []aggregate.ToolInvocation, max int) []aggregate.ToolInvocation {
+	if max <= 0 {
+		return tools
+	}
+	for i := range tools {
+		tools[i].Input = truncateRunes(tools[i].Input, max)
+		tools[i].Output = truncateRunes(tools[i].Output, max)
+	}
+	return tools
+}
+
+// truncateRunes shortens s to at most max runes, appending "…" when it cut.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // sortMainFirst orders a session's ordinary agents so the one that is the

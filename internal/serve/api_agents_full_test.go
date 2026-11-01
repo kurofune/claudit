@@ -70,6 +70,42 @@ func TestAPIAgentsFull_ReturnsUntruncated(t *testing.T) {
 	}
 }
 
+// TestAPIAgents_CapsToolSnippets: the /agents payload carries each tool
+// call's input and output cut to agentSnippetRunes and marked "…", so the
+// drawer offers "show full", which still returns the whole text above.
+func TestAPIAgents_CapsToolSnippets(t *testing.T) {
+	srv, bigCmd, bigOut := toolFixtureServer(t)
+	body := getSection(t, srv, "/_claudit/api/agents", "")
+	var sessions []struct {
+		Main struct {
+			Steps []struct {
+				Tools []struct{ ID, Input, Output string }
+			}
+		}
+	}
+	decodeField(t, body, "sessions", &sessions)
+	var found bool
+	for _, s := range sessions {
+		for _, st := range s.Main.Steps {
+			for _, tool := range st.Tools {
+				if tool.ID != "toolu_full" {
+					continue
+				}
+				found = true
+				if want := bigCmd[:agentSnippetRunes] + "…"; tool.Input != want {
+					t.Errorf("input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
+				}
+				if want := bigOut[:agentSnippetRunes] + "…"; tool.Output != want {
+					t.Errorf("output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("toolu_full missing from /agents payload")
+	}
+}
+
 func TestAPIAgentsFull_MissingParams(t *testing.T) {
 	srv, _, _ := toolFixtureServer(t)
 	for _, target := range []string{

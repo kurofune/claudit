@@ -1300,3 +1300,52 @@ func TestBuildAgentGraph_CodexGuardianSharesSessionWithUser(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildAgentGraph_SnippetRunesCapsToolIO: SnippetRunes shortens each tool
+// call's input and output snippet to that many runes, marked with the trailing
+// ellipsis the drawer's "show full" keys on; shorter snippets pass untouched,
+// and zero keeps the parse-time snippet whole.
+func TestBuildAgentGraph_SnippetRunesCapsToolIO(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	longIn := strings.Repeat("é", 30)
+	longOut := strings.Repeat("o", 40)
+	turn.ToolUses = []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: longIn},
+		{ID: "t2", Name: "Bash", Input: "ls"},
+	}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", Content: longOut},
+			{ToolUseID: "t2", Content: "ok"},
+		},
+	}
+	tools := func(opts Options) []aggregate.ToolInvocation {
+		g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, opts)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return g.Sessions[0].Main.Steps[0].Tools
+	}
+
+	capped := tools(Options{SnippetRunes: 10})
+	if len(capped) != 2 {
+		t.Fatalf("want 2 tools, got %d", len(capped))
+	}
+	if want := strings.Repeat("é", 10) + "…"; capped[0].Input != want {
+		t.Errorf("capped input = %q, want %q", capped[0].Input, want)
+	}
+	if want := strings.Repeat("o", 10) + "…"; capped[0].Output != want {
+		t.Errorf("capped output = %q, want %q", capped[0].Output, want)
+	}
+	if capped[1].Input != "ls" || capped[1].Output != "ok" {
+		t.Errorf("short snippets changed: %+v", capped[1])
+	}
+
+	whole := tools(Options{})
+	if whole[0].Input != longIn || whole[0].Output != longOut {
+		t.Errorf("SnippetRunes 0 cut the snippet: input %q output %q", whole[0].Input, whole[0].Output)
+	}
+}
