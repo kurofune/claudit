@@ -13,7 +13,7 @@ const skel = (variant) => `<span class="skeleton ${variant}"></span>`;
 export const skelPill = () => skel('skel-pill');
 export const skelLine = (cls = '') => `<span class="skeleton skel-line ${cls}"></span>`;
 
-// Nav-metric (sidebar) — narrow shimmer pill. Used for all four
+// Nav-metric (sidebar) — narrow shimmer pill. Used for all three
 // #nav-metric-* spans at boot.
 export function navMetricSkeleton() {
   return skelPill();
@@ -89,7 +89,6 @@ const SKEL_ATTR = 'data-skel';
 export function paintNavSkeletons(includeOverview) {
   const ids = [
     'nav-metric-cost',
-    'nav-metric-tools',
     'nav-metric-agents',
   ];
   if (includeOverview) {

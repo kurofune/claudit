@@ -1131,6 +1131,44 @@
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
   .hotspot button.copy.copied { background: var(--accent-2); }
+
+  /* Show all tool patterns — under the hotspot list, every (tool, pattern)
+     row grouped under its tool. */
+  .tool-patterns-section { margin-top: var(--s-3); }
+  button.show-all {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    font: inherit; font-weight: 500; color: var(--ink);
+    padding: var(--s-1) var(--s-3); cursor: pointer;
+    background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  }
+  button.show-all:hover { border-color: var(--accent); }
+  button.show-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.show-all .chev, table.tool-patterns tr.tool-parent .chev {
+    flex: none; width: 14px; height: 14px; color: var(--muted);
+    transition: transform var(--motion-fast) var(--motion-ease);
+  }
+  button.show-all[aria-expanded="true"] .chev,
+  table.tool-patterns tr.tool-parent[aria-expanded="true"] .chev { transform: rotate(90deg); color: var(--ink); }
+  @media (prefers-reduced-motion: reduce) {
+    button.show-all .chev, table.tool-patterns tr.tool-parent .chev { transition: none; }
+  }
+  .tool-patterns-body { margin-top: var(--s-3); }
+  .tool-patterns-head { margin: 0 0 var(--s-1); }
+  .tool-patterns-body .tp-controls { margin: var(--s-2) 0; }
+  table.tool-patterns td.num { white-space: nowrap; }
+  table.tool-patterns td.tp-name { overflow-wrap: anywhere; }
+  table.tool-patterns td.tp-name code { white-space: normal; overflow-wrap: anywhere; }
+  table.tool-patterns tr.tool-parent td { background: var(--surface-2); font-weight: 600; }
+  table.tool-patterns tr.tool-parent td.tp-name .chev { vertical-align: -2px; margin-right: var(--s-1); }
+  table.tool-patterns tr.tool-parent td.tp-name .small { font-weight: normal; margin-left: var(--s-1); }
+  table.tool-patterns tr.tool-parent .chev-space { display: inline-block; width: 14px; margin-right: var(--s-1); }
+  table.tool-patterns tr.tool-parent[aria-expanded] { cursor: pointer; }
+  table.tool-patterns tr.tool-parent[aria-expanded]:hover td { background: var(--surface-3); }
+  table.tool-patterns tr.tool-parent:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  table.tool-patterns tr.tool-pattern td.tp-name { padding-left: calc(var(--s-3) + 14px + var(--s-1)); }
+  table.tool-patterns td[data-tooltip] { cursor: help; }
+  table.tool-patterns td[data-tooltip]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .hotspot .view-session, .by-prompt-table .view-session {
     font: inherit; font-weight: 500;
     padding: var(--s-1) var(--s-3);

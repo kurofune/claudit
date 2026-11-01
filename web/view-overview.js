@@ -1,6 +1,7 @@
 // Overview view — landing tab. Fetches /_claudit/api/overview, paints
 // totals tiles, the ranked hotspot list, and the headline trend chart into
-// the #view-overview section.
+// the #view-overview section; under the hotspots, Show all opens every tool
+// pattern (overview-tools.js).
 //
 // SPA equivalent of the legacy SSR'd Overview chrome
 // (internal/render/totals_html.go + hotspots_html.go +
@@ -11,7 +12,8 @@ import { fmtMoney, fmtNum, hitRatioPill, escHtml } from './format.js';
 import { trendLineChart, hitRatioChart, forecastChart, wireChartInteractivity } from './charts.js';
 import { overviewSkeleton, skeletonResetIfPending } from './skeleton.js';
 import { agentsSessionHash } from './router.js';
-import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, promptPreview } from './overview-logic.js';
+import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, hashShowAll, promptPreview } from './overview-logic.js';
+import { toolPatternsHTML, wireToolPatterns } from './overview-tools.js';
 import {
   providerFromSearch, providerTiles, providerLabel, shareText,
   emptyProviderText, API_EQUIVALENT_TIP,
@@ -261,8 +263,10 @@ function fillPrompt(details, h) {
   if (pre && !pre.textContent && h) pre.textContent = promptPreview(h);
 }
 
-// openDeepLink opens the #overview/hotspot-N row and scrolls it into view.
+// openDeepLink opens the #overview/hotspot-N row, or the #overview/all
+// tool-patterns table, and scrolls it into view.
 function openDeepLink(container, hotspots) {
+  if (hashShowAll(window.location.hash)) { toolPatterns.open({ scroll: true }); return; }
   const rank = hashRank(window.location.hash);
   if (rank == null) return;
   const card = container.querySelector(`#hotspot-${rank}`);
@@ -342,7 +346,6 @@ function wireHotspots(container, hotspots) {
     const card = list.querySelector(`#hotspot-${rank}`);
     if (card) setOpen(card, hotspots[rank - 1], true);
   }
-  openDeepLink(container, hotspots);
 }
 
 function wireTrendTabs(container) {
@@ -382,13 +385,17 @@ function updateDateRange(first, last) {
 
 let painted = false;
 let paintedHotspots = [];
+const NO_TOOL_PATTERNS = { open() {}, close() {} };
+let toolPatterns = NO_TOOL_PATTERNS;
 
 export async function paint() {
   const container = document.getElementById('view-overview');
   if (!container) return;
-  // First render only; a later #overview/hotspot-N route opens its row.
+  // First render only; a later #overview/hotspot-N or #overview/all route
+  // opens its row or the tool-patterns table.
   if (painted) { openDeepLink(container, paintedHotspots); return; }
 
+  toolPatterns = NO_TOOL_PATTERNS;
   container.innerHTML = `<div class="view-head"><h1>${labelIcon('overview')}Overview</h1></div>
     ${overviewSkeleton()}`;
 
@@ -433,10 +440,13 @@ export async function paint() {
     <div id="trend-section">${trendSectionHTML(overview, anomalies.anomalies || [])}</div>
     <h2>${labelIcon('flame')}Top context-cost hotspots</h2>
     <div class="small">Ranked by context cost: what each pattern's output cost to write into context and re-read on later turns. Each row's change is against the previous window of equal length; open a row for its biggest invocations. <strong>Copy prompt</strong> hands the evidence to the coding agent working in this repo (Claude Code or Codex).</div>
-    <div class="hotspots">${hotspotsHTML(overview.hotspots)}</div>`;
+    <div class="hotspots">${hotspotsHTML(overview.hotspots)}</div>
+    ${toolPatternsHTML()}`;
 
   paintedHotspots = overview.hotspots || [];
   wireHotspots(container, paintedHotspots);
+  toolPatterns = wireToolPatterns(container.querySelector('.tool-patterns-section'));
+  openDeepLink(container, paintedHotspots);
   wireTrendTabs(container);
   wireChartInteractivity(container);
 

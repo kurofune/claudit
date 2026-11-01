@@ -1,14 +1,13 @@
 // SPA entry point. Wires the hash router, paints the active view,
 // and subscribes to /events for the data-changed reload nudge.
 //
-// Each view module (Overview, Spend, Tools, Agents) owns its own fetch +
+// Each view module (Overview, Spend, Agents) owns its own fetch +
 // render lifecycle and is a no-op on subsequent route changes within the
 // same view (just toggles the subview class).
 
 import { onChange, activate, parseHash } from './router.js';
 import { paint as paintOverview } from './view-overview.js';
 import { paint as paintSpend, paintNav as paintNavSpend } from './view-spend.js';
-import { paint as paintTools, paintNav as paintNavTools } from './view-tools.js';
 import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
@@ -20,7 +19,6 @@ import { init as initTooltips } from './tooltip.js';
 const VIEW_PAINTERS = {
   overview: paintOverview,
   spend: paintSpend,
-  tools: paintTools,
   agents: paintAgents,
 };
 
@@ -62,7 +60,7 @@ initThemes();
 // later view re-renders, so the ~150 native call sites upgrade automatically.
 initTooltips();
 
-// Sidebar metric prefetch — fires the three non-overview sections in
+// Sidebar metric prefetch — fires the two non-overview sections in
 // parallel at startup so their nav-metric dashes resolve before the
 // user clicks each tab. Each paintNav() short-circuits if its full
 // paint() has already run (e.g. via deep link), and falls back to
@@ -76,12 +74,11 @@ initTooltips();
 // paint(), which only fires when Overview is the active route — skeleton
 // them only if we're starting on Overview, otherwise leave them as "—".
 paintNavSkeletons(parseHash().view === 'overview');
-// Pills fed by the three paintNavs below — nav-metric-overview and
+// Pills fed by the two paintNavs below — nav-metric-overview and
 // date-range are owned by view-overview.js and reset there on error.
-const NAV_SKEL_IDS = ['nav-metric-cost', 'nav-metric-tools', 'nav-metric-agents'];
+const NAV_SKEL_IDS = ['nav-metric-cost', 'nav-metric-agents'];
 Promise.all([
   paintNavSpend(),
-  paintNavTools(),
   paintNavAgents(),
 ])
   .catch(err => console.error('nav metric prefetch failed:', err))

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, promptPreview } from '../web/overview-logic.js';
+import { hotspotTrend, showForecastTab, barWidth, restoreExpanded, hashRank, hashShowAll, SHOW_ALL, promptPreview } from '../web/overview-logic.js';
 
 test('hotspotTrend: up, down and new against the previous window', () => {
   assert.deepEqual(
@@ -53,6 +53,17 @@ test('barWidth is 0 for a zero or missing pct, and when no hotspot has a share',
   assert.equal(barWidth(HS[3], HS), 0);
   assert.equal(barWidth(null, HS), 0);
   assert.equal(barWidth({ pct_of_total: 5 }, [{}, { pct_of_total: 0 }]), 0);
+});
+
+test('hashShowAll reads #overview/all and nothing else', () => {
+  assert.equal(SHOW_ALL, '#overview/all');
+  assert.equal(hashShowAll('#overview/all'), true);
+  assert.equal(hashShowAll('overview/all'), true);
+  for (const h of ['', '#overview', '#overview/', '#overview/all/x', '#overview/allx', '#overview/hotspot-1', '#spend/all', '#tools', undefined, null]) {
+    assert.equal(hashShowAll(h), false, String(h));
+  }
+  assert.equal(hashRank('#overview/all'), null, 'the Show all link opens no hotspot');
+  assert.deepEqual(restoreExpanded({ hash: '#overview/all', stored: null }), []);
 });
 
 test('hashRank reads N from #overview/hotspot-N and nothing else', () => {

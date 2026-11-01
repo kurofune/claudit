@@ -2,13 +2,15 @@
 //   #overview                  → Overview
 //   #spend/<tab>               → Spend, <tab>, Dollars
 //   #spend/<tab>/tokens        → Spend, <tab>, Tokens
-//   #tools, #agents/<lens>     → Tools, Agents
+//   #overview/all              → Overview with the tool-patterns table open
+//   #agents/<lens>             → Agents
 //   #agents/tree/<session>     → Agents Tree with <session> selected
 //
-// Retired views (#cost, #tokens, #cache) redirect through REDIRECTS so
-// old bookmarks land on the Spend view.
+// Retired views redirect through REDIRECTS so old bookmarks still land:
+// #cost, #tokens and #cache on the Spend view, #tools on the Overview's
+// tool-patterns table.
 
-const KNOWN_VIEWS = new Set(['overview', 'spend', 'tools', 'agents']);
+const KNOWN_VIEWS = new Set(['overview', 'spend', 'agents']);
 
 export const SPEND_DEFAULT_TAB = 'model';
 const TOKENS_SUFFIX = 'tokens';
@@ -20,12 +22,14 @@ export function spendHash(tab, unit) {
   return tab ? `#spend/${tab}` : '#spend';
 }
 
-// REDIRECTS maps a retired view to its Spend equivalent. keepTab carries
-// the old sub-path over as the Spend tab; unit picks the Spend unit.
+// REDIRECTS maps a retired view to its replacement. A rule with `to`
+// names a fixed hash; a Spend rule's keepTab carries the old sub-path over
+// as the Spend tab and its unit picks the Spend unit.
 export const REDIRECTS = [
   { from: 'cost', unit: 'dollars', keepTab: true },
   { from: 'tokens', unit: 'tokens', keepTab: true },
   { from: 'cache', unit: 'dollars', keepTab: false },
+  { from: 'tools', to: '#overview/all' },
 ];
 
 function splitHash(raw) {
@@ -41,6 +45,7 @@ export function redirectHash(raw) {
   const { head, rest } = splitHash(raw);
   const rule = REDIRECTS.find(r => r.from === head);
   if (!rule) return null;
+  if (rule.to) return rule.to;
   const tab = rule.keepTab ? (rest[0] || '') : '';
   return spendHash(tab, rule.unit);
 }

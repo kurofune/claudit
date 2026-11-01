@@ -50,7 +50,7 @@ Date filters (serve's `?since` / `?until`) are calendar dates interpreted at mid
 
 - **Overview.** Turns, sessions, tokens (input / output / cache-read / 5m-cache-write / 1h-cache-write), cost in USD, cache hit ratio, and the time range covered.
 - **Spend.** One view with a Dollars / Tokens toggle, split by model, project, subagent, skill and slash command, and top prompts, with trend charts. Projects are grouped by git repo root, so a repo's worktrees and subdirectories roll up into one row.
-- **Tools.** Bash, Read, Edit, Grep, WebFetch, etc., with drill-down into Bash patterns, file extensions read, grep globs, and web hosts fetched.
+- **Tools.** Under the Overview's hotspots, **Show all tool patterns** opens one sortable table of every tool (Bash, Read, Edit, Grep, WebFetch, Skill, Agent, …) with its argument patterns beneath — Bash commands, file extensions read, grep globs, web hosts fetched — on calls, error %, median and p95 duration, context added and context cost, including the zero-cost rows and the tools the hotspot list leaves out. `#overview/all` links straight to it.
 - **Subagent attribution.** Sidechain (subagent) cost separated from main-thread cost, with per-invocation rows and per-agent-type roll-ups.
 - **Per-prompt cost.** Every user prompt's downstream cost, computed by walking the conversation's parent links (Spend → By top prompts).
 - **Hotspots.** Top cost drivers with a copyable LLM prompt for each, so you can paste the prompt into a model and get specific advice on that exact driver.

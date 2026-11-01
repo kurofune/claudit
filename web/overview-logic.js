@@ -47,6 +47,16 @@ export function hashRank(hash) {
   return m ? Number(m[1]) : null;
 }
 
+const SHOW_ALL_HASH = /^#?overview\/all$/;
+
+// SHOW_ALL is the hash that opens the Show all tool-patterns table.
+export const SHOW_ALL = '#overview/all';
+
+// hashShowAll is whether hash deep-links the Show all tool-patterns table.
+export function hashShowAll(hash) {
+  return SHOW_ALL_HASH.test(String(hash || ''));
+}
+
 const isRank = n => Number.isInteger(n) && n > 0;
 
 // restoreExpanded is the sorted set of hotspot ranks to open on paint:
