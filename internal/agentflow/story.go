@@ -400,8 +400,10 @@ type TextReader func(src LogSource, want parse.TextRequest) parse.FullTexts
 
 // FullText gives page the whole text the parse-time snippets cut: every
 // prompt's text, every agent message's text, its sub-agents' messages and
-// each cut tool input, read back through read, one pass per log. What read
-// cannot find keeps its snippet. The story itself is left unchanged.
+// each cut tool input, read back through read, one pass per log. A Codex
+// prompt reads back even when uncut, since its corpus text drops the
+// injected wrapper items and trims what the person typed. What read cannot
+// find keeps its snippet. The story itself is left unchanged.
 func (st *SessionStory) FullText(page StoryPage, read TextReader) StoryPage {
 	reqs := map[LogSource]*parse.TextRequest{}
 	want := func(src LogSource, ok bool) *parse.TextRequest {
@@ -416,8 +418,9 @@ func (st *SessionStory) FullText(page StoryPage, read TextReader) StoryPage {
 		return r
 	}
 	for _, p := range page.Prompts {
-		if parse.TextSnippetCut(p.Text) {
-			if r := want(st.promptLog[p.UUID], st.promptLog[p.UUID] != LogSource{}); r != nil {
+		src := st.promptLog[p.UUID]
+		if parse.TextSnippetCut(p.Text) || src.Provider == parse.ProviderCodex {
+			if r := want(src, src != LogSource{}); r != nil {
 				r.Users[p.UUID] = true
 			}
 		}

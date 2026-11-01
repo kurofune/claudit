@@ -784,3 +784,34 @@ func TestToolUse_InputKeyIsTheRawArguments(t *testing.T) {
 		t.Errorf("identical arguments keyed %d and %d", a.InputKey, same.InputKey)
 	}
 }
+
+// TestFindTexts_PromptVerbatim: ParseFile keeps a prompt's own trimmed
+// text and drops a wrapper-only message, while FindTexts reads the same
+// prompt back as written, its injected items in order and its whitespace
+// kept.
+func TestFindTexts_PromptVerbatim(t *testing.T) {
+	item := func(s string) string { return `{"type":"input_text","text":` + strconv.Quote(s) + `}` }
+	user := func(ts string, items ...string) string {
+		return `{"timestamp":"` + ts + `","type":"response_item","payload":{"type":"message","role":"user","content":[` + strings.Join(items, ",") + `]}}`
+	}
+	env := "<environment_context>\n  <cwd>/p</cwd>\n</environment_context>"
+	ask := "\n  fix it  \n"
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-10-29T10:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"s1","cwd":"/p"}}`,
+		user("2026-10-29T10:00:01Z", item(env)),
+		user("2026-10-29T10:00:02Z", item("# AGENTS.md instructions for /p\n\n<INSTRUCTIONS>x</INSTRUCTIONS>"), item(env), item(ask)),
+	}, "\n")
+	res, err := ParseFile(strings.NewReader(rollout), "rollout-s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UserMessages) != 1 || res.UserMessages[0].Text != "fix it" {
+		t.Fatalf("ParseFile prompts = %+v, want the one trimmed request", res.UserMessages)
+	}
+	id := res.UserMessages[0].UUID
+	got := FindTexts(strings.NewReader(rollout), "rollout-s1.jsonl", parse.TextRequest{Users: map[string]bool{id: true}})
+	want := "# AGENTS.md instructions for /p\n\n<INSTRUCTIONS>x</INSTRUCTIONS>\n" + env + "\n" + ask
+	if got.Users[id] != want {
+		t.Errorf("FindTexts prompt = %q, want %q", got.Users[id], want)
+	}
+}

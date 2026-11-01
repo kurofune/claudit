@@ -225,3 +225,61 @@ func TestAPISessionsStory_CodexFullText(t *testing.T) {
 		}
 	}
 }
+
+// TestAPISessionsStory_CodexPromptVerbatim: a Codex prompt that carries
+// injected wrapper items around the person's request reaches the story
+// whole, below and above the snippet cap: every input_text item in order,
+// wrappers included, with the request's own whitespace kept.
+func TestAPISessionsStory_CodexPromptVerbatim(t *testing.T) {
+	const rootID = "01a20000-0000-7000-8000-00000000000c"
+	rec := func(ts, typ string, payload any) string {
+		return jsonLine(t, map[string]any{"timestamp": ts, "type": typ, "payload": payload})
+	}
+	userMsg := func(items ...string) map[string]any {
+		content := make([]any, len(items))
+		for i, s := range items {
+			content[i] = map[string]any{"type": "input_text", "text": s}
+		}
+		return map[string]any{"type": "message", "role": "user", "content": content}
+	}
+	answer := func(text string) map[string]any {
+		return map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}
+	}
+	usage := map[string]any{"input_tokens": 100, "output_tokens": 10}
+	agentsMD := "# AGENTS.md instructions for /p/codex\n\n<INSTRUCTIONS>\nbe terse\n</INSTRUCTIONS>"
+	env := "<environment_context>\n  <cwd>/p/codex</cwd>\n</environment_context>"
+	short := "\n    indented request\n\nsecond line  \n"
+	long := "  " + strings.Repeat("q", 2600) + " LONG-END\t\n"
+
+	root := t.TempDir()
+	day := filepath.Join(root, "2026", "10", "31")
+	if err := os.MkdirAll(day, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(day, "rollout-2026-10-31T11-00-00-"+rootID+".jsonl"),
+		rec("2026-10-31T11:00:00.000Z", "session_meta", map[string]any{"session_id": rootID, "id": rootID, "cwd": "/p/codex", "originator": "codex_exec", "thread_source": "user"}),
+		rec("2026-10-31T11:00:01.000Z", "turn_context", map[string]any{"cwd": "/p/codex", "model": "gpt-6-astra"}),
+		rec("2026-10-31T11:00:02.000Z", "response_item", userMsg(agentsMD, env, short)),
+		rec("2026-10-31T11:00:03.000Z", "response_item", answer("done one")),
+		rec("2026-10-31T11:00:04.000Z", "token_usage_record", map[string]any{"response_id": "resp_one", "usage": usage}),
+		rec("2026-10-31T11:00:05.000Z", "response_item", userMsg(env, long)),
+		rec("2026-10-31T11:00:06.000Z", "response_item", answer("done two")),
+		rec("2026-10-31T11:00:07.000Z", "token_usage_record", map[string]any{"response_id": "resp_two", "usage": usage}),
+	)
+	cache := corpus.New(provider.NewClaudeCode(t.TempDir()), provider.NewCodex(root))
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
+
+	p := getStoryPage(t, srv, "?scope=all&session="+rootID)
+	want := []string{agentsMD + "\n" + env + "\n" + short, env + "\n" + long}
+	if len(p.Prompts) != len(want) {
+		t.Fatalf("prompts = %d, want %d", len(p.Prompts), len(want))
+	}
+	for i, w := range want {
+		if p.Prompts[i].Text != w {
+			t.Errorf("prompt %d text = %.160q (%d runes), want the verbatim %.160q (%d runes)", i, p.Prompts[i].Text, len([]rune(p.Prompts[i].Text)), w, len([]rune(w)))
+		}
+	}
+}

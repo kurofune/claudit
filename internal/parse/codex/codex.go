@@ -131,16 +131,18 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 }
 
 // textCaps bounds the text a parse keeps: snippets for the corpus, none
-// for FindTexts.
+// for FindTexts. verbatim keeps a prompt's every input_text item as
+// written, injected ones included, in place of its person's own text.
 type textCaps struct {
-	prompt func(string) string
-	join   func(text, block string) string
-	input  func(string) string
+	prompt   func(string) string
+	join     func(text, block string) string
+	input    func(string) string
+	verbatim bool
 }
 
 var (
 	snippets = textCaps{prompt: parse.PromptSnippet, join: parse.JoinTurnText, input: parse.ToolInputSnippet}
-	fullText = textCaps{prompt: func(s string) string { return s }, join: parse.JoinText, input: func(s string) string { return s }}
+	fullText = textCaps{prompt: func(s string) string { return s }, join: parse.JoinText, input: func(s string) string { return s }, verbatim: true}
 )
 
 func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
@@ -214,6 +216,9 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 					continue
 				}
 				if text := m.userText(); text != "" {
+					if caps.verbatim {
+						text = m.verbatimText()
+					}
 					prompt = "u" + strconv.Itoa(lineNumber)
 					res.UserMessages = append(res.UserMessages, parse.UserMessage{
 						UUID:       prompt,
@@ -423,8 +428,10 @@ func toolInput(it rawItem) (input, cmd string) {
 }
 
 // FindTexts reads one rollout at path back whole and returns the
-// untruncated text of each requested turn and prompt and the input of each
-// requested call, in the representation ParseFile snippets. A Codex turn
+// untruncated text of each requested turn and the input of each requested
+// call, in the representation ParseFile snippets, and each requested
+// prompt verbatim: every input_text item as written, the injected
+// AGENTS.md and environment items included, in order. A Codex turn
 // carries no thinking. path names the thread, as for ParseFile.
 func FindTexts(r io.Reader, path string, want parse.TextRequest) parse.FullTexts {
 	out := parse.NewFullTexts()
@@ -815,6 +822,18 @@ func (m rawMessage) userText() string {
 			continue
 		}
 		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// verbatimText is a user message's input_text items as written, joined on
+// a line break: injected items kept, whitespace untouched.
+func (m rawMessage) verbatimText() string {
+	var parts []string
+	for _, c := range m.Content {
+		if c.Type == "input_text" && c.Text != "" {
+			parts = append(parts, c.Text)
+		}
 	}
 	return strings.Join(parts, "\n")
 }
