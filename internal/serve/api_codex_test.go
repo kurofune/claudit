@@ -86,8 +86,8 @@ func TestAPICost_CodexModelRow(t *testing.T) {
 }
 
 // TestAPIAgentsFull_CodexToolBetweenCaps: a Codex call whose input and output
-// run 501–2000 runes is capped in /agents and still expands in full through
-// /agents/full, which reads the rollout with the Codex parser.
+// run 501–2000 runes is capped in the story (its output after the exit
+// envelope comes off) and still expands in full through /agents/full, which reads the rollout with the Codex parser.
 func TestAPIAgentsFull_CodexToolBetweenCaps(t *testing.T) {
 	const (
 		sessionID = "01a19999-0000-7000-8000-000000000001"
@@ -120,33 +120,21 @@ func TestAPIAgentsFull_CodexToolBetweenCaps(t *testing.T) {
 	}
 	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
 
-	var sessions []struct {
-		Main struct {
-			Steps []struct {
-				Tools []struct{ ID, Input, Output string }
-			}
-		}
-	}
-	decodeField(t, getSection(t, srv, "/_claudit/api/agents", "codex"), "sessions", &sessions)
 	found := false
-	for _, s := range sessions {
-		for _, st := range s.Main.Steps {
-			for _, tool := range st.Tools {
-				if tool.ID != callID {
-					continue
-				}
-				found = true
-				if want := bigIn[:agentSnippetRunes] + "…"; tool.Input != want {
-					t.Errorf("/agents input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
-				}
-				if want := bigOut[:agentSnippetRunes] + "…"; tool.Output != want {
-					t.Errorf("/agents output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
-				}
-			}
+	for _, tool := range wholeStoryTools(t, srv, sessionID, "&provider=codex") {
+		if tool.ID != callID {
+			continue
+		}
+		found = true
+		if want := bigIn[:agentSnippetRunes] + "…"; tool.Input != want {
+			t.Errorf("story input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
+		}
+		if want := strings.Repeat("q", agentSnippetRunes) + "…"; tool.Output != want {
+			t.Errorf("story output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
 		}
 	}
 	if !found {
-		t.Fatalf("%s missing from /agents payload", callID)
+		t.Fatalf("%s missing from the story", callID)
 	}
 
 	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session="+sessionID+"&tool="+callID, nil)

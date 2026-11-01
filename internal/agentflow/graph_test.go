@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -16,17 +17,17 @@ import (
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
-// TestBuildAgentGraph_CarriesEntrypoint: a session's origin (cli vs sdk-cli)
+// TestAssembleSession_CarriesEntrypoint: a session's origin (cli vs sdk-cli)
 // is a session invariant lifted from its turns, so the Agents view can badge
 // headless runs. First non-empty entrypoint wins; it must reach the JSON.
-func TestBuildAgentGraph_CarriesEntrypoint(t *testing.T) {
+func TestAssembleSession_CarriesEntrypoint(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
 	turn.Entrypoint = "sdk-cli"
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestBuildAgentGraph_CarriesEntrypoint(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
+func TestAssembleSession_CoalescesMessageIntoOneStep(t *testing.T) {
 	// A multi-block message (5 JSONL lines, one message.id) followed by a second
 	// one-line message. After ParseFile coalesces, the main agent must show ONE
 	// step per message — merged thinking/text/tools, cost counted once — and the
@@ -66,7 +67,7 @@ func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
 
 	prices, _ := pricing.LoadDefault()
 	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks}
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestBuildAgentGraph_CoalescesMessageIntoOneStep(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_StepGenMs(t *testing.T) {
+func TestAssembleSession_StepGenMs(t *testing.T) {
 	// A streamed turn's gen_ms is the span between its first and last JSONL
 	// line (model think + emit). Here msg_1 streams :01→:05 → gen_ms=4000; the
 	// single-line msg_2 at :10 has no measurable span → gen_ms=0. gen_ms is a
@@ -111,7 +112,7 @@ func TestBuildAgentGraph_StepGenMs(t *testing.T) {
 	}
 	prices, _ := pricing.LoadDefault()
 	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks}
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +169,11 @@ func mkTurn(uuid, sid, src string, ts time.Time) parse.Turn {
 	}
 }
 
-// TestBuildAgentGraph_ExcludesReplayedTurns: a forked session (s2/b.jsonl)
+// TestAssembleSession_ExcludesReplayedTurns: a forked session (s2/b.jsonl)
 // replays the original session's turn (s1/a.jsonl, same message.id). The
 // replay was billed once already, so the Agents view must exclude it — the
 // sum of session costs must equal the deduped headline.
-func TestBuildAgentGraph_ExcludesReplayedTurns(t *testing.T) {
+func TestAssembleSession_ExcludesReplayedTurns(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
@@ -193,7 +194,7 @@ func TestBuildAgentGraph_ExcludesReplayedTurns(t *testing.T) {
 	}
 	head := agg.Totals()
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,9 +219,9 @@ func TestBuildAgentGraph_ExcludesReplayedTurns(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_EmptySnapshot(t *testing.T) {
+func TestAssembleSession_EmptySnapshot(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
-	g, err := BuildAgentGraph(&corpus.Snapshot{}, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(&corpus.Snapshot{}, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,14 +230,14 @@ func TestBuildAgentGraph_EmptySnapshot(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SingleMainTurn(t *testing.T) {
+func TestAssembleSession_SingleMainTurn(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
 	turn.CWD = "/p/x"
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,7 +259,7 @@ func TestBuildAgentGraph_SingleMainTurn(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_JoinsToolResults(t *testing.T) {
+func TestAssembleSession_JoinsToolResults(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
@@ -272,7 +273,7 @@ func TestBuildAgentGraph_JoinsToolResults(t *testing.T) {
 		},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestBuildAgentGraph_JoinsToolResults(t *testing.T) {
 // each tool's StartedAt and the matching tool_result line's timestamp becomes
 // its EndedAt, so the Timeline can draw a sub-span whose width is the tool's
 // wall-clock. An 8s Bash here should report an 8s [start,end].
-func TestBuildAgentGraph_SurfacesPerToolTiming(t *testing.T) {
+func TestAssembleSession_SurfacesPerToolTiming(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
@@ -305,7 +306,7 @@ func TestBuildAgentGraph_SurfacesPerToolTiming(t *testing.T) {
 		},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -318,7 +319,7 @@ func TestBuildAgentGraph_SurfacesPerToolTiming(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_MainNodeRollsUp(t *testing.T) {
+func TestAssembleSession_MainNodeRollsUp(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	src := "/root/-p-x/s1.jsonl"
@@ -328,7 +329,7 @@ func TestBuildAgentGraph_MainNodeRollsUp(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +354,7 @@ func TestBuildAgentGraph_MainNodeRollsUp(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_StepCarriesModelCostAndTools(t *testing.T) {
+func TestAssembleSession_StepCarriesModelCostAndTools(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
@@ -364,7 +365,7 @@ func TestBuildAgentGraph_StepCarriesModelCostAndTools(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -390,7 +391,7 @@ func TestBuildAgentGraph_StepCarriesModelCostAndTools(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_StepCarriesTokens(t *testing.T) {
+func TestAssembleSession_StepCarriesTokens(t *testing.T) {
 	// The turn drawer shows per-turn token counts, so each AgentStep must carry
 	// its turn's usage (counted once for a coalesced message). Two cache tiers
 	// plus input/output cover the whole tuple.
@@ -406,7 +407,7 @@ func TestBuildAgentGraph_StepCarriesTokens(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestBuildAgentGraph_StepCarriesTokens(t *testing.T) {
 // the cached prefix replayed in (cache_read) — and deliberately excludes output
 // and cache-creation. It's the size that drives context-growth charts and the
 // per-turn cache-hit ratio. Here 111 input + 555 cache_read = 666.
-func TestBuildAgentGraph_StepContextTokens(t *testing.T) {
+func TestAssembleSession_StepContextTokens(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
@@ -439,7 +440,7 @@ func TestBuildAgentGraph_StepContextTokens(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -452,7 +453,7 @@ func TestBuildAgentGraph_StepContextTokens(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_InterStepDuration(t *testing.T) {
+func TestAssembleSession_InterStepDuration(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	src := "/root/-p-x/s1.jsonl"
@@ -464,7 +465,7 @@ func TestBuildAgentGraph_InterStepDuration(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -480,7 +481,7 @@ func TestBuildAgentGraph_InterStepDuration(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SubagentChildFromMeta(t *testing.T) {
+func TestAssembleSession_SubagentChildFromMeta(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -495,7 +496,7 @@ func TestBuildAgentGraph_SubagentChildFromMeta(t *testing.T) {
 	turns[1].Sidechain = true
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -521,7 +522,7 @@ func TestBuildAgentGraph_SubagentChildFromMeta(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SubagentParentToolUseID(t *testing.T) {
+func TestAssembleSession_SubagentParentToolUseID(t *testing.T) {
 	// The exact reverse link: a sub-agent whose meta carries toolUseId X gets
 	// ParentToolUseID == X, while a sub-agent without meta gets an empty one.
 	prices, _ := pricing.LoadDefault()
@@ -541,7 +542,7 @@ func TestBuildAgentGraph_SubagentParentToolUseID(t *testing.T) {
 	turns[2].Sidechain = true
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -569,7 +570,7 @@ func TestBuildAgentGraph_SubagentParentToolUseID(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SubagentWithoutMeta(t *testing.T) {
+func TestAssembleSession_SubagentWithoutMeta(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -582,7 +583,7 @@ func TestBuildAgentGraph_SubagentWithoutMeta(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -601,7 +602,7 @@ func TestBuildAgentGraph_SubagentWithoutMeta(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_MultipleSubagentsOrderedByStart(t *testing.T) {
+func TestAssembleSession_MultipleSubagentsOrderedByStart(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	root := t.TempDir()
@@ -618,7 +619,7 @@ func TestBuildAgentGraph_MultipleSubagentsOrderedByStart(t *testing.T) {
 	}
 	snap := &corpus.Snapshot{Turns: turns}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -634,7 +635,7 @@ func TestBuildAgentGraph_MultipleSubagentsOrderedByStart(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_StepCarriesThinkingAndText(t *testing.T) {
+func TestAssembleSession_StepCarriesThinkingAndText(t *testing.T) {
 	// A turn's assistant reasoning and narration flow onto its step so
 	// tool-less turns become auditable in the Agents view.
 	prices, _ := pricing.LoadDefault()
@@ -644,7 +645,7 @@ func TestBuildAgentGraph_StepCarriesThinkingAndText(t *testing.T) {
 	turn.Text = "here is the plan"
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -657,7 +658,7 @@ func TestBuildAgentGraph_StepCarriesThinkingAndText(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_StepCarriesUUID(t *testing.T) {
+func TestAssembleSession_StepCarriesUUID(t *testing.T) {
 	// The step's uuid is the key the drawer uses to fetch the turn's
 	// untruncated thinking/text via /agents/full?turn=.
 	prices, _ := pricing.LoadDefault()
@@ -665,7 +666,7 @@ func TestBuildAgentGraph_StepCarriesUUID(t *testing.T) {
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
 	snap := &corpus.Snapshot{Turns: []parse.Turn{turn}}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -674,7 +675,7 @@ func TestBuildAgentGraph_StepCarriesUUID(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_PromptMarkersSegmentMainTimeline(t *testing.T) {
+func TestAssembleSession_PromptMarkersSegmentMainTimeline(t *testing.T) {
 	// Two user prompts in one session: prompt A produced two turns, prompt B
 	// produced one. The main timeline (sorted by time) should segment into two
 	// PromptMarkers in order, the second starting at the step index where
@@ -698,7 +699,7 @@ func TestBuildAgentGraph_PromptMarkersSegmentMainTimeline(t *testing.T) {
 		Users: []parse.UserMessage{userA, userB},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -714,7 +715,7 @@ func TestBuildAgentGraph_PromptMarkersSegmentMainTimeline(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
+func TestAssembleSession_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
 	// A marker surfaces its originating prompt's text and timestamp so the
 	// Conversation lens can render the prompt bubble without a second lookup.
 	prices, _ := pricing.LoadDefault()
@@ -731,7 +732,7 @@ func TestBuildAgentGraph_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
 		Users: []parse.UserMessage{user},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -747,7 +748,7 @@ func TestBuildAgentGraph_PromptMarkerCarriesTextAndTimestamp(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_NodeErrorCount(t *testing.T) {
+func TestAssembleSession_NodeErrorCount(t *testing.T) {
 	// A node's ErrorCount counts only its tool calls whose Status is "error";
 	// an "ok" call alongside an errored one yields ErrorCount == 1.
 	prices, _ := pricing.LoadDefault()
@@ -765,7 +766,7 @@ func TestBuildAgentGraph_NodeErrorCount(t *testing.T) {
 		},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -778,7 +779,7 @@ func TestBuildAgentGraph_NodeErrorCount(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SessionErrorCountSumsNodes(t *testing.T) {
+func TestAssembleSession_SessionErrorCountSumsNodes(t *testing.T) {
 	// The session-level ErrorCount totals errored tool calls across the main
 	// agent and every sub-agent — one error in main plus one in a sub-agent
 	// rolls up to 2.
@@ -802,7 +803,7 @@ func TestBuildAgentGraph_SessionErrorCountSumsNodes(t *testing.T) {
 		},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -814,7 +815,7 @@ func TestBuildAgentGraph_SessionErrorCountSumsNodes(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_SpawnRollupOnAgentCall(t *testing.T) {
+func TestAssembleSession_SpawnRollupOnAgentCall(t *testing.T) {
 	// The Agent tool_use that launched a sub-agent carries a Spawned rollup of
 	// that child's cost/tokens/errors/duration — the blast radius of one
 	// decision. A non-spawning tool call in the same turn has nil Spawned.
@@ -845,7 +846,7 @@ func TestBuildAgentGraph_SpawnRollupOnAgentCall(t *testing.T) {
 		},
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -893,7 +894,29 @@ func TestBuildAgentGraph_SpawnRollupOnAgentCall(t *testing.T) {
 	}
 }
 
-func findSession(g AgentGraph, id string) *AgentSession {
+// testGraph is every session of a snapshot as BuildSessionStory
+// assembles it, for tests of the shared grouping.
+type testGraph struct{ Sessions []AgentSession }
+
+// graphOf groups snap with collectSessions and assembles each session with
+// its own tool results and prompts, as BuildSessionStory does, most
+// recently active first.
+func graphOf(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter) (testGraph, error) {
+	c := collectSessions(snap, prices, f, "", nil)
+	var g testGraph
+	for _, sa := range c.sessions {
+		g.Sessions = append(g.Sessions, assembleSession(sa, sessionToolResults(snap, sa), storyPrompts(snap, sa, nil)))
+	}
+	sort.SliceStable(g.Sessions, func(i, j int) bool {
+		if !g.Sessions[i].EndedAt.Equal(g.Sessions[j].EndedAt) {
+			return g.Sessions[i].EndedAt.After(g.Sessions[j].EndedAt)
+		}
+		return g.Sessions[i].SessionID < g.Sessions[j].SessionID
+	})
+	return g, nil
+}
+
+func findSession(g testGraph, id string) *AgentSession {
 	for i := range g.Sessions {
 		if g.Sessions[i].SessionID == id {
 			return &g.Sessions[i]
@@ -902,45 +925,7 @@ func findSession(g AgentGraph, id string) *AgentSession {
 	return nil
 }
 
-func TestBuildAgentGraph_Status(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	newest := t0.Add(time.Hour)
-
-	// s1: last turn is the newest in the corpus → within the active window.
-	live := mkTurn("a1", "s1", "/root/-p/s1.jsonl", newest)
-	live.ToolUses = []parse.ToolUse{{Name: "Bash", Detail: "go test"}}
-	// s2: last turn is an hour old → outside the active window.
-	stale := mkTurn("b1", "s2", "/root/-p/s2.jsonl", t0)
-
-	snap := &corpus.Snapshot{Turns: []parse.Turn{live, stale}}
-
-	// Now is "live"'s instant — so s1 (ended at Now) is inside the window and
-	// s2 (an hour earlier) is outside it.
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{Now: newest, ActiveWindow: 30 * time.Second})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	s1 := findSession(g, "s1")
-	s2 := findSession(g, "s2")
-	if s1 == nil || s2 == nil {
-		t.Fatalf("missing sessions: s1=%v s2=%v", s1, s2)
-	}
-	if s1.Main.Status != "running" {
-		t.Errorf("s1 status = %q, want %q", s1.Main.Status, "running")
-	}
-	if s1.Main.CurrentTool != "Bash" {
-		t.Errorf("s1 CurrentTool = %q, want %q", s1.Main.CurrentTool, "Bash")
-	}
-	if s2.Main.Status != "done" {
-		t.Errorf("s2 status = %q, want %q", s2.Main.Status, "done")
-	}
-	if s2.Main.CurrentTool != "" {
-		t.Errorf("s2 CurrentTool = %q, want empty (done)", s2.Main.CurrentTool)
-	}
-}
-
-func TestBuildAgentGraph_FilterExcludesTurns(t *testing.T) {
+func TestAssembleSession_FilterExcludesTurns(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
@@ -954,7 +939,7 @@ func TestBuildAgentGraph_FilterExcludesTurns(t *testing.T) {
 	snap := &corpus.Snapshot{Turns: []parse.Turn{inWindow, tooEarly, wrongProject}}
 	f := aggregate.Filter{Since: t0, ProjectSubstring: "alpha"}
 
-	g, err := BuildAgentGraph(snap, prices, f, Options{})
+	g, err := graphOf(snap, prices, f)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -970,84 +955,10 @@ func TestBuildAgentGraph_FilterExcludesTurns(t *testing.T) {
 	}
 }
 
-func TestBuildAgentGraph_TopNCapsByRecency(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-
-	// Cost and recency deliberately DISAGREE: the oldest session is the
-	// costliest. A recency cap must keep the two most recent and drop the
-	// old-but-expensive one — proving it's not selecting by cost.
-	oldRich := mkTurn("a1", "old-rich", "/root/-p/old.jsonl", t0)
-	oldRich.Usage = parse.Usage{InputTokens: 500_000}
-	mid := mkTurn("b1", "mid", "/root/-p/mid.jsonl", t0.Add(time.Minute))
-	mid.Usage = parse.Usage{InputTokens: 50_000}
-	newCheap := mkTurn("c1", "new-cheap", "/root/-p/new.jsonl", t0.Add(2*time.Minute))
-	newCheap.Usage = parse.Usage{InputTokens: 1_000}
-
-	snap := &corpus.Snapshot{Turns: []parse.Turn{oldRich, mid, newCheap}}
-
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{TopN: 2})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(g.Sessions) != 2 {
-		t.Fatalf("want 2 sessions after TopN cap, got %d", len(g.Sessions))
-	}
-	if findSession(g, "old-rich") != nil {
-		t.Errorf("oldest session should be dropped by TopN=2 recency cap, even though it's costliest")
-	}
-	if findSession(g, "mid") == nil || findSession(g, "new-cheap") == nil {
-		t.Errorf("the two most recent sessions (mid, new-cheap) must survive the cap")
-	}
-}
-
-func TestBuildAgentGraph_TopNZeroIsUnlimited(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	turns := []parse.Turn{
-		mkTurn("a1", "s1", "/root/-p/s1.jsonl", t0),
-		mkTurn("b1", "s2", "/root/-p/s2.jsonl", t0.Add(time.Minute)),
-		mkTurn("c1", "s3", "/root/-p/s3.jsonl", t0.Add(2*time.Minute)),
-	}
-	g, err := BuildAgentGraph(&corpus.Snapshot{Turns: turns}, prices, aggregate.Filter{}, Options{TopN: 0})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(g.Sessions) != 3 {
-		t.Errorf("TopN=0 must not cap; want 3 sessions, got %d", len(g.Sessions))
-	}
-}
-
-func TestBuildAgentGraph_SessionsSortedNewestFirst(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-
-	// Input order (early first) is the opposite of what we expect out: the
-	// Agents view leads with the most recently active session so a live run
-	// sits on top.
-	early := mkTurn("a1", "early", "/root/-p/early.jsonl", t0.Add(time.Minute))
-	late := mkTurn("b1", "late", "/root/-p/late.jsonl", t0.Add(time.Hour))
-	snap := &corpus.Snapshot{Turns: []parse.Turn{early, late}}
-
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(g.Sessions) != 2 {
-		t.Fatalf("want 2 sessions, got %d", len(g.Sessions))
-	}
-	if g.Sessions[0].SessionID != "late" {
-		t.Errorf("Sessions[0] = %q, want %q (most recent first)", g.Sessions[0].SessionID, "late")
-	}
-	if g.Sessions[1].SessionID != "early" {
-		t.Errorf("Sessions[1] = %q, want %q", g.Sessions[1].SessionID, "early")
-	}
-}
-
-// TestBuildAgentGraph_SessionProjectIsResolvedRepo: a session run in a linked
+// TestAssembleSession_SessionProjectIsResolvedRepo: a session run in a linked
 // worktree is labeled with the main repo's name, beside its raw cwd, so the
 // Agents view groups it with the main checkout.
-func TestBuildAgentGraph_SessionProjectIsResolvedRepo(t *testing.T) {
+func TestAssembleSession_SessionProjectIsResolvedRepo(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1067,7 +978,7 @@ func TestBuildAgentGraph_SessionProjectIsResolvedRepo(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC))
 	turn.CWD = wt
-	g, err := BuildAgentGraph(&corpus.Snapshot{Turns: []parse.Turn{turn}}, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(&corpus.Snapshot{Turns: []parse.Turn{turn}}, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1081,10 +992,10 @@ func TestBuildAgentGraph_SessionProjectIsResolvedRepo(t *testing.T) {
 	}
 }
 
-// TestBuildAgentGraph_PathToolsCarryFilePathInput: Read rows reach the Agents
+// TestAssembleSession_PathToolsCarryFilePathInput: Read rows reach the Agents
 // payload with the file path as input, not just the extension in detail — so
 // one errored .png Read never makes every later .png Read look like a retry.
-func TestBuildAgentGraph_PathToolsCarryFilePathInput(t *testing.T) {
+func TestAssembleSession_PathToolsCarryFilePathInput(t *testing.T) {
 	read := func(n int, path string) string {
 		return fmt.Sprintf(`{"type":"assistant","uuid":"a%d","timestamp":"2026-04-10T10:00:0%dZ","sessionId":"s1","message":{"id":"msg_%d","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"tool_use","id":"t%d","name":"Read","input":{"file_path":%q}}]}}`, n, n, n, n, path)
 	}
@@ -1102,7 +1013,7 @@ func TestBuildAgentGraph_PathToolsCarryFilePathInput(t *testing.T) {
 	}
 	prices, _ := pricing.LoadDefault()
 	snap := &corpus.Snapshot{Turns: res.Turns, Links: res.ParentLinks, ToolResults: res.ToolResults}
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1130,11 +1041,11 @@ func TestBuildAgentGraph_PathToolsCarryFilePathInput(t *testing.T) {
 	}
 }
 
-// TestBuildAgentGraph_CodexSubagentNestsUnderParent: a Codex subagent rollout
+// TestAssembleSession_CodexSubagentNestsUnderParent: a Codex subagent rollout
 // carries its own thread uuid as SessionID and a ParentLink to the spawning
 // thread. The Agents graph must nest it under the parent session as a child,
 // not show it as a second main session, and roll its cost into the parent's.
-func TestBuildAgentGraph_CodexSubagentNestsUnderParent(t *testing.T) {
+func TestAssembleSession_CodexSubagentNestsUnderParent(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "subagent.jsonl"))
 	if err != nil {
@@ -1157,7 +1068,7 @@ func TestBuildAgentGraph_CodexSubagentNestsUnderParent(t *testing.T) {
 		Links: child.ParentLinks,
 	}
 
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1189,11 +1100,11 @@ func TestBuildAgentGraph_CodexSubagentNestsUnderParent(t *testing.T) {
 	}
 }
 
-// TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot: a subagent spawned by
+// TestAssembleSession_CodexNestedSubagentClimbsToRoot: a subagent spawned by
 // a subagent nests under the root session, and a Claude-shaped turn whose
 // SessionID happens to appear as a link UUID without being a sidechain stays
 // its own session.
-func TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot(t *testing.T) {
+func TestAssembleSession_CodexNestedSubagentClimbsToRoot(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 10, 31, 13, 0, 0, 0, time.UTC)
 	root := mkTurn("r1", "root", "/codex/rollout-root.jsonl", t0)
@@ -1210,7 +1121,7 @@ func TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot(t *testing.T) {
 			{UUID: "plain", ParentUUID: "root"},
 		},
 	}
-	g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, Options{})
+	g, err := graphOf(snap, prices, aggregate.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1223,13 +1134,13 @@ func TestBuildAgentGraph_CodexNestedSubagentClimbsToRoot(t *testing.T) {
 	}
 }
 
-// TestBuildAgentGraph_CodexGuardianSharesSessionWithUser: a guardian_review
+// TestAssembleSession_CodexGuardianSharesSessionWithUser: a guardian_review
 // rollout parses as an ordinary session carrying its user session's id. Both
 // rollouts' responses must stay visible — the user rollout as Main (its file
 // name carries the session id, even when the guardian started first), the
 // guardian as a kind "main" child, never a sub-agent — and the displayed
 // nodes must sum to the session totals.
-func TestBuildAgentGraph_CodexGuardianSharesSessionWithUser(t *testing.T) {
+func TestAssembleSession_CodexGuardianSharesSessionWithUser(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "guardian.jsonl"))
 	if err != nil {
@@ -1253,7 +1164,7 @@ func TestBuildAgentGraph_CodexGuardianSharesSessionWithUser(t *testing.T) {
 	turns = append(turns, guardian.Turns...)
 
 	for run := 0; run < 20; run++ {
-		g, err := BuildAgentGraph(&corpus.Snapshot{Turns: turns}, prices, aggregate.Filter{}, Options{})
+		g, err := graphOf(&corpus.Snapshot{Turns: turns}, prices, aggregate.Filter{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1298,54 +1209,5 @@ func TestBuildAgentGraph_CodexGuardianSharesSessionWithUser(t *testing.T) {
 		if !s.StartedAt.Equal(gc.StartedAt) {
 			t.Errorf("session StartedAt = %v, want the guardian's earlier start %v", s.StartedAt, gc.StartedAt)
 		}
-	}
-}
-
-// TestBuildAgentGraph_SnippetRunesCapsToolIO: SnippetRunes shortens each tool
-// call's input and output snippet to that many runes, marked with the trailing
-// ellipsis the drawer's "show full" keys on; shorter snippets pass untouched,
-// and zero keeps the parse-time snippet whole.
-func TestBuildAgentGraph_SnippetRunesCapsToolIO(t *testing.T) {
-	prices, _ := pricing.LoadDefault()
-	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
-	longIn := strings.Repeat("é", 30)
-	longOut := strings.Repeat("o", 40)
-	turn.ToolUses = []parse.ToolUse{
-		{ID: "t1", Name: "Bash", Input: longIn},
-		{ID: "t2", Name: "Bash", Input: "ls"},
-	}
-	snap := &corpus.Snapshot{
-		Turns: []parse.Turn{turn},
-		ToolResults: []parse.ToolResult{
-			{ToolUseID: "t1", Content: longOut},
-			{ToolUseID: "t2", Content: "ok"},
-		},
-	}
-	tools := func(opts Options) []aggregate.ToolInvocation {
-		g, err := BuildAgentGraph(snap, prices, aggregate.Filter{}, opts)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		return g.Sessions[0].Main.Steps[0].Tools
-	}
-
-	capped := tools(Options{SnippetRunes: 10})
-	if len(capped) != 2 {
-		t.Fatalf("want 2 tools, got %d", len(capped))
-	}
-	if want := strings.Repeat("é", 10) + "…"; capped[0].Input != want {
-		t.Errorf("capped input = %q, want %q", capped[0].Input, want)
-	}
-	if want := strings.Repeat("o", 10) + "…"; capped[0].Output != want {
-		t.Errorf("capped output = %q, want %q", capped[0].Output, want)
-	}
-	if capped[1].Input != "ls" || capped[1].Output != "ok" {
-		t.Errorf("short snippets changed: %+v", capped[1])
-	}
-
-	whole := tools(Options{})
-	if whole[0].Input != longIn || whole[0].Output != longOut {
-		t.Errorf("SnippetRunes 0 cut the snippet: input %q output %q", whole[0].Input, whole[0].Output)
 	}
 }

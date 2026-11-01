@@ -70,39 +70,26 @@ func TestAPIAgentsFull_ReturnsUntruncated(t *testing.T) {
 	}
 }
 
-// TestAPIAgents_CapsToolSnippets: the /agents payload carries each tool
-// call's input and output cut to agentSnippetRunes and marked "…", so the
-// drawer offers "show full", which still returns the whole text above.
-func TestAPIAgents_CapsToolSnippets(t *testing.T) {
+// TestStory_CapsToolSnippets: the story carries each tool call's input and
+// output cut to agentSnippetRunes and marked "…", so the story offers "show
+// full", which still returns the whole text above.
+func TestStory_CapsToolSnippets(t *testing.T) {
 	srv, bigCmd, bigOut := toolFixtureServer(t)
-	body := getSection(t, srv, "/_claudit/api/agents", "")
-	var sessions []struct {
-		Main struct {
-			Steps []struct {
-				Tools []struct{ ID, Input, Output string }
-			}
-		}
-	}
-	decodeField(t, body, "sessions", &sessions)
 	var found bool
-	for _, s := range sessions {
-		for _, st := range s.Main.Steps {
-			for _, tool := range st.Tools {
-				if tool.ID != "toolu_full" {
-					continue
-				}
-				found = true
-				if want := bigCmd[:agentSnippetRunes] + "…"; tool.Input != want {
-					t.Errorf("input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
-				}
-				if want := bigOut[:agentSnippetRunes] + "…"; tool.Output != want {
-					t.Errorf("output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
-				}
-			}
+	for _, tool := range wholeStoryTools(t, srv, "s-tool", "") {
+		if tool.ID != "toolu_full" {
+			continue
+		}
+		found = true
+		if want := bigCmd[:agentSnippetRunes] + "…"; tool.Input != want {
+			t.Errorf("input = %d runes, want the first %d plus …", len([]rune(tool.Input)), agentSnippetRunes)
+		}
+		if want := bigOut[:agentSnippetRunes] + "…"; tool.Output != want {
+			t.Errorf("output = %d runes, want the first %d plus …", len([]rune(tool.Output)), agentSnippetRunes)
 		}
 	}
 	if !found {
-		t.Fatalf("toolu_full missing from /agents payload")
+		t.Fatalf("toolu_full missing from the story")
 	}
 }
 
@@ -187,34 +174,22 @@ func turnFixtureServer(t *testing.T) (*Server, string, string) {
 	return newTestServer(t, dir), bigThink, bigText
 }
 
-// The /agents payload ships a capped snippet; /agents/full?turn= reads the
+// The story ships a capped snippet; /agents/full?turn= reads the
 // untruncated thinking/text back from disk.
 func TestAPIAgentsFull_TurnReturnsUntruncated(t *testing.T) {
 	srv, bigThink, bigText := turnFixtureServer(t)
 
-	// The list payload carries only the bounded snippet, keyed by the step uuid.
-	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("agents status = %d, want 200; body=%s", w.Code, w.Body.String())
+	// The story carries only the bounded snippet, keyed by the step uuid.
+	var steps []struct {
+		UUID     string `json:"uuid"`
+		Thinking string `json:"thinking"`
+		Text     string `json:"text"`
 	}
-	var graph struct {
-		Sessions []struct {
-			Main struct {
-				Steps []struct {
-					UUID     string `json:"uuid"`
-					Thinking string `json:"thinking"`
-					Text     string `json:"text"`
-				} `json:"steps"`
-			} `json:"main"`
-		} `json:"sessions"`
+	decodeField(t, getStory(t, srv, "?scope=all&whole=1&session=s-think"), "steps", &steps)
+	if len(steps) != 1 {
+		t.Fatalf("want 1 step, got %+v", steps)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &graph); err != nil {
-		t.Fatalf("unmarshal agents: %v; body=%s", err, w.Body.String())
-	}
-	if len(graph.Sessions) != 1 || len(graph.Sessions[0].Main.Steps) != 1 {
-		t.Fatalf("want 1 session with 1 step, got %+v", graph)
-	}
-	step := graph.Sessions[0].Main.Steps[0]
+	step := steps[0]
 	if step.UUID != "turn-1" {
 		t.Errorf("step uuid = %q, want turn-1", step.UUID)
 	}
@@ -226,7 +201,7 @@ func TestAPIAgentsFull_TurnReturnsUntruncated(t *testing.T) {
 	}
 
 	// The full endpoint expands it.
-	w = doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session=s-think&turn=turn-1", nil)
+	w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session=s-think&turn=turn-1", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("full status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
@@ -239,5 +214,20 @@ func TestAPIAgentsFull_TurnReturnsUntruncated(t *testing.T) {
 	}
 	if got.Text != bigText {
 		t.Errorf("full Text len = %d, want %d (untruncated)", len(got.Text), len(bigText))
+	}
+}
+
+// TestAPIAgents_Unrouted: the whole-corpus /agents payload is gone — the
+// Sessions surface reads the index and one session's story instead — while
+// /agents/full under it still answers.
+func TestAPIAgents_Unrouted(t *testing.T) {
+	srv, _, _ := toolFixtureServer(t)
+	for _, target := range []string{"/_claudit/api/agents", "/_claudit/api/agents?scope=all", "/_claudit/api/agents/"} {
+		if w := doAPI(t, srv, http.MethodGet, target, nil); w.Code != http.StatusNotFound {
+			t.Errorf("GET %s: status = %d, want 404", target, w.Code)
+		}
+	}
+	if w := doAPI(t, srv, http.MethodGet, "/_claudit/api/agents/full?session=s-tool&tool=toolu_full", nil); w.Code != http.StatusOK {
+		t.Errorf("GET /agents/full: status = %d, want 200", w.Code)
 	}
 }

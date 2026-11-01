@@ -395,7 +395,6 @@ func TestAPISections_BadQuery(t *testing.T) {
 		"/_claudit/api/cost?hotspots=-1",
 		"/_claudit/api/cost?sessions=abc",
 		"/_claudit/api/cost?provider=gemini",
-		"/_claudit/api/agents?provider=gemini",
 	}
 	for _, target := range cases {
 		t.Run(target, func(t *testing.T) {

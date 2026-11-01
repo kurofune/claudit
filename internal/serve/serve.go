@@ -274,7 +274,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPathTrends, s.handleAPITrends)
 	s.mux.HandleFunc("GET "+apiPathAnomalies, s.handleAPIAnomalies)
 	s.mux.HandleFunc("POST "+apiPathTheme, s.handleAPITheme)
-	s.mux.HandleFunc("GET "+apiPathAgents, s.handleAPIAgents)
 	s.mux.HandleFunc("GET "+apiPathAgentsFull, s.handleAPIAgentsFull)
 	s.mux.HandleFunc("GET "+apiPathSessions, s.handleAPISessions)
 	s.mux.HandleFunc("GET "+apiPathSessionsStory, s.handleAPISessionsStory)

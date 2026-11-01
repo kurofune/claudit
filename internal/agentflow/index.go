@@ -64,7 +64,7 @@ type IndexOptions struct {
 }
 
 // BuildSessionIndex builds one row per session in the filtered window from
-// the same grouping BuildAgentGraph uses, without building steps.
+// the same grouping BuildSessionStory uses, without building steps.
 func BuildSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts IndexOptions) SessionIndex {
 	idx := SessionIndex{Sessions: []SessionIndexRow{}}
 	if snap == nil || len(snap.Turns) == 0 {

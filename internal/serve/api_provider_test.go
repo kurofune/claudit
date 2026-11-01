@@ -282,13 +282,13 @@ func TestAPISpend_ProviderIsolation(t *testing.T) {
 	}
 }
 
-// TestAPIAgents_ProviderFilter: ?provider narrows the Agents feed to that
-// provider's sessions, and each session names its provider.
-func TestAPIAgents_ProviderFilter(t *testing.T) {
+// TestAPISessions_ProviderFilter: ?provider narrows the session index to
+// that provider's sessions, and each row names its provider.
+func TestAPISessions_ProviderFilter(t *testing.T) {
 	srv := mixedProviderServer(t)
 	for _, pk := range []string{"", "claude-code", "codex"} {
 		t.Run("provider="+pk, func(t *testing.T) {
-			body := getSection(t, srv, "/_claudit/api/agents", pk)
+			body := getSection(t, srv, apiPathSessions, pk)
 			var sessions []struct {
 				SessionID string `json:"session_id"`
 				Provider  string `json:"provider"`
@@ -385,24 +385,18 @@ func TestAPITools_CodexShellFoldsIntoBash(t *testing.T) {
 	}
 }
 
-// TestAPIAgents_CodexShellKindExec: under ?provider=codex the Agents feed
-// names a Codex shell call Bash with kind exec, and list_agents other.
-func TestAPIAgents_CodexShellKindExec(t *testing.T) {
+// TestStory_CodexShellKindExec: a Codex session's story names a Codex shell
+// call Bash with kind exec, and list_agents other.
+func TestStory_CodexShellKindExec(t *testing.T) {
 	srv := mixedProviderServer(t)
 	var sessions []struct {
-		Main struct {
-			Steps []struct {
-				Tools []struct{ ID, Name, Kind string }
-			}
-		}
+		SessionID string `json:"session_id"`
 	}
-	decodeField(t, getSection(t, srv, "/_claudit/api/agents", "codex"), "sessions", &sessions)
+	decodeField(t, getSection(t, srv, apiPathSessions, "codex"), "sessions", &sessions)
 	got := map[string][2]string{}
 	for _, s := range sessions {
-		for _, st := range s.Main.Steps {
-			for _, tool := range st.Tools {
-				got[tool.ID] = [2]string{tool.Name, tool.Kind}
-			}
+		for _, tool := range wholeStoryTools(t, srv, s.SessionID, "&provider=codex") {
+			got[tool.ID] = [2]string{tool.Name, tool.Kind}
 		}
 	}
 	for id, want := range map[string][2]string{

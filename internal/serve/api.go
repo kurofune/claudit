@@ -28,10 +28,8 @@ const (
 	apiPathTrends    = "/_claudit/api/trends"
 	apiPathAnomalies = "/_claudit/api/anomalies"
 	apiPathTheme     = "/_claudit/api/theme"
-	apiPathAgents    = "/_claudit/api/agents"
-	// apiPathAgentsFull sits under apiPathAgents but both are exact
-	// (non-subtree) patterns, so they're simply two distinct routes —
-	// no precedence interplay.
+	// apiPathAgentsFull reads one tool call's or turn's whole text back
+	// from disk for the story's "show full".
 	apiPathAgentsFull = "/_claudit/api/agents/full"
 	// apiPathSessions is the Sessions list's index; apiPathSessionsStory
 	// pages one session's story.
@@ -50,7 +48,6 @@ const (
 	apiSectionSubagents = "api-subagents"
 	apiSectionAnomalies = "api-anomalies"
 	apiSectionTrends    = "api-trends"
-	apiSectionAgents    = "api-agents"
 	// apiSectionSessions and apiSectionSessionsStory label the Sessions
 	// index and story pages; each story page is its own cache entry since
 	// session/prompt/offset are part of the canonical query.

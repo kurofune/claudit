@@ -18,8 +18,9 @@ const StoryPageTurns = 200
 
 // StoryOptions tunes the story. Zero values are sensible defaults.
 type StoryOptions struct {
-	// SnippetRunes caps each tool call's input and output, as
-	// Options.SnippetRunes does; 0 keeps the parse-time snippet whole.
+	// SnippetRunes caps each tool call's input and output to this many
+	// runes, ending a cut one with "…"; 0 keeps the parse-time snippet
+	// whole.
 	SnippetRunes int
 	// Replays is the snapshot's aggregate.BuildReplaySet when the caller
 	// already holds it; nil builds it.
@@ -136,8 +137,8 @@ type StoryPage struct {
 	SourceFiles []string `json:"source_files"`
 }
 
-// BuildSessionStory assembles one session's story with the grouping
-// BuildAgentGraph uses. ok is false when the snapshot holds no turn of the
+// BuildSessionStory assembles one session's story from the snapshot's
+// sessions as collectSessions groups them. ok is false when the snapshot holds no turn of the
 // session at all; a session whose turns the filter all excluded is found,
 // with no prompts.
 func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, sessionID string, opts StoryOptions) (*SessionStory, bool) {
@@ -161,7 +162,7 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		return st, c.replays+c.outsideFilter > 0
 	}
 
-	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex), Options{EachCall: true})
+	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex))
 	for _, n := range s.nodes {
 		for _, r := range n.turns {
 			src := LogSource{File: r.t.SourceFile, Provider: r.t.Provider}

@@ -15,7 +15,10 @@ import (
 
 type storyToolWire struct {
 	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
 	Input     string `json:"input"`
+	Output    string `json:"output"`
 	InputKey  string `json:"input_key"`
 	InputFull string `json:"input_full"`
 	Status    string `json:"status"`

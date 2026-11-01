@@ -11,59 +11,31 @@ import (
 	"github.com/kurofune/claudit/internal/provider"
 )
 
-// agentActiveWindow is how recently an agent must have acted (relative to
-// wall-clock now) to be reported "running". Sized comfortably above the
-// serve poll interval so a live agent doesn't flicker to "done" between polls.
+// agentActiveWindow is how recently a session must have acted (relative to
+// wall-clock now) for the session index to mark it active. Sized
+// comfortably above the serve poll interval so a live session doesn't
+// flicker inactive between polls.
 const agentActiveWindow = 60 * time.Second
 
-// agentSnippetRunes caps each tool call's input and output in the /agents
-// payload. Over the real corpus (3,500 sessions) the 2000-rune parse snippets
-// made the payload 329 MB and its JSON.parse alone took 900 ms; every lens
-// clips a snippet to at most 160 runes, and the drawer's "show full" reads the
-// untruncated text from /agents/full.
+// agentSnippetRunes caps each tool call's input and output in a story page.
+// Over the real corpus the 2000-rune parse snippets dominated the payload;
+// the story clips a snippet when it renders one, and its "show full" reads
+// the untruncated text from /agents/full.
 const agentSnippetRunes = 500
 
-// handleAPIAgents serves /_claudit/api/agents — the agent-observability tab's
-// data. Reconstructs the per-session agent tree (main + sub-agents) and each
-// agent's tool-call timeline straight from the snapshot. Reuses the shared
-// section machinery (ETag, cache, gzip, 304) via buildFromSnapshot, which
-// bypasses the Aggregator pass the other sections need.
-func (s *Server) handleAPIAgents(w http.ResponseWriter, r *http.Request) {
-	s.serveAPISection(w, r, apiSectionSpec{
-		section: apiSectionAgents,
-		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
-			// TopN honors the --sessions cap (set by applyDefaults). It
-			// defaults to 0 (no cap — every session in the window,
-			// recency-sorted); a positive --sessions bounds the view to the N
-			// most-recently-active sessions. A negative value (unset sentinel)
-			// is normalized to 0.
-			topN := q.SessionsTop
-			if topN < 0 {
-				topN = 0
-			}
-			return agentflow.BuildAgentGraph(snap, s.opts.Prices, q.Filter, agentflow.Options{
-				Now:          now,
-				ActiveWindow: agentActiveWindow,
-				TopN:         topN,
-				SnippetRunes: agentSnippetRunes,
-			})
-		},
-	})
-}
-
-// handleAPIAgentsFull serves /_claudit/api/agents/full — the drawer's "show
+// handleAPIAgentsFull serves /_claudit/api/agents/full — the story's "show
 // full" action. Two lookup modes, exactly one of which must be given:
 //
 //	?session=&tool=<tool_use id>  → UNTRUNCATED input/output for one tool_use
 //	?session=&turn=<turn uuid>    → UNTRUNCATED thinking/text for one turn
 //
-// Both read back from the session log on disk (the default /agents payload
-// caps thinking/text to 2000-rune snippets and tool input/output to
+// Both read back from the session log on disk (a story page caps
+// thinking/text to 2000-rune snippets and tool input/output to
 // agentSnippetRunes to stay lean); ?tool= reads it with the parser of the
 // provider that wrote the session.
 //
 // Serve-mode only: the static HTML report inlines no disk and never calls
-// this — its drawer falls back to the snippet. The source file is resolved
+// this — its story falls back to the snippet. The source file is resolved
 // from the trusted snapshot (matched by session + tool_use id / turn uuid),
 // never from a user-supplied path, so there is no path-traversal surface.
 func (s *Server) handleAPIAgentsFull(w http.ResponseWriter, r *http.Request) {

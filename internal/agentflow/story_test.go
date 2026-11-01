@@ -312,3 +312,56 @@ func TestSessionStory_LocateSubagentTurn(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildSessionStory_SnippetRunesCapsToolIO: SnippetRunes shortens each
+// tool call's input and output snippet to that many runes, marked with the
+// trailing ellipsis the story's "show full" keys on and the whole input
+// kept as input_full; shorter snippets pass untouched, and zero keeps the
+// parse-time snippet whole.
+func TestBuildSessionStory_SnippetRunesCapsToolIO(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	turn := mkTurn("a1", "s1", "/root/-p-x/s1.jsonl", t0)
+	longIn := strings.Repeat("é", 30)
+	longOut := strings.Repeat("o", 40)
+	turn.ToolUses = []parse.ToolUse{
+		{ID: "t1", Name: "Bash", Input: longIn},
+		{ID: "t2", Name: "Bash", Input: "ls"},
+	}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{turn},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", Content: longOut},
+			{ToolUseID: "t2", Content: "ok"},
+		},
+	}
+	tools := func(opts StoryOptions) []StoryTool {
+		st, ok := BuildSessionStory(snap, prices, aggregate.Filter{}, "s1", opts)
+		if !ok || len(st.steps) != 1 {
+			t.Fatalf("want one step of s1, got ok=%v", ok)
+		}
+		return st.steps[0].Tools
+	}
+
+	capped := tools(StoryOptions{SnippetRunes: 10})
+	if len(capped) != 2 {
+		t.Fatalf("want 2 tools, got %d", len(capped))
+	}
+	if want := strings.Repeat("é", 10) + "…"; capped[0].Input != want {
+		t.Errorf("capped input = %q, want %q", capped[0].Input, want)
+	}
+	if capped[0].InputFull != longIn {
+		t.Errorf("capped input_full = %q, want the whole input", capped[0].InputFull)
+	}
+	if want := strings.Repeat("o", 10) + "…"; capped[0].Output != want {
+		t.Errorf("capped output = %q, want %q", capped[0].Output, want)
+	}
+	if capped[1].Input != "ls" || capped[1].Output != "ok" {
+		t.Errorf("short snippets changed: %+v", capped[1])
+	}
+
+	whole := tools(StoryOptions{})
+	if whole[0].Input != longIn || whole[0].Output != longOut {
+		t.Errorf("SnippetRunes 0 cut the snippet: input %q output %q", whole[0].Input, whole[0].Output)
+	}
+}

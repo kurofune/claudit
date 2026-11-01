@@ -1,8 +1,8 @@
-// Package agentflow reconstructs the agent tree (a main session plus the
-// sub-agents it spawned) and each agent's tool-call timeline from an
-// already-parsed corpus snapshot. It powers the "Agents" observability tab
-// in `claudit serve`. The JSON shape emitted here is the stable contract the
-// frontend renders against — keep it decoupled from presentation.
+// Package agentflow reconstructs each session's agent tree (a main session
+// plus the sub-agents it spawned) and each agent's tool-call timeline from
+// an already-parsed corpus snapshot. It powers the Sessions surface of
+// `claudit serve`: the session index (BuildSessionIndex) and one session's
+// story (BuildSessionStory).
 package agentflow
 
 import (
@@ -18,14 +18,8 @@ import (
 	"github.com/kurofune/claudit/internal/project"
 )
 
-// AgentGraph is the top-level payload: every session in the (filtered)
-// corpus, each expanded into its agent tree.
-type AgentGraph struct {
-	Sessions []AgentSession `json:"sessions"`
-}
-
 // AgentSession is one session's agent tree: the main agent plus the
-// sub-agents it spawned. (Fields grow as tests drive them.)
+// sub-agents it spawned, as BuildSessionStory assembles it.
 type AgentSession struct {
 	SessionID string `json:"session_id"`
 	CWD       string `json:"cwd"`
@@ -52,8 +46,8 @@ type AgentSession struct {
 	// any further ordinary rollout sharing the session id (kind "main").
 	Children []AgentNode `json:"children"`
 	// Prompts segments the main agent's timeline by originating user prompt,
-	// in order, so the Conversation lens can interleave "what was asked" with
-	// the turns it produced. Each marker points at the first Main.Steps index
+	// in order, so the story can open each prompt on the turns it
+	// produced. Each marker points at the first Main.Steps index
 	// belonging to that prompt.
 	Prompts []PromptMarker `json:"prompts"`
 }
@@ -61,7 +55,7 @@ type AgentSession struct {
 // PromptMarker is one user prompt anchored to where its turns begin in the
 // main agent's step timeline. Text is the raw prompt body; UUID/Timestamp
 // come from the originating parse.UserMessage. An empty UUID marks a run of steps with no resolvable
-// originating prompt (orphan turns) — the lens renders no bubble for it.
+// originating prompt (orphan turns), which the story shows without prompt text.
 type PromptMarker struct {
 	UUID      string    `json:"uuid"`
 	Text      string    `json:"text"`
@@ -88,11 +82,6 @@ type AgentNode struct {
 	EndedAt         time.Time        `json:"ended_at"`
 	CostUSD         float64          `json:"cost_usd"`
 	Tokens          aggregate.Tokens `json:"tokens"`
-	// Status is "running" if the agent's last step is within opts.ActiveWindow
-	// of the newest turn in the snapshot, else "done". CurrentTool is the last
-	// tool the agent invoked, surfaced only while running.
-	Status      string `json:"status"`
-	CurrentTool string `json:"current_tool"`
 	// ErrorCount is the number of this agent's tool calls whose Status is
 	// "error" — a heat signal for "where did it go wrong" across the trace.
 	ErrorCount int         `json:"error_count"`
@@ -102,14 +91,14 @@ type AgentNode struct {
 // AgentStep is one assistant turn within an agent's timeline.
 type AgentStep struct {
 	// UUID is the turn's uuid (the first JSONL line of the coalesced message) —
-	// the key the drawer uses to fetch the untruncated thinking/text via
+	// the key the story uses to fetch the untruncated thinking/text via
 	// /_claudit/api/agents/full?turn=. Omitted for legacy lines without one.
 	UUID      string    `json:"uuid,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Model     string    `json:"model"`
 	CostUSD   float64   `json:"cost_usd"`
 	// Tokens is this turn's usage (counted once for a coalesced message), so the
-	// drawer can show per-turn input/output/cache without re-deriving it.
+	// story can show per-turn input/output/cache without re-deriving it.
 	Tokens aggregate.Tokens `json:"tokens"`
 	// ContextTokens is the prompt size fed to the model this turn —
 	// input_tokens + cache_read_tokens (the fresh prompt plus the cached prefix
@@ -135,31 +124,6 @@ type AgentStep struct {
 	// prompt segmentation can resolve each main step back to its originating
 	// user prompt after steps are sorted. Travels with the struct through sort.
 	parentUUID string
-}
-
-// Options tunes graph construction. Zero values are sensible defaults.
-type Options struct {
-	// Now is the reference instant for the liveness check (the caller passes
-	// wall-clock time). Using real "now" rather than the snapshot's newest turn
-	// is load-bearing: an idle or historical corpus must report every agent
-	// "done", not leave its last agent stuck "running" forever.
-	Now time.Time
-	// ActiveWindow marks an agent "running" when its last step falls within
-	// this duration of Now. Zero disables liveness — every agent is "done".
-	ActiveWindow time.Duration
-	// TopN caps the result to the N most-recently-active sessions (the
-	// --sessions cap) so a busy corpus doesn't ship thousands of sessions. Recency (not cost) so a running session is never
-	// capped out. 0 means unlimited. Survivors are returned newest-first.
-	TopN int
-	// SnippetRunes shortens every tool call's Input and Output snippet to
-	// this many runes, ending a cut one with "…". The snippets dominate the
-	// payload, and the browser's JSON.parse of it is the Agents repaint's
-	// cost; the drawer's "show full" reads the untruncated text from disk.
-	// 0 keeps the parse-time snippet whole.
-	SnippetRunes int
-	// EachCall keeps one tool row per call, as the session story lists them,
-	// instead of collapsing repeats of the same call into a counted row.
-	EachCall bool
 }
 
 // nodeAccum is the in-progress per-agent state during graph construction —
@@ -284,26 +248,9 @@ func collectSessions(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 	return c
 }
 
-// toolResults indexes a snapshot's tool results by tool_use id so each
-// step's tool calls can be joined to their outcome (status + output). Ids
-// are unique per session file so cross-file collision is not a concern in
-// practice.
-func toolResults(snap *corpus.Snapshot) map[string]parse.ToolResult {
-	results := make(map[string]parse.ToolResult, len(snap.ToolResults))
-	for _, r := range snap.ToolResults {
-		if r.ToolUseID != "" {
-			results[r.ToolUseID] = r
-		}
-	}
-	return results
-}
-
-// buildSteps turns an agent's counted turns into its AgentSteps.
-func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes int, eachCall bool) {
-	invocations := aggregate.DistinctToolInvocations
-	if eachCall {
-		invocations = aggregate.EachToolInvocation
-	}
+// buildSteps turns an agent's counted turns into its AgentSteps, one tool
+// row per call.
+func buildSteps(n *nodeAccum, results map[string]parse.ToolResult) {
 	n.steps = make([]AgentStep, 0, len(n.turns))
 	for _, r := range n.turns {
 		t := r.t
@@ -323,7 +270,7 @@ func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes 
 			Tokens:        stepTokens,
 			ContextTokens: stepTokens.InputTokens + stepTokens.CacheReadTokens,
 			GenMs:         genMs,
-			Tools:         capToolSnippets(invocations(t.ToolUses, results, t.Timestamp), snippetRunes),
+			Tools:         aggregate.EachToolInvocation(t.ToolUses, results, t.Timestamp),
 			Thinking:      t.Thinking,
 			Text:          t.Text,
 			parentUUID:    t.ParentUUID,
@@ -331,53 +278,9 @@ func buildSteps(n *nodeAccum, results map[string]parse.ToolResult, snippetRunes 
 	}
 }
 
-// BuildAgentGraph groups a snapshot's turns into per-session agent trees.
-func BuildAgentGraph(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts Options) (AgentGraph, error) {
-	if snap == nil || len(snap.Turns) == 0 {
-		return AgentGraph{}, nil
-	}
-	c := collectSessions(snap, prices, f, "", nil)
-	results := toolResults(snap)
-
-	// Resolver for prompt segmentation (the Conversation lens): maps each main
-	// step's parentUuid back to the user prompt that originated it. Built once
-	// over the whole snapshot; parentUuids are globally unique so cross-session
-	// lookups don't collide.
-	resolver := aggregate.NewPromptResolver(snap.Turns, snap.Users, snap.Links)
-
-	out := make([]AgentSession, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		out = append(out, assembleSession(s, results, resolverLookup{resolver}, opts))
-	}
-	// Cap to the N most-recently-active sessions before the display sort, so
-	// a busy corpus (thousands of sessions in the window) ships only what
-	// you're likely watching. Recency, not cost: a currently-running session
-	// is by definition recent, so — unlike the old cost cap — it's never
-	// dropped just because it hasn't spent much yet. EndedAt is the session's
-	// last turn, the best "did something lately" signal.
-	if opts.TopN > 0 && len(out) > opts.TopN {
-		sort.SliceStable(out, func(i, j int) bool {
-			if !out[i].EndedAt.Equal(out[j].EndedAt) {
-				return out[i].EndedAt.After(out[j].EndedAt)
-			}
-			return out[i].SessionID < out[j].SessionID
-		})
-		out = out[:opts.TopN]
-	}
-	// Deterministic session order: most recently active first, so a live (or
-	// the freshest) session leads the view. Tiebreak on SessionID.
-	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].EndedAt.Equal(out[j].EndedAt) {
-			return out[i].EndedAt.After(out[j].EndedAt)
-		}
-		return out[i].SessionID < out[j].SessionID
-	})
-	return AgentGraph{Sessions: out}, nil
-}
-
 // assembleSession finalizes one collected session into its agent tree:
 // steps, main agent, children in start order, spawn rollups and prompts.
-func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, prompts promptLookup, opts Options) AgentSession {
+func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, prompts promptLookup) AgentSession {
 	as := AgentSession{
 		SessionID:  s.sessionID,
 		CWD:        s.cwd,
@@ -387,7 +290,7 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, promp
 	}
 	var ordinary []*nodeAccum
 	for _, n := range s.nodes {
-		buildSteps(n, results, opts.SnippetRunes, opts.EachCall)
+		buildSteps(n, results)
 		// Roll node spans/cost up to the session.
 		if as.StartedAt.IsZero() || n.started.Before(as.StartedAt) {
 			as.StartedAt = n.started
@@ -400,7 +303,7 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, promp
 			ordinary = append(ordinary, n)
 			continue
 		}
-		node := finalizeNode(n, opts)
+		node := finalizeNode(n)
 		as.ErrorCount += node.ErrorCount
 		as.Children = append(as.Children, node)
 	}
@@ -410,7 +313,7 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, promp
 	// session cost sums is displayed.
 	sortMainFirst(ordinary, s.sessionID)
 	for i, n := range ordinary {
-		node := finalizeNode(n, opts)
+		node := finalizeNode(n)
 		as.ErrorCount += node.ErrorCount
 		if i == 0 {
 			as.Main = &node
@@ -418,27 +321,14 @@ func assembleSession(s *sessionAccum, results map[string]parse.ToolResult, promp
 			as.Children = append(as.Children, node)
 		}
 	}
-	// Children ordered by start time so the swimlane reads left-to-right
-	// in spawn order; map iteration above is non-deterministic.
+	// Children ordered by start time so the story lists them in spawn
+	// order; map iteration above is non-deterministic.
 	sort.SliceStable(as.Children, func(i, j int) bool {
 		return as.Children[i].StartedAt.Before(as.Children[j].StartedAt)
 	})
 	attachSpawnRollups(&as)
 	as.Prompts = segmentPrompts(as.Main, prompts)
 	return as
-}
-
-// capToolSnippets applies Options.SnippetRunes to a step's freshly built
-// tool calls in place.
-func capToolSnippets(tools []aggregate.ToolInvocation, max int) []aggregate.ToolInvocation {
-	if max <= 0 {
-		return tools
-	}
-	for i := range tools {
-		tools[i].Input = truncateRunes(tools[i].Input, max)
-		tools[i].Output = truncateRunes(tools[i].Output, max)
-	}
-	return tools
 }
 
 // truncateRunes shortens s to at most max runes, appending "…" when it cut.
@@ -509,9 +399,9 @@ func threadRoots(snap *corpus.Snapshot) map[string]string {
 }
 
 // finalizeNode turns an accumulator into a presentable AgentNode: it orders
-// the steps chronologically, computes inter-step durations, derives liveness
-// against the snapshot's newest turn, and resolves sub-agent meta from disk.
-func finalizeNode(n *nodeAccum, opts Options) AgentNode {
+// the steps chronologically, computes inter-step durations, counts errored
+// calls and resolves sub-agent meta from disk.
+func finalizeNode(n *nodeAccum) AgentNode {
 	// Order steps chronologically (JSONL is usually already ordered, but a
 	// defensive sort is cheap) before computing inter-step gaps.
 	sort.SliceStable(n.steps, func(i, j int) bool {
@@ -536,15 +426,8 @@ func finalizeNode(n *nodeAccum, opts Options) AgentNode {
 		EndedAt:    n.ended,
 		CostUSD:    n.cost,
 		Tokens:     n.tokens,
-		Status:     "done",
 		ErrorCount: errorCount,
 		Steps:      n.steps,
-	}
-	// Liveness: an agent whose last step is within ActiveWindow of Now is
-	// still "running"; surface its most recent tool as the current activity.
-	if opts.ActiveWindow > 0 && !n.ended.Before(opts.Now.Add(-opts.ActiveWindow)) {
-		node.Status = "running"
-		node.CurrentTool = lastToolName(n.steps)
 	}
 	if n.subagent {
 		node.Kind = "subagent"
@@ -646,17 +529,6 @@ type resolverLookup struct{ r *aggregate.PromptResolver }
 func (l resolverLookup) promptOf(step *AgentStep) string { return l.r.Resolve(step.parentUUID) }
 func (l resolverLookup) text(uuid string) string         { return l.r.Text(uuid) }
 func (l resolverLookup) timestamp(uuid string) time.Time { return l.r.Timestamp(uuid) }
-
-// lastToolName returns the name of the last tool invoked in an agent's most
-// recent step, or "" if the latest step ran no tools (a text-only turn).
-func lastToolName(steps []AgentStep) string {
-	for i := len(steps) - 1; i >= 0; i-- {
-		if tools := steps[i].Tools; len(tools) > 0 {
-			return tools[len(tools)-1].Name
-		}
-	}
-	return ""
-}
 
 // addUsage accumulates a turn's usage into a Tokens tuple. Local mirror of
 // aggregate's unexported addUsage — same fields, exported here so agentflow

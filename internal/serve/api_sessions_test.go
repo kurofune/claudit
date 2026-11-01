@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,9 +104,9 @@ func TestAPISessions_IndexRows(t *testing.T) {
 	}
 }
 
-// TestAPISessions_FiltersNarrowLikeAgents: ?since/?until/?project/?provider
-// narrow the index to exactly the sessions /agents shows.
-func TestAPISessions_FiltersNarrowLikeAgents(t *testing.T) {
+// TestAPISessions_FiltersNarrow: ?since/?until/?project/?provider narrow
+// the index to the sessions with a turn inside them.
+func TestAPISessions_FiltersNarrow(t *testing.T) {
 	dir := fixtureCorpus(t)
 	later := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	writeJSONL(t, filepath.Join(dir, "s-gamma.jsonl"),
@@ -127,24 +128,8 @@ func TestAPISessions_FiltersNarrowLikeAgents(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := sessionIDs(getSessions(t, srv, c.query), func(r indexRowWire) string { return r.SessionID })
-		w := doAPI(t, srv, http.MethodGet, apiPathAgents+c.query, nil)
-		var agents struct {
-			Sessions []struct {
-				SessionID string `json:"session_id"`
-			} `json:"sessions"`
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &agents); err != nil {
-			t.Fatalf("agents%s: %v", c.query, err)
-		}
-		fromAgents := make([]string, 0, len(agents.Sessions))
-		for _, s := range agents.Sessions {
-			fromAgents = append(fromAgents, s.SessionID)
-		}
 		if strings.Join(got, ",") != strings.Join(c.want, ",") {
 			t.Errorf("sessions%s = %v, want %v", c.query, got, c.want)
-		}
-		if strings.Join(got, ",") != strings.Join(fromAgents, ",") {
-			t.Errorf("sessions%s = %v, /agents shows %v", c.query, got, fromAgents)
 		}
 	}
 }
@@ -257,6 +242,31 @@ func getStory(t *testing.T, srv *Server, query string) map[string]json.RawMessag
 		t.Fatalf("GET story%s: status %d; body=%s", query, w.Code, w.Body.String())
 	}
 	return readJSONResponse(t, w)
+}
+
+// wholeStoryTools lists every tool call — the main agent's and its
+// sub-agents' — of sessionID's whole story under the extra query
+// ("&provider=codex", or "").
+func wholeStoryTools(t *testing.T, srv *Server, sessionID, extra string) []storyToolWire {
+	t.Helper()
+	body := getStory(t, srv, "?scope=all&whole=1&session="+url.QueryEscape(sessionID)+extra)
+	type stepWire struct{ Tools []storyToolWire }
+	var steps []stepWire
+	var children []struct{ Steps []stepWire }
+	if err := json.Unmarshal(body["steps"], &steps); err != nil {
+		t.Fatalf("story steps: %v", err)
+	}
+	if err := json.Unmarshal(body["children"], &children); err != nil {
+		t.Fatalf("story children: %v", err)
+	}
+	var out []storyToolWire
+	for _, c := range children {
+		steps = append(steps, c.Steps...)
+	}
+	for _, st := range steps {
+		out = append(out, st.Tools...)
+	}
+	return out
 }
 
 func keysOf(t *testing.T, raw json.RawMessage) string {
