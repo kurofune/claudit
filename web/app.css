@@ -443,13 +443,11 @@
     .view, .nav-item, .nav-item::before { transition: none; }
   }
 
-  /* View header — view-level h1 with a thin meta line. The view's first
-     h2 sits below this, no chapter-rule (the view-head already separates). */
+  /* View header — the view-level h1. The view's first h2 sits below
+     this, no chapter-rule (the view-head already separates). */
   .view-head { display: flex; align-items: baseline; gap: var(--s-3);
                margin-bottom: var(--s-3); }
   .view-head h1 { margin: 0; }
-  .view-head .meta { color: var(--muted); font-size: var(--t-2);
-                     font-variant-numeric: tabular-nums; }
 
   /* Sub-tabs within a view (Spend/Tools/Agents). One row of
      anchor-tabs with an underline on the active item. Hash route is
