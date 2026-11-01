@@ -406,6 +406,55 @@ func TestBuildOverview_HotspotTrend(t *testing.T) {
 	}
 }
 
+// TestBuildOverview_HotspotExampleProvider: every hotspot example in the
+// Overview JSON names the provider whose session it came from.
+func TestBuildOverview_HotspotExampleProvider(t *testing.T) {
+	prices, err := pricing.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	a := aggregate.New(prices)
+	addContextPattern(a, "claude.jsonl", "go test", 200_000, t0)
+	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-a", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0, SourceFile: "cx.jsonl",
+		ToolUses: []parse.ToolUse{{ID: "cx-tu", Name: "exec_command", Detail: "rg", Input: "rg x"}}})
+	a.Add(parse.Turn{SessionID: "cx", MessageID: "cx-b", Provider: parse.ProviderCodex, Model: "gpt-6-astra", Timestamp: t0.Add(time.Second), SourceFile: "cx.jsonl",
+		Usage: parse.Usage{CacheCreate5mTokens: 200_000}})
+	a.AddToolResults([]parse.ToolResult{{ToolUseID: "cx-tu", OutputBytes: 100}})
+
+	raw, err := json.Marshal(BuildOverview(a, nil).Hotspots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hs []struct {
+		Title    string
+		Examples []map[string]any `json:"examples"`
+	}
+	if err := json.Unmarshal(raw, &hs); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"Bash: `go test`": "claude-code", "exec_command: `rg`": "codex"}
+	seen := 0
+	for _, h := range hs {
+		p, ok := want[h.Title]
+		if !ok {
+			continue
+		}
+		seen++
+		if len(h.Examples) == 0 {
+			t.Errorf("%s: no examples", h.Title)
+		}
+		for _, e := range h.Examples {
+			if e["provider"] != p {
+				t.Errorf("%s example provider = %v, want %q in %s", h.Title, e["provider"], p, raw)
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("saw %d of %v in %s", seen, want, raw)
+	}
+}
+
 // TestBuildOverview_CacheWriteTrendAcrossThreshold: a session under the
 // repeated-cache-write floor in the previous window still supplies that
 // window's cost, so crossing the floor reads as a rise, not "new".

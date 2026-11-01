@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/pricing"
 )
 
 // ContextCost is what the bytes a tool result put into context went on to
@@ -143,7 +144,7 @@ func (a *Aggregator) recordContextTurn(t parse.Turn) {
 		sessionID: t.SessionID,
 		ts:        t.Timestamp,
 		endTS:     t.EndTimestamp,
-		provider:  t.Provider,
+		provider:  pricing.PriceProvider(t.Provider),
 		model:     t.Model,
 		usage:     t.Usage,
 		toolUses:  t.ToolUses,
