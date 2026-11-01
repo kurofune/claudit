@@ -140,3 +140,63 @@ func TestBuildAssetManifest_HashChangesWithContent(t *testing.T) {
 		t.Errorf("hash unchanged across different contents: %q", m1.bySourceName["app.js"].hash)
 	}
 }
+
+// TestBuildAssetManifest_UpgradeRotatesDependents is the upgrade
+// regression: a release that changes only a dependency (router.js, a
+// stylesheet) while index.html and app.js stay byte-identical must still
+// rotate the shell's ETag and app.js's hashed URL. Otherwise a returning
+// browser gets 304 for the old shell, reuses the immutable app.<hash>.js
+// that imports the old router URL, and either runs stale routing or 404s
+// once that URL is evicted.
+func TestBuildAssetManifest_UpgradeRotatesDependents(t *testing.T) {
+	shell := []byte(`<link href="{{asset "app.css"}}"><script type="module" src="{{asset "app.js"}}"></script>`)
+	app := []byte(`import { route } from './router.js';
+import './util.js';
+route();`)
+	util := []byte(`import './app.js'; export const u = 1;`)
+	build := func(router, css string) *assetManifest {
+		t.Helper()
+		m, err := buildAssetManifest(fstest.MapFS{
+			"web/index.html": &fstest.MapFile{Data: shell},
+			"web/app.js":     &fstest.MapFile{Data: app},
+			"web/util.js":    &fstest.MapFile{Data: util},
+			"web/router.js":  &fstest.MapFile{Data: []byte(router)},
+			"web/app.css":    &fstest.MapFile{Data: []byte(css)},
+			"web/other.js":   &fstest.MapFile{Data: []byte(`export const o = 1;`)},
+		}, "web")
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		return m
+	}
+	before := build(`export function route() { return 'old'; }`, `.a{}`)
+	afterRouter := build(`export function route() { return 'new'; }`, `.a{}`)
+	afterCSS := build(`export function route() { return 'old'; }`, `.b{}`)
+
+	for _, name := range []string{"index.html", "app.js", "util.js", "router.js"} {
+		if before.bySourceName[name].hash == afterRouter.bySourceName[name].hash {
+			t.Errorf("router.js changed but %s hash stayed %q", name, before.bySourceName[name].hash)
+		}
+	}
+	if before.bySourceName["index.html"].hash == afterCSS.bySourceName["index.html"].hash {
+		t.Errorf("app.css changed but index.html hash stayed %q", before.bySourceName["index.html"].hash)
+	}
+	if before.bySourceName["app.js"].hash != afterCSS.bySourceName["app.js"].hash {
+		t.Errorf("app.js does not depend on app.css, yet its hash rotated")
+	}
+	if before.bySourceName["other.js"].hash != afterRouter.bySourceName["other.js"].hash {
+		t.Errorf("other.js is outside router.js's dependents, yet its hash rotated")
+	}
+
+	newRouter := afterRouter.bySourceName["router.js"].hashedName
+	if !strings.Contains(string(afterRouter.bySourceName["app.js"].body), "./"+newRouter) {
+		t.Errorf("upgraded app.js does not import %s:\n%s", newRouter, afterRouter.bySourceName["app.js"].body)
+	}
+	newApp := afterRouter.bySourceName["app.js"].hashedName
+	if !strings.Contains(string(afterRouter.bySourceName["index.html"].body), "/_claudit/web/"+newApp) {
+		t.Errorf("upgraded shell does not reference %s", newApp)
+	}
+	if _, ok := afterRouter.byHashedName[before.bySourceName["app.js"].hashedName]; ok {
+		t.Errorf("upgraded manifest still serves the pre-upgrade app.js URL")
+	}
+}

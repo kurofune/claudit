@@ -40,7 +40,8 @@ const appPath = "/app"
 // substituted with the hashed sibling names — at request time the
 // handler just writes the bytes.
 //
-// hash is the first 8 hex chars of sha256(original-source-bytes). It
+// hash is the first 8 hex chars of closureHash: sha256 over the raw
+// source of the file and everything it transitively references. It
 // drives both the served URL (/_claudit/web/<base>.<hash>.<ext>) and the
 // import-rewrite step below. Picking 8 chars (32 bits of collision
 // resistance) is plenty for a self-served single-binary app — the
@@ -80,17 +81,19 @@ var importRewriteRE = regexp.MustCompile(`(from|import)(\s+)(['"])\./([a-zA-Z0-9
 // reach into an arbitrary directory.
 var assetPlaceholderRE = regexp.MustCompile(`\{\{\s*asset\s+"([a-zA-Z0-9_.-]+)"\s*\}\}`)
 
-// buildAssetManifest walks fsys under root, hashes each file's
-// contents, and rewrites JS imports + HTML asset placeholders so the
-// final served bytes refer to the hashed sibling names.
+// buildAssetManifest walks fsys under root, hashes each file over its
+// dependency closure, and rewrites JS imports + HTML asset placeholders
+// so the final served bytes refer to the hashed sibling names.
 //
 // Two-pass on purpose:
-//  1. First pass: read every file, compute hash on the *raw* source.
-//     The hash drives both the served URL and the rewriter's
-//     substitutions in pass 2 — and it must reflect the source the
-//     user authored, not the post-rewrite output (which would create a
-//     hash-depends-on-hash circular dependency the second a file
-//     references itself or a tight import cycle).
+//  1. First pass: read every file and its direct sibling references
+//     (JS imports, HTML {{asset}} placeholders). A file's hash is
+//     sha256 over the raw source of every file in its transitive
+//     closure, so a change to router.js rotates app.js's URL and the
+//     shell's ETag even when those two files are byte-identical — an
+//     immutable app.<hash>.js must never import a stale dependency URL.
+//     Hashing raw source (not post-rewrite output) keeps import cycles
+//     from making a hash depend on itself; the closure is a set.
 //  2. Second pass: walk the same files, run the regex substitution
 //     against now-known hashed names from pass 1, and stash the
 //     resulting body bytes plus content-type on each entry.
@@ -98,7 +101,7 @@ var assetPlaceholderRE = regexp.MustCompile(`\{\{\s*asset\s+"([a-zA-Z0-9_.-]+)"\
 // Errors from the FS bubble up so a missing file during init fails
 // loudly at server start rather than at first request.
 func buildAssetManifest(fsys fs.FS, root string) (*assetManifest, error) {
-	// Pass 1: collect raw bytes + hash.
+	// Pass 1: collect raw bytes, then hash each file's closure.
 	rawByName := make(map[string][]byte)
 	hashByName := make(map[string]string)
 	if err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
@@ -115,11 +118,12 @@ func buildAssetManifest(fsys fs.FS, root string) (*assetManifest, error) {
 		// Source name = path relative to root (e.g. "web/app.js" → "app.js").
 		name := strings.TrimPrefix(p, root+"/")
 		rawByName[name] = data
-		sum := sha256.Sum256(data)
-		hashByName[name] = hex.EncodeToString(sum[:])[:8]
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("walk assets: %w", err)
+	}
+	for name := range rawByName {
+		hashByName[name] = closureHash(name, rawByName)
 	}
 
 	// Stable iteration order so deterministic logging / errors don't
@@ -295,4 +299,59 @@ func contentTypeForExt(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// assetDeps returns the sibling asset names a file references directly:
+// rewritable JS imports for .js, {{asset}} placeholders for .html. Names
+// absent from the tree are dropped — the rewrite pass leaves those
+// references alone, so they cannot affect any served URL.
+func assetDeps(name string, raw map[string][]byte) []string {
+	var deps []string
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js":
+		for _, sub := range importRewriteRE.FindAllSubmatch(raw[name], -1) {
+			deps = append(deps, string(sub[4])+"."+string(sub[5]))
+		}
+	case ".html":
+		for _, sub := range assetPlaceholderRE.FindAllSubmatch(raw[name], -1) {
+			deps = append(deps, string(sub[1]))
+		}
+	}
+	out := deps[:0]
+	for _, d := range deps {
+		if _, ok := raw[d]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// closureHash is the first 8 hex chars of sha256 over every file
+// reachable from name (itself included), in sorted name order, each
+// framed by its name and length so no two closures collide by
+// concatenation.
+func closureHash(name string, raw map[string][]byte) string {
+	seen := map[string]bool{name: true}
+	stack := []string{name}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, d := range assetDeps(cur, raw) {
+			if !seen[d] {
+				seen[d] = true
+				stack = append(stack, d)
+			}
+		}
+	}
+	members := make([]string, 0, len(seen))
+	for n := range seen {
+		members = append(members, n)
+	}
+	sort.Strings(members)
+	h := sha256.New()
+	for _, n := range members {
+		fmt.Fprintf(h, "%s\x00%d\x00", n, len(raw[n]))
+		h.Write(raw[n])
+	}
+	return hex.EncodeToString(h.Sum(nil))[:8]
 }
