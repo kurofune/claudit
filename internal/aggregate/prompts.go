@@ -3,6 +3,7 @@ package aggregate
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
 )
@@ -147,7 +148,78 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 		idx.turnToEntry[t.UUID] = entry
 		cache[t.UUID] = entry
 	}
+	attributeSubagents(idx, turns, msgs, extraLinks)
 	return idx
+}
+
+// attributeSubagents resolves the turns of a subagent thread that reach no
+// prompt of their own — a Codex subagent rollout carries only injected user
+// messages — to the parent thread's latest prompt at or before the
+// subagent's first turn, climbing through parents that are subagents too.
+// A thread's parent is a ParentLink keyed by its SessionID.
+func attributeSubagents(idx *PromptIndex, turns []parse.Turn, msgs []parse.UserMessage, extraLinks [][]parse.ParentLink) {
+	start := map[string]time.Time{}
+	orphaned := false
+	for _, t := range turns {
+		if s, ok := start[t.SessionID]; !ok || t.Timestamp.Before(s) {
+			start[t.SessionID] = t.Timestamp
+		}
+		if idx.turnToEntry[t.UUID].UserUUID == "" {
+			orphaned = true
+		}
+	}
+	if !orphaned {
+		return
+	}
+	parentThread := map[string]string{}
+	for _, links := range extraLinks {
+		for _, l := range links {
+			if _, isThread := start[l.UUID]; isThread && l.ParentUUID != "" {
+				if _, exists := parentThread[l.UUID]; !exists {
+					parentThread[l.UUID] = l.ParentUUID
+				}
+			}
+		}
+	}
+	if len(parentThread) == 0 {
+		return
+	}
+	prompts := map[string][]parse.UserMessage{}
+	for _, m := range msgs {
+		prompts[m.SessionID] = append(prompts[m.SessionID], m)
+	}
+	for _, ms := range prompts {
+		sort.SliceStable(ms, func(i, j int) bool { return ms[i].Timestamp.Before(ms[j].Timestamp) })
+	}
+	resolved := map[string]promptIndexEntry{}
+	threadEntry := func(thread string) promptIndexEntry {
+		if e, ok := resolved[thread]; ok {
+			return e
+		}
+		at := start[thread]
+		found := promptIndexEntry{Key: noPromptKey}
+		seen := map[string]bool{thread: true}
+		for p := parentThread[thread]; p != "" && !seen[p]; p = parentThread[p] {
+			seen[p] = true
+			ms := prompts[p]
+			i := sort.Search(len(ms), func(i int) bool { return ms[i].Timestamp.After(at) })
+			if i > 0 {
+				m := ms[i-1]
+				found = promptIndexEntry{Key: normalizePromptKey(m.Text), Sample: m.Text, UserUUID: m.UUID}
+				break
+			}
+		}
+		resolved[thread] = found
+		return found
+	}
+	for _, t := range turns {
+		if idx.turnToEntry[t.UUID].UserUUID != "" {
+			continue
+		}
+		if _, ok := parentThread[t.SessionID]; ok {
+			idx.turnToEntry[t.UUID] = threadEntry(t.SessionID)
+		}
+	}
 }
 
 // Lookup returns the originating prompt key + sample for a turn. Falls

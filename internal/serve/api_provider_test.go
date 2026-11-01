@@ -198,11 +198,16 @@ func TestAPICost_ProviderFilter(t *testing.T) {
 // TestAPISpend_ProviderIsolation: the Subagents, Skills and Prompts tabs
 // each carry exactly the rows of the providers in scope. Claude Code owns
 // the four typed prompts, the deploy skill and four main turns; Codex owns
-// the "(no prompt)" row across its four sessions, five main turns and the
-// one sidechain turn. An unfiltered section fails every single-provider case.
+// basic.jsonl's real prompt, the "(no prompt)" row across its three sessions
+// without one (tools, guardian, and the subagent whose parent is absent),
+// five main turns and the one sidechain turn. An unfiltered section fails
+// every single-provider case.
 func TestAPISpend_ProviderIsolation(t *testing.T) {
 	srv := mixedProviderServer(t)
 	claudePrompts := []string{"deploy it", "fix the login bug", "now write a test", "refactor the cache"}
+	codexPrompts := []string{"(no prompt)", "read the readme and summarize it. (replaced)"}
+	allPrompts := append(append([]string{}, claudePrompts...), codexPrompts...)
+	sort.Strings(allPrompts)
 	cases := []struct {
 		provider        string
 		mainTurns       int
@@ -212,10 +217,9 @@ func TestAPISpend_ProviderIsolation(t *testing.T) {
 		prompts         []string
 		noPromptSession int
 	}{
-		{"", 9, 1, []string{"sidechain — unknown subagent"}, []string{"skill:deploy"},
-			append([]string{"(no prompt)"}, claudePrompts...), 4},
+		{"", 9, 1, []string{"sidechain — unknown subagent"}, []string{"skill:deploy"}, allPrompts, 3},
 		{"claude-code", 4, 0, []string{}, []string{"skill:deploy"}, claudePrompts, 0},
-		{"codex", 5, 1, []string{"sidechain — unknown subagent"}, []string{}, []string{"(no prompt)"}, 4},
+		{"codex", 5, 1, []string{"sidechain — unknown subagent"}, []string{}, codexPrompts, 3},
 	}
 	for _, c := range cases {
 		t.Run("provider="+c.provider, func(t *testing.T) {

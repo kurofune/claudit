@@ -1,10 +1,14 @@
 package aggregate
 
 import (
+	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -189,5 +193,152 @@ func TestAggregator_ByPrompt_WithoutIndex(t *testing.T) {
 	agg.Add(chainTurn("a1", "u1", "s1", t0))
 	if got := agg.ByPrompt(); len(got) != 0 {
 		t.Errorf("expected empty without index, got %d rows", len(got))
+	}
+}
+
+// parseCodexFixtures runs codex.ParseFile over the named rollout fixtures and
+// merges what they yield, as the corpus does.
+func parseCodexFixtures(t *testing.T, names ...string) parse.Result {
+	t.Helper()
+	var out parse.Result
+	for _, name := range names {
+		path := filepath.Join("..", "parse", "codex", "testdata", name)
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := codex.ParseFile(f, path)
+		_ = f.Close()
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v", name, err)
+		}
+		out.Turns = append(out.Turns, res.Turns...)
+		out.UserMessages = append(out.UserMessages, res.UserMessages...)
+		out.ParentLinks = append(out.ParentLinks, res.ParentLinks...)
+	}
+	return out
+}
+
+// TestPromptIndex_CodexRollout: a Codex turn resolves to the real prompt
+// before it, a turn before any real prompt to "(no prompt)", and ByPrompt
+// puts each prompt's turns' cost under its Sample.
+func TestPromptIndex_CodexRollout(t *testing.T) {
+	res := parseCodexFixtures(t, "prompts.jsonl")
+	if len(res.Turns) != 4 {
+		t.Fatalf("turns = %d, want 4", len(res.Turns))
+	}
+	idx := BuildPromptIndex(res.Turns, res.UserMessages, res.ParentLinks)
+	want := []string{noPromptKey, "fix the login bug", "fix the login bug", "now add a regression test"}
+	for i, tr := range res.Turns {
+		if got := idx.Lookup(tr.UUID).Key; got != want[i] {
+			t.Errorf("turn %d key = %q, want %q", i, got, want[i])
+		}
+	}
+
+	prices, _ := pricing.LoadDefault()
+	agg := New(prices).WithPromptIndex(idx)
+	login := New(prices)
+	for i, tr := range res.Turns {
+		agg.Add(tr)
+		if want[i] == "fix the login bug" {
+			login.Add(tr)
+		}
+	}
+	wantCost := login.Totals().CostUSD
+	if wantCost <= 0 {
+		t.Fatalf("login turns cost %v; the fixture model must be priced", wantCost)
+	}
+	var row *PromptBucket
+	rows := agg.ByPrompt()
+	for i := range rows {
+		if rows[i].Key == "fix the login bug" {
+			row = &rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("no \"fix the login bug\" row in %+v", rows)
+	}
+	if row.Sample != "fix the login bug" || row.TurnCount != 2 || row.Invocations != 1 || row.Sessions != 1 {
+		t.Errorf("login row = %+v, want Sample \"fix the login bug\", 2 turns, 1 invocation, 1 session", *row)
+	}
+	if math.Abs(row.CostUSD-wantCost) > 1e-9 {
+		t.Errorf("login row cost = %v, want the two turns' %v", row.CostUSD, wantCost)
+	}
+}
+
+// TestPromptIndex_CodexSubagentAttributesToParentPrompt: a subagent rollout
+// carries only injected user messages, so its turns resolve to the parent
+// thread's latest real prompt at or before the subagent's first turn; with
+// the parent missing from the corpus they stay "(no prompt)".
+func TestPromptIndex_CodexSubagentAttributesToParentPrompt(t *testing.T) {
+	const subagent = "01a19217-0c60-71a2-ab13-917397bf7ed1"
+	withParent := parseCodexFixtures(t, "subagent.jsonl", "parent.jsonl")
+	idx := BuildPromptIndex(withParent.Turns, withParent.UserMessages, withParent.ParentLinks)
+	var subTurns int
+	for _, tr := range withParent.Turns {
+		if tr.SessionID != subagent {
+			continue
+		}
+		subTurns++
+		got := idx.Lookup(tr.UUID)
+		if got.Key != "spawn an auditor for the release evidence" || got.UserUUID == "" {
+			t.Errorf("subagent turn %s = %+v, want the parent's 13:12:20 prompt", tr.UUID, got)
+		}
+	}
+	if subTurns == 0 {
+		t.Fatal("no subagent turns parsed")
+	}
+	parentKeys := map[string]bool{}
+	for _, tr := range withParent.Turns {
+		if tr.SessionID != subagent {
+			parentKeys[idx.Lookup(tr.UUID).Key] = true
+		}
+	}
+	for _, k := range []string{"summarize the open release blockers", "spawn an auditor for the release evidence", "ship it"} {
+		if !parentKeys[k] {
+			t.Errorf("parent keys = %v, missing %q", parentKeys, k)
+		}
+	}
+
+	alone := parseCodexFixtures(t, "subagent.jsonl")
+	idx = BuildPromptIndex(alone.Turns, alone.UserMessages, alone.ParentLinks)
+	for _, tr := range alone.Turns {
+		if got := idx.Lookup(tr.UUID).Key; got != noPromptKey {
+			t.Errorf("orphan subagent turn key = %q, want %q", got, noPromptKey)
+		}
+	}
+}
+
+// TestPromptIndex_SubagentSessionFallback: the fallback uses the subagent's
+// first turn, climbs through a parent thread that is itself a subagent, and
+// leaves a turn alone when the parent had no prompt yet.
+func TestPromptIndex_SubagentSessionFallback(t *testing.T) {
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	users := []parse.UserMessage{
+		chainUser("p:u1", "", "p", "first ask", t0),
+		chainUser("p:u2", "", "p", "second ask", t0.Add(10*time.Minute)),
+	}
+	turns := []parse.Turn{
+		chainTurn("p-1", "p:u1", "p", t0.Add(time.Second)),
+		// child starts under the first ask; its later turn, past the second
+		// ask, still answers the first.
+		chainTurn("c-1", "", "child", t0.Add(time.Minute)),
+		chainTurn("c-2", "", "child", t0.Add(11*time.Minute)),
+		// grandchild, spawned by child, climbs to p.
+		chainTurn("g-1", "", "grandchild", t0.Add(12*time.Minute)),
+		// early starts before any prompt of p.
+		chainTurn("e-1", "", "early", t0.Add(-time.Minute)),
+	}
+	links := []parse.ParentLink{
+		{UUID: "child", ParentUUID: "p"},
+		{UUID: "grandchild", ParentUUID: "child"},
+		{UUID: "early", ParentUUID: "p"},
+	}
+	idx := BuildPromptIndex(turns, users, links)
+	want := map[string]string{"p-1": "first ask", "c-1": "first ask", "c-2": "first ask", "g-1": "second ask", "e-1": noPromptKey}
+	for uuid, key := range want {
+		if got := idx.Lookup(uuid).Key; got != key {
+			t.Errorf("%s key = %q, want %q", uuid, got, key)
+		}
 	}
 }
