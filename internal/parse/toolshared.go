@@ -11,6 +11,10 @@ func BashPattern(cmd string) string { return bashPattern(cmd) }
 // retains.
 func ToolInputSnippet(s string) string { return truncateRunes(s, toolInputMaxChars) }
 
+// PromptSnippet bounds a user prompt's text to the snippet UserMessage.Text
+// retains.
+func PromptSnippet(s string) string { return truncateRunes(s, turnTextMaxChars) }
+
 // JoinTurnText appends one more text block to a turn's text, bounded to the
 // snippet Turn.Text retains.
 func JoinTurnText(text, block string) string {

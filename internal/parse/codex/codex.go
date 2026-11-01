@@ -4,8 +4,8 @@
 // A rollout is one thread. Each line is {timestamp, type, payload}; the
 // records modeled here are session_meta (thread identity), turn_context
 // (the model in effect until the next one), token_usage_record (one per
-// model response — one Turn), the response_item assistant messages, tool
-// calls and their outputs, and event_msg token_count (the per-response usage
+// model response — one Turn), the response_item user and assistant messages,
+// tool calls and their outputs, and event_msg token_count (the per-response usage
 // of rollouts written before token_usage_record existed). Every other record type is skipped.
 package codex
 
@@ -87,11 +87,13 @@ type response struct {
 }
 
 // turn closes the gathered response into a Turn and starts the next one.
-func (rsp *response) turn(id string, ts time.Time, model, cwd string, u rawUsage, path string) parse.Turn {
+// prompt is the UUID of the user prompt the response answers.
+func (rsp *response) turn(id, prompt string, ts time.Time, model, cwd string, u rawUsage, path string) parse.Turn {
 	t := parse.Turn{
 		Provider:     parse.ProviderCodex,
 		MessageID:    id,
 		UUID:         id,
+		ParentUUID:   prompt,
 		Timestamp:    ts,
 		EndTimestamp: ts,
 		CWD:          cwd,
@@ -116,6 +118,9 @@ type legacyTurn struct {
 // ParseFile streams one rollout. path is recorded on each Turn and names the
 // thread: a subagent rollout's SessionID is the uuid its file name carries.
 //
+// Each user message carrying the person's own text becomes a UserMessage,
+// and every Turn after it, up to the next one, takes its UUID as ParentUUID.
+//
 // Turns come from token_usage_record. A rollout written before that record
 // existed prices from each token_count's last_token_usage instead; the two
 // never mix within one file, since a newer rollout carries both for the
@@ -132,6 +137,9 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 		legacy     []legacyTurn
 		lastUsage  *rawUsage
 		lineNumber int
+		// prompt is the latest real user prompt's UUID, provisional until
+		// stampThread names the thread.
+		prompt string
 	)
 	sc := bufio.NewScanner(r)
 	// session_meta carries the full base instructions and tool outputs can
@@ -169,7 +177,7 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 			}
 			// A response's tool calls and messages are written before its
 			// usage record.
-			res.Turns = append(res.Turns, cur.turn(tu.ResponseID, ts, model, turnCWD, *tu.Usage, path))
+			res.Turns = append(res.Turns, cur.turn(tu.ResponseID, prompt, ts, model, turnCWD, *tu.Usage, path))
 		case "response_item":
 			var kind rawKind
 			if err := json.Unmarshal(rec.Payload, &kind); err != nil {
@@ -177,7 +185,24 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 				continue
 			}
 			if kind.Type == "message" {
-				msg := assistantText(rec.Payload)
+				// A message whose content is not the modeled item list is an
+				// unmodeled shape, skipped like any other.
+				var m rawMessage
+				if json.Unmarshal(rec.Payload, &m) != nil {
+					continue
+				}
+				if text := m.userText(); text != "" {
+					prompt = "u" + strconv.Itoa(lineNumber)
+					res.UserMessages = append(res.UserMessages, parse.UserMessage{
+						UUID:       prompt,
+						Timestamp:  ts,
+						CWD:        turnCWD,
+						Text:       parse.PromptSnippet(text),
+						SourceFile: path,
+					})
+					continue
+				}
+				msg := m.assistantText()
 				cur.text = parse.JoinTurnText(cur.text, msg)
 				old.text = parse.JoinTurnText(old.text, msg)
 				continue
@@ -218,7 +243,7 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 			// repeat is the same response, counted once.
 			if ev.Info != nil && ev.Info.LastTokenUsage != nil {
 				if u := *ev.Info.LastTokenUsage; lastUsage == nil || u != *lastUsage {
-					legacy = append(legacy, legacyTurn{lineNumber, old.turn("", ts, model, turnCWD, u, path)})
+					legacy = append(legacy, legacyTurn{lineNumber, old.turn("", prompt, ts, model, turnCWD, u, path)})
 					lastUsage = &u
 				}
 			}
@@ -243,12 +268,15 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 }
 
 // stampThread applies the thread identity from session_meta to everything
-// the file yielded, so record order within the file does not matter.
+// the file yielded, so record order within the file does not matter. A user
+// prompt's provisional UUID (its line) gains the thread id, which makes it
+// unique across rollouts.
 func stampThread(res *parse.Result, meta rawSessionMeta, path string) {
+	thread := threadID(path, meta.ID)
 	sessionID := meta.SessionID
 	subagent := meta.ThreadSource == "subagent"
 	if subagent {
-		sessionID = threadID(path, meta.ID)
+		sessionID = thread
 		if meta.ParentThreadID != "" {
 			res.ParentLinks = append(res.ParentLinks, parse.ParentLink{UUID: sessionID, ParentUUID: meta.ParentThreadID})
 		}
@@ -260,6 +288,17 @@ func stampThread(res *parse.Result, meta rawSessionMeta, path string) {
 		t.Entrypoint = meta.Originator
 		if t.CWD == "" {
 			t.CWD = meta.CWD
+		}
+		if t.ParentUUID != "" {
+			t.ParentUUID = thread + ":" + t.ParentUUID
+		}
+	}
+	for i := range res.UserMessages {
+		m := &res.UserMessages[i]
+		m.UUID = thread + ":" + m.UUID
+		m.SessionID = sessionID
+		if m.CWD == "" {
+			m.CWD = meta.CWD
 		}
 	}
 }
@@ -664,17 +703,54 @@ func jsString(s string) (string, int, bool) {
 	return "", 0, false
 }
 
+type rawMessage struct {
+	Role    string `json:"role"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// injectedPrefixes open the input_text items Codex writes into a user
+// message on the person's behalf: the AGENTS.md instructions, the
+// environment context, a goal reminder and the guardian's tool list.
+var injectedPrefixes = []string{
+	"# AGENTS.md instructions for",
+	"<environment_context>",
+	"<codex_internal_context",
+	"<guardian_tool_descriptions>",
+}
+
+// userText is a user message's own input_text items, joined; "" for a
+// message from any other role or one holding only injected items.
+func (m rawMessage) userText() string {
+	if m.Role != "user" {
+		return ""
+	}
+	var parts []string
+	for _, c := range m.Content {
+		text := strings.TrimSpace(c.Text)
+		if c.Type != "input_text" || text == "" || injected(text) {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func injected(text string) bool {
+	for _, p := range injectedPrefixes {
+		if strings.HasPrefix(text, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // assistantText is an assistant message's output_text, joined; "" for a
 // message from any other role.
-func assistantText(payload json.RawMessage) string {
-	var m struct {
-		Role    string `json:"role"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if json.Unmarshal(payload, &m) != nil || m.Role != "assistant" {
+func (m rawMessage) assistantText() string {
+	if m.Role != "assistant" {
 		return ""
 	}
 	out := ""

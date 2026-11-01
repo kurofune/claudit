@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -493,6 +494,160 @@ func TestParseRollout_LegacyTokenCount(t *testing.T) {
 	for i := range res.Turns {
 		if a, b := res.Turns[i], again.Turns[i]; a.MessageID != b.MessageID || a.UUID != b.UUID {
 			t.Errorf("turn %d ids differ across parses: %q/%q vs %q/%q", i, a.MessageID, a.UUID, b.MessageID, b.UUID)
+		}
+	}
+}
+
+// TestParseRollout_UserPrompts: a user message holding only injected items
+// yields no UserMessage; each real prompt becomes one, and every turn whose
+// usage record follows it points back at it.
+func TestParseRollout_UserPrompts(t *testing.T) {
+	res := parseFixture(t, "prompts.jsonl", "")
+	const thread = "01a190da-3a10-7c41-9d2e-6f0b1c2d3e4f"
+	if len(res.UserMessages) != 2 {
+		t.Fatalf("UserMessages = %+v, want the two real prompts", res.UserMessages)
+	}
+	wantText := []string{"fix the login bug", "now add a regression test"}
+	wantTS := []string{"2026-10-31T07:26:24.301Z", "2026-10-31T07:31:02.004Z"}
+	seen := map[string]bool{}
+	for i, m := range res.UserMessages {
+		if m.Text != wantText[i] {
+			t.Errorf("user %d Text = %q, want %q", i, m.Text, wantText[i])
+		}
+		if m.UUID == "" || seen[m.UUID] {
+			t.Errorf("user %d UUID = %q, want non-empty and unique", i, m.UUID)
+		}
+		seen[m.UUID] = true
+		if m.SessionID != thread {
+			t.Errorf("user %d SessionID = %q, want %s", i, m.SessionID, thread)
+		}
+		if want := mustTime(t, wantTS[i]); !m.Timestamp.Equal(want) {
+			t.Errorf("user %d Timestamp = %v, want %v", i, m.Timestamp, want)
+		}
+		if m.CWD != "/home/u/proj" || m.SourceFile != filepath.Join("testdata", "prompts.jsonl") {
+			t.Errorf("user %d CWD/SourceFile = %q/%q", i, m.CWD, m.SourceFile)
+		}
+	}
+	for _, tr := range res.Turns {
+		if seen[tr.UUID] {
+			t.Errorf("turn UUID %q collides with a user message UUID", tr.UUID)
+		}
+	}
+	first, second := res.UserMessages[0].UUID, res.UserMessages[1].UUID
+	wantParent := []string{"", first, first, second}
+	if len(res.Turns) != len(wantParent) {
+		t.Fatalf("turns = %d, want %d", len(res.Turns), len(wantParent))
+	}
+	for i, tr := range res.Turns {
+		if tr.ParentUUID != wantParent[i] {
+			t.Errorf("turn %d (%s) ParentUUID = %q, want %q", i, tr.UUID, tr.ParentUUID, wantParent[i])
+		}
+	}
+
+	again := parseFixture(t, "prompts.jsonl", "")
+	for i := range res.UserMessages {
+		if res.UserMessages[i].UUID != again.UserMessages[i].UUID {
+			t.Errorf("user %d UUID differs across parses: %q vs %q", i, res.UserMessages[i].UUID, again.UserMessages[i].UUID)
+		}
+	}
+
+	// The UUID names the thread, so prompts in two rollouts never collide.
+	other := parseFixture(t, "basic.jsonl", "")
+	if len(other.UserMessages) != 1 || other.UserMessages[0].Text != "Read the README and summarize it. (replaced)" {
+		t.Fatalf("basic UserMessages = %+v", other.UserMessages)
+	}
+	if seen[other.UserMessages[0].UUID] || !strings.HasPrefix(other.UserMessages[0].UUID, "01a1708b-04a3-75a1-a07c-92bbb16be66f") {
+		t.Errorf("basic user UUID = %q, want one naming its own thread", other.UserMessages[0].UUID)
+	}
+	for i, tr := range other.Turns {
+		if tr.ParentUUID != other.UserMessages[0].UUID {
+			t.Errorf("basic turn %d ParentUUID = %q, want %q", i, tr.ParentUUID, other.UserMessages[0].UUID)
+		}
+	}
+
+	// A subagent's own user messages are injected-only.
+	sub := parseFixture(t, "subagent.jsonl", "")
+	if len(sub.UserMessages) != 0 || sub.Turns[0].ParentUUID != "" {
+		t.Errorf("subagent UserMessages = %+v, turn ParentUUID %q; want none", sub.UserMessages, sub.Turns[0].ParentUUID)
+	}
+}
+
+// TestUserText: injected items are dropped by their text prefix and the
+// remaining items are joined.
+func TestUserText(t *testing.T) {
+	item := func(s string) string { return `{"type":"input_text","text":` + strconv.Quote(s) + `}` }
+	msg := func(items ...string) []byte {
+		return []byte(`{"type":"message","role":"user","content":[` + strings.Join(items, ",") + `]}`)
+	}
+	cases := []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"agents.md", msg(item("# AGENTS.md instructions for /home/u/proj\n\n<INSTRUCTIONS>x</INSTRUCTIONS>")), ""},
+		{"environment_context", msg(item("<environment_context>\n  <cwd>/p</cwd>\n</environment_context>")), ""},
+		{"codex_internal_context", msg(item(`<codex_internal_context source="goal">keep going</codex_internal_context>`)), ""},
+		{"guardian_tool_descriptions", msg(item("<guardian_tool_descriptions>\nexec: ...\n</guardian_tool_descriptions>")), ""},
+		{"real", msg(item("fix the login bug")), "fix the login bug"},
+		{"mixed", msg(
+			item("# AGENTS.md instructions for /p"),
+			item("first ask"),
+			item("<environment_context>x</environment_context>"),
+			item("second ask"),
+			item(`<codex_internal_context source="goal">g</codex_internal_context>`),
+			item("<guardian_tool_descriptions>d</guardian_tool_descriptions>"),
+		), "first ask\nsecond ask"},
+		{"assistant", []byte(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}`), ""},
+		{"developer", []byte(`{"type":"message","role":"developer","content":[{"type":"input_text","text":"rules"}]}`), ""},
+		{"empty", msg(), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var m rawMessage
+			if err := json.Unmarshal(c.payload, &m); err != nil {
+				t.Fatal(err)
+			}
+			if got := m.userText(); got != c.want {
+				t.Errorf("userText = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestParseRollout_UserPromptBounded: a prompt longer than the snippet cap
+// is bounded the way a Claude Code prompt is.
+func TestParseRollout_UserPromptBounded(t *testing.T) {
+	long := strings.Repeat("p", 5000)
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-10-29T10:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"s1","cwd":"/p"}}`,
+		`{"timestamp":"2026-10-29T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + long + `"}]}}`,
+	}, "\n")
+	res, err := ParseFile(strings.NewReader(rollout), "rollout-x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UserMessages) != 1 {
+		t.Fatalf("UserMessages = %d, want 1", len(res.UserMessages))
+	}
+	if got, want := res.UserMessages[0].Text, parse.PromptSnippet(long); got != want || len([]rune(got)) >= len(long) {
+		t.Errorf("Text runes = %d, want the %d-rune PromptSnippet", len([]rune(got)), len([]rune(want)))
+	}
+}
+
+// TestParseRollout_LegacyTurnsLinkPrompts: a legacy turn's ParentUUID is the
+// most recent user message at its reading.
+func TestParseRollout_LegacyTurnsLinkPrompts(t *testing.T) {
+	res := parseFixture(t, "legacy.jsonl", "")
+	if len(res.UserMessages) != 2 {
+		t.Fatalf("UserMessages = %+v, want the fixture's two", res.UserMessages)
+	}
+	latest := res.UserMessages[1].UUID
+	if latest == res.UserMessages[0].UUID {
+		t.Fatalf("user UUIDs collide: %q", latest)
+	}
+	for i, tr := range res.Turns {
+		if tr.ParentUUID != latest {
+			t.Errorf("turn %d ParentUUID = %q, want %q", i, tr.ParentUUID, latest)
 		}
 	}
 }

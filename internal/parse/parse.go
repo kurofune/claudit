@@ -346,7 +346,7 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 			ParentUUID: raw.ParentUUID,
 			Timestamp:  ts,
 			CWD:        raw.CWD,
-			Text:       truncateRunes(text, turnTextMaxChars),
+			Text:       PromptSnippet(text),
 			SourceFile: path,
 		}, LineUserMessage
 	}
