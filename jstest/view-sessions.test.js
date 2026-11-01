@@ -415,3 +415,63 @@ test('a bump during an outstanding refresh fetches again once it settles and pai
   assert.equal(calls.length, 3, 'no further requests once caught up');
   clearLiveHandler();
 });
+
+test('sustained bumps, each arriving before the outstanding index answers, still advance the rows in request order', async () => {
+  const releases = [];
+  let first = true;
+  const { view, calls, bump, window, document } = await liveList(() => {
+    if (first) { first = false; return { sessions: THREE() }; }
+    return new Promise(r => { releases.push(r); });
+  });
+  const input = view.querySelector('.sl-search');
+  input.value = 'BEAD';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  click(view.querySelector('.sl-sort[data-sort="cost"]'));
+  view.querySelector('.sl-group [data-session="s-b"]').focus();
+  window.scrollY = 340;
+
+  const gen = k => [...THREE(), row(`s-gen${k}`, { family_key: 'work bead _ next', remainder: `claudit-gen${k}`, cost_usd: 5, last_activity: at(-2) })];
+  const shown = () => view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session'));
+
+  let g = 2;
+  bump(g++);
+  await settle();
+  for (let k = 0; k < 5; k++) {
+    bump(g++);
+    await settle();
+    assert.equal(calls.length, 2 + k, `request ${k} is the only one out`);
+    releases[k]({ sessions: gen(k) });
+    await settle(); await settle();
+    assert.deepEqual(shown(), ['s-b', `s-gen${k}`, 's-a'], `response ${k} painted while a follow-up is still queued`);
+    assert.equal(input.value, 'BEAD');
+    assert.equal(view.querySelector('.sl-search'), input);
+    assert.equal(view.querySelector('.sl-sort[data-sort="cost"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(document.activeElement.getAttribute('data-focus-key'), 'row:s-b');
+    assert.equal(window.scrollY, 340);
+  }
+  assert.equal(calls.length, 7, 'the last bump queued one more read');
+  releases[5]({ sessions: gen(5) });
+  await settle(); await settle();
+  assert.deepEqual(shown(), ['s-b', 's-gen5', 's-a']);
+  await settle();
+  assert.equal(calls.length, 7, 'no further requests once caught up');
+  clearLiveHandler();
+});
+
+test('an index that lands after the user opened a session paints nothing over the session page', async () => {
+  const releases = [];
+  let first = true;
+  const { view, mod, bump } = await liveList((path) => {
+    if (path === '/sessions/story') return { httpStatus: 404 };
+    if (first) { first = false; return { sessions: THREE() }; }
+    return new Promise(r => { releases.push(r); });
+  });
+  bump(2);
+  await settle();
+  await mod.paint({ view: 'agents', sub: 's-a', unit: 'dollars' });
+  releases[0]({ sessions: [...THREE(), row('s-late')] });
+  await settle(); await settle();
+  assert.equal(view.querySelector('.sessions-list'), null);
+  assert.equal(view.querySelector('.session-id').textContent, 's-a');
+  clearLiveHandler();
+});

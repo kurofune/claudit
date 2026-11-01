@@ -23,36 +23,55 @@ const ui = { query: '', filter: 'all', sort: 'newest', expanded: new Set() };
 
 /** @type {SessionIndexRow[]|null} */
 let rows = null;
-/** @type {Promise<{sessions: SessionIndexRow[]}>|null} */
+/** @typedef {{req: number, data?: {sessions: SessionIndexRow[]}, error?: unknown}} Answer */
+/** @type {Promise<Answer>|null} */
 let inFlight = null;
-/** @type {Promise<{sessions: SessionIndexRow[]}>|null} */
+/** @type {Promise<Answer>|null} */
 let followUp = null;
-// refreshSeq numbers refreshes so only the latest one paints: an older
-// answer never lands over a newer one.
-let refreshSeq = 0;
+// lastReq numbers index requests as they go out; only one is ever out at a
+// time, so they answer in that order. landed is the newest request whose
+// answer reached the screen: an answer older than it is stale and never
+// paints, and every newer one does, so a stream of bumps still advances
+// the rows.
+let lastReq = 0;
+let landed = 0;
 // gen bumps on every mount, so an index that lands after the user left
 // the list (or remounted it) paints nothing.
 let gen = 0;
 /** @type {Element|null} */
 let listRoot = null;
 
-// load fetches the index, sharing a request already in flight. fresh asks
-// for an index read after this call: when a request is already out (it may
-// have been answered before the change that prompted this call), it waits
-// for that one and fetches again. Every fresh call made while one request
-// is out shares the one follow-up.
-/** @param {boolean} [fresh] @returns {Promise<{sessions: SessionIndexRow[]}>} */
+// load fetches the index, sharing a request already in flight. It never
+// rejects: the answer carries the data or the error, tagged with its
+// request number. fresh asks for an index read after this call: when a
+// request is already out (it may have been answered before the change
+// that prompted this call), it waits for that one and fetches again.
+// Every fresh call made while one request is out shares the one follow-up.
+/** @param {boolean} [fresh] @returns {Promise<Answer>} */
 const load = (fresh = false) => {
   if (!inFlight) {
-    inFlight = fetchSessions().finally(() => { inFlight = null; });
+    const req = ++lastReq;
+    inFlight = fetchSessions().then(
+      data => ({ req, data }),
+      error => ({ req, error }),
+    ).finally(() => { inFlight = null; });
     return inFlight;
   }
   if (!fresh) return inFlight;
   if (!followUp) {
-    followUp = inFlight.catch(() => undefined).then(() => { followUp = null; return load(); });
+    followUp = inFlight.then(() => { followUp = null; return load(); });
   }
   return followUp;
 };
+
+// fresher reports whether answer is at least as new as the one on screen,
+// and if so records it as the one on screen.
+/** @param {Answer} answer */
+function fresher(answer) {
+  if (answer.req < landed) return false;
+  landed = answer.req;
+  return true;
+}
 
 const container = () => document.getElementById('view-agents');
 
@@ -69,7 +88,9 @@ function updateNavMetric(list) {
 // paintNav resolves the sidebar metric before the tab is first opened.
 export async function paintNav() {
   if (rows) return;
-  try { rows = (await load()).sessions || []; } catch { return; }
+  const answer = await load();
+  if (rows || 'error' in answer || !fresher(answer)) return;
+  rows = (answer.data && answer.data.sessions) || [];
   updateNavMetric(rows);
 }
 
@@ -112,36 +133,35 @@ function repaint(root) {
 /** @param {Element} root @param {number} my */
 async function fetchInto(root, my) {
   renderListLoading(root);
-  try {
-    const data = await load();
-    if (my !== gen) return;
-    rows = (data && data.sessions) || [];
-  } catch (err) {
-    if (my !== gen) return;
-    renderListError(root, err);
+  const answer = await load();
+  if (my !== gen || listRoot !== root) return;
+  if (!fresher(answer)) {
+    if (rows) repaint(root);
     return;
   }
+  if ('error' in answer) {
+    renderListError(root, answer.error);
+    return;
+  }
+  rows = (answer.data && answer.data.sessions) || [];
   updateNavMetric(rows);
   repaint(root);
 }
 
 // refresh refetches without the skeleton. A failure keeps the rows on
 // screen and says so above them with a Retry; the next success clears it.
+// Each answer paints in request order unless a newer one already has, so
+// bumps that keep queueing follow-ups never starve the list.
 /** @param {Element} root @param {number} my */
 async function refresh(root, my) {
-  const seq = ++refreshSeq;
-  const current = () => my === gen && listRoot === root && seq === refreshSeq;
-  let data;
-  try {
-    data = await load(true);
-  } catch (err) {
-    if (!current()) return;
-    if (rows) renderRefreshError(root, err);
-    else renderListError(root, err);
+  const answer = await load(true);
+  if (my !== gen || listRoot !== root || !fresher(answer)) return;
+  if ('error' in answer) {
+    if (rows) renderRefreshError(root, answer.error);
+    else renderListError(root, answer.error);
     return;
   }
-  if (!current()) return;
-  rows = (data && data.sessions) || [];
+  rows = (answer.data && answer.data.sessions) || [];
   clearRefreshError(root);
   updateNavMetric(rows);
   repaint(root);
