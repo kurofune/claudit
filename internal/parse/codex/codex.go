@@ -530,9 +530,10 @@ func execFunction(src string) string {
 	return first
 }
 
-// jsCode is src with every comment and the text of every string and template
-// literal blanked to spaces, keeping each template's ${...} substitutions as
-// code. A quote that opens no complete literal is kept as code.
+// jsCode is src with every comment blanked to spaces and the text of every
+// string, template and regular expression literal blanked between its
+// delimiters, keeping each template's ${...} substitutions as code. A quote
+// or slash that opens no complete literal is kept as code.
 func jsCode(src string) string {
 	b := []byte(src)
 	blank := func(from, to int) {
@@ -547,19 +548,26 @@ func jsCode(src string) string {
 			if !ok {
 				n = len(src) - i
 			}
-			if n == 0 {
-				i++
+			if n > 0 {
+				blank(i, i+n)
+				i += n
 				continue
 			}
-			blank(i, i+n)
-			i += n
+			if regexAllowed(b[:i]) {
+				if n, ok := skipRegex(src[i:]); ok {
+					blank(i+1, i+n)
+					i += n
+					continue
+				}
+			}
+			i++
 		case '"', '\'':
 			_, n, ok := jsString(src[i:])
 			if !ok {
 				i++
 				continue
 			}
-			blank(i, i+n)
+			blank(i+1, i+n-1)
 			i += n
 		case '`':
 			n, ok := skipTemplate(src[i:])
@@ -576,10 +584,71 @@ func jsCode(src string) string {
 	return string(b)
 }
 
+// regexKeywords are the keywords after which a slash opens a regular
+// expression rather than dividing.
+var regexKeywords = map[string]bool{
+	"return": true, "typeof": true, "case": true, "do": true, "else": true, "in": true, "of": true,
+	"new": true, "delete": true, "void": true, "throw": true, "instanceof": true, "yield": true, "await": true,
+}
+
+// regexAllowed reports whether a slash after the code before (comments
+// blanked, literals reduced to their delimiters) opens a regular expression:
+// at the start, after an operator or punctuator, or after a keyword such as
+// return; never after an operand (an identifier, a number, a literal, a
+// closing paren or bracket), where it divides.
+func regexAllowed(before []byte) bool {
+	j := len(before) - 1
+	for j >= 0 && strings.IndexByte(" \t\r\n", before[j]) >= 0 {
+		j--
+	}
+	if j < 0 {
+		return true
+	}
+	switch c := before[j]; {
+	case isIdentByte(c):
+		k := j
+		for k >= 0 && isIdentByte(before[k]) {
+			k--
+		}
+		return regexKeywords[string(before[k+1:j+1])]
+	case strings.IndexByte(")]\"'`/", c) >= 0:
+		return false
+	}
+	return true
+}
+
+// skipRegex returns the length of the regular expression literal at the
+// start of s, flags included; false when it does not close on its line.
+func skipRegex(s string) (int, bool) {
+	class := false
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '\n', '\r':
+			return 0, false
+		case '[':
+			class = true
+		case ']':
+			class = false
+		case '/':
+			if class {
+				continue
+			}
+			i++
+			for i < len(s) && isIdentByte(s[i]) {
+				i++
+			}
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // blankTemplate blanks the text of the template literal lit into b (the
 // same bytes), keeping jsCode of each ${...} substitution.
 func blankTemplate(b []byte, lit string) {
-	for i := range b {
+	for i := 1; i < len(b)-1; i++ {
 		b[i] = ' '
 	}
 	for i := 1; i < len(lit)-1; i++ {

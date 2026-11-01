@@ -338,6 +338,11 @@ func TestExecFunction(t *testing.T) {
 		{`text("unterminated); tools.view_image({})`, "view_image"},
 		{"text(`a\\` tools.web__run(`); tools.view_image({})", "view_image"},
 		{"// tools.exec_command({cmd:\"x\"})\ntext(await tools.write_stdin({session_id:1}));", "write_stdin"},
+		{"const q=\"'\"+msg.replace(/'/g,\"'\\\\''\")+\"'\";\ntext((await tools.exec_command({cmd:\"herdr agent prompt w \"+q})).output);", "exec_command"},
+		{`if (/[/"]/.test(s)) text(await tools.view_image({path:"a"}));`, "view_image"},
+		{`const r = a / b; const s = "tools.web__run("; const t = c / d;`, ""},
+		{`const r = (a) / 2; tools.view_image({path:'/x'})`, "view_image"},
+		{"return /tools.web__run(/.test(s) && tools.view_image({})", "view_image"},
 	}
 	for _, c := range cases {
 		if got := execFunction(c.src); got != c.want {
