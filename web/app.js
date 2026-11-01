@@ -8,7 +8,7 @@
 import { onChange, activate, parseHash } from './router.js';
 import { paint as paintOverview } from './view-overview.js';
 import { paint as paintSpend, paintNav as paintNavSpend } from './view-spend.js';
-import { paint as paintAgents, paintNav as paintNavAgents } from './view-agents.js';
+import { paint as paintAgents, paintNav as paintNavAgents } from './view-sessions.js';
 import { start as startSSE, clearLiveHandler } from './sse.js';
 import { wireDatePicker } from './date-picker.js';
 import { wireProviderFilter, setProviderBusy, busyPainter } from './provider-filter.js';
@@ -26,7 +26,7 @@ const paintBusy = busyPainter(setProviderBusy);
 
 onChange(async (route) => {
   activate(route);
-  // The Agents view registers an in-place SSE updater while it's active;
+  // The Sessions list registers an in-place SSE updater while it's open;
   // any other route must release it so the classic full-reload path runs.
   if (route.view !== 'agents') clearLiveHandler();
   const painter = VIEW_PAINTERS[route.view];
