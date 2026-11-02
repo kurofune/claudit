@@ -226,11 +226,19 @@ Interactive: `/wish <id>`. Autonomous (`DJINN_SESSION=1`): the summoner drain. N
 - Backend code and frontend logic: TDD. In a formula run use `go test -short ./...`, or the repo's `djinn.test_argv` when it sets one; CI owns the `-tags=slow` tier.
 - UI work also meets every UI rule the repo's own `AGENTS.md` adds outside the djinn block.
 
-## 4. Browser-verify web/ changes
+## 4. Verify visual work by capture beside its reference
 
-Changed `web/` files: walk every acceptance criterion in a browser with the adapter's browser procedure (artifacts in `.playwright-cli/`), at the data volume the Scalability Assumption names, through empty, loading and error states, with no console errors beyond a baseline route's.
+Visual work is any change a person judges by looking at it: `web/`, a terminal UI, and any other visual output (a game level or asset, a rendered image, video, a chart). Each lands with a capture taken where it runs:
 
-Every UI change also meets these rules, each an implicit acceptance criterion:
+- `web/`: walk every acceptance criterion in a browser with the adapter's browser procedure (artifacts in `.playwright-cli/`), at the data volume the Scalability Assumption names, through empty, loading and error states, with no console errors beyond a baseline route's.
+- A terminal UI: run it live in a real terminal via tmux at the sizes the bead names, default 160x48 and 46x48 (`tmux new-session -d -x 160 -y 48 '<cmd>'`), and read each screen back with `tmux capture-pane -p -e`. A golden file alone is never the proof: it shows the code renders what the code renders, not what was approved.
+- Other visual output: render it and capture a frame, image or still of each state the criteria name.
+
+The worker views each capture itself (reads the capture text or opens the image) before it claims a match: only a capture the worker viewed is evidence, and one taken and never looked at is not.
+
+When the bead, its epic or its design names a reference (a mockup frame or concept art), the evidence comment pairs each capture with its reference and states, per element the acceptance criteria name, whether it matches or how it differs.
+
+Every visual change, not only `web/`, also meets these rules where they apply, each an implicit acceptance criterion:
 
 - Every data view has a meaningful empty state, a visible loading state and a visible error state.
 - Every click action is reachable by keyboard (tab, arrows, enter).

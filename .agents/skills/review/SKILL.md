@@ -178,6 +178,21 @@ Assign every finding a severity:
 - **`BLOCKER`** — the change is wrong or unsafe as written: a real bug on a
   reachable path, a missing acceptance criterion that makes the bead false, data
   loss, a broken invariant. A BLOCKER means the diff must not ship as-is.
+
+  **Visual work needs its capture.** A bead whose diff changes a visual surface
+  (`web/`, a terminal-UI package, a visual asset) is a BLOCKER when its evidence
+  comment lacks the capture contract §4 requires, or when that capture misses an
+  element the reference shows and the acceptance criteria name. Review runs
+  before commit-push writes that comment, and the rule above holds here too:
+  run no `bd` command for it. Look for the capture only where the invoker
+  points you — the capture files the diff commits, capture artifacts in the
+  worktree (`.playwright-cli/`, a saved `tmux capture-pane` text) that the
+  diff or the invoker's prompt names, and any implementer report or prior
+  evidence the invoker pasted into your prompt. Open each one yourself; a
+  golden file alone is not the capture, and a capture no supplied source
+  reaches counts as missing.
+  Record each capture and its per-element comparison in that criterion's
+  `criteria` row, so commit-push carries it into the evidence comment.
 - **`IMPORTANT`** — a real defect worth fixing before ship: a meaningfully
   underspecified test, a scale or boundary hazard, a missing error path that is
   reachable but not yet reached.
