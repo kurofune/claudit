@@ -158,7 +158,9 @@ func TestBuildSessionIndex_RowFields(t *testing.T) {
 }
 
 // TestBuildSessionIndex_RowCarriesNoStepsOrSnippets: the index is one light
-// row per session — no steps, tools, inputs or outputs reach the wire.
+// row per session — no steps, tools, inputs or outputs reach the wire. The
+// one command line it carries is a failing check's (failing_checks), which
+// a passing echo is not.
 func TestBuildSessionIndex_RowCarriesNoStepsOrSnippets(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -188,7 +190,7 @@ func TestBuildSessionIndex_RowCarriesNoStepsOrSnippets(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	want := "active,commands,compactions,cost_usd,duration_ms,failed,family_key,first_failed_turn,last_activity,model,outcome,project,provider,remainder,session_id,started_at,title,turns"
+	want := "active,commands,compactions,cost_usd,duration_ms,failed,failed_edits,failing_checks,family_key,first_failed_turn,last_activity,model,outcome,project,provider,remainder,session_id,started_at,title,turns"
 	if got := strings.Join(keys, ","); got != want {
 		t.Errorf("row keys = %s\nwant       %s", got, want)
 	}
@@ -382,5 +384,69 @@ func TestBuildSessionIndex_CompactionsAndFirstFailedTurn(t *testing.T) {
 	_ = json.Unmarshal(b, &wire)
 	if wire["compactions"] != float64(1) || wire["first_failed_turn"] != "a2" {
 		t.Errorf("wire keys = compactions %v first_failed_turn %v", wire["compactions"], wire["first_failed_turn"])
+	}
+}
+
+// TestBuildSessionIndex_FailingChecksAndFailedEdits: a go test that failed
+// then passed is not failing; a go build whose last run failed is, named
+// by its label, its command's first line and its turn. Of two errored
+// Writes, the one later retried identically and applied is not a failed
+// edit; the other is. failed keeps counting every unresolved errored call.
+func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	write := func(uuid string, ts time.Time, toolID, input string) parse.Turn {
+		w := mkTurn(uuid, "s1", "/root/-p-x/s1.jsonl", ts)
+		w.ToolUses = []parse.ToolUse{{ID: toolID, Name: "Write", Input: input, InputKey: parse.ToolInputKey(input)}}
+		return w
+	}
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("a1", "s1", t0, "t1", "go test ./..."),
+			bashTurn("a2", "s1", t0.Add(time.Minute), "t2", "go build ./..."),
+			write("a3", t0.Add(2*time.Minute), "t3", "/p/x/a.go"),
+			write("a4", t0.Add(3*time.Minute), "t4", "/p/x/b.go"),
+			bashTurn("a5", "s1", t0.Add(4*time.Minute), "t5", "cd web && go test ./..."),
+			write("a6", t0.Add(5*time.Minute), "t6", "/p/x/a.go"),
+			bashTurn("a7", "s1", t0.Add(6*time.Minute), "t7", "go build ./...\necho done"),
+			bashTurn("a8", "s1", t0.Add(7*time.Minute), "t8", "ps -A -o command | rg 'go test'"),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", IsError: true, Content: "FAIL"},
+			{ToolUseID: "t2", IsError: true, Content: "build failed"},
+			{ToolUseID: "t3", IsError: true, Content: "denied"},
+			{ToolUseID: "t4", IsError: true, Content: "denied"},
+			{ToolUseID: "t5", Content: "ok"},
+			{ToolUseID: "t6", Content: "ok"},
+			{ToolUseID: "t7", IsError: true, Content: "build failed"},
+			{ToolUseID: "t8", IsError: true, Content: ""},
+		},
+	}
+	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	want := []FailingCheck{{Check: "go build", Command: "go build ./...", Turn: "a7"}}
+	if !reflect.DeepEqual(row.FailingChecks, want) {
+		t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
+	}
+	if row.FailedEdits != 1 {
+		t.Errorf("failed_edits = %d, want 1 (b.go never applied; a.go retried identically)", row.FailedEdits)
+	}
+	// Today's rule: go test (t1, input differs from t5), go build (t2), the
+	// b.go Write (t4), the second go build (t7) and the ps (t8).
+	if row.Failed != 5 || row.FirstFailedTurn != "a1" {
+		t.Errorf("failed = %d first_failed_turn = %q, want 5 and a1", row.Failed, row.FirstFailedTurn)
+	}
+	b, _ := json.Marshal(row)
+	var wire map[string]any
+	_ = json.Unmarshal(b, &wire)
+	if wire["failed_edits"] != float64(1) {
+		t.Errorf("wire failed_edits = %v", wire["failed_edits"])
+	}
+	checks, _ := wire["failing_checks"].([]any)
+	if len(checks) != 1 || !reflect.DeepEqual(checks[0], map[string]any{"check": "go build", "command": "go build ./...", "turn": "a7"}) {
+		t.Errorf("wire failing_checks = %v", wire["failing_checks"])
+	}
+	clean := findRow(t, BuildSessionIndex(&corpus.Snapshot{Turns: []parse.Turn{bashTurn("b1", "s2", t0, "u1", "ls")}, ToolResults: []parse.ToolResult{{ToolUseID: "u1", IsError: true}}}, prices, aggregate.Filter{}, IndexOptions{}), "s2")
+	if clean.FailingChecks == nil || len(clean.FailingChecks) != 0 || clean.FailedEdits != 0 {
+		t.Errorf("clean session failing_checks = %#v failed_edits = %d, want [] and 0", clean.FailingChecks, clean.FailedEdits)
 	}
 }

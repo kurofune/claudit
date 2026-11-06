@@ -49,6 +49,14 @@ type SessionIndexRow struct {
 	// FirstFailedTurn is the uuid of the earliest turn holding a call
 	// Failed counts, "" when Failed is 0.
 	FirstFailedTurn string `json:"first_failed_turn"`
+	// FailingChecks is one entry per check kind (checkKind) whose last run
+	// in the session errored, in the order of those runs: a check the
+	// session ran again and got green is not failing.
+	FailingChecks []FailingCheck `json:"failing_checks"`
+	// FailedEdits counts the Edit, Write, MultiEdit and apply_patch calls
+	// that errored and never later succeeded with the identical input: an
+	// edit that never applied.
+	FailedEdits int `json:"failed_edits"`
 	// Compactions counts the context compaction boundaries in the
 	// session's files.
 	Compactions  int       `json:"compactions"`
@@ -57,6 +65,17 @@ type SessionIndexRow struct {
 	// (activeAt).
 	Active    bool      `json:"active"`
 	StartedAt time.Time `json:"started_at"`
+}
+
+// FailingCheck is a check whose last run in a session errored.
+type FailingCheck struct {
+	// Check is the check's label, as checkKind names it ("go test").
+	Check string `json:"check"`
+	// Command is the first line of that last run's command, cut to
+	// SummaryInputRunes.
+	Command string `json:"command"`
+	// Turn is the uuid of the turn that ran it.
+	Turn string `json:"turn"`
 }
 
 // IndexOptions tunes the index. Zero values are sensible defaults.
@@ -181,7 +200,9 @@ func indexRow(s *sessionAccum, prompts []string, results map[string]bool, compac
 		row.Outcome = lastMessageLine(ordinary[0].turns)
 	}
 	sort.SliceStable(turns, func(i, j int) bool { return turns[i].Timestamp.Before(turns[j].Timestamp) })
-	row.Commands, row.Failed, row.FirstFailedTurn = countCommands(turns, results)
+	c := countCommands(turns, results)
+	row.Commands, row.Failed, row.FirstFailedTurn = c.commands, c.failed, c.firstFailed
+	row.FailingChecks, row.FailedEdits = c.failingChecks, c.failedEdits
 	return row
 }
 
@@ -244,11 +265,25 @@ func toolErrors(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessionAc
 	return out
 }
 
+// commandCounts is what countCommands counts over a session's calls.
+type commandCounts struct {
+	commands, failed int
+	firstFailed      string
+	failingChecks    []FailingCheck
+	failedEdits      int
+}
+
+// editTools are the tools that change a file; one that errored and never
+// later succeeded is an edit that never applied.
+var editTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "apply_patch": true}
+
 // countCommands counts a session's tool calls, and those that errored and
 // never later succeeded with the identical (name, whole input), and names
-// the earliest turn holding one of those. turns are in time order; errored
-// maps a tool_use id with a result to whether it errored.
-func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, failed int, firstFailed string) {
+// the earliest turn holding one of those. Of those, it counts the edits
+// (editTools). For each check kind a Bash call ran (checkKind), it keeps
+// the last run, failing when that run errored. turns are in time order;
+// errored maps a tool_use id with a result to whether it errored.
+func countCommands(turns []*parse.Turn, errored map[string]bool) commandCounts {
 	type call struct {
 		name, input string
 		key         uint64
@@ -256,16 +291,31 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, fail
 	type open struct {
 		n, first int
 	}
+	type run struct {
+		errored bool
+		at      int
+		check   FailingCheck
+	}
+	var out commandCounts
 	var pending map[call]open
+	var checks map[string]run
 	for i, t := range turns {
 		for _, u := range t.ToolUses {
-			commands++
+			out.commands++
 			if u.ID == "" {
 				continue
 			}
 			isErr, ok := errored[u.ID]
 			if !ok {
 				continue
+			}
+			if u.Name == parse.BashToolName {
+				if kind := checkKind(u.Input); kind != "" {
+					if checks == nil {
+						checks = map[string]run{}
+					}
+					checks[kind] = run{isErr, i, FailingCheck{Check: kind, Command: firstLine(u.Input, SummaryInputRunes), Turn: t.UUID}}
+				}
 			}
 			k := call{u.Name, u.Input, u.InputKey}
 			if isErr {
@@ -284,16 +334,35 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, fail
 		}
 	}
 	first := -1
-	for _, o := range pending {
-		failed += o.n
+	for k, o := range pending {
+		out.failed += o.n
+		if editTools[k.name] {
+			out.failedEdits += o.n
+		}
 		if first < 0 || o.first < first {
 			first = o.first
 		}
 	}
 	if first >= 0 {
-		firstFailed = turns[first].UUID
+		out.firstFailed = turns[first].UUID
 	}
-	return commands, failed, firstFailed
+	failing := make([]run, 0, len(checks))
+	for _, r := range checks {
+		if r.errored {
+			failing = append(failing, r)
+		}
+	}
+	sort.Slice(failing, func(i, j int) bool {
+		if failing[i].at != failing[j].at {
+			return failing[i].at < failing[j].at
+		}
+		return failing[i].check.Check < failing[j].check.Check
+	})
+	out.failingChecks = make([]FailingCheck, len(failing))
+	for i, r := range failing {
+		out.failingChecks[i] = r.check
+	}
+	return out
 }
 
 // lastMessageLine is the first non-empty line of the latest turn that
