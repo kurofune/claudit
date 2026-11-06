@@ -1859,6 +1859,10 @@
                       border: 1px solid var(--border-strong); border-radius: var(--r-sm); }
   .sh-failures-more:hover { border-color: var(--accent); }
   .sh-failures-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sh-failures-more::before { content: "▸ "; color: var(--ink-2); }
+  .sh-failures-more[aria-expanded="true"]::before { content: "▾ "; }
+  .sh-failure-list[hidden] { display: none; }
+  .sh-failure-other .sh-failure { color: var(--ink-2); }
   .sh-compare { margin: 0; font-size: var(--t-2); color: var(--ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .sh-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); }
   .sh-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0;

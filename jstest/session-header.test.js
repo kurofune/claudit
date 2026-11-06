@@ -33,7 +33,7 @@ const story = (steps, children = [], extra = {}) => ({
   steps, children, source_files: ['/logs/s1.jsonl'], ...extra,
 });
 
-// FAILED ends on three failed commands after a costly first turn, and has a
+// FAILED ends on three failing checks after a costly first turn, and has a
 // sub-agent turn between its main turns.
 const FAILED = () => story([
   step('a1', 0, [tool('rg login', 'ok')], { cost_usd: 2, context_cost_usd: 0.4, duration_ms: 5000, tokens: tokens(100, 50, 1000, 0, 3000) }),
@@ -43,7 +43,14 @@ const FAILED = () => story([
 ], [{
   kind: 'subagent', agent_type: 'Explore', description: '', parent_tool_use_id: '', started_at: at(10), ended_at: at(10),
   cost_usd: 0.01, error_count: 0, steps: [step('k1', 10, [tool('rg auth', 'ok')], { context_cost_usd: 0.05, duration_ms: 2000 })],
-}], { started_at: at(0), last_activity: at(3725) });
+}], {
+  started_at: at(0), last_activity: at(3725), failed: 3,
+  failing_checks: [
+    { check: 'npm test', command: 'npm test', turn: 'a3' },
+    { check: 'make', command: 'make lint', turn: 'a3' },
+    { check: 'go vet', command: 'go vet ./...', turn: 'a3' },
+  ],
+});
 
 const CLEAN = () => story([step('a1', 0), step('a2', 5), step('a3', 10)]);
 
@@ -305,7 +312,7 @@ const FAMILY = [1, 1, 1, 1, 1.06, 1.06, 2, 2, 3, 8.28].map((c, i) => ({
   model: i < 6 ? 'claude-fable-5-1' : 'claude-opus-4-7', provider: 'claude-code',
 }));
 
-test('the header leads with the last message, then the unfixed failed commands, the tiles, the strip and the notes', async () => {
+test('the header leads with the last message, then the failing checks, the tiles, the strip and the notes', async () => {
   const { host, done } = await mount(route({ ...FAILED(), outcome: 'All three checks still fail.' }));
   await done;
   const section = host.querySelector('.session-header');
@@ -323,18 +330,18 @@ test('a session with no agent message reads "Last message: (no agent message)"',
   assert.equal(text(host.querySelector('.sh-last-message')), 'Last message: (no agent message)');
 });
 
-test('failures: none renders no block', async () => {
+test('failures: no failing check, no failed edit and no errored call renders no block', async () => {
   const { host, done } = await mount(route(CLEAN()));
   await done;
   assert.equal(host.querySelector('.sh-failures'), null);
 });
 
-test('failures: three rows read tool and command, link to their turn and follow on click and Enter', async () => {
+test('failures: three failing checks read "Last `<check>` failed · <command>", link to their turn and follow on click and Enter', async () => {
   const { host, done, location } = await mount(route(FAILED()));
   await done;
-  assert.equal(text(host.querySelector('.sh-failures-title')), '3 failed commands never fixed');
+  assert.equal(text(host.querySelector('.sh-failures-title')), '3 failing checks');
   const links = host.querySelectorAll('.sh-failures a.sh-failure');
-  assert.deepEqual(links.map(text), ['Bash · npm test', 'Bash · make lint', 'Bash · go vet ./...']);
+  assert.deepEqual(links.map(text), ['Last `npm test` failed · npm test', 'Last `make` failed · make lint', 'Last `go vet` failed · go vet ./...']);
   assert.deepEqual(links.map(a => a.getAttribute('href')), Array(3).fill(`#agents/${SID}/a3`));
   assert.equal(host.querySelector('.sh-failures-more'), null);
   location.hash = '';
@@ -345,26 +352,55 @@ test('failures: three rows read tool and command, link to their turn and follow 
   assert.equal(location.hash, `#agents/${SID}/a3`);
 });
 
-test('failures: 25 show 10 rows and Show all 25, whose click reveals the rest', async () => {
-  const { host, done, document } = await mount(route(failing(25)));
+test('failures: checks, then edits never applied, then the other errors behind a collapsed count that click and Enter expand', async () => {
+  const edit = (path, status, key) => tool(path, status, { name: 'Edit', kind: 'edit', detail: path, input_key: key });
+  const st = story([
+    step('a1', 0, [tool('ls missing', 'error'), tool('go test ./...', 'error')]),
+    step('a2', 20, [edit('/p/a.go', 'error', 'e1'), tool('rg nothing', 'error')]),
+    step('a3', 40, [tool('go test ./...', 'error')]),
+  ], [], { failed: 5, failed_edits: 1, failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a3' }] });
+  const { host, done, location } = await mount(route(st));
   await done;
-  assert.equal(text(host.querySelector('.sh-failures-title')), '25 failed commands never fixed');
-  assert.equal(host.querySelectorAll('.sh-failure').length, 10);
+  assert.equal(text(host.querySelector('.sh-failures-title')), '1 failing check · 1 edit never applied');
+  const lead = host.querySelectorAll('.sh-failure');
+  assert.deepEqual(lead.map(text), ['Last `go test` failed · go test ./...', 'Edit failed and never applied · /p/a.go']);
+  assert.deepEqual(lead.map(a => a.getAttribute('href')), [`#agents/${SID}/a3`, `#agents/${SID}/a2`]);
   const more = host.querySelector('button.sh-failures-more');
-  assert.equal(text(more), 'Show all 25');
+  assert.equal(text(more), '2 other commands errored and were not retried');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(host.querySelector('.sh-failure-other').hidden, true);
+  assert.equal(host.querySelectorAll('.sh-failure-other .sh-failure').length, 0, 'the others are collapsed');
+  assert.equal(host.querySelector('.sh-failures').textContent.includes('Show all'), false);
+
   click(more);
-  const links = host.querySelectorAll('.sh-failure');
-  assert.equal(links.length, 25);
-  assert.equal(text(links[24]), 'Bash · npm test -- case24');
-  assert.equal(host.querySelector('.sh-failures-more'), null);
-  assert.equal(document.activeElement, links[10], 'focus lands on the first row revealed');
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(host.querySelector('.sh-failure-other').hidden, false);
+  const others = host.querySelectorAll('.sh-failure-other .sh-failure');
+  assert.deepEqual(others.map(text), ['Bash · ls missing', 'Bash · rg nothing'], 'the earlier go test run folds into its check row');
+  assert.deepEqual(others.map(a => a.getAttribute('href')), [`#agents/${SID}/a1`, `#agents/${SID}/a2`]);
+  location.hash = '';
+  click(others[1]);
+  assert.equal(location.hash, `#agents/${SID}/a2`);
+
+  click(more);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(host.querySelectorAll('.sh-failure-other .sh-failure').length, 0);
+  keydown(more, 'Enter');
+  assert.equal(more.getAttribute('aria-expanded'), 'true', 'Enter expands');
+  assert.equal(host.querySelectorAll('.sh-failure-other .sh-failure').length, 2);
 });
 
-test('failures: 200 render 10 rows and Show all 200', async () => {
+test('failures: 200 errored calls and no check or edit show only the collapsed count until expanded', async () => {
   const { host, done } = await mount(route(failing(200)));
   await done;
-  assert.equal(host.querySelectorAll('.sh-failure').length, 10);
-  assert.equal(text(host.querySelector('.sh-failures-more')), 'Show all 200');
+  assert.equal(host.querySelector('.sh-failures-title'), null, 'no check or edit to count');
+  assert.equal(host.querySelectorAll('.sh-failure').length, 0);
+  const more = host.querySelector('.sh-failures-more');
+  assert.equal(text(more), '200 other commands errored and were not retried');
+  click(more);
+  const links = host.querySelectorAll('.sh-failure');
+  assert.equal(links.length, 200);
+  assert.equal(text(links[199]), 'Bash · npm test -- case199');
 });
 
 test('a family of at least 5 runs puts the comparison line under the tiles', async () => {

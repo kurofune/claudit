@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 import {
   headerNumbers, stripBars, worthALook, explainPrompt, sessionOf, sessionTurns, unresolvedFailures, MAX_BARS,
-  failureRows, failuresHeading, headerFamilyStats, comparisonLine,
+  failureRows, failuresHeading, otherFailuresLabel, headerFamilyStats, comparisonLine,
 } from '../web/session-header-logic.js';
 
 const T0 = Date.parse('2026-05-01T10:00:00Z');
@@ -364,23 +364,57 @@ test('explainPrompt over a summary, whose calls carry no output, names the failu
   assert.equal(lines[i + 1], '10:00:00  npm test');
 });
 
-test('failureRows: one row per unfixed failure, tool name and the input\'s first line (≤120 runes) else its detail, linked to its turn', () => {
+test('failureRows: other errored calls read tool name and the input\'s first line (≤120 runes) else its detail, linked to their turn', () => {
   const long = 'x'.repeat(130);
   const st = story([
     step('a1', 0, [tool('npm test\n  --watch', 'error'), tool('', 'error', { name: 'Read', detail: 'main.go' })]),
     step('a2', 30, [tool(long, 'error')]),
   ], [child('Explore', [step('', 10, [tool('rg auth', 'error')])])]);
-  const rows = failureRows(st);
-  assert.deepEqual(rows.map(r => r.text), [
+  const { checks, edits, other } = failureRows(st);
+  assert.deepEqual([checks, edits], [[], []], 'a summary with no failing_checks and no errored edit leads with nothing');
+  assert.deepEqual(other.map(r => r.text), [
     'Bash · npm test',
     'Read · main.go',
     'Bash · rg auth',
     'Bash · ' + 'x'.repeat(119) + '…',
   ]);
-  assert.deepEqual(rows.map(r => r.link), ['a1', 'a1', 'a1', 'a2'], 'a sub-agent turn with no uuid links to the main turn before it');
-  assert.equal(Array.from(rows[3].text.split(' · ')[1]).length, 120);
-  assert.equal(failuresHeading(1), '1 failed command never fixed');
-  assert.equal(failuresHeading(25), '25 failed commands never fixed');
+  assert.deepEqual(other.map(r => r.link), ['a1', 'a1', 'a1', 'a2'], 'a sub-agent turn with no uuid links to the main turn before it');
+  assert.equal(Array.from(other[3].text.split(' · ')[1]).length, 120);
+  assert.equal(failuresHeading({ checks, edits, other }), '');
+  assert.equal(otherFailuresLabel(4), '4 other commands errored and were not retried');
+  assert.equal(otherFailuresLabel(1), '1 other command errored and was not retried');
+});
+
+test('failureRows leads with the failing checks, then the edits never applied, then every other unretried call', () => {
+  const st = story([
+    step('a1', 0, [tool('go test ./...', 'error'), tool('ls missing', 'error')]),
+    step('a2', 10, [tool('/p/x/a.go', 'error', { name: 'Edit', kind: 'edit', detail: 'a.go', input_key: 'e1' })]),
+    step('a3', 20, [tool('/p/x/b.go', 'error', { name: 'Write', kind: 'edit', detail: 'b.go', input_key: 'w1' }),
+      tool('/p/x/b.go', 'ok', { name: 'Write', kind: 'edit', detail: 'b.go', input_key: 'w1' })]),
+    step('a4', 30, [tool('go test ./...', 'error'), tool('go build ./...', 'error')]),
+    step('a5', 40, [tool('*** Begin Patch', 'error', { name: 'apply_patch', kind: 'edit', detail: 'patch', input_key: 'p1' })]),
+  ], [], {
+    failing_checks: [
+      { check: 'go test', command: 'go test ./...', turn: 'a4' },
+      { check: 'go build', command: 'go build ./...', turn: 'a4' },
+    ],
+  });
+  const g = failureRows(st);
+  assert.deepEqual(g.checks, [
+    { text: 'Last `go test` failed · go test ./...', link: 'a4' },
+    { text: 'Last `go build` failed · go build ./...', link: 'a4' },
+  ]);
+  assert.deepEqual(g.edits, [
+    { text: 'Edit failed and never applied · /p/x/a.go', link: 'a2' },
+    { text: 'apply_patch failed and never applied · *** Begin Patch', link: 'a5' },
+  ], 'the Write retried identically applied');
+  assert.deepEqual(g.other, [{ text: 'Bash · ls missing', link: 'a1' }],
+    'both go test runs fold into their check row; the ls stays');
+  assert.equal(failuresHeading(g), '2 failing checks · 2 edits never applied');
+  assert.equal(failuresHeading({ checks: g.checks.slice(0, 1), edits: [], other: [] }), '1 failing check');
+  assert.equal(failuresHeading({ checks: [], edits: g.edits.slice(0, 1), other: [] }), '1 edit never applied');
+  assert.deepEqual(failureRows(story([step('a1', 0, [tool('ls', 'ok')])], [], { failing_checks: null })),
+    { checks: [], edits: [], other: [] }, 'a clean session has no rows; a null failing_checks reads as none');
 });
 
 // family builds index rows of one prompt: cost_usd and duration_ms per

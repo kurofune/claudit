@@ -1,7 +1,8 @@
 // @ts-check
 // The session page's header: what the session ended on (the main agent's
-// last message), the failed commands it never fixed, each a link to its
-// turn, four tiles (cost, duration, tokens, unresolved failures), where this
+// last message), its failing checks and the edits it never applied, each
+// a link to its turn, over the other unretried errors behind a collapsed
+// count, four tiles (cost, duration, tokens, unresolved failures), where this
 // run sits among its prompt's runs, a strip of one bar per model turn
 // showing where the money or the time went, up to three Worth a look notes,
 // a button that copies an explain-this-session prompt and, last, what the
@@ -18,7 +19,7 @@ import { copyText } from './clipboard.js';
 import { clock, fmtDuration, fmtUSD } from './session-story-logic.js';
 import {
   headerNumbers, stripBars, worthALook, explainPrompt, sessionOf,
-  failureRows, failuresHeading, headerFamilyStats, comparisonLine, FAILURES_PAGE,
+  failureRows, failuresHeading, otherFailuresLabel, headerFamilyStats, comparisonLine,
 } from './session-header-logic.js';
 
 /** @import { SessionSummary, SessionIndexRow } from './api-types.js' */
@@ -32,7 +33,7 @@ const COPIED_MS = 2000;
  * @property {'cost'|'time'} mode
  * @property {number} nowMs
  * @property {number} focusBar            the strip's roving tab stop
- * @property {import('./session-header-logic.js').FailureRow[]} failures
+ * @property {import('./session-header-logic.js').FailureGroups} failures
  * @property {ReturnType<typeof setTimeout>|undefined} copyTimer
  */
 
@@ -166,35 +167,40 @@ export function renderSessionHeader(host, story, opts = {}) {
   host.setAttribute('data-session', sid);
 }
 
-// failuresHTML is the unfixed failed commands block: a heading over one
-// link per failure, the first FAILURES_PAGE of them until Show all; '' when
-// there are none.
+// failuresHTML is the failure block: a heading over one link per failing
+// check, then one per edit never applied, then a collapsed button over the
+// other errored calls not retried; '' when all three are empty.
 /** @param {HeaderState} st */
 function failuresHTML(st) {
-  const n = st.failures.length;
-  if (!n) return '';
-  return `<section class="sh-failures" aria-label="Failed commands never fixed">
-    <h3 class="sh-failures-title">${escHtml(failuresHeading(n))}</h3>
-    <ul class="sh-failure-list">${failureItems(st, FAILURES_PAGE)}</ul>
-    ${n > FAILURES_PAGE ? `<button type="button" class="sh-failures-more">Show all ${n}</button>` : ''}
+  const { checks, edits, other } = st.failures;
+  if (!checks.length && !edits.length && !other.length) return '';
+  const heading = failuresHeading(st.failures);
+  const lead = [...checks, ...edits];
+  return `<section class="sh-failures" aria-label="Failing checks and failed edits">
+    ${heading ? `<h3 class="sh-failures-title">${escHtml(heading)}</h3>` : ''}
+    ${lead.length ? `<ul class="sh-failure-list">${failureItems(st, lead)}</ul>` : ''}
+    ${other.length ? `<button type="button" class="sh-failures-more" aria-expanded="false" aria-controls="sh-failure-other">${escHtml(otherFailuresLabel(other.length))}</button>
+    <ul class="sh-failure-list sh-failure-other" id="sh-failure-other" hidden></ul>` : ''}
   </section>`;
 }
 
-/** @param {HeaderState} st @param {number} limit */
-const failureItems = (st, limit) => st.failures.slice(0, limit).map(f =>
+/** @param {HeaderState} st @param {import('./session-header-logic.js').FailureRow[]} rows */
+const failureItems = (st, rows) => rows.map(f =>
   `<li><a class="sh-failure" href="${escHtml(sessionHash(st.story.session_id, f.link))}" data-link="${escHtml(f.link)}">${escHtml(f.text)}</a></li>`).join('');
 
-// showAllFailures draws every failure row, drops the Show all button and
-// moves focus to the first row it revealed.
+// toggleOtherFailures expands the other errored calls under their button,
+// or collapses them, and says which on the button's aria-expanded. The
+// rows are drawn only while expanded.
 /** @param {Element} host @param {HeaderState} st */
-function showAllFailures(host, st) {
-  const list = host.querySelector('.sh-failure-list');
-  if (!list) return;
-  list.innerHTML = failureItems(st, st.failures.length);
-  const more = host.querySelector('.sh-failures-more');
-  if (more) more.remove();
-  const next = list.querySelectorAll('.sh-failure')[FAILURES_PAGE];
-  if (next) /** @type {any} */ (next).focus();
+function toggleOtherFailures(host, st) {
+  const btn = host.querySelector('.sh-failures-more');
+  const list = host.querySelector('.sh-failure-other');
+  if (!btn || !list) return;
+  const open = btn.getAttribute('aria-expanded') !== 'true';
+  btn.setAttribute('aria-expanded', String(open));
+  list.innerHTML = open ? failureItems(st, st.failures.other) : '';
+  if (open) list.removeAttribute('hidden');
+  else list.setAttribute('hidden', '');
 }
 
 /** @param {'cost'|'time'} mode @param {string} label @param {'cost'|'time'} active */
@@ -236,8 +242,8 @@ function go(host, link) {
 
 // wireSessionHeader attaches the header's handlers to host once: failed
 // command, bar and note clicks and Enter jump to their turn (a modified
-// click on a failed command opens it as a link does), Show all reveals
-// every failed command, the Cost | Time switch answers
+// click on a failed command opens it as a link does), the other-errors
+// button expands and collapses them on click or Enter, the Cost | Time switch answers
 // clicks and the arrow keys, the strip's arrows move between bars and the
 // copy button copies the explain prompt.
 /** @param {Element} host @param {SessionSummary} story */
@@ -260,7 +266,7 @@ export function wireSessionHeader(host, story) {
       go(host, fail.getAttribute('data-link') || '');
       return;
     }
-    if (t.closest('.sh-failures-more')) { showAllFailures(host, st); return; }
+    if (t.closest('.sh-failures-more')) { toggleOtherFailures(host, st); return; }
     const jump = t.closest('.turn-bar, .note');
     if (jump) { go(host, jump.getAttribute('data-link') || ''); return; }
     const copy = t.closest('.sh-copy');
@@ -286,6 +292,11 @@ export function wireSessionHeader(host, story) {
       bars.forEach((b, k) => b.setAttribute('tabindex', k === next ? '0' : '-1'));
       st.focusBar = next;
       /** @type {any} */ (bars[next]).focus();
+      return;
+    }
+    if (t.closest('.sh-failures-more') && ev.key === 'Enter') {
+      e.preventDefault();
+      toggleOtherFailures(host, st);
       return;
     }
     const jump = t.closest('.turn-bar, .note, .sh-failure');

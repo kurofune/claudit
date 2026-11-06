@@ -29,8 +29,6 @@ import { fmtMoney, fmtNum } from './format.js';
 
 export const MAX_BARS = 120;
 export const MAX_NOTES = 3;
-// FAILURES_PAGE is how many failed-command rows show before "Show all N".
-export const FAILURES_PAGE = 10;
 const CMD_RUNES = 120;
 // NO_PROMPT_KEY is the family every prompt-less session shares; its runs
 // are not runs of one prompt.
@@ -130,25 +128,66 @@ export function unresolvedFailures(story, turns = sessionTurns(story), ok = succ
 const clipRunes = (s, n) => { const r = Array.from(s); return r.length > n ? r.slice(0, n - 1).join('') + '…' : s; };
 
 /**
- * One row of the failed-commands block.
+ * One row of the failure block.
  * @typedef {Object} FailureRow
- * @property {string} text   "<tool name> · <input's first line, else its detail>"
+ * @property {string} text   what failed, as the row reads
  * @property {string} link   turn uuid the row links to
  */
 
-// failureRows is one row per unresolvedFailures entry, in session turn
-// order: the tool's name and the first line of its input, at most
-// CMD_RUNES runes, else its detail, linked to the failure's turn.
-/** @param {WholeStory} story @returns {FailureRow[]} */
+/**
+ * The failure block's rows in its three groups.
+ * @typedef {Object} FailureGroups
+ * @property {FailureRow[]} checks  "Last `<check>` failed · <command>", one per failing_checks entry
+ * @property {FailureRow[]} edits   "<tool> failed and never applied · <input>", one per edit never applied
+ * @property {FailureRow[]} other   "<tool> · <input>", every other errored call not retried
+ */
+
+// EDIT_TOOLS are the tools that change a file, as the index's failed_edits
+// counts them.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
+
+// failureRows splits the session's failures into the block's three groups:
+// one row per check whose last run failed (story.failing_checks, the index
+// row's), linked to that run's turn; one row per unresolvedFailures edit;
+// and every other unresolvedFailures call, the runs of a failing check's
+// own command excepted since its row stands for them. A call reads by its
+// tool name and the first line of its input, at most CMD_RUNES runes,
+// else its detail; all in session turn order.
+/** @param {WholeStory} story @returns {FailureGroups} */
 export function failureRows(story) {
-  return unresolvedFailures(story).map(({ turn, tool }) => {
+  const failing = story.failing_checks || [];
+  const checkCommands = new Set(failing.map(c => c.command));
+  /** @type {FailureGroups} */
+  const out = {
+    checks: failing.map(c => ({ text: `Last \`${c.check}\` failed · ${c.command}`, link: c.turn })),
+    edits: [],
+    other: [],
+  };
+  for (const { turn, tool } of unresolvedFailures(story)) {
     const what = clipRunes(firstLine(tool.input || ''), CMD_RUNES) || tool.detail || '';
-    return { text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link };
-  });
+    if (EDIT_TOOLS.has(tool.name || '')) {
+      out.edits.push({ text: [`${tool.name} failed and never applied`, what].filter(Boolean).join(' · '), link: turn.link });
+    } else if (!checkCommands.has(what)) {
+      out.other.push({ text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link });
+    }
+  }
+  return out;
 }
 
+// failuresHeading counts what the block leads with: the failing checks and
+// the edits never applied, a zero dropped; '' when both are zero.
+/** @param {FailureGroups} g */
+export function failuresHeading(g) {
+  const parts = [];
+  if (g.checks.length) parts.push(`${fmtNum(g.checks.length)} failing check${g.checks.length === 1 ? '' : 's'}`);
+  if (g.edits.length) parts.push(`${fmtNum(g.edits.length)} edit${g.edits.length === 1 ? '' : 's'} never applied`);
+  return parts.join(' · ');
+}
+
+// otherFailuresLabel is the collapsed button over the other errored calls.
 /** @param {number} n */
-export const failuresHeading = n => `${fmtNum(n)} failed command${n === 1 ? '' : 's'} never fixed`;
+export const otherFailuresLabel = n =>
+  `${fmtNum(n)} other command${n === 1 ? '' : 's'} errored and ${n === 1 ? 'was' : 'were'} not retried`;
 
 /**
  * A family's numbers as the header compares one run against them.
