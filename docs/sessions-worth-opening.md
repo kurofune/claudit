@@ -95,3 +95,32 @@ On `#agents/<id>` (web/session-header.js, session-header-logic.js):
 
 The operator uses the reworked list and session page before anything
 larger is planned.
+
+## 4. Failures that mean something (after dogfooding, 2026-11-06)
+
+The landed list flagged 641 of 1,429 sessions (45%, $3,402 of $4,171) as
+"ended with unfixed failed commands": `failed` counts every errored call
+with no later identical success, so a `grep` that found nothing, an `ls` on
+a missing path or a `ps | rg` counts. All 8 Worth opening rows were the
+costliest sessions with any failure; compaction and top-10% never showed.
+
+Measured on the same corpus (summary endpoint, every session):
+- Last run of each check (a command segment that starts `go test|build|vet`,
+  `npm test`/`npm run test|build|lint|check`, `make`, `pytest`, `cargo
+  test|build|check`, `node --test`, `tsc`, `git commit|push`) failed: 52
+  sessions (4%, $242). Mostly `go test` (32), `go build` (8).
+- An edit (Edit, Write, MultiEdit, apply_patch) that errored and never
+  succeeded with the same input: 4 sessions ($312).
+- Either: 56 sessions (4%, $554).
+- A substring match is wrong: `ps -A … | rg 'go test'` matched 86 times;
+  match the start of a `&&`/`;`/`||`/newline segment after `cd`/env prefixes.
+
+Change: rank and count by these two facts instead of `failed`.
+- Top sentence: "K ended with a failing check (go test, build, commit…)."
+- Worth opening reason 1: "Last `<check>` failed" (the check's first word
+  pair) linking to that turn; reason 2: "N edits failed and never applied".
+- The filter chip and the session page's failure block lead with the
+  failing check and failed edits; the other unretried errors stay listed
+  under a collapsed "N other commands errored and were not retried".
+- Titles: `<pasted_content …>` tags are stripped and the first line of the
+  pasted text is the title (11 sessions).
