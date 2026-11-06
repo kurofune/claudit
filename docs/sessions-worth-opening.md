@@ -124,3 +124,21 @@ Change: rank and count by these two facts instead of `failed`.
   under a collapsed "N other commands errored and were not retried".
 - Titles: `<pasted_content …>` tags are stripped and the first line of the
   pasted text is the title (11 sessions).
+
+**Landed 2026-11-06, code at 25df683 (claudit-me6).** `claudit serve --port
+18787` built at 25df683, on this machine's corpus, the list's default window
+(the last 7 days, no query):
+
+```sh
+curl -s http://127.0.0.1:18787/_claudit/api/sessions | jq -c 'def fc: (.failing_checks // []) | length > 0; def usd(f): [.sessions[] | select(f) | .cost_usd] | add // 0 | . * 100 | round / 100; {total: (.sessions | length), usd: usd(true), failed: ([.sessions[] | select(.failed > 0)] | length), checks: ([.sessions[] | select(fc)] | length), checks_usd: usd(fc), edits: ([.sessions[] | select(.failed_edits > 0)] | length), edits_usd: usd(.failed_edits > 0), either: ([.sessions[] | select(fc or .failed_edits > 0)] | length), either_usd: usd(fc or .failed_edits > 0), by_check: ([.sessions[] | (.failing_checks // [])[] | .check] | group_by(.) | map({key: .[0], value: length}) | sort_by(-.value) | from_entries)}'
+```
+
+- 1,447 sessions, $4,208; `failed` > 0 in 650 (45%, unchanged rule).
+- A non-empty `failing_checks`: 81 sessions ($173). Per label: `go test` 54,
+  `go build` 11, `make` 6, `npm test` 5, `go vet` 3, `npm run check` 3,
+  `node --test` 2, `git commit` 1.
+- `failed_edits` > 0: 4 sessions ($312), as measured above.
+- Either: 85 sessions (5.9%, $485), under the 10% bar.
+- 81 is above the 52 measured above; the difference is not reconciled
+  (the window moved a day and the corpus is live). Titles: no session title
+  carries `pasted_content` (was 11).
