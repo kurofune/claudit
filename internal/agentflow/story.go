@@ -602,9 +602,7 @@ func storySteps(steps []AgentStep, codexOutput bool, snippetRunes int) []StorySt
 					tool.inputOnDisk = parse.ToolInputSnippetCut(whole)
 				}
 			}
-			if inv.InputKey != 0 {
-				tool.InputHash = strconv.FormatUint(inv.InputKey, 16)
-			}
+			tool.InputHash = storyInputKey(inv.InputKey)
 			tools[j] = tool
 		}
 		s.Tools = nil
@@ -719,4 +717,13 @@ func fullSteps(steps []StoryStep, got parse.FullTexts) []StoryStep {
 		out[i] = s
 	}
 	return out
+}
+
+// storyInputKey is a whole-input identity (parse.ToolUse.InputKey) as the
+// payloads carry it: hex, "" for none.
+func storyInputKey(k uint64) string {
+	if k == 0 {
+		return ""
+	}
+	return strconv.FormatUint(k, 16)
 }

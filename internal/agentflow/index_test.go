@@ -17,7 +17,7 @@ import (
 
 func bashTurn(uuid, sid string, ts time.Time, toolID, cmd string) parse.Turn {
 	t := mkTurn(uuid, sid, "/root/-p-x/"+sid+".jsonl", ts)
-	t.ToolUses = []parse.ToolUse{{ID: toolID, Name: "Bash", Input: cmd}}
+	t.ToolUses = []parse.ToolUse{{ID: toolID, Name: "Bash", Input: cmd, InputKey: parse.ToolInputKey(cmd)}}
 	return t
 }
 
@@ -423,7 +423,8 @@ func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
 		},
 	}
 	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
-	want := []FailingCheck{{Check: "go build", Command: "go build ./...", Turn: "a7"}}
+	want := []FailingCheck{{Check: "go build", Command: "go build ./...", Turn: "a7",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("go build ./...\necho done"), 16)}}
 	if !reflect.DeepEqual(row.FailingChecks, want) {
 		t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
 	}
@@ -442,7 +443,7 @@ func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
 		t.Errorf("wire failed_edits = %v", wire["failed_edits"])
 	}
 	checks, _ := wire["failing_checks"].([]any)
-	if len(checks) != 1 || !reflect.DeepEqual(checks[0], map[string]any{"check": "go build", "command": "go build ./...", "turn": "a7"}) {
+	if len(checks) != 1 || !reflect.DeepEqual(checks[0], map[string]any{"check": "go build", "command": "go build ./...", "turn": "a7", "input_key": want[0].InputKey}) {
 		t.Errorf("wire failing_checks = %v", wire["failing_checks"])
 	}
 	clean := findRow(t, BuildSessionIndex(&corpus.Snapshot{Turns: []parse.Turn{bashTurn("b1", "s2", t0, "u1", "ls")}, ToolResults: []parse.ToolResult{{ToolUseID: "u1", IsError: true}}}, prices, aggregate.Filter{}, IndexOptions{}), "s2")

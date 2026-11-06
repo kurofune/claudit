@@ -76,6 +76,9 @@ type FailingCheck struct {
 	Command string `json:"command"`
 	// Turn is the uuid of the turn that ran it.
 	Turn string `json:"turn"`
+	// InputKey is that run's whole-input identity, as the story's
+	// input_key carries it; "" when the call has none.
+	InputKey string `json:"input_key"`
 }
 
 // IndexOptions tunes the index. Zero values are sensible defaults.
@@ -314,7 +317,7 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) commandCounts {
 					if checks == nil {
 						checks = map[string]run{}
 					}
-					checks[kind] = run{isErr, i, FailingCheck{Check: kind, Command: firstLine(u.Input, SummaryInputRunes), Turn: t.UUID}}
+					checks[kind] = run{isErr, i, FailingCheck{Check: kind, Command: firstLine(u.Input, SummaryInputRunes), Turn: t.UUID, InputKey: storyInputKey(u.InputKey)}}
 				}
 			}
 			k := call{u.Name, u.Input, u.InputKey}

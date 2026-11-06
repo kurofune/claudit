@@ -178,6 +178,7 @@
  * @property {string} check    the check's label, as checkKind names it ("go test")
  * @property {string} command  the first line of that last run's command, cut to 120 runes
  * @property {string} turn     uuid of the turn that ran it
+ * @property {string} input_key that run's whole-input identity, as a story tool's input_key; "" when none
  */
 
 /**

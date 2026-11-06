@@ -387,16 +387,16 @@ test('failureRows: other errored calls read tool name and the input\'s first lin
 
 test('failureRows leads with the failing checks, then the edits never applied, then every other unretried call', () => {
   const st = story([
-    step('a1', 0, [tool('go test ./...', 'error'), tool('ls missing', 'error')]),
+    step('a1', 0, [tool('go test ./...', 'error', { input_key: 'gt' }), tool('ls missing', 'error', { input_key: 'ls' })]),
     step('a2', 10, [tool('/p/x/a.go', 'error', { name: 'Edit', kind: 'edit', detail: 'a.go', input_key: 'e1' })]),
     step('a3', 20, [tool('/p/x/b.go', 'error', { name: 'Write', kind: 'edit', detail: 'b.go', input_key: 'w1' }),
       tool('/p/x/b.go', 'ok', { name: 'Write', kind: 'edit', detail: 'b.go', input_key: 'w1' })]),
-    step('a4', 30, [tool('go test ./...', 'error'), tool('go build ./...', 'error')]),
+    step('a4', 30, [tool('go test ./...', 'error', { input_key: 'gt' }), tool('go build ./...', 'error', { input_key: 'gb' })]),
     step('a5', 40, [tool('*** Begin Patch', 'error', { name: 'apply_patch', kind: 'edit', detail: 'patch', input_key: 'p1' })]),
   ], [], {
     failing_checks: [
-      { check: 'go test', command: 'go test ./...', turn: 'a4' },
-      { check: 'go build', command: 'go build ./...', turn: 'a4' },
+      { check: 'go test', command: 'go test ./...', turn: 'a4', input_key: 'gt' },
+      { check: 'go build', command: 'go build ./...', turn: 'a4', input_key: 'gb' },
     ],
   });
   const g = failureRows(st);
@@ -415,6 +415,20 @@ test('failureRows leads with the failing checks, then the edits never applied, t
   assert.equal(failuresHeading({ checks: [], edits: g.edits.slice(0, 1), other: [] }), '1 edit never applied');
   assert.deepEqual(failureRows(story([step('a1', 0, [tool('ls', 'ok')])], [], { failing_checks: null })),
     { checks: [], edits: [], other: [] }, 'a clean session has no rows; a null failing_checks reads as none');
+});
+
+test('failureRows folds only the failing check\'s own call, by input_key, never another call sharing its first line', () => {
+  const st = story([
+    step('a1', 0, [tool('cd /repo\nls missing', 'error', { input_key: 'ls' })]),
+    step('a2', 10, [tool('cd /repo\ngo test ./...', 'error', { input_key: 'gt' }), tool('cd /repo\nrg x', 'error')]),
+  ], [], { failing_checks: [{ check: 'go test', command: 'cd /repo', turn: 'a2', input_key: 'gt' }] });
+  const g = failureRows(st);
+  assert.deepEqual(g.checks, [{ text: 'Last `go test` failed · cd /repo', link: 'a2' }]);
+  assert.deepEqual(g.other, [{ text: 'Bash · cd /repo', link: 'a1' }, { text: 'Bash · cd /repo', link: 'a2' }],
+    'the ls and the rg stay though they read like the check row; only the go test call folds');
+  const keyless = story([step('a1', 0, [tool('go test ./...', 'error')])],
+    [], { failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a1', input_key: '' }] });
+  assert.equal(failureRows(keyless).other.length, 1, 'with no input_key there is no identity to fold by, so the call stays');
 });
 
 // family builds index rows of one prompt: cost_usd and duration_ms per

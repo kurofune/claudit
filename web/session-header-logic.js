@@ -150,13 +150,14 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'apply_patch']);
 // one row per check whose last run failed (story.failing_checks, the index
 // row's), linked to that run's turn; one row per unresolvedFailures edit;
 // and every other unresolvedFailures call, the runs of a failing check's
-// own command excepted since its row stands for them. A call reads by its
+// own command (the same input_key) excepted since its row stands for them;
+// a check with no input_key excepts none. A call reads by its
 // tool name and the first line of its input, at most CMD_RUNES runes,
 // else its detail; all in session turn order.
 /** @param {WholeStory} story @returns {FailureGroups} */
 export function failureRows(story) {
   const failing = story.failing_checks || [];
-  const checkCommands = new Set(failing.map(c => c.command));
+  const checkKeys = new Set(failing.map(c => c.input_key).filter(Boolean));
   /** @type {FailureGroups} */
   const out = {
     checks: failing.map(c => ({ text: `Last \`${c.check}\` failed · ${c.command}`, link: c.turn })),
@@ -167,7 +168,7 @@ export function failureRows(story) {
     const what = clipRunes(firstLine(tool.input || ''), CMD_RUNES) || tool.detail || '';
     if (EDIT_TOOLS.has(tool.name || '')) {
       out.edits.push({ text: [`${tool.name} failed and never applied`, what].filter(Boolean).join(' · '), link: turn.link });
-    } else if (!checkCommands.has(what)) {
+    } else if (!(tool.input_key && checkKeys.has(tool.input_key))) {
       out.other.push({ text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link });
     }
   }
