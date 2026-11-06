@@ -25,6 +25,10 @@ type StoryOptions struct {
 	// Replays is the snapshot's aggregate.BuildReplaySet when the caller
 	// already holds it; nil builds it.
 	Replays *aggregate.ReplaySet
+	// Layout is the snapshot's NewLayout when the caller already holds
+	// it; nil builds it from Replays. The story reads only the session's
+	// own files through it.
+	Layout *Layout
 	// PromptIndex is the snapshot's aggregate.BuildPromptIndex when the
 	// caller already holds it, so the story reads each turn's prompt from it
 	// instead of walking the whole snapshot's parent links; nil walks them.
@@ -47,7 +51,16 @@ type SessionStory struct {
 	turnLog, promptLog, toolLog map[string]LogSource
 	// sourceFiles is every session log the story's turns came from.
 	sourceFiles []string
+	// row is the session's index row under the story's filter; hasRow is
+	// false when the filter or replay dedup left it no turn.
+	row    SessionIndexRow
+	hasRow bool
 }
+
+// Row is the session's index row under the story's filter, as
+// BuildSessionIndex builds it; ok is false when the filter or replay dedup
+// left the session no turn. Its Active flag is unset: read it through At.
+func (st *SessionStory) Row() (row SessionIndexRow, ok bool) { return st.row, st.hasRow }
 
 // LogSource is a session log and the provider that wrote it.
 type LogSource struct {
@@ -138,14 +151,22 @@ type StoryPage struct {
 }
 
 // BuildSessionStory assembles one session's story from the snapshot's
-// sessions as collectSessions groups them. ok is false when the snapshot holds no turn of the
-// session at all; a session whose turns the filter all excluded is found,
-// with no prompts.
+// sessions as collectSessions groups them, reading only the session's own
+// files. Every step carries its context cost (SessionContextCost). ok is
+// false when the snapshot holds no turn of the session at all; a session
+// whose turns the filter all excluded is found, with no prompts.
 func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, sessionID string, opts StoryOptions) (*SessionStory, bool) {
 	if snap == nil || sessionID == "" {
 		return nil, false
 	}
-	c := collectSessions(snap, prices, f, sessionID, opts.Replays)
+	l := opts.Layout
+	if l == nil {
+		l = NewLayout(snap, opts.Replays)
+	}
+	if !l.Has(sessionID) {
+		return nil, false
+	}
+	c := collectIn(snap, prices, f, l, []string{sessionID})
 	st := &SessionStory{
 		SessionID:   sessionID,
 		Prompts:     []StoryPrompt{},
@@ -159,10 +180,17 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	}
 	s, ok := c.sessions[sessionID]
 	if !ok {
-		return st, c.replays+c.outsideFilter > 0
+		return st, true
 	}
 
-	as := assembleSession(s, sessionToolResults(snap, s), storyPrompts(snap, s, opts.PromptIndex))
+	results := sessionToolResults(snap, s)
+	errored := make(map[string]bool, len(results))
+	for id, r := range results {
+		errored[id] = r.IsError
+	}
+	st.row = indexRow(s, sessionPrompts(snap, c.sessions)[sessionID], errored, IndexOptions{})
+	st.hasRow = true
+	as := assembleSession(s, results, storyPrompts(snap, s, opts.PromptIndex))
 	for _, n := range s.nodes {
 		for _, r := range n.turns {
 			src := LogSource{File: r.t.SourceFile, Provider: r.t.Provider}
@@ -186,8 +214,9 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	sort.Strings(st.sourceFiles)
 	codexOutput := s.provider == parse.ProviderCodex
 
+	byTurn := SessionContextCost(snap, prices, f, sessionID, l)
 	if as.Main != nil {
-		st.steps = storySteps(as.Main.Steps, codexOutput, opts.SnippetRunes)
+		st.steps = withContextCost(storySteps(as.Main.Steps, codexOutput, opts.SnippetRunes), byTurn)
 	}
 	for i, m := range as.Prompts {
 		end := len(st.steps)
@@ -216,7 +245,7 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 			EndedAt:         ch.EndedAt,
 			CostUSD:         ch.CostUSD,
 			ErrorCount:      ch.ErrorCount,
-			Steps:           storySteps(ch.Steps, codexOutput, opts.SnippetRunes),
+			Steps:           withContextCost(storySteps(ch.Steps, codexOutput, opts.SnippetRunes), byTurn),
 		})
 	}
 	return st, true
@@ -321,26 +350,12 @@ func (st *SessionStory) Whole() StoryPage {
 	}
 }
 
-// WithContextCost returns page with each step's ContextCostUSD read from
-// byTurn by turn uuid, its main and sub-agent steps copied so the story
-// they came from is left unchanged.
-func (page StoryPage) WithContextCost(byTurn map[string]float64) StoryPage {
-	withCost := func(steps []StoryStep) []StoryStep {
-		out := make([]StoryStep, len(steps))
-		for i, s := range steps {
-			s.ContextCostUSD = byTurn[s.UUID]
-			out[i] = s
-		}
-		return out
+// withContextCost sets each step's ContextCostUSD from byTurn by turn uuid.
+func withContextCost(steps []StoryStep, byTurn map[string]float64) []StoryStep {
+	for i := range steps {
+		steps[i].ContextCostUSD = byTurn[steps[i].UUID]
 	}
-	page.Steps = withCost(page.Steps)
-	children := make([]StoryChild, len(page.Children))
-	for i, ch := range page.Children {
-		ch.Steps = withCost(ch.Steps)
-		children[i] = ch
-	}
-	page.Children = children
-	return page
+	return steps
 }
 
 // Locate finds the page that carries turn uuid: its prompt index and the

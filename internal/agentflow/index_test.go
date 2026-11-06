@@ -2,6 +2,7 @@ package agentflow
 
 import (
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -254,5 +255,84 @@ func TestBuildSessionIndex_FailedComparesWholeParsedInput(t *testing.T) {
 				t.Errorf("failed = %d, want %d", got, tc.wantFailed)
 			}
 		})
+	}
+}
+
+// stamped gives every file of snap a stamp, so a Layout key reads them.
+func stamped(snap *corpus.Snapshot, at time.Time) *corpus.Snapshot {
+	snap.Files = map[string]corpus.FileStamp{}
+	for _, t := range snap.Turns {
+		snap.Files[t.SourceFile] = corpus.FileStamp{Size: 1, ModTime: at}
+	}
+	return snap
+}
+
+// TestReuseSessionIndex_RebuildsOnlyChangedSessions: after B's log grows,
+// only B's row is built again and the index equals a fresh build; a new
+// log that takes over A's turns as its replays rebuilds A as well.
+func TestReuseSessionIndex_RebuildsOnlyChangedSessions(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	snap0 := stamped(contextCorpus(), t0)
+	idx0, rows, built := ReuseSessionIndex(snap0, prices, aggregate.Filter{}, NewLayout(snap0, nil), nil, IndexOptions{})
+	if len(built) != 5 || len(idx0.Sessions) != 5 {
+		t.Fatalf("first build: built %v, %d rows; want all 5", built, len(idx0.Sessions))
+	}
+
+	snap1 := stamped(contextCorpus(), t0)
+	snap1.Turns = append(snap1.Turns, ctxTurn("b3", "m-b3", "B", "/p/b.jsonl", t0.Add(time.Minute), "tB3"))
+	snap1.Files["/p/b.jsonl"] = corpus.FileStamp{Size: 2, ModTime: t0.Add(time.Minute)}
+	idx1, rows, built := ReuseSessionIndex(snap1, prices, aggregate.Filter{}, NewLayout(snap1, nil), rows, IndexOptions{})
+	if strings.Join(built, ",") != "B" {
+		t.Errorf("after B grew: built %v, want only B", built)
+	}
+	assertSameIndex(t, idx1, BuildSessionIndex(snap1, prices, aggregate.Filter{}, IndexOptions{}))
+	before := map[string]SessionIndexRow{}
+	for _, r := range idx0.Sessions {
+		before[r.SessionID] = r
+	}
+	var changed []string
+	for _, r := range idx1.Sessions {
+		if !reflect.DeepEqual(before[r.SessionID], r) {
+			changed = append(changed, r.SessionID)
+		}
+	}
+	if len(idx1.Sessions) != len(idx0.Sessions) || strings.Join(changed, ",") != "B" {
+		t.Errorf("rows changed = %v of %d, want only B of %d", changed, len(idx1.Sessions), len(idx0.Sessions))
+	}
+
+	snap2 := stamped(contextCorpus(), t0)
+	snap2.Turns = append(snap2.Turns, ctxTurn("a1", "m-a1", "Y", "/p/0y.jsonl", t0, "tA1"))
+	snap2.Files["/p/0y.jsonl"] = corpus.FileStamp{Size: 1, ModTime: t0}
+	idx2, _, built := ReuseSessionIndex(snap2, prices, aggregate.Filter{}, NewLayout(snap2, nil), rows, IndexOptions{})
+	if strings.Join(built, ",") != "A,B,Y" {
+		t.Errorf("after Y replayed a1 from a smaller path: built %v, want A (lost a1), B (grew back) and Y", built)
+	}
+	assertSameIndex(t, idx2, BuildSessionIndex(snap2, prices, aggregate.Filter{}, IndexOptions{}))
+}
+
+func assertSameIndex(t *testing.T, got, want SessionIndex) {
+	t.Helper()
+	g, _ := json.Marshal(got)
+	w, _ := json.Marshal(want)
+	if string(g) != string(w) {
+		t.Errorf("reused index differs from a fresh build:\n got %s\nwant %s", g, w)
+	}
+}
+
+// TestSessionStory_RowMatchesIndex: a story's Row is the session's index
+// row, for every session of the corpus.
+func TestSessionStory_RowMatchesIndex(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	snap := contextCorpus()
+	for _, row := range BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}).Sessions {
+		st, ok := BuildSessionStory(snap, prices, aggregate.Filter{}, row.SessionID, StoryOptions{})
+		if !ok {
+			t.Fatalf("story %s not found", row.SessionID)
+		}
+		got, ok := st.Row()
+		if !ok || !reflect.DeepEqual(got, row) {
+			t.Errorf("story row of %s = %+v (%v)\nindex row = %+v", row.SessionID, got, ok, row)
+		}
 	}
 }

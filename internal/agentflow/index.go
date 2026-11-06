@@ -66,16 +66,63 @@ type IndexOptions struct {
 // BuildSessionIndex builds one row per session in the filtered window from
 // the same grouping BuildSessionStory uses, without building steps.
 func BuildSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, opts IndexOptions) SessionIndex {
-	idx := SessionIndex{Sessions: []SessionIndexRow{}}
 	if snap == nil || len(snap.Turns) == 0 {
-		return idx
+		return SessionIndex{Sessions: []SessionIndexRow{}}
 	}
-	c := collectSessions(snap, prices, f, "", opts.Replays)
-	results := toolErrors(snap)
-	prompts := sessionPrompts(snap, c.sessions)
+	idx, _, _ := ReuseSessionIndex(snap, prices, f, NewLayout(snap, opts.Replays), nil, opts)
+	return idx
+}
 
-	for _, s := range c.sessions {
-		idx.Sessions = append(idx.Sessions, indexRow(s, prompts[s.sessionID], results, opts))
+// IndexRows is the rows one index build made, each with the Layout key of
+// its session, for a later build under the same filter and prices to reuse.
+type IndexRows struct {
+	rows map[string]indexRowEntry
+}
+
+type indexRowEntry struct {
+	key string
+	row SessionIndexRow
+	// ok is false for a session the filter or replay dedup left no turn.
+	ok bool
+}
+
+// ReuseSessionIndex is BuildSessionIndex over l, taking each session's row
+// from prev, built under the same filter and prices, when the session's
+// Layout key is unchanged and building only the rest. It returns the rows
+// for the next build and the sessions whose rows it built.
+func ReuseSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, l *Layout, prev *IndexRows, opts IndexOptions) (SessionIndex, *IndexRows, []string) {
+	idx := SessionIndex{Sessions: []SessionIndexRow{}}
+	next := &IndexRows{rows: make(map[string]indexRowEntry, len(l.files))}
+	keys := make(map[string]string, len(l.files))
+	var built []string
+	for id := range l.files {
+		key := l.Key(id)
+		keys[id] = key
+		if prev != nil {
+			if e, ok := prev.rows[id]; ok && e.key == key {
+				next.rows[id] = e
+				continue
+			}
+		}
+		built = append(built, id)
+	}
+	sort.Strings(built)
+	if len(built) > 0 {
+		c := collectIn(snap, prices, f, l, built)
+		results := toolErrors(snap, c.sessions)
+		prompts := sessionPrompts(snap, c.sessions)
+		for _, id := range built {
+			e := indexRowEntry{key: keys[id]}
+			if s, ok := c.sessions[id]; ok {
+				e.row, e.ok = indexRow(s, prompts[id], results, IndexOptions{}), true
+			}
+			next.rows[id] = e
+		}
+	}
+	for _, e := range next.rows {
+		if e.ok {
+			idx.Sessions = append(idx.Sessions, e.row.At(opts.Now, opts.ActiveWindow))
+		}
 	}
 	sort.Slice(idx.Sessions, func(i, j int) bool {
 		a, b := idx.Sessions[i], idx.Sessions[j]
@@ -84,7 +131,7 @@ func BuildSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		}
 		return a.SessionID < b.SessionID
 	})
-	return idx
+	return idx, next, built
 }
 
 func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts IndexOptions) SessionIndexRow {
@@ -135,13 +182,18 @@ func (r SessionIndexRow) activeAt(now time.Time, window time.Duration) bool {
 	return window > 0 && !r.LastActivity.Before(now.Add(-window))
 }
 
+// At is the row as it reads at now: Active recomputed for window.
+func (r SessionIndexRow) At(now time.Time, window time.Duration) SessionIndexRow {
+	r.Active = r.activeAt(now, window)
+	return r
+}
+
 // At is the index as it reads at now: each row's Active recomputed for
 // window, everything else unchanged. idx is not modified.
 func (idx SessionIndex) At(now time.Time, window time.Duration) SessionIndex {
 	rows := make([]SessionIndexRow, len(idx.Sessions))
 	for i, r := range idx.Sessions {
-		r.Active = r.activeAt(now, window)
-		rows[i] = r
+		rows[i] = r.At(now, window)
 	}
 	return SessionIndex{Sessions: rows}
 }
@@ -160,11 +212,24 @@ func (idx SessionIndex) Inactive(now time.Time, window time.Duration) int {
 	return n
 }
 
-// toolErrors maps each tool_use id with a result to whether it errored.
-func toolErrors(snap *corpus.Snapshot) map[string]bool {
-	out := make(map[string]bool, len(snap.ToolResults))
-	for _, r := range snap.ToolResults {
-		if r.ToolUseID != "" {
+// toolErrors maps each tool_use id of the sessions' calls with a result to
+// whether it errored.
+func toolErrors(snap *corpus.Snapshot, sessions map[string]*sessionAccum) map[string]bool {
+	calls := map[string]bool{}
+	for _, s := range sessions {
+		for _, n := range s.nodes {
+			for _, r := range n.turns {
+				for _, u := range r.t.ToolUses {
+					if u.ID != "" {
+						calls[u.ID] = true
+					}
+				}
+			}
+		}
+	}
+	out := make(map[string]bool, len(calls))
+	for i := range snap.ToolResults {
+		if r := &snap.ToolResults[i]; calls[r.ToolUseID] {
 			out[r.ToolUseID] = r.IsError
 		}
 	}

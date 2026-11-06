@@ -198,54 +198,76 @@ func collectSessions(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.F
 		if only != "" && sessionID != only {
 			continue
 		}
-		if !aggregate.MatchesFilter(*t, f) {
-			c.outsideFilter++
-			continue
-		}
-		if replays.IsReplay(*t) {
-			c.replays++
-			continue
-		}
-		s, ok := c.sessions[sessionID]
-		if !ok {
-			s = &sessionAccum{sessionID: sessionID, nodes: map[string]*nodeAccum{}}
-			c.sessions[sessionID] = s
-		}
-		if s.cwd == "" && t.CWD != "" {
-			s.cwd = t.CWD
-		}
-		// Entrypoint is a session invariant — capture the first non-empty one.
-		if s.entrypoint == "" && t.Entrypoint != "" {
-			s.entrypoint = t.Entrypoint
-		}
-		if s.provider == "" {
-			s.provider = pricing.PriceProvider(t.Provider)
-		}
-		n, ok := s.nodes[t.SourceFile]
-		if !ok {
-			n = &nodeAccum{
-				sourceFile: t.SourceFile,
-				subagent:   sessionID != t.SessionID || parse.IsSubagentFile(t.SourceFile),
-				started:    t.Timestamp,
-				ended:      t.Timestamp,
-			}
-			s.nodes[t.SourceFile] = n
-		}
-		if t.Timestamp.Before(n.started) {
-			n.started = t.Timestamp
-		}
-		if t.Timestamp.After(n.ended) {
-			n.ended = t.Timestamp
-		}
-		cost, _ := prices.CostAt(t.Provider, t.Model, t.Timestamp,
-			t.Usage.InputTokens, t.Usage.OutputTokens,
-			t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
-			t.Usage.CacheReadTokens, t.Usage.Speed)
-		n.cost += cost
-		addUsage(&n.tokens, t.Usage)
-		n.turns = append(n.turns, turnRef{t: t, cost: cost})
+		c.add(t, sessionID, prices, f, replays)
 	}
 	return c
+}
+
+// collectIn is collectSessions over the given sessions only, reading just
+// their files through l.
+func collectIn(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter, l *Layout, ids []string) collected {
+	c := collected{sessions: map[string]*sessionAccum{}}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	l.eachTurn(snap, ids, func(t *parse.Turn) {
+		if id := l.root(t.SessionID); want[id] {
+			c.add(t, id, prices, f, &l.Replays)
+		}
+	})
+	return c
+}
+
+// add counts one turn of sessionID: the filter, the replay skip and its
+// priced cost on the agent of its file.
+func (c *collected) add(t *parse.Turn, sessionID string, prices *pricing.Table, f aggregate.Filter, replays *aggregate.ReplaySet) {
+	if !aggregate.MatchesFilter(*t, f) {
+		c.outsideFilter++
+		return
+	}
+	if replays.IsReplay(*t) {
+		c.replays++
+		return
+	}
+	s, ok := c.sessions[sessionID]
+	if !ok {
+		s = &sessionAccum{sessionID: sessionID, nodes: map[string]*nodeAccum{}}
+		c.sessions[sessionID] = s
+	}
+	if s.cwd == "" && t.CWD != "" {
+		s.cwd = t.CWD
+	}
+	// Entrypoint is a session invariant — capture the first non-empty one.
+	if s.entrypoint == "" && t.Entrypoint != "" {
+		s.entrypoint = t.Entrypoint
+	}
+	if s.provider == "" {
+		s.provider = pricing.PriceProvider(t.Provider)
+	}
+	n, ok := s.nodes[t.SourceFile]
+	if !ok {
+		n = &nodeAccum{
+			sourceFile: t.SourceFile,
+			subagent:   sessionID != t.SessionID || parse.IsSubagentFile(t.SourceFile),
+			started:    t.Timestamp,
+			ended:      t.Timestamp,
+		}
+		s.nodes[t.SourceFile] = n
+	}
+	if t.Timestamp.Before(n.started) {
+		n.started = t.Timestamp
+	}
+	if t.Timestamp.After(n.ended) {
+		n.ended = t.Timestamp
+	}
+	cost, _ := prices.CostAt(t.Provider, t.Model, t.Timestamp,
+		t.Usage.InputTokens, t.Usage.OutputTokens,
+		t.Usage.CacheCreate5mTokens, t.Usage.CacheCreate1hTokens,
+		t.Usage.CacheReadTokens, t.Usage.Speed)
+	n.cost += cost
+	addUsage(&n.tokens, t.Usage)
+	n.turns = append(n.turns, turnRef{t: t, cost: cost})
 }
 
 // buildSteps turns an agent's counted turns into its AgentSteps, one tool
