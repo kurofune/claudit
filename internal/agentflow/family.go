@@ -17,18 +17,23 @@ const titleMaxRunes = 200
 // person's behalf: Claude Code's caveats, reminders and slash-command
 // echoes, and Codex's injected AGENTS.md, environment, goal and guardian
 // items. An unclosed block runs to the end of the text. Each opens with
-// its marker, so a prompt without the marker skips the regexp.
+// its marker, so a prompt without the marker skips the regexp. A block
+// with keep set is the person's own text in a harness's tags (Claude
+// Code's pasted_content): only its tags are stripped, so its first line
+// can title the prompt.
 var wrapperBlocks = []struct {
 	marker string
 	re     *regexp.Regexp
+	keep   bool
 }{
-	{"<local-command-", regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`)},
-	{"<system-reminder>", regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`)},
-	{"<command-", regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`)},
-	{"# AGENTS.md instructions", regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`)},
-	{"<environment_context>", regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`)},
-	{"<codex_internal_context", regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`)},
-	{"<guardian_tool_descriptions>", regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`)},
+	{"<local-command-", regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`), false},
+	{"<system-reminder>", regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`), false},
+	{"<command-", regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`), false},
+	{"# AGENTS.md instructions", regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`), false},
+	{"<environment_context>", regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`), false},
+	{"<codex_internal_context", regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`), false},
+	{"<guardian_tool_descriptions>", regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`), false},
+	{"<pasted_content", regexp.MustCompile(`(?s)<pasted_content(?:\s[^>]*)?>(.*?)(?:</pasted_content>|\z)`), true},
 }
 
 // promptToken is one candidate for blanking: a run of characters that can
@@ -41,10 +46,16 @@ var promptToken = regexp.MustCompile("[^\\s`'\"()\\[\\]{}<>,;]+")
 // too; the key blanks it like any other id.
 var beadID = regexp.MustCompile(`^([a-z][a-z0-9]*)-([0-9a-z]{3,})((?:\.[0-9]+)*)$`)
 
-// stripWrappers removes every wrapper block from a prompt.
+// stripWrappers removes every wrapper block from a prompt, keeping the
+// text of a block marked keep.
 func stripWrappers(prompt string) string {
 	for _, w := range wrapperBlocks {
-		if strings.Contains(prompt, w.marker) {
+		if !strings.Contains(prompt, w.marker) {
+			continue
+		}
+		if w.keep {
+			prompt = w.re.ReplaceAllString(prompt, "\n$1\n")
+		} else {
 			prompt = w.re.ReplaceAllString(prompt, "\n")
 		}
 	}

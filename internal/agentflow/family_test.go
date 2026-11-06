@@ -286,3 +286,26 @@ func TestSessionFamily_TitleCapsAt200Runes(t *testing.T) {
 		t.Errorf("title = %d runes, want 200", n)
 	}
 }
+
+// pastedPrompt opens like a real session's prompt (~/.claude/projects,
+// 2026-11): a pasted_content block, its opening tag carrying an id, then
+// the pasted text; cut to its first sentences and closed.
+const pastedPrompt = "\n\n<pasted_content id=\"a9d4\">\nInside this folder, you'll find another folder called SIE AI Craft VTT Files. These are transcripts from videos that I've recorded for a group that I run called AI Craft, where I teach people how to use agent harnesses and how to become an agentic engineer.\nI'm putting together a class.\n</pasted_content>\n"
+
+func TestFamily_PastedContentTitlesByItsFirstLine(t *testing.T) {
+	line := "Inside this folder, you'll find another folder called SIE AI Craft VTT Files. These are transcripts from videos that I've recorded for a group that I run called AI Craft, where I teach people how to use agent harnesses and how to become an agentic engineer."
+	f := SessionFamily([]string{pastedPrompt})
+	if want := truncateRunesPlain(line, titleMaxRunes); f.Title != want {
+		t.Errorf("title = %q, want %q", f.Title, want)
+	}
+	if key, _ := blank(line); f.Key != key {
+		t.Errorf("key = %q, want blank(first pasted line) %q", f.Key, key)
+	}
+	if strings.Contains(f.Title, "pasted_content") || strings.Contains(f.Key, "pasted_content") {
+		t.Errorf("title %q or key %q carries the tag", f.Title, f.Key)
+	}
+	unclosed := SessionFamily([]string{"<pasted_content id=\"x1\">\n\nfix the login bug\nmore"})
+	if unclosed.Title != "fix the login bug" {
+		t.Errorf("unclosed block title = %q, want the pasted first line", unclosed.Title)
+	}
+}
