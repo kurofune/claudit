@@ -159,3 +159,18 @@ backslash (`rg 'a; go test' .` is no check). The same query against
   identical `failing_checks` (check, command, turn). The 81 → 82 move is
   the live corpus. Every entry carries an `input_key`, which the session
   page's failure block now matches calls by.
+
+**Remeasured 2026-11-06, code at 22521a0 (claudit-me6),** after a `#` that
+begins a word started a comment through its line (`# don't skip checks`
+newline `go test ./...` is a `go test` again; the quote-aware split had
+read the apostrophe as an open quote). Same query, `claudit serve` built at
+22521a0 on port 18797 beside a build at c29e5cd (before it) on 18798, both
+at the same moment:
+
+- 1,461 sessions, $4,223; `failed` > 0 in 654 (45%).
+- A non-empty `failing_checks`: 81 sessions ($173). Per label: `go test` 54,
+  `go build` 11, `make` 6, `npm test` 5, `go vet` 3, `npm run check` 3,
+  `node --test` 2, `git commit` 1.
+- `failed_edits` > 0: 4 sessions ($312). Either: 85 sessions (5.8%, $485).
+- Comment handling changed no session: the two builds gave identical
+  `failing_checks` per session. The 82 → 81 move is the live corpus.
