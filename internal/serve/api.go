@@ -88,6 +88,9 @@ type apiSectionSpec struct {
 	// previous window of equal length (nil for an unbounded window).
 	// Takes precedence over build.
 	buildWithPrev func(a, prev *aggregate.Aggregator) (any, error)
+	// promptFree marks a payload that reads no per-prompt figure
+	// (Aggregator.ByPrompt), so its Aggregators skip the PromptIndex.
+	promptFree bool
 }
 
 // serveAPISection is the shared body of every /_claudit/api/*
@@ -150,7 +153,27 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		// pass entirely and build straight from raw turns.
 		payload, err = spec.buildFromSnapshot(snap, q, now)
 	} else {
-		agg, aerr := s.sharedAggregateData(r.Context(), snap, q)
+		aggregateFor := s.sharedAggregateData
+		if spec.promptFree {
+			aggregateFor = s.promptFreeAggregateData
+		}
+		// The previous window builds beside the current one: they share
+		// nothing but the snapshot.
+		type built struct {
+			agg *aggregate.Aggregator
+			err error
+		}
+		var prevCh chan built
+		if spec.buildWithPrev != nil {
+			if pq, ok := previousWindow(q, now); ok {
+				prevCh = make(chan built, 1)
+				go func() {
+					a, err := aggregateFor(r.Context(), snap, pq)
+					prevCh <- built{a, err}
+				}()
+			}
+		}
+		agg, aerr := aggregateFor(r.Context(), snap, q)
 		if aerr != nil {
 			if isClientGone(aerr) {
 				// Client disconnected mid-aggregation (reload/navigation).
@@ -167,8 +190,9 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		switch {
 		case spec.buildWithPrev != nil:
 			var prev *aggregate.Aggregator
-			if pq, ok := previousWindow(q, now); ok {
-				if prev, aerr = s.sharedAggregateData(r.Context(), snap, pq); aerr != nil {
+			if prevCh != nil {
+				b := <-prevCh
+				if prev, aerr = b.agg, b.err; aerr != nil {
 					if isClientGone(aerr) {
 						return
 					}
@@ -346,6 +370,7 @@ func (s *Server) handleAPIOverview(w http.ResponseWriter, r *http.Request) {
 		buildWithPrev: func(a, prev *aggregate.Aggregator) (any, error) {
 			return render.BuildOverview(a, prev), nil
 		},
+		promptFree: true,
 	})
 }
 

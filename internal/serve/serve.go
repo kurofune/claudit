@@ -602,12 +602,29 @@ func isSingleLocalDay(since, until time.Time) bool {
 // building, so the handler can drop it silently instead of paying for
 // a build nobody will read.
 func (s *Server) sharedAggregateData(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, error) {
+	return s.aggregateData(ctx, snap, q, true)
+}
+
+// promptFreeAggregateData is sharedAggregateData for a section that reads
+// no per-prompt figure: its Aggregator skips the PromptIndex, the costliest
+// per-generation structure, under a singleflight key of its own.
+func (s *Server) promptFreeAggregateData(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, error) {
+	return s.aggregateData(ctx, snap, q, false)
+}
+
+func (s *Server) aggregateData(ctx context.Context, snap *Snapshot, q Query, prompts bool) (*aggregate.Aggregator, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	key := fmt.Sprintf("%d|%s", snap.Generation, q.rawQuery)
+	if !prompts {
+		key += "|prompt-free"
+	}
 	v, err, _ := s.aggregateSF.Do(key, func() (any, error) {
 		s.aggregateBuildN.Add(1)
+		if !prompts {
+			return s.buildPromptFreeAggregator(snap, q), nil
+		}
 		return s.buildAggregator(snap, q), nil
 	})
 	if err != nil {
@@ -664,6 +681,16 @@ func (s *Server) promptIndexBuildCount() int64 {
 // minus the file-walking stage (the snapshot already has parsed data).
 func (s *Server) buildAggregator(snap *Snapshot, q Query) *aggregate.Aggregator {
 	promptIdx, replays := s.promptData(snap)
+	return s.aggregateSnapshot(snap, q, promptIdx, replays)
+}
+
+// buildPromptFreeAggregator is buildAggregator without per-prompt
+// attribution: ByPrompt stays empty, every other figure is the same.
+func (s *Server) buildPromptFreeAggregator(snap *Snapshot, q Query) *aggregate.Aggregator {
+	return s.aggregateSnapshot(snap, q, nil, s.layout(snap).Replays)
+}
+
+func (s *Server) aggregateSnapshot(snap *Snapshot, q Query, promptIdx *aggregate.PromptIndex, replays aggregate.ReplaySet) *aggregate.Aggregator {
 	agg := aggregate.New(s.opts.Prices).
 		WithFilter(q.Filter).
 		WithPeriod(q.Period).
