@@ -917,15 +917,6 @@ func graphOf(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter) (
 	return g, nil
 }
 
-func findSession(g testGraph, id string) *AgentSession {
-	for i := range g.Sessions {
-		if g.Sessions[i].SessionID == id {
-			return &g.Sessions[i]
-		}
-	}
-	return nil
-}
-
 func TestAssembleSession_FilterExcludesTurns(t *testing.T) {
 	prices, _ := pricing.LoadDefault()
 	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

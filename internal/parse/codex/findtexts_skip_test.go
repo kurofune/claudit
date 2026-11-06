@@ -89,7 +89,7 @@ func reshape(raw []byte) []byte {
 			out.WriteByte('\n')
 			continue
 		}
-		keys := []string{"timestamp", "type", "payload"}
+		var keys []string
 		if i%2 == 0 {
 			rec["ordinal"] = json.RawMessage(strconv.Itoa(i))
 			keys = []string{"timestamp", "ordinal", "type", "payload"}
