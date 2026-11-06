@@ -141,4 +141,4 @@ curl -s http://127.0.0.1:18787/_claudit/api/sessions | jq -c 'def fc: (.failing_
 - Either: 85 sessions (5.9%, $485), under the 10% bar.
 - 81 is above the 52 measured above; the difference is not reconciled
   (the window moved a day and the corpus is live). Titles: no session title
-  carries `pasted_content` (was 11).
+  carries `pasted_content` (§4 counted 11).
