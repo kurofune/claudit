@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { detectRetries, detectSignals, percentiles } from '../web/agents-insights-logic.js';
+import { detectRetries, detectSignals, percentiles, nearestRank } from '../web/agents-insights-logic.js';
 
 // ── detectRetries (Phase 3 — retry detection) ───────────────────────
 // Keys/ofRef are agent-relative tool coords "si:ti" (the suffix of the full
@@ -751,4 +751,12 @@ test('detectSignals: three Reads of one path with the first two errored emit one
   const storms = detectSignals(graph).filter(s => s.kind === 'retry-storm');
   assert.equal(storms.length, 1);
   assert.equal(storms[0].reason, '3 attempts of Read `/x/a.png`, 2 errored — threshold 3');
+});
+
+test('nearestRank is the value at rank ceil(p/100 × n), one of the values', () => {
+  assert.equal(nearestRank([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90), 9);
+  assert.equal(nearestRank([5, 1, 3, 2, 4], 90), 5);
+  assert.equal(nearestRank([3, 1, 2, 4], 50), 2);
+  assert.equal(nearestRank([7], 90), 7);
+  assert.ok(Number.isNaN(nearestRank([], 90)));
 });

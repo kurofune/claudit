@@ -44,6 +44,18 @@ export function percentiles(values, ps) {
   });
 }
 
+// nearestRank is the p-th percentile by nearest rank: the smallest value
+// at or above which p% of the values lie, always one of the values.
+/** @param {number[]|null|undefined} values @param {number} p @returns {number} */
+export function nearestRank(values, p) {
+  const nums = (Array.isArray(values) ? values : [])
+    .filter(v => typeof v === 'number' && !Number.isNaN(v))
+    .sort((a, b) => a - b);
+  if (nums.length === 0) return NaN;
+  const rank = Math.ceil((Math.max(0, Math.min(100, p)) / 100) * nums.length);
+  return nums[Math.max(0, rank - 1)];
+}
+
 // retryTarget is what a call was aimed at: its input (the Bash command, the
 // file path) when it has one, else its detail. Two Reads of different .go files
 // share a detail but are not repeats of each other.
