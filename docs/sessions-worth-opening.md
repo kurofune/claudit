@@ -174,3 +174,48 @@ at the same moment:
 - `failed_edits` > 0: 4 sessions ($312). Either: 85 sessions (5.8%, $485).
 - Comment handling changed no session: the two builds gave identical
   `failing_checks` per session. The 82 → 81 move is the live corpus.
+
+**Remeasured 2026-11-06, code at b115c3e (claudit-b0r),** after a check
+counts only when the call's exit is that check's. A Bash call exits with
+its last command's status, so `checkKind` names a check only when it is the
+call's final segment: trailing `echo`, `printf`, `true` and `:` after `&&`
+are skipped, and a piped final segment (`go test | tail`) is no check. A
+`<<` opens a here-document only outside quotes and comments. A Codex exec
+script that calls more than one `tools.*` function (parallel
+`exec_command`s, or one plus a `write_stdin` poll of another session) fails
+when any of them does, so it runs no check (`parse.ToolUse.Concurrent`).
+A call that is no check neither fails nor clears one. Same query,
+`claudit serve` built at b115c3e on port 18811 beside a build at ad970bf
+(its parent) on 18812, both read at 13:48:17 PST:
+
+| | ad970bf (parent) | b115c3e (change) |
+|---|---|---|
+| sessions | 1,540 ($4,288) | 1,540 ($4,288) |
+| non-empty `failing_checks` | 81 sessions ($173) | 7 sessions ($15), 91% fewer |
+| per label | `go test` 54, `go build` 11, `make` 6, `npm test` 5, `go vet` 3, `npm run check` 3, `node --test` 2, `git commit` 1 | `go vet` 3, `go build` 2, `go test` 2 |
+| by provider | Claude Code 17, Codex 64 | Claude Code 6, Codex 1 |
+| either (check or `failed_edits`) | 86 sessions ($485) | 12 sessions ($327) |
+
+The final-segment rule alone (2f57f6c, same moment) left 42 sessions; 36
+were Codex exec scripts whose joined commands put the check last though
+another parallel command or poll errored (`cat CONTEXT_MAP.md` beside a
+`go test`, a `write_stdin` poll printing another run's FAIL). The
+`Concurrent` rule removed those. It costs recall: a check that really
+failed inside a multi-tool Codex script is no longer flagged.
+
+Hand check of every remaining flag (7, fewer than 20). Each call traced to
+its raw log by session and `input_key` (Codex) or turn (Claude Code):
+
+| # | session | label | final command | output | verdict |
+|---|---|---|---|---|---|
+| 1 | 5c6e9a64 | go build | `go build ./... && echo built` | `family.go:34:120: too few values in struct literal` | true |
+| 2 | a4324674 | go vet | `GOOS=windows go vet … && echo win-ok` | `undefined: syscall.Flock` | true |
+| 3 | 01a1996e | go test | `go test ./internal/readcache … -count=1` (one exec_command) | exit 1, `go: creating work dir: … operation not permitted` | true (sandbox, not code) |
+| 4 | a456734f | go vet | `go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room` | exit 137, `Sent redeclared in this block` | true, with a gap: the printed failure is the `go build` before `&&`, so vet never ran |
+| 5 | cfe42aa0 | go build | `CGO_ENABLED=0 GOOS=darwin … go build … && echo darwin-ok` | exit 1, `gozstd … undefined: CDict`; no `-ok` printed | true |
+| 6 | b98f2e54 | go test | `go test -short ./internal/aggregate/ -run PathTools` | `FAIL … [build failed]` | true |
+| 7 | 24b9adcb | go vet | `go vet ./internal/aggregate/ ./internal/agentflow/` | `vet: … "context" imported and not used` | true |
+
+All 7 are calls whose final command is the check and whose output shows a
+failure. Row 4's failure comes from an earlier check in the same `&&` chain,
+which the final-segment rule labels by the last check.
