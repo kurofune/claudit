@@ -142,3 +142,20 @@ curl -s http://127.0.0.1:18787/_claudit/api/sessions | jq -c 'def fc: (.failing_
 - 81 is above the 52 measured above; the difference is not reconciled
   (the window moved a day and the corpus is live). Titles: no session title
   carries `pasted_content` (§4 counted 11).
+
+**Remeasured 2026-11-06, code at b1d5b6e (claudit-me6),** after check
+recognition stopped splitting at separators inside quotes or after a
+backslash (`rg 'a; go test' .` is no check). The same query against
+`claudit serve --port 18787` built at b1d5b6e:
+
+- 1,457 sessions, $4,218; `failed` > 0 in 653 (45%).
+- A non-empty `failing_checks`: 82 sessions ($174). Per label: `go test` 54,
+  `go build` 11, `make` 6, `npm test` 5, `go vet` 3, `node --test` 3,
+  `npm run check` 3, `git commit` 1.
+- `failed_edits` > 0: 4 sessions ($312).
+- Either: 86 sessions (5.9%, $486), under the 10% bar.
+- The quote-aware split changed no session: a build at 13594f9 (before it),
+  served on port 18788 at the same moment, gave the same 82 sessions with
+  identical `failing_checks` (check, command, turn). The 81 → 82 move is
+  the live corpus. Every entry carries an `input_key`, which the session
+  page's failure block now matches calls by.
