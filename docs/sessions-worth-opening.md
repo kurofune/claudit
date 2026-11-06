@@ -211,11 +211,46 @@ its raw log by session and `input_key` (Codex) or turn (Claude Code):
 | 1 | 5c6e9a64 | go build | `go build ./... && echo built` | `family.go:34:120: too few values in struct literal` | true |
 | 2 | a4324674 | go vet | `GOOS=windows go vet … && echo win-ok` | `undefined: syscall.Flock` | true |
 | 3 | 01a1996e | go test | `go test ./internal/readcache … -count=1` (one exec_command) | exit 1, `go: creating work dir: … operation not permitted` | true (sandbox, not code) |
-| 4 | a456734f | go vet | `go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room` | exit 137, `Sent redeclared in this block` | true, with a gap: the printed failure is the `go build` before `&&`, so vet never ran |
+| 4 | a456734f | go vet | `go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room` | exit 137, `Sent redeclared in this block` | false: the printed failure is the `go build` before `&&`, so vet never ran |
 | 5 | cfe42aa0 | go build | `CGO_ENABLED=0 GOOS=darwin … go build … && echo darwin-ok` | exit 1, `gozstd … undefined: CDict`; no `-ok` printed | true |
 | 6 | b98f2e54 | go test | `go test -short ./internal/aggregate/ -run PathTools` | `FAIL … [build failed]` | true |
 | 7 | 24b9adcb | go vet | `go vet ./internal/aggregate/ ./internal/agentflow/` | `vet: … "context" imported and not used` | true |
 
-All 7 are calls whose final command is the check and whose output shows a
-failure. Row 4's failure comes from an earlier check in the same `&&` chain,
-which the final-segment rule labels by the last check.
+6 of 7 are true: the final command is the check and its output shows its
+failure. Row 4 is false: the failure is the `go build` earlier in the `&&`
+chain, which stopped before `go vet` ran; the final-segment rule labelled
+it by the last check. (Corrected 2026-11-06; first written as "true, with a
+gap".)
+
+**Remeasured 2026-11-06, code at 801bc52 (claudit-b0r),** after a check
+counts only when the call's exit is surely its own. An errored call whose
+check an earlier command that can fail gates with `&&` (anything but
+`echo`, `printf`, `true`, `:`; `cd` counts) may have stopped before the
+check, so it neither fails nor clears it; a passing call whose check `||`
+gates may never have run it, so it clears nothing. A piped final segment
+is no check even after `&&` (`go test && echo ok | false`). A tool input
+cut at the parser's 2,000-rune cap runs no check, since its trailing
+commands are gone. Same query, `claudit serve` built at 801bc52 on port
+18821 beside a build at 2ce4ec4 (its parent, code as b115c3e) on 18822,
+both read at 13:54:46 PST:
+
+| | 2ce4ec4 (parent) | 801bc52 (change) |
+|---|---|---|
+| sessions | 1,547 ($4,296) | 1,547 ($4,296) |
+| non-empty `failing_checks` | 7 sessions ($15) | 5 sessions ($10) |
+| per label | `go vet` 3, `go build` 2, `go test` 2 | `go test` 2, `go vet` 2, `go build` 1 |
+| by provider | Claude Code 6, Codex 1 | Claude Code 4, Codex 1 |
+| either (check or `failed_edits`) | 12 sessions ($327) | 10 sessions ($322) |
+
+Two sessions left, both rows of the hand check above:
+- a456734f (row 4, false): `go build … && go vet …` errored; gated by the
+  build, so no longer labelled `go vet`. The fix this change was for.
+- 5c6e9a64 (row 1, true): `sed -i … && sed -n … && go build ./... && echo
+  built`; its output is a real build error, but `sed` could have failed
+  first, so the conservative rule drops it. A recall cost of one true flag;
+  reading the tool output would be needed to keep it.
+
+The 5 left are rows 2, 3, 5, 6 and 7 above, each re-read in its raw log:
+the check is the final command and no failable `&&` gates it (row 5's
+`go build` follows a `;`, row 7's `go vet` a `;`, row 6's follows a closed
+here-document on its own line). All 5 are true.

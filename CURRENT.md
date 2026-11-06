@@ -4,7 +4,7 @@
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
-**Last change:** failing-check flags 81 → 7 sessions (claudit-b0r): a check counts only as the call's final command, and a multi-tool Codex exec script runs none; all 7 left hand-checked true.
+**Last change:** failing-check flags 81 → 5 sessions (claudit-b0r): a check counts only when the call's exit is surely its own (final command, not gated by a failable `&&`, input not truncated); all 5 left hand-checked true.
 
 **Assumptions:**
 - Projects key on the session cwd's git repo root (`internal/project/`); a deleted cwd outside any surviving repo is its own `missing` bucket (DECISIONS).
