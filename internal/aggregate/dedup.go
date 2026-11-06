@@ -30,31 +30,31 @@ type ReplaySet struct {
 // empty message.id (legacy single-line transcripts) can't be keyed and are
 // never treated as replays.
 func BuildReplaySet(turns []parse.Turn) ReplaySet {
-	files := map[string]map[string]struct{}{} // message.id -> set of source files
-	for _, t := range turns {
+	// first is the file each message.id was first seen in; canonical, the
+	// smallest file of each message.id seen in a second file.
+	first := make(map[string]string, len(turns))
+	canonical := map[string]string{}
+	for i := range turns {
+		t := &turns[i]
 		if t.MessageID == "" {
 			continue
 		}
-		s := files[t.MessageID]
-		if s == nil {
-			s = map[string]struct{}{}
-			files[t.MessageID] = s
+		f, seen := first[t.MessageID]
+		if !seen {
+			first[t.MessageID] = t.SourceFile
+			continue
 		}
-		s[t.SourceFile] = struct{}{}
-	}
-	canonical := map[string]string{}
-	for id, fs := range files {
-		if len(fs) < 2 {
-			continue // single file — nothing to dedup
+		if f == t.SourceFile {
+			continue
 		}
-		var min string
-		first := true
-		for f := range fs {
-			if first || f < min {
-				min, first = f, false
-			}
+		min, multi := canonical[t.MessageID]
+		if !multi {
+			min = f
 		}
-		canonical[id] = min
+		if t.SourceFile < min {
+			min = t.SourceFile
+		}
+		canonical[t.MessageID] = min
 	}
 	return ReplaySet{canonical: canonical}
 }

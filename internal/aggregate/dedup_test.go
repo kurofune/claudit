@@ -1,6 +1,9 @@
 package aggregate
 
 import (
+	"fmt"
+	"math/rand"
+	"reflect"
 	"testing"
 
 	"github.com/kurofune/claudit/internal/parse"
@@ -60,5 +63,54 @@ func TestBuildReplaySet_EmptyMessageIDNeverReplay(t *testing.T) {
 	rs := BuildReplaySet(turns)
 	if rs.IsReplay(turns[0]) || rs.IsReplay(turns[1]) {
 		t.Errorf("empty message.id must never be flagged as a replay")
+	}
+}
+
+// buildReplaySetBySets is BuildReplaySet as it read when it kept every
+// message.id's set of files.
+func buildReplaySetBySets(turns []parse.Turn) ReplaySet {
+	files := map[string]map[string]struct{}{}
+	for _, t := range turns {
+		if t.MessageID == "" {
+			continue
+		}
+		if files[t.MessageID] == nil {
+			files[t.MessageID] = map[string]struct{}{}
+		}
+		files[t.MessageID][t.SourceFile] = struct{}{}
+	}
+	canonical := map[string]string{}
+	for id, fs := range files {
+		if len(fs) < 2 {
+			continue
+		}
+		min, first := "", true
+		for f := range fs {
+			if first || f < min {
+				min, first = f, false
+			}
+		}
+		canonical[id] = min
+	}
+	return ReplaySet{canonical: canonical}
+}
+
+// TestBuildReplaySet_MatchesSetBuild: over random turns spread across
+// files, repeats within a file included, the canonical file of every
+// message.id equals the set-based build's.
+func TestBuildReplaySet_MatchesSetBuild(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for round := 0; round < 200; round++ {
+		var turns []parse.Turn
+		for i := rng.Intn(60); i >= 0; i-- {
+			id := ""
+			if rng.Intn(10) > 0 {
+				id = fmt.Sprintf("m%d", rng.Intn(15))
+			}
+			turns = append(turns, parse.Turn{MessageID: id, SourceFile: fmt.Sprintf("/f%d.jsonl", rng.Intn(5))})
+		}
+		if got, want := BuildReplaySet(turns), buildReplaySetBySets(turns); !reflect.DeepEqual(got, want) {
+			t.Fatalf("round %d: canonical %v, want %v", round, got.canonical, want.canonical)
+		}
 	}
 }
