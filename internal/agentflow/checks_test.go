@@ -47,6 +47,15 @@ func TestCheckKind(t *testing.T) {
 		{"cat > f.sh <<EOF\ngo build ./...\nEOF\ngo vet ./...", "go vet"},
 		{"cat <<-\"END\"\n\tgit push\n\tEND\nls", ""},
 		{"rg x <<< \"y\"\ngo test ./...", "go test"},
+		{"rg 'prefix; go test ./...' .", ""},
+		{"rg \"a && go build\" .", ""},
+		{"echo 'x\ngo test'", ""},
+		{"echo \"it's || make\"", ""},
+		{"echo a\\; go test", ""},
+		{"echo \"a\\\" ; go vet\"", ""},
+		{"rg 'a;b' . ; go test ./...", "go test"},
+		{"echo \"x\" && make", "make"},
+		{"echo 'it'\"s\" || cargo check", "cargo check"},
 		{"", ""},
 	}
 	for _, tc := range cases {

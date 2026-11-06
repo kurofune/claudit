@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// checkSeparators splits a shell command into the segments a check can
-// start: one per &&, ||, ; or newline.
-var checkSeparators = regexp.MustCompile(`&&|\|\||;|\n`)
-
 // heredocStart finds a here-document's delimiter on a command line:
 // <<WORD, <<-WORD, <<'WORD' or <<"WORD", never a <<< here-string.
 var heredocStart = regexp.MustCompile(`(?:^|[^<])<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
@@ -26,13 +22,14 @@ var checkSubcommands = map[string][]string{
 
 // checkKind is the check a shell command runs, labelled by its words
 // ("go test", "npm run build", "make"), or "" when no segment of it starts
-// one. A segment is a piece between &&, ||, ; and newlines; a leading "(",
-// NAME=value assignments, `time` and `timeout N` are skipped, and a `cd`
-// segment runs no check. The first segment that starts a check names it, so
+// one. A segment is a piece between the &&, ||, ; and newlines the shell
+// reads as separators (shellSegments); a leading "(", NAME=value
+// assignments, `time` and `timeout N` are skipped, and a `cd` segment runs
+// no check. The first segment that starts a check names it, so
 // `ps | rg 'go test'` and `echo go test` are not checks. A here-document's
 // body is data, not commands, so its lines start no segment.
 func checkKind(command string) string {
-	for _, seg := range checkSeparators.Split(dropHeredocs(command), -1) {
+	for _, seg := range shellSegments(dropHeredocs(command)) {
 		if k := segmentCheck(seg); k != "" {
 			return k
 		}
@@ -121,4 +118,38 @@ func dropHeredocs(command string) string {
 		}
 	}
 	return strings.Join(keep, "\n")
+}
+
+// shellSegments splits a shell command at each &&, ||, ; and newline that
+// the shell reads as a separator: one outside '...' and "..." and not
+// escaped by a backslash, so `rg 'a; go test' .` is one segment.
+func shellSegments(command string) []string {
+	var segs []string
+	start := 0
+	var quote byte
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case c == '\\':
+			i++
+		case quote == '"':
+			if c == '"' {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == ';' || c == '\n':
+			segs = append(segs, command[start:i])
+			start = i + 1
+		case (c == '&' || c == '|') && i+1 < len(command) && command[i+1] == c:
+			segs = append(segs, command[start:i])
+			i++
+			start = i + 1
+		}
+	}
+	return append(segs, command[start:])
 }
