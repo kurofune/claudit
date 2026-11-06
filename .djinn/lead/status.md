@@ -76,13 +76,14 @@ operator, say what and drop straight into Job 4.
 
 ### Stop one bead / pause the drain
 
-"Stop that bead", "pause the drain" and "run 5 workers" are messages: a bead of
+"Stop that bead", "tell that bead", "pause the drain" and "run 5 workers" are messages: a bead of
 type `message` the running drain reads and closes. No djinn or summoner
 command sends them.
 
 | The operator says | File |
 |---|---|
 | stop that bead | `bd create --type message --title "<why>" --label to:<bead-id> --label directive:stop --silent` |
+| tell that bead | `bd create --type message --title "<note>" --description "<detail>" --label to:<bead-id> --label directive:note --silent` |
 | pause the drain | `bd create --type message --title "<why>" --label to:drain --label directive:pause-drain --silent` |
 | run <n> workers | `bd create --type message --title "<why>" --label to:drain --label directive:set-workers --label workers:<n> --silent` |
 
@@ -90,6 +91,10 @@ command sends them.
   runs to its end first. It leaves the bead open — not closed, not failed —
   with a comment naming where it stopped, and the drain carries on with the rest
   of the work; the bead is not retried in this drain.
+- **a note lands at the bead's next step boundary** too, and the worker keeps
+  going: from then on every later prompt of that run carries it under
+  "Follow-ups since you started", title first, detail below. Use it to correct a
+  worker without stopping it.
 - **pause-drain lands at the drain's next poll.** No new bead is dispatched;
   running workers finish their beads, then the drain ends. It does not resume:
   starting again is a fresh Job 2 start.
