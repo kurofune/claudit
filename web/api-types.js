@@ -240,12 +240,14 @@
  */
 
 /**
- * /_claudit/api/sessions/story?whole=1 payload — every turn of one session
- * as one page, with its index row's title, project, provider, model and
- * span (ended_at is its last activity).
- * Mirrors internal/serve/api_sessions.go (sessionWhole).
- * @typedef {SessionStoryPage & {title: string, project: string, provider: string, model: string,
- *   started_at: string, ended_at: string}} SessionStoryWhole
+ * /_claudit/api/sessions/summary payload — what the session header reads:
+ * the session's whole index row plus every step of the main agent and its
+ * sub-agents with their numbers and calls but none of their text. Steps
+ * carry no text or thinking; tools carry no output or input_full, and each
+ * input is its first line, at most 120 runes.
+ * Mirrors internal/agentflow/story.go (agentflow.SessionSummary).
+ * @typedef {SessionIndexRow & {steps: StoryStep[], children: StoryChild[],
+ *   source_files: string[]}} SessionSummary
  */
 
 export {};

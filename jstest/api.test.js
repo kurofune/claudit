@@ -52,6 +52,12 @@ test('fetchSessionStory with a turn asks for the page that carries it', async ()
   assert.equal(await fetchURL(() => api.fetchSessionStory('s1', { turn: 'u/1' })),
     '/_claudit/api/sessions/story?session=s1&turn=u%2F1');
 });
+test('fetchSessionSummary asks for the session summary with the page query', async () => {
+  assert.equal(await fetchURL(() => api.fetchSessionSummary('a b/c&d')),
+    '/_claudit/api/sessions/summary?session=a%20b%2Fc%26d');
+  assert.equal(await fetchURL(() => api.fetchSessionSummary('s1'), '?project=x'),
+    '/_claudit/api/sessions/summary?session=s1&project=x');
+});
 test('fetchAgentToolFull and fetchAgentTurnFull keep their URLs', async () => {
   assert.equal(api.fetchAgents, undefined);
   assert.equal(await fetchURL(() => api.fetchAgentToolFull('s 1', 'toolu_&1')),

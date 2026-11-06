@@ -27,8 +27,8 @@ const child = (agentType, steps) => ({
 });
 const story = (steps, children = [], extra = {}) => ({
   session_id: 's1', title: 'fix the login bug', project: 'claudit', provider: 'claude-code', model: 'claude-opus-4-7',
-  started_at: steps[0].timestamp, ended_at: steps[steps.length - 1].timestamp, prompts: [], page: {},
-  steps, children, hidden: { replays: 0, outside_filter: 0 }, source_files: ['/logs/s1.jsonl'], ...extra,
+  started_at: steps[0].timestamp, last_activity: steps[steps.length - 1].timestamp,
+  steps, children, source_files: ['/logs/s1.jsonl'], ...extra,
 });
 
 test('headerNumbers sums cost, turns, commands and tokens across main and sub-agents', () => {
@@ -39,7 +39,7 @@ test('headerNumbers sums cost, turns, commands and tokens across main and sub-ag
     step('a3', 90, [tool('npm test', 'error'), tool('make lint', 'error'), tool('go vet', 'error')],
       { cost_usd: 1, tokens: tokens(1, 1, 0, 0, 0) }),
   ], [child('Explore', [step('k1', 10, [tool('go build ./...', 'error')], { cost_usd: 0.125, tokens: tokens(4, 4, 0, 0, 0) })])],
-  { started_at: at(-5), ended_at: at(115) });
+  { started_at: at(-5), last_activity: at(115) });
 
   const n = headerNumbers(st);
   assert.equal(n.costUSD, 1.875);
@@ -349,4 +349,16 @@ test('explainPrompt of a clean session says none for each list', () => {
     '',
     'Slowest turns: none',
   ].join('\n'));
+});
+
+test('explainPrompt over a summary, whose calls carry no output, names the failure without claiming no output', () => {
+  const bare = (input, status) => {
+    const t = tool(input, status);
+    delete t.output;
+    return t;
+  };
+  const st = story([step('a1', 0, [bare('npm test', 'error')]), step('a2', 30)]);
+  const lines = explainPrompt(st).split('\n');
+  const i = lines.indexOf('Unresolved failures:');
+  assert.equal(lines[i + 1], '10:00:00  npm test');
 });

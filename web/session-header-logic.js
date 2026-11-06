@@ -1,14 +1,15 @@
 // @ts-check
 // The session header's numbers, strip bars, Worth a look notes and the
-// explain-this-session prompt, computed over the whole story of one session
-// (the /sessions/story?whole=1 payload). Every sentence here is a fixed
-// template over counted fields: claudit generates no prose.
+// explain-this-session prompt, computed over one session's summary (the
+// /sessions/summary payload: every turn's numbers and calls, no text).
+// Every sentence here is a fixed template over counted fields: claudit
+// generates no prose.
 
 import { detectRetries, detectSignals, inputIdentity, percentiles, retryTarget } from './agents-insights-logic.js';
 import { agentLabel, parseRefKey, parseTime } from './agents-model.js';
 import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-story-logic.js';
 
-/** @import { StoryStep, StoryTool, StoryChild, Tokens, SessionStoryWhole as WholeStory } from './api-types.js' */
+/** @import { StoryStep, StoryTool, StoryChild, Tokens, SessionSummary as WholeStory } from './api-types.js' */
 /** @import { Signal } from './agents-insights-logic.js' */
 
 /**
@@ -140,7 +141,7 @@ export function headerNumbers(story) {
     const p = tokenParts(step.tokens);
     input += p.input; output += p.output; c5 += p.c5; c1 += p.c1; read += p.read;
   }
-  const start = parseTime(story.started_at), end = parseTime(story.ended_at);
+  const start = parseTime(story.started_at), end = parseTime(story.last_activity);
   const durationMs = !Number.isNaN(start) && !Number.isNaN(end) && end > start ? end - start : 0;
   const tokens = input + output + c5 + c1 + read;
   const prompt = input + c5 + c1 + read;
@@ -329,7 +330,8 @@ function slowestTurns(turns) {
 
 // explainPrompt is the text the "Copy explain-this-session prompt" button
 // copies: addressed to the coding agent that ran the session, naming its
-// logs, each unresolved failure (time, command, first output line), each
+// logs, each unresolved failure (time, command and, when the call carries
+// its output, that output's first line; the summary carries none), each
 // call retried after an error (time, target, attempts), the three costliest
 // turns (time, cost, first command) and the turns at or over the session's
 // p95 turn time.
@@ -345,8 +347,10 @@ export function explainPrompt(story) {
   if (failures.length) {
     lines.push('Unresolved failures:');
     for (const { turn, tool } of failures) {
-      const out = firstLine(unwrapExit(tool.output || ''));
-      lines.push(`${clock(turn.step.timestamp)}  ${commandOf(tool)}  → ${out ? clip(out, CMD_RUNES) : 'no output'}`);
+      const head = `${clock(turn.step.timestamp)}  ${commandOf(tool)}`;
+      if (tool.output === undefined) { lines.push(head); continue; }
+      const out = firstLine(unwrapExit(tool.output));
+      lines.push(`${head}  → ${out ? clip(out, CMD_RUNES) : 'no output'}`);
     }
   } else {
     lines.push('Unresolved failures: none');

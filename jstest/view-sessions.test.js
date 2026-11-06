@@ -202,7 +202,7 @@ test('no active session, no Active row', async () => {
 
 test('#agents/<session-id>/<turn> mounts paintStory with the session and turn under a Back to sessions link', async () => {
   const calls = stubFetch((path, p) => {
-    assert.equal(path, '/sessions/story');
+    assert.ok(path === '/sessions/story' || path === '/sessions/summary', path);
     return { httpStatus: 404 };
   });
   const { view, done } = await mount('s-a/turn-7');
@@ -469,7 +469,7 @@ test('an index that lands after the user opened a session paints nothing over th
   const releases = [];
   let first = true;
   const { view, mod, bump } = await liveList((path) => {
-    if (path === '/sessions/story') return { httpStatus: 404 };
+    if (path === '/sessions/story' || path === '/sessions/summary') return { httpStatus: 404 };
     if (first) { first = false; return { sessions: THREE() }; }
     return new Promise(r => { releases.push(r); });
   });

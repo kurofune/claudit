@@ -10,8 +10,9 @@ import { explainPrompt } from '../web/session-header-logic.js';
 const T0 = Date.parse('2026-05-01T10:00:00Z');
 const at = sec => new Date(T0 + sec * 1000).toISOString();
 
+// tool is a call as the summary carries it: no output, no input_full.
 const tool = (input, status, extra = {}) => ({
-  name: 'Bash', detail: input.split(' ')[0], kind: 'exec', input, status, count: 1, output: '',
+  name: 'Bash', detail: input.split(' ')[0], kind: 'exec', input, status, count: 1,
   input_key: '', exit_code: null, ...extra,
 });
 const tokens = (i = 0, o = 0, c5 = 0, c1 = 0, r = 0) =>
@@ -21,10 +22,14 @@ const step = (uuid, sec, tools = [], extra = {}) => ({
   duration_ms: 1000, gen_ms: 0, tools, context_cost_usd: 0, ...extra,
 });
 const SID = '0f1e2d3c-aaaa-bbbb-cccc-1234567890ab';
+// story is a /sessions/summary payload: the session's index row, its
+// steps and children, and its logs.
 const story = (steps, children = [], extra = {}) => ({
-  session_id: SID, title: 'fix the login bug', project: 'claudit', provider: 'codex', model: 'gpt-5.5',
-  started_at: steps[0].timestamp, ended_at: steps[steps.length - 1].timestamp, prompts: [], page: {},
-  steps, children, hidden: { replays: 0, outside_filter: 0 }, source_files: ['/logs/s1.jsonl'], ...extra,
+  session_id: SID, family_key: 'fix the login bug', remainder: '', title: 'fix the login bug',
+  outcome: 'done', project: 'claudit', provider: 'codex', model: 'gpt-5.5', cost_usd: 0, duration_ms: 0,
+  turns: steps.length, commands: 0, failed: 0, active: false,
+  started_at: steps[0].timestamp, last_activity: steps[steps.length - 1].timestamp,
+  steps, children, source_files: ['/logs/s1.jsonl'], ...extra,
 });
 
 // FAILED ends on three failed commands after a costly first turn, and has a
@@ -32,12 +37,12 @@ const story = (steps, children = [], extra = {}) => ({
 const FAILED = () => story([
   step('a1', 0, [tool('rg login', 'ok')], { cost_usd: 2, context_cost_usd: 0.4, duration_ms: 5000, tokens: tokens(100, 50, 1000, 0, 3000) }),
   step('a2', 20, [tool('git diff', 'ok', { count: 2 })], { context_cost_usd: 0.1, duration_ms: 1000 }),
-  step('a3', 40, [tool('npm test', 'error', { output: 'FAIL login.test.js' }), tool('make lint', 'error'), tool('go vet ./...', 'error')],
+  step('a3', 40, [tool('npm test', 'error'), tool('make lint', 'error'), tool('go vet ./...', 'error')],
     { context_cost_usd: 0.2, duration_ms: 20000 }),
 ], [{
   kind: 'subagent', agent_type: 'Explore', description: '', parent_tool_use_id: '', started_at: at(10), ended_at: at(10),
   cost_usd: 0.01, error_count: 0, steps: [step('k1', 10, [tool('rg auth', 'ok')], { context_cost_usd: 0.05, duration_ms: 2000 })],
-}], { started_at: at(0), ended_at: at(3725) });
+}], { started_at: at(0), last_activity: at(3725) });
 
 const CLEAN = () => story([step('a1', 0), step('a2', 5), step('a3', 10)]);
 
@@ -72,7 +77,7 @@ const heights = host => host.querySelectorAll('.turn-bar').map(b => b.getAttribu
 test('the header names the session and fills the four tiles', async () => {
   const { host, calls, done } = await mount(FAILED());
   await done;
-  assert.match(calls[0], /\/_claudit\/api\/sessions\/story\?session=0f1e2d3c-aaaa-bbbb-cccc-1234567890ab&whole=1$/);
+  assert.match(calls[0], /\/_claudit\/api\/sessions\/summary\?session=0f1e2d3c-aaaa-bbbb-cccc-1234567890ab$/);
   assert.equal(text(host.querySelector('.sh-title')), 'fix the login bug');
   assert.equal(text(host.querySelector('.sh-project')), 'claudit');
   assert.equal(text(host.querySelector('.sh-provider')), 'Codex');
@@ -272,7 +277,7 @@ test('the session page mounts the header above the story', async () => {
   const view = env.document.createElement('section');
   view.setAttribute('id', 'view-agents');
   env.document.body.appendChild(view);
-  stubFetch(url => (url.includes('whole=1') ? FAILED() : { httpStatus: 404 }));
+  stubFetch(url => (url.includes('/sessions/summary?') ? FAILED() : { httpStatus: 404 }));
   const mod = await import(`../web/view-sessions.js?m=${++seq}`);
   await mod.paint({ view: 'agents', sub: SID, unit: 'dollars' });
   const host = view.querySelector('#session-header');

@@ -3,9 +3,9 @@
 // duration, tokens, unresolved failures), a strip of one bar per model turn
 // showing where the money or the time went, up to three Worth a look notes
 // and a button that copies an explain-this-session prompt. Every number
-// comes from web/session-header-logic.js over the whole story.
+// comes from web/session-header-logic.js over the session's summary.
 
-import { fetchSessionWhole } from './api.js';
+import { fetchSessionSummary } from './api.js';
 import { escHtml, fmtCompact } from './format.js';
 import { API_EQUIVALENT_TIP, providerLabel } from './provider-filter.js';
 import { sessionHash } from './router.js';
@@ -14,14 +14,14 @@ import { copyText } from './clipboard.js';
 import { clock, fmtDuration, fmtUSD } from './session-story-logic.js';
 import { headerNumbers, stripBars, worthALook, explainPrompt, sessionOf } from './session-header-logic.js';
 
-/** @import { SessionStoryWhole } from './api-types.js' */
+/** @import { SessionSummary } from './api-types.js' */
 
 const COPY_LABEL = 'Copy explain-this-session prompt';
 const COPIED_MS = 2000;
 
 /**
  * @typedef {Object} HeaderState
- * @property {SessionStoryWhole} story
+ * @property {SessionSummary} story
  * @property {'cost'|'time'} mode
  * @property {number} nowMs
  * @property {number} focusBar            the strip's roving tab stop
@@ -38,8 +38,8 @@ const loads = new WeakMap();
 /** @param {any} err */
 const reasonOf = err => (err && err.status ? `HTTP ${err.status}` : (err && err.message) || 'network error');
 
-// paintSessionHeader shows the skeleton header in host, fetches the whole
-// session and renders it, or the error with a Retry that refetches. A
+// paintSessionHeader shows the skeleton header in host, fetches the
+// session's summary and renders it, or the error with a Retry that refetches. A
 // later call on the same host drops an earlier one's answer.
 /** @param {Element} host @param {string} sessionId @param {{nowMs?: number}} [opts] */
 export async function paintSessionHeader(host, sessionId, opts = {}) {
@@ -47,10 +47,10 @@ export async function paintSessionHeader(host, sessionId, opts = {}) {
   loads.set(host, my);
   states.delete(host);
   host.innerHTML = skeletonHTML();
-  /** @type {SessionStoryWhole} */
+  /** @type {SessionSummary} */
   let story;
   try {
-    story = await fetchSessionWhole(sessionId);
+    story = await fetchSessionSummary(sessionId);
   } catch (err) {
     if (loads.get(host) !== my) return;
     if (err && err.status === 404) { host.innerHTML = ''; return; }
@@ -76,7 +76,7 @@ function skeletonHTML() {
 }
 
 // renderSessionHeader paints story's header into host.
-/** @param {Element} host @param {SessionStoryWhole} story @param {{nowMs?: number, mode?: 'cost'|'time'}} [opts] */
+/** @param {Element} host @param {SessionSummary} story @param {{nowMs?: number, mode?: 'cost'|'time'}} [opts] */
 export function renderSessionHeader(host, story, opts = {}) {
   const prev = states.get(host);
   /** @type {HeaderState} */
@@ -92,7 +92,7 @@ export function renderSessionHeader(host, story, opts = {}) {
   const notes = worthALook(sessionOf(story), st.nowMs);
   const sid = story.session_id || '';
   const provider = story.provider || 'claude-code';
-  const last = clock(story.ended_at);
+  const last = clock(story.last_activity);
 
   const tile = (/** @type {string} */ key, /** @type {string} */ label, /** @type {string} */ value, /** @type {string} */ sub, cls = '') =>
     `<div class="sh-tile${cls}" data-tile="${key}"><div class="sh-label">${label}</div>
@@ -175,7 +175,7 @@ function go(host, link) {
 // note clicks and Enter jump to their turn, the Cost | Time switch answers
 // clicks and the arrow keys, the strip's arrows move between bars and the
 // copy button copies the explain prompt.
-/** @param {Element} host @param {SessionStoryWhole} story */
+/** @param {Element} host @param {SessionSummary} story */
 export function wireSessionHeader(host, story) {
   const st = states.get(host);
   if (st && st.story !== story) st.story = story;
