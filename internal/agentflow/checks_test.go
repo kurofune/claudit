@@ -43,6 +43,10 @@ func TestCheckKind(t *testing.T) {
 		{"cd web", ""},
 		{"maker", ""},
 		{"gotest ./...", ""},
+		{"python3 - <<'EOF'\nmake = 1\ngo test\nEOF", ""},
+		{"cat > f.sh <<EOF\ngo build ./...\nEOF\ngo vet ./...", "go vet"},
+		{"cat <<-\"END\"\n\tgit push\n\tEND\nls", ""},
+		{"rg x <<< \"y\"\ngo test ./...", "go test"},
 		{"", ""},
 	}
 	for _, tc := range cases {
