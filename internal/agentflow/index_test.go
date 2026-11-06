@@ -387,6 +387,32 @@ func TestBuildSessionIndex_CompactionsAndFirstFailedTurn(t *testing.T) {
 	}
 }
 
+// TestBuildSessionIndex_CommentedCheck: a comment's apostrophe or double
+// quote opens no quote, so the check on the next line is a check: its
+// failure counts, and a later success clears it.
+func TestBuildSessionIndex_CommentedCheck(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("a1", "s1", t0, "t1", "# don't skip checks\ngo test ./..."),
+			bashTurn("a2", "s1", t0.Add(time.Minute), "t2", "# say \"hi\ngo build ./..."),
+			bashTurn("a3", "s1", t0.Add(2*time.Minute), "t3", "go test ./..."),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", IsError: true, Content: "FAIL"},
+			{ToolUseID: "t2", IsError: true, Content: "build failed"},
+			{ToolUseID: "t3", Content: "ok"},
+		},
+	}
+	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	want := []FailingCheck{{Check: "go build", Command: "# say \"hi", Turn: "a2",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("# say \"hi\ngo build ./..."), 16)}}
+	if !reflect.DeepEqual(row.FailingChecks, want) {
+		t.Errorf("failing_checks = %+v, want %+v (go test cleared by a3)", row.FailingChecks, want)
+	}
+}
+
 // TestBuildSessionIndex_FailingChecksAndFailedEdits: a go test that failed
 // then passed is not failing; a go build whose last run failed is, named
 // by its label, its command's first line and its turn. Of two errored

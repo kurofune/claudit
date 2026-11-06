@@ -122,7 +122,9 @@ func dropHeredocs(command string) string {
 
 // shellSegments splits a shell command at each &&, ||, ; and newline that
 // the shell reads as a separator: one outside '...' and "..." and not
-// escaped by a backslash, so `rg 'a; go test' .` is one segment.
+// escaped by a backslash, so `rg 'a; go test' .` is one segment. A # that
+// begins a word starts a comment through the end of its line, so a quote or
+// separator inside it is text: `# don't` opens no quote.
 func shellSegments(command string) []string {
 	var segs []string
 	start := 0
@@ -139,6 +141,10 @@ func shellSegments(command string) []string {
 		case quote == '"':
 			if c == '"' {
 				quote = 0
+			}
+		case c == '#' && (i == 0 || strings.IndexByte(" \t\n;&|()<>", command[i-1]) >= 0):
+			for i+1 < len(command) && command[i+1] != '\n' {
+				i++
 			}
 		case c == '\'' || c == '"':
 			quote = c
