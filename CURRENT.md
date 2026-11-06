@@ -1,10 +1,10 @@
 # CURRENT
 
-**Mode:** v3 landed (one Sessions surface; Tools folded into Overview). Polish from dogfooding is next.
+**Mode:** Sessions rework planned (`docs/sessions-worth-opening.md`): speed first, then the list says what to open, then the session page leads with how it ended.
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
-**Last change:** Codex `exec` calls named by their tools.* function; write_stdin polls fold into Bash (`exec` row 1,240 → 6 calls); Worth a look calibrated, sessions with a note 1060 → 456 (claudit-hts, claudit-5mp).
+**Last change:** operator found v3 Sessions unguided and slow; council rejected a kinds-of-work landing page; 3-bead plan approved 2026-11-05.
 
 **Assumptions:**
 - Projects key on the session cwd's git repo root (`internal/project/`); a deleted cwd outside any surviving repo is its own `missing` bucket (DECISIONS).
@@ -13,7 +13,7 @@
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** next dogfooding pass by the operator on the Sessions surface.
+**Next checkpoint:** 3 beads filed and drained; operator tries the reworked list and session page before anything larger.
 
 **Stop conditions:**
 - Claude Code or Codex changes the log schema → parser catch-up becomes the priority.
