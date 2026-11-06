@@ -11,7 +11,7 @@ import { sessionHash } from './router.js';
 import { providerLabel, API_EQUIVALENT_TIP } from './provider-filter.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { fmtDuration } from './session-story-logic.js';
-import { listView, rowTitle, elapsedText, agoText, windowText, FILTERS, SORTS } from './sessions-list-logic.js';
+import { listView, rowTitle, elapsedText, agoText, windowText, FILTERS, SORTS, failureBadge } from './sessions-list-logic.js';
 
 /** @import { SessionIndexRow } from './api-types.js' */
 /** @import { WorthRow, ViewGroup } from './sessions-list-logic.js' */
@@ -72,7 +72,8 @@ function mainHTML(r) {
 /** @param {SessionIndexRow} r */
 function rowHTML(r) {
   const id = r.session_id;
-  const failed = (r.failed || 0) > 0 ? `<span class="sl-failed">${escHtml(String(r.failed))} failed</span>` : '';
+  const badge = failureBadge(r);
+  const failed = badge ? `<span class="sl-failed">${escHtml(badge)}</span>` : '';
   return `<a class="sl-row" href="${escHtml(sessionHash(id))}" data-session="${escHtml(id)}" data-focus-key="row:${escHtml(id)}">
       ${mainHTML(r)}
       <span class="sl-meta">

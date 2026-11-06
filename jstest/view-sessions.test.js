@@ -13,15 +13,16 @@ const at = min => new Date(NOW + min * 60_000).toISOString();
 const row = (id, f = {}) => ({
   session_id: id, family_key: 'fix the bug', remainder: '', title: 'fix the bug', outcome: 'Done.',
   project: 'claudit', provider: 'claude-code', model: 'claude-opus-5-5', cost_usd: 1, duration_ms: 60_000,
-  turns: 3, commands: 2, failed: 0, last_activity: at(-30), active: false, started_at: at(-40), ...f,
+  turns: 3, commands: 2, failed: 0, failing_checks: [], failed_edits: 0, last_activity: at(-30), active: false, started_at: at(-40), ...f,
 });
 
 const THREE = () => [
   row('s-a', { family_key: 'work bead _ next', remainder: 'claudit-9yx', title: 'work bead claudit-9yx next', first_failed_turn: 'turn-f1', last_activity: at(-1), cost_usd: 2.5, duration_ms: 125_000, failed: 2,
+    failing_checks: [{ check: 'go test', command: 'go test ./internal/...', turn: 'turn-gt' }],
     outcome: 'All twelve acceptance criteria hold and the branch is committed.', active: true, started_at: at(-12) }),
   row('s-b', { family_key: 'work bead _ next', remainder: 'claudit-4eb', title: 'work bead claudit-4eb next', last_activity: at(-20), cost_usd: 9, compactions: 2 }),
-  row('s-c', { family_key: 'review the diff', remainder: '', title: 'review the diff please', last_activity: at(-5), provider: 'codex', outcome: '' }),
-  row('s-d', { family_key: 'retry _ times with a _ms timeout', remainder: '3 · 500', title: 'retry 3 times with a 500ms timeout', last_activity: at(-50), cost_usd: 1234.5, model: 'claude-fable-5-1' }),
+  row('s-c', { family_key: 'review the diff', remainder: '', title: 'review the diff please', last_activity: at(-5), provider: 'codex', outcome: '', failed: 3, first_failed_turn: 'turn-c1' }),
+  row('s-d', { family_key: 'retry _ times with a _ms timeout', remainder: '3 · 500', title: 'retry 3 times with a 500ms timeout', last_activity: at(-50), cost_usd: 1234.5, model: 'claude-fable-5-1', failed: 1, failed_edits: 1, first_failed_turn: 'turn-d1' }),
 ];
 
 // stubFetch answers the index and story routes through route(path, params).
@@ -86,13 +87,13 @@ test('three families render as groups ordered by their newest member, each heade
   assert.equal(view.ownerDocument.getElementById('nav-metric-agents').textContent, '4 sessions');
 });
 
-test('the top sentence counts the window, its cost and the unfixed failures, labelled API-equivalent with Codex in it', async () => {
+test('the top sentence counts the window, its cost, the failing checks and the edits never applied, labelled API-equivalent with Codex in it', async () => {
   stubFetch(() => ({ sessions: THREE() }));
   const { view, done } = await mount();
   await done;
   const p = view.querySelector('.sl-sentence');
   assert.equal(p.textContent.replace(/\s+/g, ' ').trim(),
-    '4 sessions in the last 7 days, $1,247 API-equivalent. 1 ended with unfixed failed commands ($2.50).');
+    '4 sessions in the last 7 days, $1,247 API-equivalent. 1 ended with a failing check (go test, build, commit…). 1 had edits that never applied.');
   assert.match(p.querySelector('.api-eq').getAttribute('data-tooltip'), /API list rates/);
   const kids = view.querySelector('.sl-body').children;
   assert.deepEqual(kids.map(k => k.className.split(' ')[0]), ['sl-active', 'sl-sentence', 'sl-worth', 'sl-group', 'sl-group', 'sl-group'],
@@ -112,19 +113,21 @@ test('a row shows the title, a visible "Last message:" line, a provider chip, co
   assert.equal(a.querySelector('.sl-provider').textContent, 'Claude Code');
   assert.equal(a.querySelector('.sl-cost').textContent, '$2.50');
   assert.equal(a.querySelector('.sl-dur').textContent, '2m 5s');
-  assert.equal(a.querySelector('.sl-failed').textContent, '2 failed');
+  assert.equal(a.querySelector('.sl-failed').textContent, 'go test failed', 'the failing check, not the errored-call count');
 
   const b = view.querySelector('.sl-group [data-session="s-b"]');
-  assert.equal(b.querySelector('.sl-failed'), null, 'no failure count when failed is 0');
+  assert.equal(b.querySelector('.sl-failed'), null, 'no badge when nothing failed');
   const c = view.querySelector('.sl-group [data-session="s-c"]');
+  assert.equal(c.querySelector('.sl-failed'), null, 'no badge for errored commands alone');
   assert.equal(c.querySelector('.sl-label').textContent, 'review the diff please');
   assert.equal(c.querySelector('.sl-outcome').textContent, 'Last message: (no agent message)');
   assert.equal(c.querySelector('.sl-provider').textContent, 'Codex');
   const d = view.querySelector('.sl-group [data-session="s-d"]');
   assert.equal(d.querySelector('.sl-cost').textContent, '$1,235');
+  assert.equal(d.querySelector('.sl-failed').textContent, '1 edit never applied');
 });
 
-test('Worth opening lists each session once with its reason, cost and last activity; a failed row opens its first failing turn', async () => {
+test('Worth opening lists each session once with its reason, cost and last activity; a failing check opens its run, a failed edit its first failing turn', async () => {
   stubFetch(() => ({ sessions: THREE() }));
   const { view, done, location } = await mount();
   await done;
@@ -132,23 +135,24 @@ test('Worth opening lists each session once with its reason, cost and last activ
   assert.equal(block.querySelector('.sl-worth-title').textContent, 'Worth opening');
   const rows = block.querySelectorAll('.sl-row');
   assert.deepEqual(rows.map(r => [r.getAttribute('data-session'), r.querySelector('.sl-reason').textContent]), [
-    ['s-a', '2 failed commands never fixed'],
+    ['s-a', 'Last `go test` failed'],
+    ['s-d', '1 edit failed and never applied'],
     ['s-b', 'Context compacted 2 times'],
-    ['s-d', 'Most expensive session this week'],
   ]);
   assert.equal(rows[0].querySelector('.sl-label').textContent, 'work bead claudit-9yx next');
   assert.equal(rows[0].querySelector('.sl-cost').textContent, '$2.50');
   assert.equal(rows[0].querySelector('.sl-when').textContent, '1m ago');
-  assert.equal(rows[0].getAttribute('href'), '#agents/s-a/turn-f1');
-  assert.equal(rows[1].getAttribute('href'), '#agents/s-b');
+  assert.equal(rows[0].getAttribute('href'), '#agents/s-a/turn-gt');
+  assert.equal(rows[1].getAttribute('href'), '#agents/s-d/turn-d1');
+  assert.equal(rows[2].getAttribute('href'), '#agents/s-b');
   click(rows[0].querySelector('.sl-reason'));
-  assert.equal(location.hash, '#agents/s-a/turn-f1');
-  rows[1].focus();
-  keydown(rows[1], 'Enter');
+  assert.equal(location.hash, '#agents/s-a/turn-gt');
+  rows[2].focus();
+  keydown(rows[2], 'Enter');
   assert.equal(location.hash, '#agents/s-b');
   rows[0].focus();
   keydown(rows[0], 'Enter');
-  assert.equal(location.hash, '#agents/s-a/turn-f1');
+  assert.equal(location.hash, '#agents/s-a/turn-gt');
 });
 
 test('clicking a row or pressing Enter on it opens #agents/<session-id>', async () => {
@@ -169,7 +173,7 @@ test('ArrowDown and ArrowUp walk the Active, Worth opening and family rows; ever
   await done;
   const rows = view.querySelectorAll('.sl-body .sl-row');
   assert.deepEqual(rows.map(r => r.getAttribute('data-focus-key')),
-    ['active:s-a', 'worth:s-a', 'worth:s-b', 'worth:s-d', 'row:s-a', 'row:s-b', 'row:s-c', 'row:s-d']);
+    ['active:s-a', 'worth:s-a', 'worth:s-d', 'worth:s-b', 'row:s-a', 'row:s-b', 'row:s-c', 'row:s-d']);
   rows[3].focus();
   keydown(rows[3], 'ArrowDown');
   assert.equal(document.activeElement, rows[4], 'from the last Worth opening row into the first family row');
@@ -211,11 +215,12 @@ test('filter chips carry counts and select one at a time; the sort reorders rows
   await done;
   const chips = () => view.querySelectorAll('.sl-chip');
   assert.deepEqual(chips().map(c => c.textContent.replace(/\s+/g, ' ').trim()),
-    ['All 4', 'Active in the last minute 1', 'Had unresolved failures 1']);
+    ['All 4', 'Active in the last minute 1', 'Ended with a failing check 2']);
   assert.deepEqual(chips().map(c => c.getAttribute('aria-pressed')), ['true', 'false', 'false']);
   click(chips()[2]);
   assert.deepEqual(chips().map(c => c.getAttribute('aria-pressed')), ['false', 'false', 'true']);
-  assert.deepEqual(view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session')), ['s-a']);
+  assert.deepEqual(view.querySelectorAll('.sl-group .sl-row').map(r => r.getAttribute('data-session')), ['s-a', 's-d'],
+    'the failing check and the failed edit; s-c only errored commands');
   click(chips()[0]);
   assert.equal(view.querySelectorAll('.sl-group .sl-row').length, 4);
 
@@ -347,14 +352,14 @@ test('an SSE generation bump refetches and repaints, keeping search, filter, sor
 test('a family starts collapsed to its 3 rows most worth opening behind "Show all N"; opening it focuses the first revealed row', async () => {
   const seven = Array.from({ length: 7 }, (_, i) => row(`s7-${i}`, {
     family_key: 'seven runs', title: `seven runs ${i}`, last_activity: at(-i), cost_usd: i + 1,
-    failed: i === 5 ? 1 : 0, compactions: i === 2 ? 3 : 0,
+    failed: i < 5 ? 1 : 0, failing_checks: i === 5 ? [{ check: 'make', command: 'make', turn: 'tm' }] : [], compactions: i === 2 ? 3 : 0,
   }));
   stubFetch(() => ({ sessions: [...seven, row('other', { family_key: 'other', last_activity: at(-60) })] }));
   const { view, done, document } = await mount();
   await done;
   const g = () => view.querySelector('.sl-group[data-family="seven runs"]');
   assert.deepEqual(g().querySelectorAll('.sl-row').map(r => r.getAttribute('data-session')), ['s7-2', 's7-5', 's7-6'],
-    'failed, then compacted, then costliest, in the newest-first sort');
+    'failing check, then compacted, then costliest, in the newest-first sort');
   const more = g().querySelector('.sl-more');
   assert.equal(more.textContent, 'Show all 7');
   assert.equal(more.tagName, 'BUTTON');
@@ -369,7 +374,8 @@ test('a family starts collapsed to its 3 rows most worth opening behind "Show al
 
 test('the 3,000-row 88-family index draws the sentence, 8 Worth opening rows and every family collapsed to 3', async () => {
   const rows = Array.from({ length: 3000 }, (_, i) => row(`s${i}`, {
-    family_key: `family _ ${i % 88}`, last_activity: at(-i), cost_usd: (i % 37) + 0.5, failed: i % 101 === 0 ? 1 : 0,
+    family_key: `family _ ${i % 88}`, last_activity: at(-i), cost_usd: (i % 37) + 0.5, failed: i % 7 === 0 ? 1 : 0,
+    failing_checks: i % 101 === 0 ? [{ check: 'go test', command: 'go test ./...', turn: `t${i}` }] : [],
   }));
   stubFetch(() => ({ sessions: rows }));
   const { view, done } = await mount();

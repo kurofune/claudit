@@ -163,10 +163,21 @@
  * @property {number} commands          tool calls
  * @property {number} failed            errored tool calls whose exact input never later succeeded
  * @property {string} first_failed_turn uuid of the earliest turn holding one of those calls; "" when failed is 0
+ * @property {FailingCheck[]|null} failing_checks one per check kind whose last run in the session errored, in the order of those runs; a check run again and green is not failing
+ * @property {number} failed_edits      Edit, Write, MultiEdit and apply_patch calls that errored and never later succeeded with the identical input: edits that never applied
  * @property {number} compactions       context compaction boundaries in the session's files
  * @property {string} last_activity     RFC3339
  * @property {boolean} active           last activity within the last minute
  * @property {string} started_at        RFC3339
+ */
+
+/**
+ * A check whose last run in a session errored.
+ * Mirrors internal/agentflow/index.go (agentflow.FailingCheck).
+ * @typedef {Object} FailingCheck
+ * @property {string} check    the check's label, as checkKind names it ("go test")
+ * @property {string} command  the first line of that last run's command, cut to 120 runes
+ * @property {string} turn     uuid of the turn that ran it
  */
 
 /**

@@ -27,7 +27,7 @@ export const DEFAULT_WINDOW = 'the last 7 days';
 export const FILTERS = /** @type {const} */ ([
   { id: 'all', label: 'All' },
   { id: 'active', label: 'Active in the last minute' },
-  { id: 'failed', label: 'Had unresolved failures' },
+  { id: 'failed', label: 'Ended with a failing check' },
 ]);
 
 export const SORTS = /** @type {const} */ ([
@@ -80,7 +80,7 @@ export function groupByFamily(rows) {
 /** @param {SessionIndexRow[]} rows @param {ListFilter|string} filter */
 export function applyFilter(rows, filter) {
   if (filter === 'active') return rows.filter(r => r.active === true);
-  if (filter === 'failed') return rows.filter(r => (r.failed || 0) > 0);
+  if (filter === 'failed') return rows.filter(endedFailing);
   return rows;
 }
 
@@ -129,15 +129,33 @@ export function activeRows(rows) {
 const plural = (n, one, many = one + 's') => `${fmtNum(n)} ${n === 1 ? one : many}`;
 
 const cost = (/** @type {SessionIndexRow} */ r) => r.cost_usd || 0;
-const failedOf = (/** @type {SessionIndexRow} */ r) => r.failed || 0;
+// failingChecksOf is a row's checks whose last run failed, [] for none.
+/** @param {SessionIndexRow} r @returns {import('./api-types.js').FailingCheck[]} */
+export const failingChecksOf = r => r.failing_checks || [];
+// failedEditsOf is how many of a row's edits failed and never applied.
+export const failedEditsOf = (/** @type {SessionIndexRow} */ r) => r.failed_edits || 0;
+// endedFailing is a row that ended with a failing check or an edit that
+// never applied: the failures that mean something.
+export const endedFailing = (/** @type {SessionIndexRow} */ r) => failingChecksOf(r).length > 0 || failedEditsOf(r) > 0;
 const compactionsOf = (/** @type {SessionIndexRow} */ r) => r.compactions || 0;
 const isCodex = (/** @type {SessionIndexRow} */ r) => r.provider === 'codex';
 
-// worthRank orders rows most worth opening first: those with unfixed failed
-// commands by cost, then the most compacted, then by cost.
+// failureBadge is a row's badge text: its first failing check's label and
+// "failed", else how many edits never applied, else ''.
+/** @param {SessionIndexRow} r */
+export function failureBadge(r) {
+  const c = failingChecksOf(r)[0];
+  if (c) return `${c.check} failed`;
+  const n = failedEditsOf(r);
+  return n > 0 ? `${plural(n, 'edit')} never applied` : '';
+}
+
+// worthRank orders rows most worth opening first: those that ended with a
+// failing check or an edit that never applied by cost, then the most
+// compacted, then by cost.
 /** @param {SessionIndexRow} a @param {SessionIndexRow} b */
 export function worthRank(a, b) {
-  const fa = failedOf(a) > 0, fb = failedOf(b) > 0;
+  const fa = endedFailing(a), fb = endedFailing(b);
   if (fa !== fb) return fa ? -1 : 1;
   if (fa) return (cost(b) - cost(a)) || (ts(b.last_activity) - ts(a.last_activity));
   return (compactionsOf(b) - compactionsOf(a)) || (cost(b) - cost(a)) || (ts(b.last_activity) - ts(a.last_activity));
@@ -198,20 +216,20 @@ export function familyStats(rows) {
 }
 
 // topSentence is the list's opening line: how many sessions the window
-// holds and what they cost, then how many ended with unfixed failed
-// commands and what those cost (dropped when none did). The dollars are
-// called API-equivalent when a Codex row is among them.
+// holds and what they cost, then how many ended with a failing check and
+// how many had edits that never applied, each dropped when none did. The
+// dollars are called API-equivalent when a Codex row is among them.
 /** @param {SessionIndexRow[]} rows @param {string} window */
 export function topSentence(rows, window) {
   const total = rows.reduce((a, r) => a + cost(r), 0);
-  const failed = rows.filter(r => failedOf(r) > 0);
+  const checks = rows.filter(r => failingChecksOf(r).length > 0).length;
+  const edits = rows.filter(r => failedEditsOf(r) > 0).length;
   const w = String(window || DEFAULT_WINDOW);
   const where = /^(since|until)\b/.test(w) ? w : `in ${w}`;
   const label = rows.some(isCodex) ? ' API-equivalent' : '';
   let text = `${plural(rows.length, 'session')} ${where}, ${fmtMoney(total)}${label}.`;
-  if (failed.length) {
-    text += ` ${fmtNum(failed.length)} ended with unfixed failed commands (${fmtMoney(failed.reduce((a, r) => a + cost(r), 0))}).`;
-  }
+  if (checks) text += ` ${fmtNum(checks)} ended with a failing check (go test, build, commit…).`;
+  if (edits) text += ` ${fmtNum(edits)} had edits that never applied.`;
   return text;
 }
 
@@ -219,12 +237,14 @@ export function topSentence(rows, window) {
  * @typedef {Object} WorthRow
  * @property {SessionIndexRow} row
  * @property {string} reason  the literal reason it is listed
- * @property {string} turn    the turn to land on: the first unfixed failure's, or ''
+ * @property {string} turn    the turn to land on: the failing check's or the first unfixed failure's, or ''
  */
 
 // worthOpening lists at most WORTH_MAX sessions to open first, each once,
-// under the first reason it meets: unfixed failed commands (costliest
-// first), context compactions (most first), a cost in the top tenth of a
+// under the first reason it meets: a check whose last run failed
+// (costliest first, landing on that run's turn), edits that failed and
+// never applied (costliest first, landing on the first unfixed failure's
+// turn), context compactions (most first), a cost in the top tenth of a
 // family of at least TOP_TENTH_MIN_RUNS runs (nearest-rank 90th
 // percentile; costliest first), then the window's single most expensive
 // session. window names it in that last reason.
@@ -242,8 +262,12 @@ export function worthOpening(rows, window = DEFAULT_WINDOW) {
   const byCost = (/** @type {SessionIndexRow} */ a, /** @type {SessionIndexRow} */ b) =>
     (cost(b) - cost(a)) || (ts(b.last_activity) - ts(a.last_activity));
 
-  for (const r of rows.filter(r => failedOf(r) > 0).sort(byCost)) {
-    add(r, `${plural(failedOf(r), 'failed command')} never fixed`, r.first_failed_turn || '');
+  for (const r of rows.filter(r => failingChecksOf(r).length > 0).sort(byCost)) {
+    const c = failingChecksOf(r)[0];
+    add(r, `Last \`${c.check}\` failed`, c.turn || '');
+  }
+  for (const r of rows.filter(r => failedEditsOf(r) > 0).sort(byCost)) {
+    add(r, `${plural(failedEditsOf(r), 'edit')} failed and never applied`, r.first_failed_turn || '');
   }
   for (const r of rows.filter(r => compactionsOf(r) > 0)
     .sort((a, b) => (compactionsOf(b) - compactionsOf(a)) || byCost(a, b))) {
