@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 import {
   headerNumbers, stripBars, worthALook, explainPrompt, sessionOf, sessionTurns, unresolvedFailures, MAX_BARS,
+  failureRows, failuresHeading, headerFamilyStats, comparisonLine,
 } from '../web/session-header-logic.js';
 
 const T0 = Date.parse('2026-05-01T10:00:00Z');
@@ -361,4 +362,53 @@ test('explainPrompt over a summary, whose calls carry no output, names the failu
   const lines = explainPrompt(st).split('\n');
   const i = lines.indexOf('Unresolved failures:');
   assert.equal(lines[i + 1], '10:00:00  npm test');
+});
+
+test('failureRows: one row per unfixed failure, tool name and the input\'s first line (≤120 runes) else its detail, linked to its turn', () => {
+  const long = 'x'.repeat(130);
+  const st = story([
+    step('a1', 0, [tool('npm test\n  --watch', 'error'), tool('', 'error', { name: 'Read', detail: 'main.go' })]),
+    step('a2', 30, [tool(long, 'error')]),
+  ], [child('Explore', [step('', 10, [tool('rg auth', 'error')])])]);
+  const rows = failureRows(st);
+  assert.deepEqual(rows.map(r => r.text), [
+    'Bash · npm test',
+    'Read · main.go',
+    'Bash · rg auth',
+    'Bash · ' + 'x'.repeat(119) + '…',
+  ]);
+  assert.deepEqual(rows.map(r => r.link), ['a1', 'a1', 'a1', 'a2'], 'a sub-agent turn with no uuid links to the main turn before it');
+  assert.equal(Array.from(rows[3].text.split(' · ')[1]).length, 120);
+  assert.equal(failuresHeading(1), '1 failed command never fixed');
+  assert.equal(failuresHeading(25), '25 failed commands never fixed');
+});
+
+// family builds index rows of one prompt: cost_usd and duration_ms per
+// run, Fable for the first `fable` rows and Opus for the rest.
+const family = (costs, durations, fable) => costs.map((c, i) => ({
+  session_id: `r${i}`, family_key: 'fix the login bug', cost_usd: c, duration_ms: durations[i],
+  model: i < fable ? 'claude-fable-5-1' : 'claude-opus-4-7', provider: 'claude-code',
+}));
+const COSTS = [1, 1, 1, 1, 1.06, 1.06, 2, 2, 3, 8.28];
+const DURS = [10, 10, 10, 10, 20, 20, 30, 30, 40, 90].map(m => m * 60e3);
+const OTHER = { session_id: 'z', family_key: 'another prompt', cost_usd: 100, duration_ms: 1e9, model: 'claude-opus-4-7' };
+
+test('comparisonLine: most expensive, longest, both, neither, and no line under 5 runs', () => {
+  const stats = headerFamilyStats([...family(COSTS, DURS, 6), OTHER], 'fix the login bug');
+  assert.equal(stats.runs, 10, 'only rows of the summary\'s family_key count');
+  const mix = '(median $1.06; 6 Fable, 4 Opus)';
+  const sum = (cost_usd, duration_ms) => ({ family_key: 'fix the login bug', cost_usd, duration_ms });
+  assert.equal(comparisonLine(sum(8.28, 10 * 60e3), stats), `$8.28 — most expensive 10% of 10 runs of this prompt ${mix}`);
+  assert.equal(comparisonLine(sum(1, 90 * 60e3), stats), `$1.00 — longest 10% of 10 runs of this prompt ${mix}`);
+  assert.equal(comparisonLine(sum(8.28, 90 * 60e3), stats), `$8.28 — longest, most expensive 10% of 10 runs of this prompt ${mix}`);
+  assert.equal(comparisonLine(sum(1.06, 20 * 60e3), stats), `$1.06 — one of 10 runs of this prompt ${mix}`);
+  const four = headerFamilyStats(family(COSTS.slice(0, 4), DURS.slice(0, 4), 2), 'fix the login bug');
+  assert.equal(comparisonLine(sum(8.28, 90 * 60e3), four), '');
+  assert.equal(comparisonLine(sum(8.28, 90 * 60e3), null), '');
+});
+
+test('headerFamilyStats: no stats for the prompt-less family, an empty key or a missing index', () => {
+  assert.equal(headerFamilyStats(family(COSTS, DURS, 6).map(r => ({ ...r, family_key: '(no prompt)' })), '(no prompt)'), null);
+  assert.equal(headerFamilyStats(family(COSTS, DURS, 6), ''), null);
+  assert.equal(headerFamilyStats(undefined, 'fix the login bug'), null);
 });

@@ -5,11 +5,14 @@
 // Every sentence here is a fixed template over counted fields: claudit
 // generates no prose.
 
-import { detectRetries, detectSignals, inputIdentity, percentiles, retryTarget } from './agents-insights-logic.js';
+import { detectRetries, detectSignals, inputIdentity, nearestRank, percentiles, retryTarget } from './agents-insights-logic.js';
 import { agentLabel, parseRefKey, parseTime } from './agents-model.js';
 import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-story-logic.js';
+import { familyStats, TOP_TENTH_MIN_RUNS } from './sessions-list-logic.js';
+import { fmtMoney, fmtNum } from './format.js';
 
-/** @import { StoryStep, StoryTool, StoryChild, Tokens, SessionSummary as WholeStory } from './api-types.js' */
+/** @import { StoryStep, StoryTool, StoryChild, Tokens, SessionIndexRow, SessionSummary as WholeStory } from './api-types.js' */
+/** @import { FamilyStats } from './sessions-list-logic.js' */
 /** @import { Signal } from './agents-insights-logic.js' */
 
 /**
@@ -26,7 +29,12 @@ import { clock, fmtDuration, fmtUSD, toolLabel, unwrapExit } from './session-sto
 
 export const MAX_BARS = 120;
 export const MAX_NOTES = 3;
+// FAILURES_PAGE is how many failed-command rows show before "Show all N".
+export const FAILURES_PAGE = 10;
 const CMD_RUNES = 120;
+// NO_PROMPT_KEY is the family every prompt-less session shares; its runs
+// are not runs of one prompt.
+const NO_PROMPT_KEY = '(no prompt)';
 
 /** @param {string} s @param {number} n */
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -116,6 +124,67 @@ export function unresolvedFailures(story, turns = sessionTurns(story), ok = succ
     for (const tool of turn.step.tools || []) if (tool.status === 'error' && !ok.has(tool)) out.push({ turn, tool });
   }
   return out;
+}
+
+/** @param {string} s @param {number} n */
+const clipRunes = (s, n) => { const r = Array.from(s); return r.length > n ? r.slice(0, n - 1).join('') + '…' : s; };
+
+/**
+ * One row of the failed-commands block.
+ * @typedef {Object} FailureRow
+ * @property {string} text   "<tool name> · <input's first line, else its detail>"
+ * @property {string} link   turn uuid the row links to
+ */
+
+// failureRows is one row per unresolvedFailures entry, in session turn
+// order: the tool's name and the first line of its input, at most
+// CMD_RUNES runes, else its detail, linked to the failure's turn.
+/** @param {WholeStory} story @returns {FailureRow[]} */
+export function failureRows(story) {
+  return unresolvedFailures(story).map(({ turn, tool }) => {
+    const what = clipRunes(firstLine(tool.input || ''), CMD_RUNES) || tool.detail || '';
+    return { text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link };
+  });
+}
+
+/** @param {number} n */
+export const failuresHeading = n => `${fmtNum(n)} failed command${n === 1 ? '' : 's'} never fixed`;
+
+/**
+ * A family's numbers as the header compares one run against them.
+ * @typedef {FamilyStats & {costP90: number, durationP90: number}} HeaderFamilyStats
+ */
+
+// headerFamilyStats is familyStats over the index rows of familyKey with
+// the nearest-rank 90th percentile of their cost_usd and duration_ms; null
+// when there is no index, no key or the prompt-less family.
+/** @param {SessionIndexRow[]|undefined|null} rows @param {string} familyKey @returns {HeaderFamilyStats|null} */
+export function headerFamilyStats(rows, familyKey) {
+  if (!Array.isArray(rows) || !familyKey || familyKey === NO_PROMPT_KEY) return null;
+  const fam = rows.filter(r => r && r.family_key === familyKey);
+  if (!fam.length) return null;
+  return {
+    ...familyStats(fam),
+    costP90: nearestRank(fam.map(r => r.cost_usd || 0), 90),
+    durationP90: nearestRank(fam.map(r => r.duration_ms || 0), 90),
+  };
+}
+
+// comparisonLine places this run among its prompt's runs once the family
+// has TOP_TENTH_MIN_RUNS of them: its cost, whether its cost or duration
+// is at or above the family's 90th percentile, the run count, median cost
+// and model mix. '' below that many runs.
+/** @param {{cost_usd?: number, duration_ms?: number}} summary @param {HeaderFamilyStats|null} stats */
+export function comparisonLine(summary, stats) {
+  if (!stats || stats.runs < TOP_TENTH_MIN_RUNS) return '';
+  const cost = summary.cost_usd || 0, dur = summary.duration_ms || 0;
+  const costly = cost > 0 && cost >= stats.costP90;
+  const long = dur > 0 && dur >= stats.durationP90;
+  const where = costly && long ? 'longest, most expensive 10% of'
+    : costly ? 'most expensive 10% of' : long ? 'longest 10% of' : 'one of';
+  const aside = [stats.median != null ? `median ${fmtMoney(stats.median)}` : '',
+    stats.models.map(([m, n]) => `${fmtNum(n)} ${m}`).join(', ')].filter(Boolean).join('; ');
+  return `${fmtMoney(cost)} — ${where} ${fmtNum(stats.runs)} runs of this prompt${aside ? ` (${aside})` : ''}`;
 }
 
 /** @param {Tokens|undefined} t */
