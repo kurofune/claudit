@@ -45,7 +45,13 @@ type SessionIndexRow struct {
 	Commands int `json:"commands"`
 	// Failed counts the errored tool calls whose exact input never later
 	// succeeded in the session: a failure the session fixed is not failed.
-	Failed       int       `json:"failed"`
+	Failed int `json:"failed"`
+	// FirstFailedTurn is the uuid of the earliest turn holding a call
+	// Failed counts, "" when Failed is 0.
+	FirstFailedTurn string `json:"first_failed_turn"`
+	// Compactions counts the context compaction boundaries in the
+	// session's files.
+	Compactions  int       `json:"compactions"`
 	LastActivity time.Time `json:"last_activity"`
 	// Active is LastActivity within IndexOptions.ActiveWindow of Now
 	// (activeAt).
@@ -114,7 +120,7 @@ func ReuseSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		for _, id := range built {
 			e := indexRowEntry{key: keys[id]}
 			if s, ok := c.sessions[id]; ok {
-				e.row, e.ok = indexRow(s, prompts[id], results, IndexOptions{}), true
+				e.row, e.ok = indexRow(s, prompts[id], results, len(l.compactBoundaries(snap, id)), IndexOptions{}), true
 			}
 			next.rows[id] = e
 		}
@@ -134,15 +140,16 @@ func ReuseSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	return idx, next, built
 }
 
-func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts IndexOptions) SessionIndexRow {
+func indexRow(s *sessionAccum, prompts []string, results map[string]bool, compactions int, opts IndexOptions) SessionIndexRow {
 	fam := SessionFamily(prompts)
 	row := SessionIndexRow{
-		SessionID: s.sessionID,
-		FamilyKey: fam.Key,
-		Remainder: fam.Remainder,
-		Title:     fam.Title,
-		Project:   project.Default.Resolve(s.cwd).Name,
-		Provider:  s.provider,
+		SessionID:   s.sessionID,
+		Compactions: compactions,
+		FamilyKey:   fam.Key,
+		Remainder:   fam.Remainder,
+		Title:       fam.Title,
+		Project:     project.Default.Resolve(s.cwd).Name,
+		Provider:    s.provider,
 	}
 	models := map[string]int{}
 	var turns []*parse.Turn
@@ -174,7 +181,7 @@ func indexRow(s *sessionAccum, prompts []string, results map[string]bool, opts I
 		row.Outcome = lastMessageLine(ordinary[0].turns)
 	}
 	sort.SliceStable(turns, func(i, j int) bool { return turns[i].Timestamp.Before(turns[j].Timestamp) })
-	row.Commands, row.Failed = countCommands(turns, results)
+	row.Commands, row.Failed, row.FirstFailedTurn = countCommands(turns, results)
 	return row
 }
 
@@ -238,16 +245,19 @@ func toolErrors(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessionAc
 }
 
 // countCommands counts a session's tool calls, and those that errored and
-// never later succeeded with the identical (name, whole input). turns are in
-// time order; errored maps a tool_use id with a result to whether it
-// errored.
-func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, failed int) {
+// never later succeeded with the identical (name, whole input), and names
+// the earliest turn holding one of those. turns are in time order; errored
+// maps a tool_use id with a result to whether it errored.
+func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, failed int, firstFailed string) {
 	type call struct {
 		name, input string
 		key         uint64
 	}
-	var pending map[call]int
-	for _, t := range turns {
+	type open struct {
+		n, first int
+	}
+	var pending map[call]open
+	for i, t := range turns {
 		for _, u := range t.ToolUses {
 			commands++
 			if u.ID == "" {
@@ -260,18 +270,30 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) (commands, fail
 			k := call{u.Name, u.Input, u.InputKey}
 			if isErr {
 				if pending == nil {
-					pending = map[call]int{}
+					pending = map[call]open{}
 				}
-				pending[k]++
+				o, seen := pending[k]
+				if !seen {
+					o.first = i
+				}
+				o.n++
+				pending[k] = o
 			} else {
 				delete(pending, k)
 			}
 		}
 	}
-	for _, n := range pending {
-		failed += n
+	first := -1
+	for _, o := range pending {
+		failed += o.n
+		if first < 0 || o.first < first {
+			first = o.first
+		}
 	}
-	return commands, failed
+	if first >= 0 {
+		firstFailed = turns[first].UUID
+	}
+	return commands, failed, firstFailed
 }
 
 // lastMessageLine is the first non-empty line of the latest turn that

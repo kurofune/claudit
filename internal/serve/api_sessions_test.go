@@ -18,22 +18,24 @@ import (
 )
 
 type indexRowWire struct {
-	SessionID    string    `json:"session_id"`
-	FamilyKey    string    `json:"family_key"`
-	Remainder    string    `json:"remainder"`
-	Title        string    `json:"title"`
-	Outcome      string    `json:"outcome"`
-	Project      string    `json:"project"`
-	Provider     string    `json:"provider"`
-	Model        string    `json:"model"`
-	CostUSD      float64   `json:"cost_usd"`
-	DurationMs   int64     `json:"duration_ms"`
-	Turns        int       `json:"turns"`
-	Commands     int       `json:"commands"`
-	Failed       int       `json:"failed"`
-	LastActivity time.Time `json:"last_activity"`
-	Active       bool      `json:"active"`
-	StartedAt    time.Time `json:"started_at"`
+	SessionID       string    `json:"session_id"`
+	FamilyKey       string    `json:"family_key"`
+	Remainder       string    `json:"remainder"`
+	Title           string    `json:"title"`
+	Outcome         string    `json:"outcome"`
+	Project         string    `json:"project"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	CostUSD         float64   `json:"cost_usd"`
+	DurationMs      int64     `json:"duration_ms"`
+	Turns           int       `json:"turns"`
+	Commands        int       `json:"commands"`
+	Failed          int       `json:"failed"`
+	FirstFailedTurn string    `json:"first_failed_turn"`
+	Compactions     int       `json:"compactions"`
+	LastActivity    time.Time `json:"last_activity"`
+	Active          bool      `json:"active"`
+	StartedAt       time.Time `json:"started_at"`
 }
 
 func getSessions(t *testing.T, srv *Server, query string) []indexRowWire {
@@ -66,6 +68,17 @@ func TestAPISessions_IndexRows(t *testing.T) {
 	rows := getSessions(t, srv, "")
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2: %+v", len(rows), rows)
+	}
+	var raw struct {
+		Sessions []map[string]json.RawMessage `json:"sessions"`
+	}
+	if err := json.Unmarshal(doAPI(t, srv, http.MethodGet, apiPathSessions, nil).Body.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal raw sessions: %v", err)
+	}
+	for _, r := range raw.Sessions {
+		if string(r["compactions"]) != "0" || string(r["first_failed_turn"]) != `""` {
+			t.Errorf("row %s: compactions = %s, first_failed_turn = %s, want 0 and \"\"", r["session_id"], r["compactions"], r["first_failed_turn"])
+		}
 	}
 	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	prices := loadPricesForTest(t)

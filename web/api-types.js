@@ -162,6 +162,8 @@
  * @property {number} turns
  * @property {number} commands          tool calls
  * @property {number} failed            errored tool calls whose exact input never later succeeded
+ * @property {string} first_failed_turn uuid of the earliest turn holding one of those calls; "" when failed is 0
+ * @property {number} compactions       context compaction boundaries in the session's files
  * @property {string} last_activity     RFC3339
  * @property {boolean} active           last activity within the last minute
  * @property {string} started_at        RFC3339

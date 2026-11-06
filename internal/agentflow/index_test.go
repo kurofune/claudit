@@ -188,7 +188,7 @@ func TestBuildSessionIndex_RowCarriesNoStepsOrSnippets(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	want := "active,commands,cost_usd,duration_ms,failed,family_key,last_activity,model,outcome,project,provider,remainder,session_id,started_at,title,turns"
+	want := "active,commands,compactions,cost_usd,duration_ms,failed,family_key,first_failed_turn,last_activity,model,outcome,project,provider,remainder,session_id,started_at,title,turns"
 	if got := strings.Join(keys, ","); got != want {
 		t.Errorf("row keys = %s\nwant       %s", got, want)
 	}
@@ -334,5 +334,53 @@ func TestSessionStory_RowMatchesIndex(t *testing.T) {
 		if !ok || !reflect.DeepEqual(got, row) {
 			t.Errorf("story row of %s = %+v (%v)\nindex row = %+v", row.SessionID, got, ok, row)
 		}
+	}
+}
+
+// TestBuildSessionIndex_CompactionsAndFirstFailedTurn: a session with one
+// compaction boundary in its own file counts one; another session's
+// boundary is not its. The earliest turn whose errored call never later
+// succeeded is first_failed_turn; an earlier error the session fixed is
+// not; a session with nothing failed reads "".
+func TestBuildSessionIndex_CompactionsAndFirstFailedTurn(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	snap := &corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("a1", "s1", t0, "t1", "go vet ./..."),
+			bashTurn("a2", "s1", t0.Add(time.Minute), "t2", "go test ./..."),
+			bashTurn("a3", "s1", t0.Add(2*time.Minute), "t3", "go vet ./..."),
+			bashTurn("a4", "s1", t0.Add(3*time.Minute), "t4", "go build ./..."),
+			bashTurn("b1", "s2", t0, "t5", "ls"),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", IsError: true, Content: "vet failed"},
+			{ToolUseID: "t2", IsError: true, Content: "FAIL"},
+			{ToolUseID: "t3", Content: "ok"},
+			{ToolUseID: "t4", IsError: true, Content: "build failed"},
+			{ToolUseID: "t5", Content: "ok"},
+		},
+		CompactBoundaries: []parse.CompactBoundary{
+			{SessionID: "s1", SourceFile: "/root/-p-x/s1.jsonl", Timestamp: t0.Add(90 * time.Second)},
+			{SessionID: "s9", SourceFile: "/root/-p-x/s9.jsonl", Timestamp: t0},
+		},
+	}
+	idx := BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{})
+	s1 := findRow(t, idx, "s1")
+	if s1.Compactions != 1 {
+		t.Errorf("s1 compactions = %d, want 1", s1.Compactions)
+	}
+	if s1.Failed != 2 || s1.FirstFailedTurn != "a2" {
+		t.Errorf("s1 failed = %d first_failed_turn = %q, want 2 and a2 (a1's vet was fixed by a3)", s1.Failed, s1.FirstFailedTurn)
+	}
+	s2 := findRow(t, idx, "s2")
+	if s2.Compactions != 0 || s2.FirstFailedTurn != "" {
+		t.Errorf("s2 compactions = %d first_failed_turn = %q, want 0 and \"\"", s2.Compactions, s2.FirstFailedTurn)
+	}
+	b, _ := json.Marshal(s1)
+	var wire map[string]any
+	_ = json.Unmarshal(b, &wire)
+	if wire["compactions"] != float64(1) || wire["first_failed_turn"] != "a2" {
+		t.Errorf("wire keys = compactions %v first_failed_turn %v", wire["compactions"], wire["first_failed_turn"])
 	}
 }

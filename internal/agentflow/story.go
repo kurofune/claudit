@@ -189,7 +189,7 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	for id, r := range results {
 		errored[id] = r.IsError
 	}
-	st.row = indexRow(s, sessionPrompts(snap, l, c.sessions)[sessionID], errored, IndexOptions{})
+	st.row = indexRow(s, sessionPrompts(snap, l, c.sessions)[sessionID], errored, len(l.compactBoundaries(snap, sessionID)), IndexOptions{})
 	st.hasRow = true
 	prompts := storyPrompts(snap, l, s, opts.PromptIndex)
 	as := assembleSession(s, results, prompts)
