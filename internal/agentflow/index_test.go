@@ -434,7 +434,7 @@ func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
 			write("a4", t0.Add(3*time.Minute), "t4", "/p/x/b.go"),
 			bashTurn("a5", "s1", t0.Add(4*time.Minute), "t5", "cd web && go test ./..."),
 			write("a6", t0.Add(5*time.Minute), "t6", "/p/x/a.go"),
-			bashTurn("a7", "s1", t0.Add(6*time.Minute), "t7", "go build ./...\necho done"),
+			bashTurn("a7", "s1", t0.Add(6*time.Minute), "t7", "go build ./... && echo done"),
 			bashTurn("a8", "s1", t0.Add(7*time.Minute), "t8", "ps -A -o command | rg 'go test'"),
 		},
 		ToolResults: []parse.ToolResult{
@@ -449,8 +449,8 @@ func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
 		},
 	}
 	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
-	want := []FailingCheck{{Check: "go build", Command: "go build ./...", Turn: "a7",
-		InputKey: strconv.FormatUint(parse.ToolInputKey("go build ./...\necho done"), 16)}}
+	want := []FailingCheck{{Check: "go build", Command: "go build ./... && echo done", Turn: "a7",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("go build ./... && echo done"), 16)}}
 	if !reflect.DeepEqual(row.FailingChecks, want) {
 		t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
 	}
@@ -469,11 +469,47 @@ func TestBuildSessionIndex_FailingChecksAndFailedEdits(t *testing.T) {
 		t.Errorf("wire failed_edits = %v", wire["failed_edits"])
 	}
 	checks, _ := wire["failing_checks"].([]any)
-	if len(checks) != 1 || !reflect.DeepEqual(checks[0], map[string]any{"check": "go build", "command": "go build ./...", "turn": "a7", "input_key": want[0].InputKey}) {
+	if len(checks) != 1 || !reflect.DeepEqual(checks[0], map[string]any{"check": "go build", "command": "go build ./... && echo done", "turn": "a7", "input_key": want[0].InputKey}) {
 		t.Errorf("wire failing_checks = %v", wire["failing_checks"])
 	}
 	clean := findRow(t, BuildSessionIndex(&corpus.Snapshot{Turns: []parse.Turn{bashTurn("b1", "s2", t0, "u1", "ls")}, ToolResults: []parse.ToolResult{{ToolUseID: "u1", IsError: true}}}, prices, aggregate.Filter{}, IndexOptions{}), "s2")
 	if clean.FailingChecks == nil || len(clean.FailingChecks) != 0 || clean.FailedEdits != 0 {
 		t.Errorf("clean session failing_checks = %#v failed_edits = %d, want [] and 0", clean.FailingChecks, clean.FailedEdits)
+	}
+}
+
+// TestBuildSessionIndex_CheckOwnsErrorOnlyWhenFinal: a call's error is its
+// last command's, so an errored `go build && tmux` is no go build failure
+// and a passing `go test && tmux` does not clear an earlier go test failure.
+func TestBuildSessionIndex_CheckOwnsErrorOnlyWhenFinal(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	build := findRow(t, BuildSessionIndex(&corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("a1", "s1", t0, "t1", "go build ./..."),
+			bashTurn("a2", "s1", t0.Add(time.Minute), "t2", "go build ./... && tmux x"),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", Content: ""},
+			{ToolUseID: "t2", IsError: true, Content: "can't find pane"},
+		},
+	}, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	if len(build.FailingChecks) != 0 {
+		t.Errorf("failing_checks = %+v, want none (tmux failed, not go build)", build.FailingChecks)
+	}
+	test := findRow(t, BuildSessionIndex(&corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("b1", "s2", t0, "u1", "go test ./..."),
+			bashTurn("b2", "s2", t0.Add(time.Minute), "u2", "go test ./... && tmux x"),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "u1", IsError: true, Content: "FAIL"},
+			{ToolUseID: "u2", Content: ""},
+		},
+	}, prices, aggregate.Filter{}, IndexOptions{}), "s2")
+	want := []FailingCheck{{Check: "go test", Command: "go test ./...", Turn: "b1",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("go test ./..."), 16)}}
+	if !reflect.DeepEqual(test.FailingChecks, want) {
+		t.Errorf("failing_checks = %+v, want %+v (b2 is tmux's exit, not go test's)", test.FailingChecks, want)
 	}
 }

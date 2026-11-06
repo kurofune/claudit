@@ -5,9 +5,13 @@ import (
 	"strings"
 )
 
-// heredocStart finds a here-document's delimiter on a command line:
-// <<WORD, <<-WORD, <<'WORD' or <<"WORD", never a <<< here-string.
-var heredocStart = regexp.MustCompile(`(?:^|[^<])<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+// heredocDelim reads a here-document's delimiter after its << operator:
+// WORD, -WORD, 'WORD' or "WORD".
+var heredocDelim = regexp.MustCompile(`^-?[ \t]*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+// cannotFail are the commands whose exit is always zero, so one run after
+// && leaves the call's exit to the command before it.
+var cannotFail = map[string]bool{"echo": true, "printf": true, "true": true, ":": true}
 
 // envAssign is a leading NAME=value word of a shell segment.
 var envAssign = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -21,27 +25,42 @@ var checkSubcommands = map[string][]string{
 }
 
 // checkKind is the check a shell command runs, labelled by its words
-// ("go test", "npm run build", "make"), or "" when no segment of it starts
-// one. A segment is a piece between the &&, ||, ; and newlines the shell
-// reads as separators (shellSegments); a leading "(", NAME=value
-// assignments, `time` and `timeout N` are skipped, and a `cd` segment runs
-// no check. The first segment that starts a check names it, so
-// `ps | rg 'go test'` and `echo go test` are not checks. A here-document's
-// body is data, not commands, so its lines start no segment.
+// ("go test", "npm run build", "make"), or "" when the call's exit status is
+// not that check's. A call exits with its last command's status, so only
+// the final segment can name the check (shellSegments splits at the &&, ||,
+// ; and newlines the shell reads as separators): trailing segments that
+// cannot fail (cannotFail) are skipped when && joins them, since they run
+// only after the check passed; blank and comment-only segments are skipped.
+// A piped final segment exits with its last stage, so it is no check. In a
+// segment, a leading "(", NAME=value assignments, `time` and `timeout N` are
+// skipped, and a `cd` runs no check, so `ps | rg 'go test'` and
+// `echo go test` are not checks. A here-document's body is data, not
+// commands, so its lines start no segment.
 func checkKind(command string) string {
-	for _, seg := range shellSegments(dropHeredocs(command)) {
-		if k := segmentCheck(seg); k != "" {
-			return k
+	segs := shellSegments(command)
+	for i := len(segs) - 1; i >= 0; i-- {
+		s := segs[i]
+		words := segmentWords(s.text)
+		if len(words) == 0 || (s.sep == "&&" && cannotFail[words[0]]) {
+			continue
 		}
+		if s.piped {
+			return ""
+		}
+		return segmentCheck(words)
 	}
 	return ""
 }
 
-func segmentCheck(seg string) string {
+func segmentWords(seg string) []string {
 	words := strings.Fields(strings.TrimLeft(strings.TrimSpace(seg), "( \t"))
 	for i := range words {
 		words[i] = strings.TrimRight(words[i], ")")
 	}
+	return words
+}
+
+func segmentCheck(words []string) string {
 	for len(words) > 0 {
 		switch w := words[0]; {
 		case envAssign.MatchString(w), w == "time":
@@ -96,39 +115,35 @@ func wordsCheck(words []string) string {
 	return ""
 }
 
-// dropHeredocs removes every here-document body from a shell command: the
-// lines after one naming a delimiter, through the line that is only that
-// delimiter (leading tabs allowed), or to the end when none closes it.
-func dropHeredocs(command string) string {
-	if !strings.Contains(command, "<<") {
-		return command
-	}
-	var keep []string
-	var pending []string
-	for _, line := range strings.Split(command, "\n") {
-		if len(pending) > 0 {
-			if strings.TrimLeft(line, "\t") == pending[0] {
-				pending = pending[1:]
-			}
-			continue
-		}
-		keep = append(keep, line)
-		for _, m := range heredocStart.FindAllStringSubmatch(line, -1) {
-			pending = append(pending, m[1])
-		}
-	}
-	return strings.Join(keep, "\n")
+// segment is one command between shell separators: its text without any
+// trailing comment, the separator before it ("" for the first, else "&&",
+// "||", ";" or "\n"), and whether a | pipes it.
+type segment struct {
+	text, sep string
+	piped     bool
 }
 
 // shellSegments splits a shell command at each &&, ||, ; and newline that
 // the shell reads as a separator: one outside '...' and "..." and not
 // escaped by a backslash, so `rg 'a; go test' .` is one segment. A # that
-// begins a word starts a comment through the end of its line, so a quote or
-// separator inside it is text: `# don't` opens no quote.
-func shellSegments(command string) []string {
-	var segs []string
-	start := 0
+// begins a word starts a comment through the end of its line, so a quote,
+// separator or << inside it is text: `# don't` opens no quote. A << outside
+// quotes and comments (not a <<< here-string) names a here-document whose
+// body, the lines after its line through the one that is only the
+// delimiter (leading tabs allowed) or to the end, is dropped.
+func shellSegments(command string) []segment {
+	var segs []segment
+	start, cut := 0, -1
+	sep, piped := "", false
 	var quote byte
+	var pending []string
+	emit := func(end int, next string) {
+		if cut >= 0 {
+			end = cut
+		}
+		segs = append(segs, segment{command[start:end], sep, piped})
+		sep, piped, cut = next, false, -1
+	}
 	for i := 0; i < len(command); i++ {
 		c := command[i]
 		switch {
@@ -143,19 +158,63 @@ func shellSegments(command string) []string {
 				quote = 0
 			}
 		case c == '#' && (i == 0 || strings.IndexByte(" \t\n;&|()<>", command[i-1]) >= 0):
+			cut = i
 			for i+1 < len(command) && command[i+1] != '\n' {
 				i++
 			}
 		case c == '\'' || c == '"':
 			quote = c
-		case c == ';' || c == '\n':
-			segs = append(segs, command[start:i])
+		case strings.HasPrefix(command[i:], "<<<"):
+			i += 2
+		case strings.HasPrefix(command[i:], "<<"):
+			i++
+			if m := heredocDelim.FindStringSubmatch(command[i+1:]); m != nil {
+				pending = append(pending, m[1])
+				i += len(m[0])
+			}
+		case c == ';':
+			emit(i, ";")
 			start = i + 1
+		case c == '\n':
+			emit(i, "\n")
+			start = skipHeredocBodies(command, i+1, pending)
+			pending = nil
+			i = start - 1
 		case (c == '&' || c == '|') && i+1 < len(command) && command[i+1] == c:
-			segs = append(segs, command[start:i])
+			emit(i, command[i:i+2])
 			i++
 			start = i + 1
+		case c == '|':
+			piped = true
 		}
 	}
-	return append(segs, command[start:])
+	emit(len(command), "")
+	return segs
+}
+
+// skipHeredocBodies returns the offset just past the here-document bodies
+// that begin at from, one per delimiter in order, or len(command) when one
+// never closes.
+func skipHeredocBodies(command string, from int, delims []string) int {
+	for _, d := range delims {
+		for {
+			if from >= len(command) {
+				return len(command)
+			}
+			nl := strings.IndexByte(command[from:], '\n')
+			line := command[from:]
+			if nl >= 0 {
+				line = command[from : from+nl]
+			}
+			if nl < 0 {
+				from = len(command)
+			} else {
+				from += nl + 1
+			}
+			if strings.TrimLeft(line, "\t") == d {
+				break
+			}
+		}
+	}
+	return from
 }
