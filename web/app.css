@@ -1821,13 +1821,17 @@
   .session-head { flex-direction: column; align-items: flex-start; gap: var(--s-1); }
   .session-head .session-id { font-size: var(--t-4); overflow-wrap: anywhere; }
 
-  /* ─── Session header: identity, four tiles, the per-turn strip, Worth a
-     look notes and the copy button, above the story. ─────────────────── */
+  /* ─── Session header: the last message, the unfixed failed commands,
+     four tiles, the per-turn strip, Worth a look notes, the copy button and
+     the session's identity, above the story. ──────────────────────────── */
   .session-header-host { margin-bottom: var(--s-5); }
   .session-header { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0;
                     background: var(--surface); border: 1px solid var(--border);
                     border-radius: var(--r-lg); padding: var(--s-4); box-shadow: var(--shadow-sm); }
-  .sh-ident { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+  .sh-ident { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0;
+              padding-top: var(--s-3); border-top: 1px solid var(--border); }
+  .sh-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+           overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
   .sh-title { display: block; margin: 0; padding: 0; border: none; font-size: var(--t-5); color: var(--ink);
               overflow-wrap: anywhere; }
   .sh-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3);

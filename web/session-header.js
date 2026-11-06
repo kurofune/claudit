@@ -1,10 +1,11 @@
 // @ts-check
-// The session page's header: what the session is, what it ended on (the
-// main agent's last message), the failed commands it never fixed, each a
-// link to its turn, four tiles (cost, duration, tokens, unresolved
-// failures), where this run sits among its prompt's runs, a strip of one bar per model turn
-// showing where the money or the time went, up to three Worth a look notes
-// and a button that copies an explain-this-session prompt. Every number
+// The session page's header: what the session ended on (the main agent's
+// last message), the failed commands it never fixed, each a link to its
+// turn, four tiles (cost, duration, tokens, unresolved failures), where this
+// run sits among its prompt's runs, a strip of one bar per model turn
+// showing where the money or the time went, up to three Worth a look notes,
+// a button that copies an explain-this-session prompt and, last, what the
+// session is (its title, project, provider, model and id). Every number
 // comes from web/session-header-logic.js over the session's summary and,
 // for the comparison line, the index.
 
@@ -95,10 +96,10 @@ function showComparison(host, line) {
 function skeletonHTML() {
   const tile = `<div class="sh-tile is-loading">${skelLine('sh-skel-label')}${skelLine('sh-skel-value')}${skelLine('sh-skel-sub')}</div>`;
   return `<section class="session-header" aria-label="Session summary" aria-busy="true">
-    <div class="sh-ident">${skelLine('sh-skel-title')}${skelLine('sh-skel-meta')}</div>
     <div class="sh-last-message is-loading" aria-label="Loading the last message">${skelLine('sh-skel-last')}</div>
     <div class="sh-tiles">${tile}${tile}${tile}${tile}</div>
     <div class="sh-strip is-empty" aria-label="Loading the turns"></div>
+    <div class="sh-ident">${skelLine('sh-skel-title')}${skelLine('sh-skel-meta')}</div>
   </section>`;
 }
 
@@ -127,21 +128,11 @@ export function renderSessionHeader(host, story, opts = {}) {
       <div class="sh-value">${value}</div><div class="sh-sub">${sub}</div></div>`;
 
   host.innerHTML = `<section class="session-header" aria-label="Session summary">
-    <div class="sh-ident">
-      <h2 class="sh-title">${escHtml(story.title || '(no prompt)')}</h2>
-      <div class="sh-meta">
-        <span class="sh-project">${escHtml(story.project || '')}</span>
-        <span class="s-entry sh-provider s-provider-${escHtml(provider)}">${escHtml(providerLabel(provider))}</span>
-        <span class="sh-model">${escHtml(story.model || '')}</span>
-        <code class="sh-id" data-tooltip="${escHtml(sid)}">${escHtml(sid.slice(0, 8))}</code>
-        ${last ? `<span class="sh-last">Last activity ${escHtml(last)}</span>` : ''}
-      </div>
-    </div>
     <p class="sh-last-message"><strong class="sh-lm-label">Last message:</strong>
       <span class="sh-lm-text">${escHtml(story.outcome || '(no agent message)')}</span></p>
     ${failuresHTML(st)}
     <div class="sh-tiles">
-      ${tile('cost', `Cost <span class="api-eq" tabindex="0" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span>`,
+      ${tile('cost', `Cost <span class="api-eq" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span><span class="sh-sr"> (${escHtml(API_EQUIVALENT_TIP)})</span>`,
         escHtml(fmtUSD(n.costUSD)), 'sum of every turn')}
       ${tile('duration', 'Duration', escHtml(fmtDuration(n.durationMs)), escHtml(n.durationSub))}
       ${tile('tokens', 'Tokens', escHtml(fmtCompact(n.tokens)), escHtml(n.tokensSub))}
@@ -161,6 +152,16 @@ export function renderSessionHeader(host, story, opts = {}) {
         <span class="note-body">${escHtml(note.body)}</span></button>`).join('')}
     </section>` : ''}
     <div class="sh-actions"><button type="button" class="sh-copy">${COPY_LABEL}</button></div>
+    <div class="sh-ident">
+      <h2 class="sh-title">${escHtml(story.title || '(no prompt)')}</h2>
+      <div class="sh-meta">
+        <span class="sh-project">${escHtml(story.project || '')}</span>
+        <span class="s-entry sh-provider s-provider-${escHtml(provider)}">${escHtml(providerLabel(provider))}</span>
+        <span class="sh-model">${escHtml(story.model || '')}</span>
+        <code class="sh-id" data-tooltip="${escHtml(sid)}">${escHtml(sid.slice(0, 8))}</code>
+        ${last ? `<span class="sh-last">Last activity ${escHtml(last)}</span>` : ''}
+      </div>
+    </div>
   </section>`;
   host.setAttribute('data-session', sid);
 }

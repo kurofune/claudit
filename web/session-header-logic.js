@@ -178,8 +178,8 @@ export function headerFamilyStats(rows, familyKey) {
 export function comparisonLine(summary, stats) {
   if (!stats || stats.runs < TOP_TENTH_MIN_RUNS) return '';
   const cost = summary.cost_usd || 0, dur = summary.duration_ms || 0;
-  const costly = cost > 0 && cost >= stats.costP90;
-  const long = dur > 0 && dur >= stats.durationP90;
+  const costly = cost >= stats.costP90;
+  const long = dur >= stats.durationP90;
   const where = costly && long ? 'longest, most expensive 10% of'
     : costly ? 'most expensive 10% of' : long ? 'longest 10% of' : 'one of';
   const aside = [stats.median != null ? `median ${fmtMoney(stats.median)}` : '',

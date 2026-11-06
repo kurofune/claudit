@@ -308,10 +308,13 @@ const FAMILY = [1, 1, 1, 1, 1.06, 1.06, 2, 2, 3, 8.28].map((c, i) => ({
 test('the header leads with the last message, then the unfixed failed commands, the tiles, the strip and the notes', async () => {
   const { host, done } = await mount(route({ ...FAILED(), outcome: 'All three checks still fail.' }));
   await done;
+  const section = host.querySelector('.session-header');
+  assert.equal(section.children[0].getAttribute('class'), 'sh-last-message', 'the last message is the header\'s first block');
   const order = host.querySelectorAll('.sh-last-message, .sh-failures, .sh-tiles, .sh-strip, .sh-notes')
     .map(el => el.getAttribute('class').split(' ')[0]);
   assert.deepEqual(order, ['sh-last-message', 'sh-failures', 'sh-tiles', 'sh-strip', 'sh-notes']);
   assert.equal(text(host.querySelector('.sh-last-message')), 'Last message: All three checks still fail.');
+  assert.equal(text(host.querySelector('.sh-title')), 'fix the login bug', 'the title stays, below the header\'s blocks');
 });
 
 test('a session with no agent message reads "Last message: (no agent message)"', async () => {
@@ -401,13 +404,12 @@ test('the title is the wrapper-stripped first line and the header holds no wrapp
 // ones and tabindex >= 0, none with a negative tabindex, in DOM order.
 const tabStops = host => host.querySelectorAll('a[href], button, [tabindex]').filter(el => el.tabIndex >= 0);
 
-test('tab order: the failed-command links, the API-equivalent tip, the Cost | Time switch, the strip\'s one stop, the notes, Copy', async () => {
+test('tab order: the failed-command links, the Cost | Time switch, the strip\'s one stop, the notes, Copy', async () => {
   const { host, done } = await mount(route(FAILED()));
   await done;
   const name = el => {
     const c = el.getAttribute('class') || '';
     if (c.includes('sh-failure')) return 'failure';
-    if (c.includes('api-eq')) return 'api-eq';
     if (c.includes('sh-mode-btn')) return `mode:${el.getAttribute('data-mode')}`;
     if (c.includes('turn-bar')) return 'bar';
     if (c.includes('note')) return 'note';
@@ -415,7 +417,9 @@ test('tab order: the failed-command links, the API-equivalent tip, the Cost | Ti
     return c;
   };
   assert.deepEqual(tabStops(host).map(name),
-    ['failure', 'failure', 'failure', 'api-eq', 'mode:cost', 'bar', 'note', 'note', 'copy']);
+    ['failure', 'failure', 'failure', 'mode:cost', 'bar', 'note', 'note', 'copy']);
+  assert.ok(text(host.querySelector('[data-tile="cost"] .sh-label')).includes(API_EQUIVALENT_TIP),
+    'the API-equivalent explanation is read with the Cost label rather than taking its own tab stop');
 });
 
 test('skeleton: a last-message placeholder sits above the tiles under aria-busy', async () => {
@@ -424,6 +428,7 @@ test('skeleton: a last-message placeholder sits above the tiles under aria-busy'
   await settle();
   const section = host.querySelector('.session-header');
   assert.equal(section.getAttribute('aria-busy'), 'true');
+  assert.equal(section.children[0].getAttribute('class'), 'sh-last-message is-loading', 'the placeholder is the skeleton\'s first block');
   const order = host.querySelectorAll('.sh-last-message, .sh-tiles').map(el => el.getAttribute('class').split(' ')[0]);
   assert.deepEqual(order, ['sh-last-message', 'sh-tiles']);
   assert.ok(host.querySelector('.sh-last-message.is-loading .skel-line'));

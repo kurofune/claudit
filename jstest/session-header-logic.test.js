@@ -407,6 +407,24 @@ test('comparisonLine: most expensive, longest, both, neither, and no line under 
   assert.equal(comparisonLine(sum(8.28, 90 * 60e3), null), '');
 });
 
+test('comparisonLine: exactly the nearest-rank 90th percentile counts as the top tenth, a hair under does not', () => {
+  const stats = headerFamilyStats(family(COSTS, DURS, 6), 'fix the login bug');
+  assert.equal(stats.costP90, 3);
+  assert.equal(stats.durationP90, 40 * 60e3);
+  const mix = '(median $1.06; 6 Fable, 4 Opus)';
+  const sum = (cost_usd, duration_ms) => ({ family_key: 'fix the login bug', cost_usd, duration_ms });
+  assert.equal(comparisonLine(sum(3, 40 * 60e3), stats), `$3.00 — longest, most expensive 10% of 10 runs of this prompt ${mix}`);
+  assert.equal(comparisonLine(sum(2.99, 40 * 60e3 - 1), stats), `$2.99 — one of 10 runs of this prompt ${mix}`);
+});
+
+test('comparisonLine: a family of zero-cost, zero-length runs puts a zero run at its 90th percentile', () => {
+  const stats = headerFamilyStats(family([0, 0, 0, 0, 0], [0, 0, 0, 0, 0], 3), 'fix the login bug');
+  assert.equal(stats.costP90, 0);
+  assert.equal(stats.durationP90, 0);
+  assert.match(comparisonLine({ family_key: 'fix the login bug', cost_usd: 0, duration_ms: 0 }, stats),
+    /^\$0\.00 — longest, most expensive 10% of 5 runs of this prompt \(/);
+});
+
 test('headerFamilyStats: no stats for the prompt-less family, an empty key or a missing index', () => {
   assert.equal(headerFamilyStats(family(COSTS, DURS, 6).map(r => ({ ...r, family_key: '(no prompt)' })), '(no prompt)'), null);
   assert.equal(headerFamilyStats(family(COSTS, DURS, 6), ''), null);
