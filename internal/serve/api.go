@@ -33,8 +33,9 @@ const (
 	apiPathAgentsFull = "/_claudit/api/agents/full"
 	// apiPathSessions is the Sessions list's index; apiPathSessionsStory
 	// pages one session's story.
-	apiPathSessions      = "/_claudit/api/sessions"
-	apiPathSessionsStory = "/_claudit/api/sessions/story"
+	apiPathSessions        = "/_claudit/api/sessions"
+	apiPathSessionsStory   = "/_claudit/api/sessions/story"
+	apiPathSessionsSummary = "/_claudit/api/sessions/summary"
 )
 
 // Section labels for the per-section render cache. Trends uses a
@@ -51,8 +52,9 @@ const (
 	// apiSectionSessions and apiSectionSessionsStory label the Sessions
 	// index and story pages; each story page is its own cache entry since
 	// session/prompt/offset are part of the canonical query.
-	apiSectionSessions      = "api-sessions"
-	apiSectionSessionsStory = "api-sessions-story"
+	apiSectionSessions        = "api-sessions"
+	apiSectionSessionsStory   = "api-sessions-story"
+	apiSectionSessionsSummary = "api-sessions-summary"
 )
 
 // sectionBuilder receives the shared aggregator and returns a section's
@@ -86,12 +88,6 @@ type apiSectionSpec struct {
 	// previous window of equal length (nil for an unbounded window).
 	// Takes precedence over build.
 	buildWithPrev func(a, prev *aggregate.Aggregator) (any, error)
-	// buildFiltered, when set, receives the snapshot, the query and an
-	// Aggregator keyed on the filter alone (see filterAggregate), so
-	// request params that only pick a slice of the payload — a story's
-	// session, prompt and offset — never rebuild it. Takes precedence
-	// over build.
-	buildFiltered func(snap *Snapshot, q Query, a *aggregate.Aggregator) (any, error)
 }
 
 // serveAPISection is the shared body of every /_claudit/api/*
@@ -154,11 +150,7 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 		// pass entirely and build straight from raw turns.
 		payload, err = spec.buildFromSnapshot(snap, q, now)
 	} else {
-		aggregateFor := s.sharedAggregateData
-		if spec.buildFiltered != nil {
-			aggregateFor = s.filterAggregate
-		}
-		agg, aerr := aggregateFor(r.Context(), snap, q)
+		agg, aerr := s.sharedAggregateData(r.Context(), snap, q)
 		if aerr != nil {
 			if isClientGone(aerr) {
 				// Client disconnected mid-aggregation (reload/navigation).
@@ -173,8 +165,6 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 			return
 		}
 		switch {
-		case spec.buildFiltered != nil:
-			payload, err = spec.buildFiltered(snap, q, agg)
 		case spec.buildWithPrev != nil:
 			var prev *aggregate.Aggregator
 			if pq, ok := previousWindow(q, now); ok {

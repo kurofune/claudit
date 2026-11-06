@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kurofune/claudit/internal/aggregate"
@@ -348,6 +349,72 @@ func (st *SessionStory) Whole() StoryPage {
 		Hidden:      st.Hidden,
 		SourceFiles: st.sourceFiles,
 	}
+}
+
+// SummaryInputRunes caps each tool input of a session summary.
+const SummaryInputRunes = 120
+
+// SessionSummary is the /_claudit/api/sessions/summary payload: the
+// session's index row and every step of the main agent and its sub-agents
+// with their numbers and calls but none of their text: each step's text
+// and thinking and each call's output and whole input dropped, its input
+// cut to its first line.
+type SessionSummary struct {
+	SessionIndexRow
+	Steps    []StoryStep  `json:"steps"`
+	Children []StoryChild `json:"children"`
+	// SourceFiles is every session log the story's turns came from, sorted.
+	SourceFiles []string `json:"source_files"`
+}
+
+// Summary is the story's SessionSummary. A session the filter left no turn
+// carries a row with only its id. The story itself is left unchanged.
+func (st *SessionStory) Summary() SessionSummary {
+	row := st.row
+	if !st.hasRow {
+		row = SessionIndexRow{SessionID: st.SessionID}
+	}
+	out := SessionSummary{
+		SessionIndexRow: row,
+		Steps:           summarySteps(st.steps),
+		Children:        make([]StoryChild, len(st.children)),
+		SourceFiles:     st.sourceFiles,
+	}
+	for i, ch := range st.children {
+		ch.Steps = summarySteps(ch.Steps)
+		out.Children[i] = ch
+	}
+	return out
+}
+
+func summarySteps(steps []StoryStep) []StoryStep {
+	out := make([]StoryStep, len(steps))
+	for i, s := range steps {
+		s.Text, s.Thinking = "", ""
+		tools := make([]StoryTool, len(s.Tools))
+		for j, t := range s.Tools {
+			t.Output, t.InputFull = "", ""
+			t.Input = firstLine(t.Input, SummaryInputRunes)
+			tools[j] = t
+		}
+		s.Tools = tools
+		out[i] = s
+	}
+	return out
+}
+
+// firstLine is s's first non-blank line, trimmed and cut to max runes, a
+// cut one ending in "…".
+func firstLine(s string, max int) string {
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			if r := []rune(l); len(r) > max {
+				return string(r[:max-1]) + "…"
+			}
+			return l
+		}
+	}
+	return ""
 }
 
 // withContextCost sets each step's ContextCostUSD from byTurn by turn uuid.

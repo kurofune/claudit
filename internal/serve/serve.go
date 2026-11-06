@@ -115,18 +115,29 @@ type Server struct {
 	promptMemoMu sync.Mutex
 	promptMemo   *promptMemo
 
-	// filterAggMu guards filterAgg, the last Aggregator built for a
-	// filter-only key (filterAggregate), storyMemo, the stories built at
-	// the current generation (sessionStory), and indexMemo, the session
-	// indexes built at the current generation (sessionIndex). Story pages
-	// of one session share the first two instead of rebuilding per page;
-	// the index's ETag check and body share the third.
-	filterAggMu  sync.Mutex
-	filterAgg    *filterAggMemo
-	storyMemo    map[string]*agentflow.SessionStory
-	storyMemoGen int64
-	indexMemo    map[string]agentflow.SessionIndex
-	indexMemoGen int64
+	// filterAggMu guards storyMemo, the stories built per (filter,
+	// session, stamps of its files) (sessionStory), indexMemo, the session
+	// indexes built at the current generation, and indexRows, each
+	// filter's last index rows for the next generation to reuse
+	// (sessionIndex), with indexRowBuilds counting each session's row
+	// builds.
+	filterAggMu    sync.Mutex
+	storyMemo      map[string]*storyMemoEntry
+	storyMemoTick  int64
+	indexMemo      map[string]agentflow.SessionIndex
+	indexMemoGen   int64
+	indexRows      map[string]*agentflow.IndexRows
+	indexRowBuilds map[string]int
+	// storySF collapses concurrent builds of one story; storyBuildN
+	// counts the builds.
+	storySF     singleflight.Group
+	storyBuildN atomic.Int64
+
+	// layoutMu guards layoutMemo, the current generation's
+	// agentflow.Layout (layout).
+	layoutMu   sync.Mutex
+	layoutMemo *agentflow.Layout
+	layoutGen  int64
 
 	// now is the API sections' clock; nil reads time.Now. Tests set it to
 	// cross a time boundary without the snapshot moving.
@@ -179,6 +190,8 @@ func NewServer(cache *Cache, opts Options) *Server {
 		subagentLookup:  aggregate.NewMemoizedSubagentLookup(),
 		shutdownTimeout: 3 * time.Second,
 		shutdownCh:      make(chan struct{}),
+		indexRows:       map[string]*agentflow.IndexRows{},
+		indexRowBuilds:  map[string]int{},
 	}
 	if opts.MaxCachedRenders > 0 {
 		// One LRU holds entries for every section (html, data, and
@@ -276,6 +289,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPathAgentsFull, s.handleAPIAgentsFull)
 	s.mux.HandleFunc("GET "+apiPathSessions, s.handleAPISessions)
 	s.mux.HandleFunc("GET "+apiPathSessionsStory, s.handleAPISessionsStory)
+	s.mux.HandleFunc("GET "+apiPathSessionsSummary, s.handleAPISessionsSummary)
 
 	s.mux.HandleFunc("GET "+webAssetURLPrefix, s.handleWebAsset)
 
@@ -601,7 +615,7 @@ func (s *Server) promptData(snap *Snapshot) (*aggregate.PromptIndex, aggregate.R
 	m := &promptMemo{
 		generation: snap.Generation,
 		idx:        aggregate.BuildPromptIndex(snap.Turns, snap.Users, snap.Links),
-		replays:    aggregate.BuildReplaySet(snap.Turns),
+		replays:    s.layout(snap).Replays,
 	}
 	s.promptMemo = m
 	return m.idx, m.replays

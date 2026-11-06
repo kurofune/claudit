@@ -441,19 +441,19 @@ func TestAPISessionsStory_Paging(t *testing.T) {
 	}
 }
 
-// TestAPISessionsStory_PagesShareOneAggregator: a session's later pages
-// reuse the Aggregator the first page built rather than rebuilding it.
-func TestAPISessionsStory_PagesShareOneAggregator(t *testing.T) {
+// TestAPISessionsStory_PagesShareOneStory: a session's later pages reuse
+// the story the first page built, and no page builds a whole-corpus
+// Aggregator.
+func TestAPISessionsStory_PagesShareOneStory(t *testing.T) {
 	srv := newTestServer(t, longCorpus(t))
 	getStory(t, srv, "?session=s-long")
-	after1 := srv.aggregateBuildCount()
-	if after1 != 1 {
-		t.Fatalf("first page built %d aggregators, want 1", after1)
-	}
 	getStory(t, srv, "?session=s-long&offset=200")
 	getStory(t, srv, "?session=s-long&offset=400&prompt=0")
-	if got := srv.aggregateBuildCount(); got != after1 {
-		t.Errorf("aggregate builds after three pages = %d, want %d", got, after1)
+	if got := srv.storyBuildCount(); got != 1 {
+		t.Errorf("story builds after three pages = %d, want 1", got)
+	}
+	if got := srv.aggregateBuildCount(); got != 0 {
+		t.Errorf("aggregate builds after three pages = %d, want 0", got)
 	}
 }
 

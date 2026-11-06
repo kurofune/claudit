@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,12 +8,11 @@ import (
 	"time"
 
 	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/aggregate"
 )
 
-// storyMemoMax bounds how many sessions' stories stay built at one
-// generation: enough for a few open sessions, small enough that a long
-// session's steps never pile up.
+// storyMemoMax bounds how many sessions' stories stay built: enough for a
+// few open sessions, small enough that a long session's steps never pile
+// up. It also bounds how many filters keep their index rows.
 const storyMemoMax = 8
 
 // handleAPISessions serves /_claudit/api/sessions — the Sessions list:
@@ -36,7 +34,9 @@ func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionIndex returns the session index for q's filter, memoized per
-// generation; its Active flags are stale, so read it through At.
+// generation; its Active flags are stale, so read it through At. A new
+// generation rebuilds only the rows of the sessions whose files changed
+// (agentflow.ReuseSessionIndex) and reuses the rest.
 func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 	key := filterQueryKey(q)
 	s.filterAggMu.Lock()
@@ -46,19 +46,99 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 			return idx
 		}
 	}
+	prev := s.indexRows[key]
 	s.filterAggMu.Unlock()
 
-	// No promptData here: its PromptIndex is the costly half, and the
-	// index needs only the replay set, which it builds cheaply.
-	idx := agentflow.BuildSessionIndex(snap, s.opts.Prices, q.Filter, agentflow.IndexOptions{})
+	idx, rows, built := agentflow.ReuseSessionIndex(snap, s.opts.Prices, q.Filter, s.layout(snap), prev, agentflow.IndexOptions{})
 	s.filterAggMu.Lock()
+	defer s.filterAggMu.Unlock()
+	for _, id := range built {
+		s.indexRowBuilds[id]++
+	}
 	if s.indexMemoGen != snap.Generation || len(s.indexMemo) >= storyMemoMax {
 		s.indexMemo = map[string]agentflow.SessionIndex{}
 		s.indexMemoGen = snap.Generation
 	}
 	s.indexMemo[key] = idx
-	s.filterAggMu.Unlock()
+	if _, ok := s.indexRows[key]; !ok && len(s.indexRows) >= storyMemoMax {
+		s.indexRows = map[string]*agentflow.IndexRows{}
+	}
+	s.indexRows[key] = rows
 	return idx
+}
+
+// indexRowBuildCount is how many times session's index row was built.
+// Test-only accessor.
+func (s *Server) indexRowBuildCount(session string) int {
+	s.filterAggMu.Lock()
+	defer s.filterAggMu.Unlock()
+	return s.indexRowBuilds[session]
+}
+
+// layout returns the snapshot's agentflow.Layout, built once per
+// generation: which files each session reads, the key every per-session
+// memo is checked against.
+func (s *Server) layout(snap *Snapshot) *agentflow.Layout {
+	s.layoutMu.Lock()
+	defer s.layoutMu.Unlock()
+	if s.layoutMemo != nil && s.layoutGen == snap.Generation {
+		return s.layoutMemo
+	}
+	s.layoutMemo, s.layoutGen = agentflow.NewLayout(snap, nil), snap.Generation
+	return s.layoutMemo
+}
+
+// sessionQuery validates the ?session and filter params a per-session
+// endpoint takes, answering 400 or 404 itself; ok is false when it did.
+func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request) (session string, ok bool) {
+	v := r.URL.Query()
+	session = strings.TrimSpace(v.Get("session"))
+	if session == "" {
+		http.Error(w, "?session is required", http.StatusBadRequest)
+		return "", false
+	}
+	if _, err := parseQuery(v, time.Now()); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return "", false
+	}
+	if !s.layout(s.cache.Snapshot()).Has(session) {
+		http.NotFound(w, r)
+		return "", false
+	}
+	return session, true
+}
+
+// handleAPISessionsSummary serves /_claudit/api/sessions/summary?session=<id>
+// — what the session header computes over: the session's index row under
+// the filter plus every step of it and its sub-agents with their numbers
+// and calls but none of their text (agentflow.SessionSummary). An unknown
+// session answers 404. Built from the memoized story, so it costs the
+// session's own files only.
+func (s *Server) handleAPISessionsSummary(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.sessionQuery(w, r)
+	if !ok {
+		return
+	}
+	s.serveAPISection(w, r, apiSectionSpec{
+		section: apiSectionSessionsSummary,
+		variant: func(snap *Snapshot, q Query, now time.Time) string {
+			if st, ok := s.sessionStory(snap, q, session); ok {
+				if row, ok := st.Row(); ok && row.At(now, agentActiveWindow).Active {
+					return "active"
+				}
+			}
+			return "inactive"
+		},
+		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
+			st, ok := s.sessionStory(snap, q, session)
+			if !ok {
+				return nil, errNotFound
+			}
+			sum := st.Summary()
+			sum.SessionIndexRow = sum.At(now, agentActiveWindow)
+			return sum, nil
+		},
+	})
 }
 
 // handleAPISessionsStory serves /_claudit/api/sessions/story — one page of
@@ -71,20 +151,14 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 // with the session's title, project, provider, model and time span from
 // its index row: what the session header computes over.
 //
-// Every step carries context_cost_usd (aggregate.ContextCostByTurn) and
+// Every step carries context_cost_usd (agentflow.SessionContextCost) and
 // every page the session's source_files.
 //
-// The story is served on the shared-aggregator path so per-turn figures
-// from the Aggregator can join its steps by turn uuid; filterAggregate keys
-// that Aggregator on the filter alone, and sessionStory memoizes the built
-// story, so a session's later pages rebuild neither.
+// The story is built from the session's own files alone and memoized on
+// their stamps (sessionStory), so a session's later pages, and its pages
+// after another session wrote, rebuild nothing.
 func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	session := strings.TrimSpace(v.Get("session"))
-	if session == "" {
-		http.Error(w, "?session is required", http.StatusBadRequest)
-		return
-	}
 	prompt, err := nonNegativeParam(v.Get("prompt"))
 	if err != nil {
 		http.Error(w, "?prompt: "+err.Error(), http.StatusBadRequest)
@@ -105,24 +179,19 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "?whole excludes ?turn, ?prompt and ?offset", http.StatusBadRequest)
 		return
 	}
-	if _, err := parseQuery(v, time.Now()); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if !agentflow.HasSession(s.cache.Snapshot(), session) {
-		http.NotFound(w, r)
+	session, ok := s.sessionQuery(w, r)
+	if !ok {
 		return
 	}
 	s.serveAPISection(w, r, apiSectionSpec{
 		section: apiSectionSessionsStory,
-		buildFiltered: func(snap *Snapshot, q Query, agg *aggregate.Aggregator) (any, error) {
+		buildFromSnapshot: func(snap *Snapshot, q Query, _ time.Time) (any, error) {
 			st, ok := s.sessionStory(snap, q, session)
 			if !ok {
 				return nil, errNotFound
 			}
-			byTurn := agg.ContextCostByTurnWhere(agentflow.InSession(snap, session))
 			if whole {
-				return s.wholeSession(snap, q, st.Whole().WithContextCost(byTurn)), nil
+				return wholeSession(st), nil
 			}
 			prompt, offset := prompt, offset
 			if turn != "" {
@@ -134,7 +203,7 @@ func (s *Server) handleAPISessionsStory(w http.ResponseWriter, r *http.Request) 
 			if !ok {
 				return nil, errNotFound
 			}
-			return st.FullText(page.WithContextCost(byTurn), readLogText), nil
+			return st.FullText(page, readLogText), nil
 		},
 	})
 }
@@ -151,16 +220,13 @@ type sessionWhole struct {
 	EndedAt   time.Time `json:"ended_at"`
 }
 
-// wholeSession joins page to the session's index row under q's filter; a
-// session the filter left no row for keeps those fields empty.
-func (s *Server) wholeSession(snap *Snapshot, q Query, page agentflow.StoryPage) sessionWhole {
-	out := sessionWhole{StoryPage: page}
-	for _, row := range s.sessionIndex(snap, q).Sessions {
-		if row.SessionID == page.SessionID {
-			out.Title, out.Project, out.Provider, out.Model = row.Title, row.Project, row.Provider, row.Model
-			out.StartedAt, out.EndedAt = row.StartedAt, row.LastActivity
-			break
-		}
+// wholeSession is the story as one page joined to its index row; a
+// session the filter left no row keeps those fields empty.
+func wholeSession(st *agentflow.SessionStory) sessionWhole {
+	out := sessionWhole{StoryPage: st.Whole()}
+	if row, ok := st.Row(); ok {
+		out.Title, out.Project, out.Provider, out.Model = row.Title, row.Project, row.Provider, row.Model
+		out.StartedAt, out.EndedAt = row.StartedAt, row.LastActivity
 	}
 	return out
 }
@@ -193,66 +259,60 @@ func unixNanoOrZero(t time.Time) int64 {
 	return t.UnixNano()
 }
 
-// filterAggMemo is the last filter-only Aggregator built.
-type filterAggMemo struct {
-	generation int64
-	key        string
-	agg        *aggregate.Aggregator
-}
-
-// filterAggregate returns the Aggregator for q's filter alone — no trend
-// period, no paging params — memoized for the last (generation, filter),
-// so sequential story pages share one build that sharedAggregateData's
-// singleflight alone would repeat.
-func (s *Server) filterAggregate(ctx context.Context, snap *Snapshot, q Query) (*aggregate.Aggregator, error) {
-	key := filterQueryKey(q)
-	s.filterAggMu.Lock()
-	if m := s.filterAgg; m != nil && m.generation == snap.Generation && m.key == key {
-		s.filterAggMu.Unlock()
-		return m.agg, nil
-	}
-	s.filterAggMu.Unlock()
-
-	fq := Query{Filter: q.Filter, Hotspots: q.Hotspots, rawQuery: key}
-	agg, err := s.sharedAggregateData(ctx, snap, fq)
-	if err != nil {
-		return nil, err
-	}
-	s.filterAggMu.Lock()
-	s.filterAgg = &filterAggMemo{generation: snap.Generation, key: key, agg: agg}
-	s.filterAggMu.Unlock()
-	return agg, nil
+// storyMemoEntry is one built story and when it was last served.
+type storyMemoEntry struct {
+	story *agentflow.SessionStory
+	used  int64
 }
 
 // sessionStory returns the session's whole story under q's filter,
-// memoized per generation. ok is false when the snapshot holds no turn of
-// the session.
+// memoized on the filter, the session and the stamps of its own files
+// (agentflow.Layout.Key), so another session's write leaves it built. ok
+// is false when the snapshot holds no turn of the session.
 func (s *Server) sessionStory(snap *Snapshot, q Query, session string) (*agentflow.SessionStory, bool) {
-	key := filterQueryKey(q) + "|session=" + session
+	l := s.layout(snap)
+	if !l.Has(session) {
+		return nil, false
+	}
+	key := filterQueryKey(q) + "|" + l.Key(session)
 	s.filterAggMu.Lock()
-	if s.storyMemoGen == snap.Generation {
-		if st, ok := s.storyMemo[key]; ok {
-			s.filterAggMu.Unlock()
-			return st, true
-		}
+	s.storyMemoTick++
+	if e, ok := s.storyMemo[key]; ok {
+		e.used = s.storyMemoTick
+		s.filterAggMu.Unlock()
+		return e.story, true
 	}
 	s.filterAggMu.Unlock()
 
-	idx, replays := s.promptData(snap)
-	st, ok := agentflow.BuildSessionStory(snap, s.opts.Prices, q.Filter, session, agentflow.StoryOptions{
-		SnippetRunes: agentSnippetRunes,
-		Replays:      &replays,
-		PromptIndex:  idx,
+	v, _, _ := s.storySF.Do(key, func() (any, error) {
+		s.storyBuildN.Add(1)
+		st, _ := agentflow.BuildSessionStory(snap, s.opts.Prices, q.Filter, session, agentflow.StoryOptions{
+			SnippetRunes: agentSnippetRunes,
+			Layout:       l,
+		})
+		return st, nil
 	})
-	if !ok {
+	st, _ := v.(*agentflow.SessionStory)
+	if st == nil {
 		return nil, false
 	}
 	s.filterAggMu.Lock()
-	if s.storyMemoGen != snap.Generation || len(s.storyMemo) >= storyMemoMax {
-		s.storyMemo = map[string]*agentflow.SessionStory{}
-		s.storyMemoGen = snap.Generation
+	defer s.filterAggMu.Unlock()
+	if s.storyMemo == nil {
+		s.storyMemo = map[string]*storyMemoEntry{}
 	}
-	s.storyMemo[key] = st
-	s.filterAggMu.Unlock()
+	if _, ok := s.storyMemo[key]; !ok && len(s.storyMemo) >= storyMemoMax {
+		var oldest string
+		for k, e := range s.storyMemo {
+			if oldest == "" || e.used < s.storyMemo[oldest].used {
+				oldest = k
+			}
+		}
+		delete(s.storyMemo, oldest)
+	}
+	s.storyMemo[key] = &storyMemoEntry{story: st, used: s.storyMemoTick}
 	return st, true
 }
+
+// storyBuildCount is how many stories were built. Test-only accessor.
+func (s *Server) storyBuildCount() int64 { return s.storyBuildN.Load() }
