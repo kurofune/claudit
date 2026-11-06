@@ -38,17 +38,17 @@ const story = (steps, children = [], extra = {}) => ({
 const FAILED = () => story([
   step('a1', 0, [tool('rg login', 'ok')], { cost_usd: 2, context_cost_usd: 0.4, duration_ms: 5000, tokens: tokens(100, 50, 1000, 0, 3000) }),
   step('a2', 20, [tool('git diff', 'ok', { count: 2 })], { context_cost_usd: 0.1, duration_ms: 1000 }),
-  step('a3', 40, [tool('npm test', 'error'), tool('make lint', 'error'), tool('go vet ./...', 'error')],
-    { context_cost_usd: 0.2, duration_ms: 20000 }),
+  step('a3', 40, [tool('npm test', 'error', { input_key: 'nt' }), tool('make lint', 'error', { input_key: 'ml' }),
+    tool('go vet ./...', 'error', { input_key: 'gv' })], { context_cost_usd: 0.2, duration_ms: 20000 }),
 ], [{
   kind: 'subagent', agent_type: 'Explore', description: '', parent_tool_use_id: '', started_at: at(10), ended_at: at(10),
   cost_usd: 0.01, error_count: 0, steps: [step('k1', 10, [tool('rg auth', 'ok')], { context_cost_usd: 0.05, duration_ms: 2000 })],
 }], {
   started_at: at(0), last_activity: at(3725), failed: 3,
   failing_checks: [
-    { check: 'npm test', command: 'npm test', turn: 'a3' },
-    { check: 'make', command: 'make lint', turn: 'a3' },
-    { check: 'go vet', command: 'go vet ./...', turn: 'a3' },
+    { check: 'npm test', command: 'npm test', turn: 'a3', input_key: 'nt' },
+    { check: 'make', command: 'make lint', turn: 'a3', input_key: 'ml' },
+    { check: 'go vet', command: 'go vet ./...', turn: 'a3', input_key: 'gv' },
   ],
 });
 
@@ -355,10 +355,10 @@ test('failures: three failing checks read "Last `<check>` failed · <command>", 
 test('failures: checks, then edits never applied, then the other errors behind a collapsed count that click and Enter expand', async () => {
   const edit = (path, status, key) => tool(path, status, { name: 'Edit', kind: 'edit', detail: path, input_key: key });
   const st = story([
-    step('a1', 0, [tool('ls missing', 'error'), tool('go test ./...', 'error')]),
+    step('a1', 0, [tool('ls missing', 'error'), tool('go test ./...', 'error', { input_key: 'gt' })]),
     step('a2', 20, [edit('/p/a.go', 'error', 'e1'), tool('rg nothing', 'error')]),
-    step('a3', 40, [tool('go test ./...', 'error')]),
-  ], [], { failed: 5, failed_edits: 1, failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a3' }] });
+    step('a3', 40, [tool('go test ./...', 'error', { input_key: 'gt' })]),
+  ], [], { failed: 5, failed_edits: 1, failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a3', input_key: 'gt' }] });
   const { host, done, location } = await mount(route(st));
   await done;
   assert.equal(text(host.querySelector('.sh-failures-title')), '1 failing check · 1 edit never applied');
