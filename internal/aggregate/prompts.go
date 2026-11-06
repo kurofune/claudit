@@ -2,8 +2,8 @@ package aggregate
 
 import (
 	"sort"
-	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kurofune/claudit/internal/parse"
 )
@@ -70,7 +70,11 @@ type PromptIndex struct {
 // turn and its originating user message. Without these the chain
 // frequently dies one hop short of the prompt.
 func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks ...[]parse.ParentLink) *PromptIndex {
-	parent := make(map[string]string, len(turns)+len(msgs))
+	size := len(turns) + len(msgs)
+	for _, links := range extraLinks {
+		size += len(links)
+	}
+	parent := make(map[string]string, size)
 	userText := make(map[string]string, len(msgs))
 	for _, links := range extraLinks {
 		for _, l := range links {
@@ -79,8 +83,8 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 			}
 		}
 	}
-	for _, t := range turns {
-		parent[t.UUID] = t.ParentUUID
+	for i := range turns {
+		parent[turns[i].UUID] = turns[i].ParentUUID
 	}
 	for _, m := range msgs {
 		parent[m.UUID] = m.ParentUUID
@@ -101,9 +105,10 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 		if v, ok := cache[start]; ok {
 			return v
 		}
-		// Walk up, recording the chain so we can backfill the cache.
+		// Walk up, recording the chain so we can backfill the cache. A
+		// short chain checks itself for a cycle; a long one keeps a set.
 		chain := []string{start}
-		seen := map[string]struct{}{start: {}}
+		var seen map[string]struct{}
 		var found promptIndexEntry
 		cur := start
 		for {
@@ -125,12 +130,11 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 				found = v
 				break
 			}
-			if _, loop := seen[p]; loop {
+			if inChain(chain, &seen, p) {
 				// Cycle (shouldn't happen, but defend).
 				found = promptIndexEntry{Key: noPromptKey}
 				break
 			}
-			seen[p] = struct{}{}
 			chain = append(chain, p)
 			cur = p
 		}
@@ -141,7 +145,8 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 		return found
 	}
 
-	for _, t := range turns {
+	for i := range turns {
+		t := &turns[i]
 		// Walk starts at the turn's parent — the turn itself isn't a user
 		// message, so cache[t.UUID] would otherwise sit at noPromptKey.
 		entry := resolve(t.ParentUUID)
@@ -150,6 +155,35 @@ func BuildPromptIndex(turns []parse.Turn, msgs []parse.UserMessage, extraLinks .
 	}
 	attributeSubagents(idx, turns, msgs, extraLinks)
 	return idx
+}
+
+// chainScanMax is the longest chain inChain scans before keeping a set.
+const chainScanMax = 32
+
+// inChain reports whether u is already on chain, scanning a short chain
+// and keeping *seen as the set of a long one.
+func inChain(chain []string, seen *map[string]struct{}, u string) bool {
+	if len(chain) <= chainScanMax {
+		for _, c := range chain {
+			if c == u {
+				return true
+			}
+		}
+		if len(chain) < chainScanMax {
+			return false
+		}
+	}
+	if *seen == nil {
+		*seen = make(map[string]struct{}, 2*len(chain))
+		for _, c := range chain {
+			(*seen)[c] = struct{}{}
+		}
+	}
+	if _, ok := (*seen)[u]; ok {
+		return true
+	}
+	(*seen)[u] = struct{}{}
+	return false
 }
 
 // attributeSubagents resolves the turns of a subagent thread that reach no
@@ -236,27 +270,43 @@ func (p *PromptIndex) Lookup(turnUUID string) promptIndexEntry {
 // different prompts ("write a test for foo.go" vs "write a test for
 // bar.go" — once the differing path falls past the rune cap) cluster.
 func normalizePromptKey(s string) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	b.Grow(len(s))
+	out := make([]rune, 0, promptKeyMaxRunes+1)
+	lead := 0 // leading runes of out that trimming drops
 	inSpace := false
 	for _, r := range s {
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			if !inSpace && b.Len() > 0 {
-				b.WriteByte(' ')
+			if !inSpace && len(out) > 0 {
+				out = append(out, ' ')
 				inSpace = true
+				if lead == len(out)-1 {
+					lead++
+				}
 			}
 			continue
 		}
-		b.WriteRune(r)
+		r = unicode.ToLower(r)
+		out = append(out, r)
 		inSpace = false
+		if unicode.IsSpace(r) {
+			if lead == len(out)-1 {
+				lead++
+			}
+			continue
+		}
+		// A non-space past the cap fixes the key's first runes: trimming
+		// the rest can no longer reach them.
+		if len(out)-lead > promptKeyMaxRunes {
+			break
+		}
 	}
-	out := strings.TrimSpace(b.String())
-	runes := []rune(out)
-	if len(runes) > promptKeyMaxRunes {
-		runes = runes[:promptKeyMaxRunes]
+	out = out[lead:]
+	for len(out) > 0 && unicode.IsSpace(out[len(out)-1]) {
+		out = out[:len(out)-1]
 	}
-	return string(runes)
+	if len(out) > promptKeyMaxRunes {
+		out = out[:promptKeyMaxRunes]
+	}
+	return string(out)
 }
 
 // ByPrompt returns the per-prompt rows sorted by cost descending.
