@@ -68,11 +68,27 @@ type Snapshot struct {
 	LastUpdate        time.Time
 	FileCount         int
 	Malformed         int
+	// Files stamps every parsed file with the (size, mtime) its parse
+	// saw: a file whose stamp is unchanged between two snapshots yielded
+	// the same turns, so per-session work over it can be reused.
+	Files map[string]FileStamp
 	// FileErrors holds non-fatal per-file open/parse errors. Populated
 	// by LoadConcurrent (the one-shot path surfaces them as a warning);
 	// the polled Cache leaves it nil since the daemon tolerates broken
 	// files silently and re-reads them next tick.
 	FileErrors []error
+}
+
+// FileStamp is the (size, mtime) a file had when it was parsed: the
+// change signal Refresh re-parses on.
+type FileStamp struct {
+	Size    int64
+	ModTime time.Time
+}
+
+// Equal reports whether two stamps name the same parse of a file.
+func (s FileStamp) Equal(o FileStamp) bool {
+	return s.Size == o.Size && s.ModTime.Equal(o.ModTime)
 }
 
 // Cache walks its Sources and keeps a parsed in-memory copy current
@@ -223,8 +239,10 @@ func (c *Cache) publishSnapshot() {
 		LastUpdate:  time.Now(),
 		FileCount:   len(c.files),
 		Malformed:   malformed,
+		Files:       make(map[string]FileStamp, len(c.files)),
 	}
-	for _, e := range c.files {
+	for path, e := range c.files {
+		snap.Files[path] = FileStamp{Size: e.size, ModTime: e.mtime}
 		snap.Turns = append(snap.Turns, e.turns...)
 		snap.Users = append(snap.Users, e.users...)
 		snap.Links = append(snap.Links, e.links...)
@@ -339,15 +357,17 @@ func LoadConcurrent(sources []provider.Source, earliest time.Time) (*Snapshot, e
 	defer debug.SetGCPercent(debug.SetGCPercent(200))
 
 	var jobs []fileJob
-	_, walkErr := walkSources(sources, earliest, func(i int, path string, _ time.Time, _ int64) {
+	stamps := map[string]FileStamp{}
+	_, walkErr := walkSources(sources, earliest, func(i int, path string, mod time.Time, size int64) {
 		jobs = append(jobs, fileJob{src: sources[i], path: path})
+		stamps[path] = FileStamp{Size: size, ModTime: mod}
 	})
 	if walkErr != nil {
 		return nil, walkErr
 	}
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].path < jobs[j].path })
 
-	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(jobs)}
+	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(jobs), Files: stamps}
 	for _, pr := range parseFiles(jobs) {
 		snap.Turns = append(snap.Turns, pr.turns...)
 		snap.Users = append(snap.Users, pr.users...)

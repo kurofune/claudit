@@ -654,3 +654,52 @@ func TestCodex_CorruptArchiveIsFileError(t *testing.T) {
 		}
 	}
 }
+
+// TestSnapshotsCarryFileStamps: both the polled Cache and LoadConcurrent
+// stamp every file with the (size, mtime) its parse saw, and an append
+// moves only the appended file's stamp.
+func TestSnapshotsCarryFileStamps(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.jsonl"), filepath.Join(dir, "b.jsonl")
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, a, mkAssistantLine("a1", "", t0))
+	writeJSONL(t, b, mkAssistantLine("b1", "", t0))
+	stampOf := func(path string) FileStamp {
+		t.Helper()
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return FileStamp{Size: fi.Size(), ModTime: fi.ModTime()}
+	}
+
+	c := New(provider.NewClaudeCode(dir))
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	s0 := c.Snapshot()
+	if len(s0.Files) != 2 || !s0.Files[a].Equal(stampOf(a)) || !s0.Files[b].Equal(stampOf(b)) {
+		t.Fatalf("cache stamps = %+v", s0.Files)
+	}
+
+	writeJSONL(t, b, mkAssistantLine("b1", "", t0), mkAssistantLine("b2", "b1", t0.Add(time.Second)))
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(b, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	s1 := c.Snapshot()
+	if !s1.Files[a].Equal(s0.Files[a]) || s1.Files[b].Equal(s0.Files[b]) || !s1.Files[b].Equal(stampOf(b)) {
+		t.Errorf("after appending to b: a %+v -> %+v, b %+v -> %+v", s0.Files[a], s1.Files[a], s0.Files[b], s1.Files[b])
+	}
+
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Files) != 2 || !snap.Files[a].Equal(stampOf(a)) || !snap.Files[b].Equal(stampOf(b)) {
+		t.Errorf("LoadConcurrent stamps = %+v", snap.Files)
+	}
+}
