@@ -414,9 +414,41 @@ func (s *Server) Start(ctx context.Context) {
 	if _, err := s.cache.Refresh(); err != nil {
 		s.opts.Logger.LogAttrs(ctx, slog.LevelError, "serve: initial refresh failed", slog.Any("err", err))
 	}
+	gens, unsub := s.cache.SubscribeGeneration()
+	go s.warmLayouts(ctx, gens, unsub)
 	go s.cache.RunPoller(ctx, s.opts.PollInterval, func(err error) {
 		s.opts.Logger.LogAttrs(ctx, slog.LevelError, "serve: refresh failed", slog.Any("err", err))
 	})
+}
+
+// warmLayouts builds each published generation's session layout as it
+// lands, so a session request rarely waits on it: while a log writes, the
+// generation moves every poll.
+func (s *Server) warmLayouts(ctx context.Context, gens <-chan int64, unsub func()) {
+	defer unsub()
+	s.layout(s.cache.Snapshot())
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-gens:
+			if !ok {
+				return
+			}
+			s.layout(s.cache.Snapshot())
+		}
+	}
+}
+
+// layoutGeneration is the generation of the layout built last. Test-only
+// accessor.
+func (s *Server) layoutGeneration() int64 {
+	s.layoutMu.Lock()
+	defer s.layoutMu.Unlock()
+	if s.layoutMemo == nil {
+		return 0
+	}
+	return s.layoutGen
 }
 
 // ListenAndServe binds opts.Bind and serves until ctx is canceled.

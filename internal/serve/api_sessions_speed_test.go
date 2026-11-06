@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -258,4 +259,42 @@ func TestAPISessionsSummary(t *testing.T) {
 	if w := doAPI(t, srv, http.MethodGet, apiPathSessionsSummary, nil); w.Code != http.StatusBadRequest {
 		t.Errorf("no session: status %d, want 400", w.Code)
 	}
+}
+
+// TestStart_WarmsEachGenerationsLayout: a running server builds each new
+// generation's session layout without a request asking for it.
+func TestStart_WarmsEachGenerationsLayout(t *testing.T) {
+	dir := t.TempDir()
+	_, b := twoSessionCorpus(t, dir)
+	srv := NewServer(NewCache(dir), Options{Prices: loadPricesForTest(t), PollInterval: 20 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.Start(ctx)
+
+	waitLayout := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for srv.layoutGeneration() != srv.cache.Snapshot().Generation || srv.layoutGeneration() == 0 {
+			if time.Now().After(deadline) {
+				t.Fatalf("layout generation %d, snapshot %d", srv.layoutGeneration(), srv.cache.Snapshot().Generation)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitLayout()
+	gen := srv.cache.Snapshot().Generation
+	f, err := os.OpenFile(b, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(mkAssistantLineWithCWD("s-b", "b9", "b2", "/p/s-b", "claude-opus-4-7", 1, 1, time.Date(2026, 5, 1, 13, 0, 0, 0, time.UTC)) + "\n")
+	_ = f.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for srv.cache.Snapshot().Generation == gen {
+		if time.Now().After(deadline) {
+			t.Fatal("the poller never saw the append")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	waitLayout()
 }
