@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { installDOM, click, keydown } from './helpers/mini-dom.js';
 import { API_EQUIVALENT_TIP } from '../web/provider-filter.js';
 import { explainPrompt } from '../web/session-header-logic.js';
+import { WRAPPER_LABEL } from '../web/session-story-logic.js';
 
 const T0 = Date.parse('2026-05-01T10:00:00Z');
 const at = sec => new Date(T0 + sec * 1000).toISOString();
@@ -212,7 +213,7 @@ test('a tool-free session with a turn over the cost-whale floor still has no Wor
 
 test('skeleton tiles and an empty strip show while the story loads', async () => {
   let release;
-  const { host, done } = await mount(() => new Promise(r => { release = r; }));
+  const { host, done } = await mount(url => (url.includes('/sessions/summary?') ? new Promise(r => { release = r; }) : { sessions: [] }));
   await settle();
   assert.equal(host.querySelectorAll('.sh-tile.is-loading').length, 4);
   assert.ok(host.querySelector('.sh-strip.is-empty'));
@@ -231,7 +232,7 @@ test('a 5xx shows the failure with a Retry that refetches', async () => {
   fail = false;
   click(host.querySelector('.sh-error button.retry'));
   await settle(); await settle();
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter(u => u.includes('/sessions/summary?')).length, 2);
   assert.equal(host.querySelector('.sh-error'), null);
   assert.equal(host.querySelectorAll('.turn-bar').length, 3);
 });
@@ -284,4 +285,150 @@ test('the session page mounts the header above the story', async () => {
   assert.ok(host, 'the page has the header host');
   assert.equal(host.querySelectorAll('.turn-bar').length, 4);
   assert.ok(view.querySelector('.session-story-host'));
+});
+
+// route answers the summary with summary and the index with index (an
+// httpStatus object fails it).
+const route = (summary, index = { sessions: [] }) => url => (url.includes('/sessions/summary?') ? summary : index);
+
+// failing is a session whose last turn holds n failed commands no later
+// call fixed.
+const failing = n => story([
+  step('a1', 0, [tool('rg login', 'ok')]),
+  step('a2', 20, Array.from({ length: n }, (_, i) => tool(`npm test -- case${i}`, 'error'))),
+]);
+
+// FAMILY is ten index rows of the summary's prompt: Fable runs the first
+// six; costs and durations put $8.28 and 90 minutes at the top tenth.
+const FAMILY = [1, 1, 1, 1, 1.06, 1.06, 2, 2, 3, 8.28].map((c, i) => ({
+  session_id: `r${i}`, family_key: 'fix the login bug', cost_usd: c, duration_ms: [10, 10, 10, 10, 20, 20, 30, 30, 40, 90][i] * 60e3,
+  model: i < 6 ? 'claude-fable-5-1' : 'claude-opus-4-7', provider: 'claude-code',
+}));
+
+test('the header leads with the last message, then the unfixed failed commands, the tiles, the strip and the notes', async () => {
+  const { host, done } = await mount(route({ ...FAILED(), outcome: 'All three checks still fail.' }));
+  await done;
+  const order = host.querySelectorAll('.sh-last-message, .sh-failures, .sh-tiles, .sh-strip, .sh-notes')
+    .map(el => el.getAttribute('class').split(' ')[0]);
+  assert.deepEqual(order, ['sh-last-message', 'sh-failures', 'sh-tiles', 'sh-strip', 'sh-notes']);
+  assert.equal(text(host.querySelector('.sh-last-message')), 'Last message: All three checks still fail.');
+});
+
+test('a session with no agent message reads "Last message: (no agent message)"', async () => {
+  const { host, done } = await mount(route({ ...CLEAN(), outcome: '' }));
+  await done;
+  assert.equal(text(host.querySelector('.sh-last-message')), 'Last message: (no agent message)');
+});
+
+test('failures: none renders no block', async () => {
+  const { host, done } = await mount(route(CLEAN()));
+  await done;
+  assert.equal(host.querySelector('.sh-failures'), null);
+});
+
+test('failures: three rows read tool and command, link to their turn and follow on click and Enter', async () => {
+  const { host, done, location } = await mount(route(FAILED()));
+  await done;
+  assert.equal(text(host.querySelector('.sh-failures-title')), '3 failed commands never fixed');
+  const links = host.querySelectorAll('.sh-failures a.sh-failure');
+  assert.deepEqual(links.map(text), ['Bash · npm test', 'Bash · make lint', 'Bash · go vet ./...']);
+  assert.deepEqual(links.map(a => a.getAttribute('href')), Array(3).fill(`#agents/${SID}/a3`));
+  assert.equal(host.querySelector('.sh-failures-more'), null);
+  location.hash = '';
+  click(links[0]);
+  assert.equal(location.hash, `#agents/${SID}/a3`);
+  location.hash = '';
+  keydown(links[1], 'Enter');
+  assert.equal(location.hash, `#agents/${SID}/a3`);
+});
+
+test('failures: 25 show 10 rows and Show all 25, whose click reveals the rest', async () => {
+  const { host, done, document } = await mount(route(failing(25)));
+  await done;
+  assert.equal(text(host.querySelector('.sh-failures-title')), '25 failed commands never fixed');
+  assert.equal(host.querySelectorAll('.sh-failure').length, 10);
+  const more = host.querySelector('button.sh-failures-more');
+  assert.equal(text(more), 'Show all 25');
+  click(more);
+  const links = host.querySelectorAll('.sh-failure');
+  assert.equal(links.length, 25);
+  assert.equal(text(links[24]), 'Bash · npm test -- case24');
+  assert.equal(host.querySelector('.sh-failures-more'), null);
+  assert.equal(document.activeElement, links[10], 'focus lands on the first row revealed');
+});
+
+test('failures: 200 render 10 rows and Show all 200', async () => {
+  const { host, done } = await mount(route(failing(200)));
+  await done;
+  assert.equal(host.querySelectorAll('.sh-failure').length, 10);
+  assert.equal(text(host.querySelector('.sh-failures-more')), 'Show all 200');
+});
+
+test('a family of at least 5 runs puts the comparison line under the tiles', async () => {
+  const { host, done, calls } = await mount(route({ ...FAILED(), cost_usd: 8.28, duration_ms: 10 * 60e3 }, { sessions: FAMILY }));
+  await done;
+  assert.ok(calls.some(u => /\/_claudit\/api\/sessions$/.test(u)), 'the index is fetched');
+  const line = host.querySelector('.sh-compare');
+  assert.equal(text(line), '$8.28 — most expensive 10% of 10 runs of this prompt (median $1.06; 6 Fable, 4 Opus)');
+  const order = host.querySelectorAll('.sh-tiles, .sh-compare, .sh-strip').map(el => el.getAttribute('class').split(' ')[0]);
+  assert.deepEqual(order, ['sh-tiles', 'sh-compare', 'sh-strip']);
+});
+
+test('a family under 5 runs has no comparison line', async () => {
+  const { host, done } = await mount(route(FAILED(), { sessions: FAMILY.slice(0, 4) }));
+  await done;
+  assert.equal(host.querySelector('.sh-compare'), null);
+});
+
+test('a failed index fetch leaves the header whole, with no comparison line and no error card', async () => {
+  const { host, done } = await mount(route(FAILED(), { httpStatus: 500 }));
+  await done;
+  assert.equal(host.querySelector('.sh-compare'), null);
+  assert.equal(host.querySelector('.sh-error'), null);
+  assert.equal(host.querySelectorAll('.turn-bar').length, 4);
+  assert.equal(host.querySelectorAll('.sh-failure').length, 3);
+});
+
+test('the title is the wrapper-stripped first line and the header holds no wrapper text', async () => {
+  const { host, done } = await mount(route(FAILED()));
+  await done;
+  assert.equal(text(host.querySelector('.sh-title')), 'fix the login bug');
+  assert.ok(!host.textContent.includes(WRAPPER_LABEL));
+  assert.ok(!/environment_context|AGENTS\.md/.test(host.textContent));
+});
+
+// tabStops lists the header's elements in Tab order: natively focusable
+// ones and tabindex >= 0, none with a negative tabindex, in DOM order.
+const tabStops = host => host.querySelectorAll('a[href], button, [tabindex]').filter(el => el.tabIndex >= 0);
+
+test('tab order: the failed-command links, the API-equivalent tip, the Cost | Time switch, the strip\'s one stop, the notes, Copy', async () => {
+  const { host, done } = await mount(route(FAILED()));
+  await done;
+  const name = el => {
+    const c = el.getAttribute('class') || '';
+    if (c.includes('sh-failure')) return 'failure';
+    if (c.includes('api-eq')) return 'api-eq';
+    if (c.includes('sh-mode-btn')) return `mode:${el.getAttribute('data-mode')}`;
+    if (c.includes('turn-bar')) return 'bar';
+    if (c.includes('note')) return 'note';
+    if (c.includes('sh-copy')) return 'copy';
+    return c;
+  };
+  assert.deepEqual(tabStops(host).map(name),
+    ['failure', 'failure', 'failure', 'api-eq', 'mode:cost', 'bar', 'note', 'note', 'copy']);
+});
+
+test('skeleton: a last-message placeholder sits above the tiles under aria-busy', async () => {
+  let release;
+  const { host, done } = await mount(url => (url.includes('/sessions/summary?') ? new Promise(r => { release = r; }) : { sessions: [] }));
+  await settle();
+  const section = host.querySelector('.session-header');
+  assert.equal(section.getAttribute('aria-busy'), 'true');
+  const order = host.querySelectorAll('.sh-last-message, .sh-tiles').map(el => el.getAttribute('class').split(' ')[0]);
+  assert.deepEqual(order, ['sh-last-message', 'sh-tiles']);
+  assert.ok(host.querySelector('.sh-last-message.is-loading .skel-line'));
+  release(CLEAN());
+  await done;
+  assert.equal(host.querySelector('.sh-last-message.is-loading'), null);
+  assert.equal(text(host.querySelector('.sh-last-message')), 'Last message: done');
 });

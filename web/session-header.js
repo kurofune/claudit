@@ -1,20 +1,26 @@
 // @ts-check
-// The session page's header: what the session is, four tiles (cost,
-// duration, tokens, unresolved failures), a strip of one bar per model turn
+// The session page's header: what the session is, what it ended on (the
+// main agent's last message), the failed commands it never fixed, each a
+// link to its turn, four tiles (cost, duration, tokens, unresolved
+// failures), where this run sits among its prompt's runs, a strip of one bar per model turn
 // showing where the money or the time went, up to three Worth a look notes
 // and a button that copies an explain-this-session prompt. Every number
-// comes from web/session-header-logic.js over the session's summary.
+// comes from web/session-header-logic.js over the session's summary and,
+// for the comparison line, the index.
 
-import { fetchSessionSummary } from './api.js';
+import { fetchSessionSummary, fetchSessions } from './api.js';
 import { escHtml, fmtCompact } from './format.js';
 import { API_EQUIVALENT_TIP, providerLabel } from './provider-filter.js';
 import { sessionHash } from './router.js';
 import { skelLine } from './skeleton.js';
 import { copyText } from './clipboard.js';
 import { clock, fmtDuration, fmtUSD } from './session-story-logic.js';
-import { headerNumbers, stripBars, worthALook, explainPrompt, sessionOf } from './session-header-logic.js';
+import {
+  headerNumbers, stripBars, worthALook, explainPrompt, sessionOf,
+  failureRows, failuresHeading, headerFamilyStats, comparisonLine, FAILURES_PAGE,
+} from './session-header-logic.js';
 
-/** @import { SessionSummary } from './api-types.js' */
+/** @import { SessionSummary, SessionIndexRow } from './api-types.js' */
 
 const COPY_LABEL = 'Copy explain-this-session prompt';
 const COPIED_MS = 2000;
@@ -25,6 +31,7 @@ const COPIED_MS = 2000;
  * @property {'cost'|'time'} mode
  * @property {number} nowMs
  * @property {number} focusBar            the strip's roving tab stop
+ * @property {import('./session-header-logic.js').FailureRow[]} failures
  * @property {ReturnType<typeof setTimeout>|undefined} copyTimer
  */
 
@@ -39,7 +46,9 @@ const loads = new WeakMap();
 const reasonOf = err => (err && err.status ? `HTTP ${err.status}` : (err && err.message) || 'network error');
 
 // paintSessionHeader shows the skeleton header in host, fetches the
-// session's summary and renders it, or the error with a Retry that refetches. A
+// session's summary and renders it, or the error with a Retry that
+// refetches, then adds the comparison line once the index (fetched beside
+// the summary) answers; a failed index fetch leaves the header without it. A
 // later call on the same host drops an earlier one's answer.
 /** @param {Element} host @param {string} sessionId @param {{nowMs?: number}} [opts] */
 export async function paintSessionHeader(host, sessionId, opts = {}) {
@@ -47,10 +56,13 @@ export async function paintSessionHeader(host, sessionId, opts = {}) {
   loads.set(host, my);
   states.delete(host);
   host.innerHTML = skeletonHTML();
+  const summary = fetchSessionSummary(sessionId);
+  /** @type {Promise<SessionIndexRow[]|null>} */
+  const index = fetchSessions().then(ix => (ix && Array.isArray(ix.sessions) ? ix.sessions : null), () => null);
   /** @type {SessionSummary} */
   let story;
   try {
-    story = await fetchSessionSummary(sessionId);
+    story = await summary;
   } catch (err) {
     if (loads.get(host) !== my) return;
     if (err && err.status === 404) { host.innerHTML = ''; return; }
@@ -64,12 +76,27 @@ export async function paintSessionHeader(host, sessionId, opts = {}) {
   if (loads.get(host) !== my) return;
   renderSessionHeader(host, story, opts);
   wireSessionHeader(host, story);
+  const line = comparisonLine(story, headerFamilyStats(await index, story.family_key));
+  if (loads.get(host) !== my || !line) return;
+  showComparison(host, line);
+}
+
+// showComparison puts the comparison line under the tiles.
+/** @param {Element} host @param {string} line */
+function showComparison(host, line) {
+  const tiles = host.querySelector('.sh-tiles');
+  if (!tiles || !tiles.parentNode || host.querySelector('.sh-compare')) return;
+  const p = host.ownerDocument.createElement('p');
+  p.setAttribute('class', 'sh-compare');
+  p.textContent = line;
+  tiles.parentNode.insertBefore(p, tiles.nextElementSibling);
 }
 
 function skeletonHTML() {
   const tile = `<div class="sh-tile is-loading">${skelLine('sh-skel-label')}${skelLine('sh-skel-value')}${skelLine('sh-skel-sub')}</div>`;
   return `<section class="session-header" aria-label="Session summary" aria-busy="true">
     <div class="sh-ident">${skelLine('sh-skel-title')}${skelLine('sh-skel-meta')}</div>
+    <div class="sh-last-message is-loading" aria-label="Loading the last message">${skelLine('sh-skel-last')}</div>
     <div class="sh-tiles">${tile}${tile}${tile}${tile}</div>
     <div class="sh-strip is-empty" aria-label="Loading the turns"></div>
   </section>`;
@@ -85,6 +112,7 @@ export function renderSessionHeader(host, story, opts = {}) {
     mode: opts.mode || (prev && prev.story === story ? prev.mode : 'cost'),
     nowMs: typeof opts.nowMs === 'number' ? opts.nowMs : Date.now(),
     focusBar: 0,
+    failures: failureRows(story),
     copyTimer: undefined,
   };
   states.set(host, st);
@@ -109,6 +137,9 @@ export function renderSessionHeader(host, story, opts = {}) {
         ${last ? `<span class="sh-last">Last activity ${escHtml(last)}</span>` : ''}
       </div>
     </div>
+    <p class="sh-last-message"><strong class="sh-lm-label">Last message:</strong>
+      <span class="sh-lm-text">${escHtml(story.outcome || '(no agent message)')}</span></p>
+    ${failuresHTML(st)}
     <div class="sh-tiles">
       ${tile('cost', `Cost <span class="api-eq" tabindex="0" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span>`,
         escHtml(fmtUSD(n.costUSD)), 'sum of every turn')}
@@ -132,6 +163,37 @@ export function renderSessionHeader(host, story, opts = {}) {
     <div class="sh-actions"><button type="button" class="sh-copy">${COPY_LABEL}</button></div>
   </section>`;
   host.setAttribute('data-session', sid);
+}
+
+// failuresHTML is the unfixed failed commands block: a heading over one
+// link per failure, the first FAILURES_PAGE of them until Show all; '' when
+// there are none.
+/** @param {HeaderState} st */
+function failuresHTML(st) {
+  const n = st.failures.length;
+  if (!n) return '';
+  return `<section class="sh-failures" aria-label="Failed commands never fixed">
+    <h3 class="sh-failures-title">${escHtml(failuresHeading(n))}</h3>
+    <ul class="sh-failure-list">${failureItems(st, FAILURES_PAGE)}</ul>
+    ${n > FAILURES_PAGE ? `<button type="button" class="sh-failures-more">Show all ${n}</button>` : ''}
+  </section>`;
+}
+
+/** @param {HeaderState} st @param {number} limit */
+const failureItems = (st, limit) => st.failures.slice(0, limit).map(f =>
+  `<li><a class="sh-failure" href="${escHtml(sessionHash(st.story.session_id, f.link))}" data-link="${escHtml(f.link)}">${escHtml(f.text)}</a></li>`).join('');
+
+// showAllFailures draws every failure row, drops the Show all button and
+// moves focus to the first row it revealed.
+/** @param {Element} host @param {HeaderState} st */
+function showAllFailures(host, st) {
+  const list = host.querySelector('.sh-failure-list');
+  if (!list) return;
+  list.innerHTML = failureItems(st, st.failures.length);
+  const more = host.querySelector('.sh-failures-more');
+  if (more) more.remove();
+  const next = list.querySelectorAll('.sh-failure')[FAILURES_PAGE];
+  if (next) /** @type {any} */ (next).focus();
 }
 
 /** @param {'cost'|'time'} mode @param {string} label @param {'cost'|'time'} active */
@@ -171,8 +233,10 @@ function go(host, link) {
   window.location.hash = sessionHash(st.story.session_id, link);
 }
 
-// wireSessionHeader attaches the header's handlers to host once: bar and
-// note clicks and Enter jump to their turn, the Cost | Time switch answers
+// wireSessionHeader attaches the header's handlers to host once: failed
+// command, bar and note clicks and Enter jump to their turn (a modified
+// click on a failed command opens it as a link does), Show all reveals
+// every failed command, the Cost | Time switch answers
 // clicks and the arrow keys, the strip's arrows move between bars and the
 // copy button copies the explain prompt.
 /** @param {Element} host @param {SessionSummary} story */
@@ -187,6 +251,15 @@ export function wireSessionHeader(host, story) {
     if (!st || !t || typeof t.closest !== 'function') return;
     const mode = t.closest('.sh-mode-btn');
     if (mode) { setMode(host, st, /** @type {'cost'|'time'} */ (mode.getAttribute('data-mode') || 'cost')); return; }
+    const ev = /** @type {MouseEvent} */ (e);
+    const fail = t.closest('.sh-failure');
+    if (fail) {
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || (ev.button || 0) !== 0) return;
+      e.preventDefault();
+      go(host, fail.getAttribute('data-link') || '');
+      return;
+    }
+    if (t.closest('.sh-failures-more')) { showAllFailures(host, st); return; }
     const jump = t.closest('.turn-bar, .note');
     if (jump) { go(host, jump.getAttribute('data-link') || ''); return; }
     const copy = t.closest('.sh-copy');
@@ -214,7 +287,7 @@ export function wireSessionHeader(host, story) {
       /** @type {any} */ (bars[next]).focus();
       return;
     }
-    const jump = t.closest('.turn-bar, .note');
+    const jump = t.closest('.turn-bar, .note, .sh-failure');
     if (jump && ev.key === 'Enter') {
       e.preventDefault();
       go(host, jump.getAttribute('data-link') || '');
