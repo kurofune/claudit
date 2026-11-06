@@ -376,13 +376,15 @@ func convertUsage(u rawUsage) parse.Usage {
 // buckets by its Bash pattern; an exec call that only polls a running command
 // through tools.write_stdin is Bash under the pollDetail bucket; any other
 // exec call is named by the tools.* function it invokes; any other call keeps
-// its raw name and input.
+// its raw name and input. An exec call that calls more than one tools.*
+// function is Concurrent.
 func toolUse(it rawItem) parse.ToolUse { return cappedToolUse(it, parse.ToolInputSnippet) }
 
 // cappedToolUse is toolUse with capInput bounding the input.
 func cappedToolUse(it rawItem, capInput func(string) string) parse.ToolUse {
 	name, input, detail := toolCall(it)
-	return parse.ToolUse{ID: it.CallID, Name: name, Input: capInput(input), Detail: detail, InputKey: parse.ToolInputKey(rawToolInput(it))}
+	concurrent := it.Type == "custom_tool_call" && it.Name == "exec" && len(toolsCall.FindAllStringIndex(jsCode(it.Input), 2)) > 1
+	return parse.ToolUse{ID: it.CallID, Name: name, Input: capInput(input), Detail: detail, InputKey: parse.ToolInputKey(rawToolInput(it)), Concurrent: concurrent}
 }
 
 // rawToolInput is a call's input as the rollout recorded it, before any

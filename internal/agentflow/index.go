@@ -284,7 +284,8 @@ var editTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, 
 // never later succeeded with the identical (name, whole input), and names
 // the earliest turn holding one of those. Of those, it counts the edits
 // (editTools). For each check kind a Bash call ran (checkKind), it keeps
-// the last run, failing when that run errored. turns are in time order;
+// the last run, failing when that run errored; a Concurrent call runs no
+// check, since its error is no single command's. turns are in time order;
 // errored maps a tool_use id with a result to whether it errored.
 func countCommands(turns []*parse.Turn, errored map[string]bool) commandCounts {
 	type call struct {
@@ -312,7 +313,7 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) commandCounts {
 			if !ok {
 				continue
 			}
-			if u.Name == parse.BashToolName {
+			if u.Name == parse.BashToolName && !u.Concurrent {
 				if kind := checkKind(u.Input); kind != "" {
 					if checks == nil {
 						checks = map[string]run{}

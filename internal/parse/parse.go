@@ -60,6 +60,10 @@ type ToolUse struct {
 	// input), so two calls compare by exact input although Input is capped
 	// and reduces a file tool to its path. Zero when the call had no input.
 	InputKey uint64
+	// Concurrent marks a call that ran several tools side by side (a Codex
+	// exec script calling more than one tools.* function): it fails when
+	// any of them does, so its error is no single command's.
+	Concurrent bool
 }
 
 // ToolResult is one tool_result block from a user turn — the outcome of a

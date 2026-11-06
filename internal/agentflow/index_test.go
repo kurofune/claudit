@@ -513,3 +513,33 @@ func TestBuildSessionIndex_CheckOwnsErrorOnlyWhenFinal(t *testing.T) {
 		t.Errorf("failing_checks = %+v, want %+v (b2 is tmux's exit, not go test's)", test.FailingChecks, want)
 	}
 }
+
+// TestBuildSessionIndex_ConcurrentCallRunsNoCheck: a call that ran several
+// commands side by side (a Codex exec script) fails when any of them does,
+// so it neither fails nor clears the check among them.
+func TestBuildSessionIndex_ConcurrentCallRunsNoCheck(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	concurrent := func(uuid string, ts time.Time, toolID, cmd string) parse.Turn {
+		c := bashTurn(uuid, "s1", ts, toolID, cmd)
+		c.ToolUses[0].Concurrent = true
+		return c
+	}
+	row := findRow(t, BuildSessionIndex(&corpus.Snapshot{
+		Turns: []parse.Turn{
+			bashTurn("a1", "s1", t0, "t1", "go vet ./..."),
+			concurrent("a2", t0.Add(time.Minute), "t2", "cat missing\ngo test ./..."),
+			concurrent("a3", t0.Add(2*time.Minute), "t3", "ls\ngo vet ./..."),
+		},
+		ToolResults: []parse.ToolResult{
+			{ToolUseID: "t1", IsError: true, Content: "vet failed"},
+			{ToolUseID: "t2", IsError: true, Content: "cat: missing"},
+			{ToolUseID: "t3", Content: "ok"},
+		},
+	}, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	want := []FailingCheck{{Check: "go vet", Command: "go vet ./...", Turn: "a1",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("go vet ./..."), 16)}}
+	if !reflect.DeepEqual(row.FailingChecks, want) {
+		t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
+	}
+}

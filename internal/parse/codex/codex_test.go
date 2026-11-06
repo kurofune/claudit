@@ -902,3 +902,28 @@ func TestFindTexts_PromptVerbatim(t *testing.T) {
 		t.Errorf("FindTexts prompt = %q, want %q", got.Users[id], want)
 	}
 }
+
+// TestToolUse_ConcurrentWhenExecCallsSeveralTools: an exec script that calls
+// more than one tools.* function fails when any of them does, so its error is
+// no one command's; a script calling one function, or a plain exec_command
+// function call, is not concurrent. Calls in comments and strings do not count.
+func TestToolUse_ConcurrentWhenExecCallsSeveralTools(t *testing.T) {
+	cases := []struct {
+		src  string
+		want bool
+	}{
+		{`text(await tools.exec_command({cmd:"go test ./..."}))`, false},
+		{`const r=await Promise.allSettled([tools.exec_command({cmd:"cat a"}),tools.exec_command({cmd:"go test ./..."})]);`, true},
+		{`text(await tools.exec_command({cmd:"go test ./...",yield_time_ms:1000}));text(await tools.write_stdin({session_id:1,chars:""}));`, true},
+		{`text(await tools.exec_command({cmd:"go test ./..."})) // tools.write_stdin({session_id:1})`, false},
+		{`text(await tools.exec_command({cmd:"echo tools.exec_command({cmd:1})"}))`, false},
+	}
+	for _, tc := range cases {
+		if got := toolUse(rawItem{Type: "custom_tool_call", Name: "exec", Input: tc.src}).Concurrent; got != tc.want {
+			t.Errorf("toolUse(%q).Concurrent = %v, want %v", tc.src, got, tc.want)
+		}
+	}
+	if toolUse(rawItem{Type: "function_call", Name: "exec_command", Arguments: `{"cmd":"go test ./..."}`}).Concurrent {
+		t.Error("an exec_command function call is concurrent, want not")
+	}
+}
