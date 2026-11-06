@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {
   familyLabel, groupByFamily, applyFilter, applySort, searchRows, activeRows, pageGroup,
   filterCounts, listView, rowLabel, elapsedText, windowText, GROUP_PAGE,
-  topSentence, worthOpening, familyStats, modelShort, worthRank, rowTitle,
+  topSentence, worthOpening, familyStats, modelShort, worthRank, rowTitle, agoText,
 } from '../web/sessions-list-logic.js';
 
 const at = min => new Date(Date.parse('2026-11-01T09:00:00Z') + min * 60_000).toISOString();
@@ -278,4 +278,13 @@ test('windowText names the since/until filter, or the default window', () => {
   assert.equal(windowText('?since=2026-10-25'), 'since 2026-10-25');
   assert.equal(windowText('?until=2026-11-01&project=x'), 'until 2026-11-01');
   assert.equal(windowText(''), 'the last 7 days');
+});
+
+test('agoText names the time since last activity in its coarsest unit', () => {
+  const now = Date.parse(at(0));
+  assert.equal(agoText(at(-0.5), now), 'just now');
+  assert.equal(agoText(at(-12), now), '12m ago');
+  assert.equal(agoText(at(-185), now), '3h ago');
+  assert.equal(agoText(at(-3 * 1440), now), '3d ago');
+  assert.equal(agoText('', now), '');
 });

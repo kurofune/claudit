@@ -275,6 +275,19 @@ export function elapsedText(startedAt, now) {
   return fmtDuration(Math.max(0, now - t));
 }
 
+// agoText is how long before now a session last did anything, to the
+// coarsest unit: "just now", "12m ago", "3h ago", "2d ago".
+/** @param {string} at @param {number} now */
+export function agoText(at, now) {
+  const t = Date.parse(at || '');
+  if (isNaN(t)) return '';
+  const min = Math.floor(Math.max(0, now - t) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  if (min < 48 * 60) return `${Math.floor(min / 60)}h ago`;
+  return `${Math.floor(min / 1440)}d ago`;
+}
+
 // windowText names the page's date filter for the empty state, matching
 // the server's default 7-day window when the URL names none.
 /** @param {string} search */

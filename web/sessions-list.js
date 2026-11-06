@@ -1,18 +1,20 @@
 // @ts-check
 // The Sessions list's DOM: the search box, filter chips and sort control,
-// the pinned "Active in the last minute" row and the prompt-family groups.
+// the pinned "Active in the last minute" row, the counted top sentence, the
+// Worth opening rows and the prompt-family groups.
 // What to draw comes from sessions-list-logic.js listView; this module owns
 // the markup, the keyboard model and keeping focus and scroll across a
 // repaint.
 
 import { escHtml, fmtMoney } from './format.js';
 import { sessionHash } from './router.js';
-import { providerLabel } from './provider-filter.js';
+import { providerLabel, API_EQUIVALENT_TIP } from './provider-filter.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { fmtDuration } from './session-story-logic.js';
-import { listView, rowLabel, elapsedText, windowText, FILTERS, SORTS } from './sessions-list-logic.js';
+import { listView, rowTitle, elapsedText, agoText, windowText, FILTERS, SORTS } from './sessions-list-logic.js';
 
 /** @import { SessionIndexRow } from './api-types.js' */
+/** @import { WorthRow, ViewGroup } from './sessions-list-logic.js' */
 
 /**
  * @typedef {Object} ListUI
@@ -47,11 +49,24 @@ function providerChip(r) {
   return `<span class="s-entry sl-provider s-provider-${escHtml(p)}">${escHtml(providerLabel(p))}</span>`;
 }
 
+const API_EQ = `<span class="api-eq" tabindex="0" data-tooltip="${escHtml(API_EQUIVALENT_TIP)}">API-equivalent</span>`;
+
+// withApiEq escapes text and draws its "API-equivalent" label with the
+// tooltip saying what kind of dollars these are.
+/** @param {string} text */
+const withApiEq = text => escHtml(text).replace('API-equivalent', API_EQ);
+
 /** @param {SessionIndexRow} r */
 function outcomeHTML(r) {
-  return r.outcome
-    ? `<span class="sl-outcome" title="${escHtml(r.outcome)}">${escHtml(r.outcome)}</span>`
-    : '<span class="sl-outcome is-empty">(no agent message)</span>';
+  return `<span class="sl-outcome${r.outcome ? '' : ' is-empty'}">Last message: ${escHtml(r.outcome || '(no agent message)')}</span>`;
+}
+
+/** @param {SessionIndexRow} r */
+function mainHTML(r) {
+  return `<span class="sl-main">
+        <span class="sl-label">${escHtml(rowTitle(r))}</span>
+        ${outcomeHTML(r)}
+      </span>`;
 }
 
 /** @param {SessionIndexRow} r */
@@ -59,10 +74,7 @@ function rowHTML(r) {
   const id = r.session_id;
   const failed = (r.failed || 0) > 0 ? `<span class="sl-failed">${escHtml(String(r.failed))} failed</span>` : '';
   return `<a class="sl-row" href="${escHtml(sessionHash(id))}" data-session="${escHtml(id)}" data-focus-key="row:${escHtml(id)}">
-      <span class="sl-main">
-        <span class="sl-label">${escHtml(rowLabel(r))}</span>
-        ${outcomeHTML(r)}
-      </span>
+      ${mainHTML(r)}
       <span class="sl-meta">
         ${providerChip(r)}
         <span class="sl-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</span>
@@ -76,12 +88,38 @@ function rowHTML(r) {
 function activeRowHTML(r, now) {
   const id = r.session_id;
   return `<a class="sl-row sl-active-row" href="${escHtml(sessionHash(id))}" data-session="${escHtml(id)}" data-focus-key="active:${escHtml(id)}">
-      <span class="sl-main">
-        <span class="sl-label">${escHtml(rowLabel(r))}</span>
-        ${outcomeHTML(r)}
-      </span>
+      ${mainHTML(r)}
       <span class="sl-meta"><span class="sl-elapsed" title="Time since the session started">${escHtml(elapsedText(r.started_at, now))}</span></span>
     </a>`;
+}
+
+// worthRowHTML is one Worth opening row: the session's title, why it is
+// listed, its cost and last activity; a failed-commands row opens on the
+// turn of its first unfixed failure.
+/** @param {WorthRow} w @param {number} now */
+function worthRowHTML(w, now) {
+  const r = w.row, id = r.session_id;
+  return `<a class="sl-row sl-worth-row" href="${escHtml(sessionHash(id, w.turn))}" data-session="${escHtml(id)}" data-focus-key="worth:${escHtml(id)}">
+      <span class="sl-main">
+        <span class="sl-label">${escHtml(rowTitle(r))}</span>
+        <span class="sl-reason">${escHtml(w.reason)}</span>
+      </span>
+      <span class="sl-meta">
+        <span class="sl-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</span>
+        <span class="sl-when">${escHtml(agoText(r.last_activity, now))}</span>
+      </span>
+    </a>`;
+}
+
+/** @param {ViewGroup} g */
+function groupHTML(g) {
+  return `<section class="sl-group" data-family="${escHtml(g.key)}">
+        <h2 class="sl-group-head"><span class="sl-family">${escHtml(g.label)}</span>
+          <span class="sl-stats">${withApiEq(g.stats.text)}</span></h2>
+        <div class="sl-rows">${g.rows.map(rowHTML).join('')}</div>
+        ${g.hidden ? `<button type="button" class="sl-more" data-expand="${escHtml(g.key)}"
+            data-focus-key="more:${escHtml(g.key)}">Show all ${escHtml(String(g.count))}</button>` : ''}
+      </section>`;
 }
 
 /**
@@ -91,7 +129,7 @@ function activeRowHTML(r, now) {
  * @param {{now?: number, search?: string}} [opts]
  */
 export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {}) {
-  const v = listView(rows, ui);
+  const v = listView(rows, { ...ui, window: windowText(search) });
   const filters = root.querySelector('.sl-filters');
   const sorts = root.querySelector('.sl-sorts');
   const body = root.querySelector('.sl-body');
@@ -107,8 +145,6 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
 
   if (v.empty === 'none') {
     body.innerHTML = `<p class="empty-state sl-empty" role="status">No sessions in this window (${escHtml(windowText(search))})</p>`;
-  } else if (v.empty) {
-    body.innerHTML = `<p class="empty-state sl-empty" role="status">${escHtml(v.empty)}</p>`;
   } else {
     const active = v.active.length
       ? `<section class="sl-active" aria-label="Active in the last minute">
@@ -116,13 +152,16 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
           <div class="sl-rows">${v.active.map(r => activeRowHTML(r, now)).join('')}</div>
         </section>`
       : '';
-    body.innerHTML = active + v.groups.map(g => `<section class="sl-group" data-family="${escHtml(g.key)}">
-        <h2 class="sl-group-head"><span class="sl-family">${escHtml(g.label)}</span>
-          <span class="sl-count" title="${escHtml(String(g.count))} session${g.count === 1 ? '' : 's'}">${escHtml(String(g.count))}</span></h2>
-        <div class="sl-rows">${g.rows.map(rowHTML).join('')}</div>
-        ${g.hidden ? `<button type="button" class="sl-more" data-expand="${escHtml(g.key)}"
-            data-focus-key="more:${escHtml(g.key)}">Show ${escHtml(String(g.hidden))} more</button>` : ''}
-      </section>`).join('');
+    const sentence = `<p class="sl-sentence">${withApiEq(v.sentence)}</p>`;
+    const worth = v.worth.length
+      ? `<section class="sl-worth" aria-label="Worth opening">
+          <h2 class="sl-worth-title">Worth opening</h2>
+          <div class="sl-rows">${v.worth.map(w => worthRowHTML(w, now)).join('')}</div>
+        </section>`
+      : '';
+    body.innerHTML = active + sentence + (v.empty
+      ? `<p class="empty-state sl-empty" role="status">${escHtml(v.empty)}</p>`
+      : worth + v.groups.map(groupHTML).join(''));
   }
   restoreFocus(root, keep);
   if (typeof window.scrollTo === 'function' && window.scrollY !== scrollY) window.scrollTo(0, scrollY);
@@ -185,15 +224,16 @@ function restoreFocus(root, key) {
 /** @param {Element} root */
 const rowsOf = root => /** @type {HTMLElement[]} */ (Array.from(root.querySelectorAll('.sl-body .sl-row')));
 
-/** @param {string} id */
-function openSession(id) {
-  window.location.hash = sessionHash(id);
+// openRow opens the session (or turn) a row links to.
+/** @param {Element} row */
+function openRow(row) {
+  window.location.hash = row.getAttribute('href') || sessionHash(row.getAttribute('data-session') || '');
 }
 
 // wireList binds the list's controls once: typing searches, a chip picks
-// the filter, a sort button the order, "Show N more" opens a group, a row
-// (click or Enter) opens its session, and ArrowDown/ArrowUp walk the rows
-// across group boundaries. onChange repaints; onRetry refetches.
+// the filter, a sort button the order, "Show all N" opens a family, a row
+// (click or Enter) opens its session or turn, and ArrowDown/ArrowUp walk
+// the Active, Worth opening and family rows across section boundaries. onChange repaints; onRetry refetches.
 /**
  * @param {Element} root
  * @param {ListUI} ui
@@ -214,7 +254,7 @@ export function wireList(root, ui, { onChange, onRetry }) {
     if (row) {
       if (me.button || me.metaKey || me.ctrlKey || me.shiftKey || me.altKey) return;
       ev.preventDefault();
-      openSession(row.getAttribute('data-session') || '');
+      openRow(row);
       return;
     }
     const chip = t.closest('[data-filter]');
@@ -226,10 +266,12 @@ export function wireList(root, ui, { onChange, onRetry }) {
       const key = more.getAttribute('data-expand') || '';
       ui.expanded.add(key);
       // The button goes away; land focus on the first row it revealed.
-      const before = rowsOf(root).filter(r => r.closest('.sl-group') === more.closest('.sl-group')).length;
+      const shown = new Set(rowsOf(root).filter(r => r.closest('.sl-group') === more.closest('.sl-group'))
+        .map(r => r.getAttribute('data-session')));
       onChange();
       const group = root.querySelector(`.sl-group[data-family="${cssEsc(key)}"]`);
-      const next = group ? /** @type {HTMLElement|undefined} */ (group.querySelectorAll('.sl-row')[before]) : null;
+      const next = group ? /** @type {HTMLElement[]} */ (Array.from(group.querySelectorAll('.sl-row')))
+        .find(r => !shown.has(r.getAttribute('data-session'))) : null;
       if (next) next.focus();
       return;
     }
@@ -241,7 +283,7 @@ export function wireList(root, ui, { onChange, onRetry }) {
     const key = /** @type {KeyboardEvent} */ (ev).key;
     if (key === 'Enter') {
       ev.preventDefault();
-      openSession(t.getAttribute('data-session') || '');
+      openRow(t);
       return;
     }
     if (key !== 'ArrowDown' && key !== 'ArrowUp') return;
