@@ -19,6 +19,44 @@ type PromptResolver struct {
 	userText map[string]string
 	userTS   map[string]time.Time
 	cache    map[string]string
+	// more answers for a uuid the resolver's own records lack.
+	more PromptChains
+}
+
+// PromptChains is a read-only set of parent edges and prompts a
+// PromptResolver reads past its own records: a resolver built over one
+// session's files climbs on into the rest of the corpus through it.
+type PromptChains interface {
+	// Parent is uuid's parent edge; ok is false when no record names uuid.
+	Parent(uuid string) (parent string, ok bool)
+	// Prompt is the user prompt with that uuid; ok is false when none.
+	Prompt(uuid string) (parse.UserMessage, bool)
+}
+
+// WithFallback makes r look up every uuid its own records lack in more,
+// and returns r. Its own edges and prompts win where both name a uuid.
+func (r *PromptResolver) WithFallback(more PromptChains) *PromptResolver {
+	r.more = more
+	return r
+}
+
+// step reports whether cur is a prompt and, when not, its parent edge.
+func (r *PromptResolver) step(cur string) (prompt bool, parent string, ok bool) {
+	if _, ok := r.userText[cur]; ok {
+		return true, "", false
+	}
+	if p, ok := r.parent[cur]; ok {
+		return false, p, true
+	}
+	if r.more == nil {
+		return false, "", false
+	}
+	if m, ok := r.more.Prompt(cur); ok {
+		r.userText[cur], r.userTS[cur] = m.Text, m.Timestamp
+		return true, "", false
+	}
+	p, ok := r.more.Parent(cur)
+	return false, p, ok
 }
 
 // NewPromptResolver indexes the parent edges and user prompts so Resolve can
@@ -63,11 +101,11 @@ func (r *PromptResolver) Resolve(start string) string {
 	var found string
 	cur := start
 	for {
-		if _, ok := r.userText[cur]; ok {
+		prompt, p, ok := r.step(cur)
+		if prompt {
 			found = cur
 			break
 		}
-		p, ok := r.parent[cur]
 		if !ok || p == "" {
 			break
 		}

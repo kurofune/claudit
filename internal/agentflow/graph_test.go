@@ -903,9 +903,10 @@ type testGraph struct{ Sessions []AgentSession }
 // recently active first.
 func graphOf(snap *corpus.Snapshot, prices *pricing.Table, f aggregate.Filter) (testGraph, error) {
 	c := collectSessions(snap, prices, f, "", nil)
+	l := NewLayout(snap, nil)
 	var g testGraph
 	for _, sa := range c.sessions {
-		g.Sessions = append(g.Sessions, assembleSession(sa, sessionToolResults(snap, sa), storyPrompts(snap, sa, nil)))
+		g.Sessions = append(g.Sessions, assembleSession(sa, sessionToolResults(snap, l, sa), storyPrompts(snap, l, sa, nil)))
 	}
 	sort.SliceStable(g.Sessions, func(i, j int) bool {
 		if !g.Sessions[i].EndedAt.Equal(g.Sessions[j].EndedAt) {

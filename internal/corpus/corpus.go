@@ -72,6 +72,10 @@ type Snapshot struct {
 	// saw: a file whose stamp is unchanged between two snapshots yielded
 	// the same turns, so per-session work over it can be reused.
 	Files map[string]FileStamp
+	// Spans places each file's records in Turns, Users, Links, ToolResults
+	// and CompactBoundaries, so work over a few files reads only theirs.
+	// Nil for a snapshot assembled by hand: its readers scan every slice.
+	Spans map[string]FileSpans
 	// FileErrors holds non-fatal per-file open/parse errors. Populated
 	// by LoadConcurrent (the one-shot path surfaces them as a warning);
 	// the polled Cache leaves it nil since the daemon tolerates broken
@@ -84,6 +88,38 @@ type Snapshot struct {
 type FileStamp struct {
 	Size    int64
 	ModTime time.Time
+}
+
+// Span is the half-open range [Start, End) of one file's records in one
+// of a Snapshot's slices.
+type Span struct{ Start, End int }
+
+// FileSpans is where one file's records sit in a Snapshot's slices.
+type FileSpans struct {
+	Turns, Users, Links, ToolResults, CompactBoundaries Span
+}
+
+// AddFile appends one parsed file's records to the snapshot, stamping it
+// in Files and placing its records in Spans.
+func (s *Snapshot) AddFile(path string, stamp FileStamp, turns []parse.Turn, users []parse.UserMessage, links []parse.ParentLink, results []parse.ToolResult, compacts []parse.CompactBoundary) {
+	if s.Files == nil {
+		s.Files = map[string]FileStamp{}
+	}
+	if s.Spans == nil {
+		s.Spans = map[string]FileSpans{}
+	}
+	s.Files[path] = stamp
+	var sp FileSpans
+	sp.Turns.Start, sp.Users.Start, sp.Links.Start = len(s.Turns), len(s.Users), len(s.Links)
+	sp.ToolResults.Start, sp.CompactBoundaries.Start = len(s.ToolResults), len(s.CompactBoundaries)
+	s.Turns = append(s.Turns, turns...)
+	s.Users = append(s.Users, users...)
+	s.Links = append(s.Links, links...)
+	s.ToolResults = append(s.ToolResults, results...)
+	s.CompactBoundaries = append(s.CompactBoundaries, compacts...)
+	sp.Turns.End, sp.Users.End, sp.Links.End = len(s.Turns), len(s.Users), len(s.Links)
+	sp.ToolResults.End, sp.CompactBoundaries.End = len(s.ToolResults), len(s.CompactBoundaries)
+	s.Spans[path] = sp
 }
 
 // Equal reports whether two stamps name the same parse of a file.
@@ -240,14 +276,10 @@ func (c *Cache) publishSnapshot() {
 		FileCount:   len(c.files),
 		Malformed:   malformed,
 		Files:       make(map[string]FileStamp, len(c.files)),
+		Spans:       make(map[string]FileSpans, len(c.files)),
 	}
 	for path, e := range c.files {
-		snap.Files[path] = FileStamp{Size: e.size, ModTime: e.mtime}
-		snap.Turns = append(snap.Turns, e.turns...)
-		snap.Users = append(snap.Users, e.users...)
-		snap.Links = append(snap.Links, e.links...)
-		snap.ToolResults = append(snap.ToolResults, e.toolResults...)
-		snap.CompactBoundaries = append(snap.CompactBoundaries, e.compacts...)
+		snap.AddFile(path, FileStamp{Size: e.size, ModTime: e.mtime}, e.turns, e.users, e.links, e.toolResults, e.compacts)
 	}
 	c.snapshot.Store(snap)
 	c.notifySubscribers(snap.Generation)
@@ -367,13 +399,9 @@ func LoadConcurrent(sources []provider.Source, earliest time.Time) (*Snapshot, e
 	}
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].path < jobs[j].path })
 
-	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(jobs), Files: stamps}
+	snap := &Snapshot{LastUpdate: time.Now(), FileCount: len(jobs), Files: stamps, Spans: make(map[string]FileSpans, len(jobs))}
 	for _, pr := range parseFiles(jobs) {
-		snap.Turns = append(snap.Turns, pr.turns...)
-		snap.Users = append(snap.Users, pr.users...)
-		snap.Links = append(snap.Links, pr.links...)
-		snap.ToolResults = append(snap.ToolResults, pr.toolResults...)
-		snap.CompactBoundaries = append(snap.CompactBoundaries, pr.compacts...)
+		snap.AddFile(pr.path, stamps[pr.path], pr.turns, pr.users, pr.links, pr.toolResults, pr.compacts)
 		snap.Malformed += pr.malformed
 		if pr.err != nil {
 			snap.FileErrors = append(snap.FileErrors, pr.err)

@@ -184,14 +184,15 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 		return st, true
 	}
 
-	results := sessionToolResults(snap, s)
+	results := sessionToolResults(snap, l, s)
 	errored := make(map[string]bool, len(results))
 	for id, r := range results {
 		errored[id] = r.IsError
 	}
-	st.row = indexRow(s, sessionPrompts(snap, c.sessions)[sessionID], errored, IndexOptions{})
+	st.row = indexRow(s, sessionPrompts(snap, l, c.sessions)[sessionID], errored, IndexOptions{})
 	st.hasRow = true
-	as := assembleSession(s, results, storyPrompts(snap, s, opts.PromptIndex))
+	prompts := storyPrompts(snap, l, s, opts.PromptIndex)
+	as := assembleSession(s, results, prompts)
 	for _, n := range s.nodes {
 		for _, r := range n.turns {
 			src := LogSource{File: r.t.SourceFile, Provider: r.t.Provider}
@@ -230,11 +231,9 @@ func BuildSessionStory(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 			st.promptLog[m.UUID] = LogSource{Provider: s.provider}
 		}
 	}
-	for _, m := range snap.Users {
-		if src, ok := st.promptLog[m.UUID]; ok && src.File == "" {
-			src.File = m.SourceFile
-			st.promptLog[m.UUID] = src
-		}
+	for uuid, src := range st.promptLog {
+		src.File = prompts.sourceFile(uuid)
+		st.promptLog[uuid] = src
 	}
 	for _, ch := range as.Children {
 		st.children = append(st.children, StoryChild{
@@ -465,9 +464,12 @@ func (st *SessionStory) Locate(uuid string, limit int) (prompt, offset int, ok b
 	return 0, 0, false
 }
 
-// storyPrompts is the promptLookup for one session's story: the snapshot's
-// PromptIndex when given, else a PromptResolver over the session's turns.
-func storyPrompts(snap *corpus.Snapshot, s *sessionAccum, idx *aggregate.PromptIndex) promptLookup {
+// storyPrompts is the promptLookup for one session's story: the
+// snapshot's PromptIndex when given, else a PromptResolver over the
+// session's turns and its files' prompts and parent links, which reads on
+// into the rest of the snapshot only for a chain that leaves those files.
+func storyPrompts(snap *corpus.Snapshot, l *Layout, s *sessionAccum, idx *aggregate.PromptIndex) storyLookup {
+	own := sessionUsers(snap, l, s.sessionID)
 	if idx == nil {
 		var turns []parse.Turn
 		for _, n := range s.nodes {
@@ -475,23 +477,76 @@ func storyPrompts(snap *corpus.Snapshot, s *sessionAccum, idx *aggregate.PromptI
 				turns = append(turns, *r.t)
 			}
 		}
-		return resolverLookup{aggregate.NewPromptResolver(turns, snap.Users, snap.Links)}
+		var links []parse.ParentLink
+		for _, part := range l.links(snap, []string{s.sessionID}) {
+			links = append(links, part...)
+		}
+		users := make([]parse.UserMessage, 0, len(own))
+		for _, m := range own {
+			users = append(users, *m)
+		}
+		r := aggregate.NewPromptResolver(turns, users, links).WithFallback(layoutChains{l})
+		return storyLookup{promptLookup: resolverLookup{r}, own: own, l: l}
 	}
-	l := indexLookup{idx: idx, users: map[string]parse.UserMessage{}}
-	want := map[string]bool{}
+	il := indexLookup{idx: idx, users: map[string]parse.UserMessage{}}
 	for _, n := range s.nodes {
 		for _, r := range n.turns {
-			if u := idx.Lookup(r.t.UUID).UserUUID; u != "" {
-				want[u] = true
+			u := idx.Lookup(r.t.UUID).UserUUID
+			if u == "" {
+				continue
+			}
+			if _, ok := il.users[u]; ok {
+				continue
+			}
+			if m, ok := own[u]; ok {
+				il.users[u] = *m
+			} else if m, ok := l.snapshotChains().Prompt(u); ok {
+				il.users[u] = m
 			}
 		}
 	}
-	for _, m := range snap.Users {
-		if want[m.UUID] {
-			l.users[m.UUID] = m
+	return storyLookup{promptLookup: il, own: own, l: l}
+}
+
+// storyLookup is a story's promptLookup that also names the log each
+// prompt was read from.
+type storyLookup struct {
+	promptLookup
+	own map[string]*parse.UserMessage
+	l   *Layout
+}
+
+// sourceFile is the log the prompt uuid was read from: the session's own
+// file holding it, else whichever file of the snapshot does.
+func (s storyLookup) sourceFile(uuid string) string {
+	if m, ok := s.own[uuid]; ok {
+		return m.SourceFile
+	}
+	m, _ := s.l.snapshotChains().Prompt(uuid)
+	return m.SourceFile
+}
+
+// sessionUsers is the prompts of the session's files by uuid, the first
+// file to hold a uuid winning.
+func sessionUsers(snap *corpus.Snapshot, l *Layout, sessionID string) map[string]*parse.UserMessage {
+	out := map[string]*parse.UserMessage{}
+	for _, part := range l.users(snap, []string{sessionID}) {
+		for i := range part {
+			if _, ok := out[part[i].UUID]; !ok {
+				out[part[i].UUID] = &part[i]
+			}
 		}
 	}
-	return l
+	return out
+}
+
+// layoutChains is the PromptChains of a layout's whole snapshot, built on
+// its first lookup.
+type layoutChains struct{ l *Layout }
+
+func (c layoutChains) Parent(uuid string) (string, bool) { return c.l.snapshotChains().Parent(uuid) }
+func (c layoutChains) Prompt(uuid string) (parse.UserMessage, bool) {
+	return c.l.snapshotChains().Prompt(uuid)
 }
 
 // indexLookup is a promptLookup over the snapshot's PromptIndex, with the
@@ -506,7 +561,7 @@ func (l indexLookup) text(uuid string) string         { return l.users[uuid].Tex
 func (l indexLookup) timestamp(uuid string) time.Time { return l.users[uuid].Timestamp }
 
 // sessionToolResults indexes the tool results of one session's calls.
-func sessionToolResults(snap *corpus.Snapshot, s *sessionAccum) map[string]parse.ToolResult {
+func sessionToolResults(snap *corpus.Snapshot, l *Layout, s *sessionAccum) map[string]parse.ToolResult {
 	ids := map[string]bool{}
 	for _, n := range s.nodes {
 		for _, r := range n.turns {
@@ -518,10 +573,8 @@ func sessionToolResults(snap *corpus.Snapshot, s *sessionAccum) map[string]parse
 		}
 	}
 	out := make(map[string]parse.ToolResult, len(ids))
-	for _, r := range snap.ToolResults {
-		if ids[r.ToolUseID] {
-			out[r.ToolUseID] = r
-		}
+	for _, r := range l.toolResults(snap, []string{s.sessionID}, ids) {
+		out[r.ToolUseID] = r
 	}
 	return out
 }

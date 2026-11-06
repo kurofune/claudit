@@ -703,3 +703,47 @@ func TestSnapshotsCarryFileStamps(t *testing.T) {
 		t.Errorf("LoadConcurrent stamps = %+v", snap.Files)
 	}
 }
+
+// TestSnapshotsCarryFileSpans: both the polled Cache and LoadConcurrent
+// place every file's turns, prompts and parent links in Spans, so a reader
+// of one file finds exactly that file's records there.
+func TestSnapshotsCarryFileSpans(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.jsonl"), filepath.Join(dir, "b.jsonl")
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	writeJSONL(t, a, mkAssistantLine("a1", "", t0), mkAssistantLine("a2", "a1", t0.Add(time.Second)))
+	writeJSONL(t, b, mkAssistantLine("b1", "", t0))
+
+	check := func(name string, snap *Snapshot) {
+		t.Helper()
+		if len(snap.Spans) != 2 {
+			t.Fatalf("%s: spans = %+v, want one per file", name, snap.Spans)
+		}
+		turns, links := 0, 0
+		for path, sp := range snap.Spans {
+			for _, tr := range snap.Turns[sp.Turns.Start:sp.Turns.End] {
+				if tr.SourceFile != path {
+					t.Errorf("%s: span of %s holds a turn of %s", name, path, tr.SourceFile)
+				}
+			}
+			turns += sp.Turns.End - sp.Turns.Start
+			links += sp.Links.End - sp.Links.Start
+		}
+		if turns != len(snap.Turns) || links != len(snap.Links) {
+			t.Errorf("%s: spans cover %d turns and %d links of %d and %d", name, turns, links, len(snap.Turns), len(snap.Links))
+		}
+		if sp := snap.Spans[a]; sp.Links.End-sp.Links.Start != 1 {
+			t.Errorf("%s: a's span holds %d links, want its one a2→a1 edge", name, sp.Links.End-sp.Links.Start)
+		}
+	}
+	c := New(provider.NewClaudeCode(dir))
+	if _, err := c.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	check("cache", c.Snapshot())
+	snap, err := LoadConcurrent([]provider.Source{provider.NewClaudeCode(dir)}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("LoadConcurrent", snap)
+}

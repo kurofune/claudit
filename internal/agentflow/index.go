@@ -109,8 +109,8 @@ func ReuseSessionIndex(snap *corpus.Snapshot, prices *pricing.Table, f aggregate
 	sort.Strings(built)
 	if len(built) > 0 {
 		c := collectIn(snap, prices, f, l, built)
-		results := toolErrors(snap, c.sessions)
-		prompts := sessionPrompts(snap, c.sessions)
+		results := toolErrors(snap, l, c.sessions)
+		prompts := sessionPrompts(snap, l, c.sessions)
 		for _, id := range built {
 			e := indexRowEntry{key: keys[id]}
 			if s, ok := c.sessions[id]; ok {
@@ -214,9 +214,11 @@ func (idx SessionIndex) Inactive(now time.Time, window time.Duration) int {
 
 // toolErrors maps each tool_use id of the sessions' calls with a result to
 // whether it errored.
-func toolErrors(snap *corpus.Snapshot, sessions map[string]*sessionAccum) map[string]bool {
+func toolErrors(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessionAccum) map[string]bool {
 	calls := map[string]bool{}
-	for _, s := range sessions {
+	ids := make([]string, 0, len(sessions))
+	for id, s := range sessions {
+		ids = append(ids, id)
 		for _, n := range s.nodes {
 			for _, r := range n.turns {
 				for _, u := range r.t.ToolUses {
@@ -227,11 +229,10 @@ func toolErrors(snap *corpus.Snapshot, sessions map[string]*sessionAccum) map[st
 			}
 		}
 	}
+	sort.Strings(ids)
 	out := make(map[string]bool, len(calls))
-	for i := range snap.ToolResults {
-		if r := &snap.ToolResults[i]; calls[r.ToolUseID] {
-			out[r.ToolUseID] = r.IsError
-		}
+	for _, r := range l.toolResults(snap, ids, calls) {
+		out[r.ToolUseID] = r.IsError
 	}
 	return out
 }
@@ -309,17 +310,24 @@ func mostUsed(counts map[string]int) string {
 // sessionPrompts lists each collected session's own prompts in time order,
 // whatever the window: user messages from the session's main files, not a
 // sub-agent's file and not a folded sub-agent thread.
-func sessionPrompts(snap *corpus.Snapshot, sessions map[string]*sessionAccum) map[string][]string {
+func sessionPrompts(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessionAccum) map[string][]string {
 	type msg struct {
 		ts   time.Time
 		text string
 	}
+	ids := make([]string, 0, len(sessions))
+	for id := range sessions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
 	byID := map[string][]msg{}
-	for _, m := range snap.Users {
-		if _, ok := sessions[m.SessionID]; !ok || parse.IsSubagentFile(m.SourceFile) {
-			continue
+	for _, part := range l.users(snap, ids) {
+		for _, m := range part {
+			if _, ok := sessions[m.SessionID]; !ok || parse.IsSubagentFile(m.SourceFile) {
+				continue
+			}
+			byID[m.SessionID] = append(byID[m.SessionID], msg{m.Timestamp, m.Text})
 		}
-		byID[m.SessionID] = append(byID[m.SessionID], msg{m.Timestamp, m.Text})
 	}
 	out := make(map[string][]string, len(byID))
 	for id, ms := range byID {
