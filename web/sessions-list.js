@@ -95,8 +95,8 @@ function activeRowHTML(r, now) {
 }
 
 // worthRowHTML is one Worth opening row: the session's title, why it is
-// listed, its cost and last activity; a failed-commands row opens on the
-// turn of its first unfixed failure.
+// listed, its cost and last activity; a failing-check row opens on that
+// check's last run, a failed-edits row on its first unfixed failure.
 /** @param {WorthRow} w @param {number} now */
 function worthRowHTML(w, now) {
   const r = w.row, id = r.session_id;
