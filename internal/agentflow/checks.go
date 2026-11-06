@@ -24,32 +24,89 @@ var checkSubcommands = map[string][]string{
 	"git":   {"commit", "push"},
 }
 
+// checkRun is the check a shell command runs and whether the call's exit
+// status may belong to an earlier command that kept the check from running.
+// afterAnd: an earlier command that can fail gates the check with &&, so an
+// error may be that command's and the check never ran. afterOr: an earlier
+// command gates it with ||, so a success may be that command's.
+type checkRun struct {
+	kind              string
+	afterAnd, afterOr bool
+}
+
+// owns reports whether a call that ran c and errored (isErr) or succeeded
+// carries the check's own exit status.
+func (c checkRun) owns(isErr bool) bool {
+	if c.kind == "" {
+		return false
+	}
+	if isErr {
+		return !c.afterAnd
+	}
+	return !c.afterOr
+}
+
 // checkKind is the check a shell command runs, labelled by its words
-// ("go test", "npm run build", "make"), or "" when the call's exit status is
-// not that check's. A call exits with its last command's status, so only
-// the final segment can name the check (shellSegments splits at the &&, ||,
-// ; and newlines the shell reads as separators): trailing segments that
-// cannot fail (cannotFail) are skipped when && joins them, since they run
-// only after the check passed; blank and comment-only segments are skipped.
-// A piped final segment exits with its last stage, so it is no check. In a
-// segment, a leading "(", NAME=value assignments, `time` and `timeout N` are
-// skipped, and a `cd` runs no check, so `ps | rg 'go test'` and
-// `echo go test` are not checks. A here-document's body is data, not
-// commands, so its lines start no segment.
-func checkKind(command string) string {
+// ("go test", "npm run build", "make"), with kind "" when the call's exit
+// status is not that check's. A call exits with its last command's status,
+// so only the final segment can name the check (shellSegments splits at the
+// &&, ||, ; and newlines the shell reads as separators): trailing segments
+// that cannot fail (cannotFail) are skipped when && joins them, since they
+// run only after the check passed; blank and comment-only segments are
+// skipped. A piped final segment exits with its last stage, so it is no
+// check, even when its first stage cannot fail. The commands joined to the
+// check by && and || before it set afterAnd and afterOr. In a segment, a
+// leading "(", NAME=value assignments, `time` and `timeout N` are skipped,
+// and a `cd` runs no check, so `ps | rg 'go test'` and `echo go test` are
+// not checks. A here-document's body is data, not commands, so its lines
+// start no segment.
+func checkKind(command string) checkRun {
 	segs := shellSegments(command)
 	for i := len(segs) - 1; i >= 0; i-- {
 		s := segs[i]
 		words := segmentWords(s.text)
-		if len(words) == 0 || (s.sep == "&&" && cannotFail[words[0]]) {
+		if len(words) == 0 {
 			continue
 		}
 		if s.piped {
-			return ""
+			return checkRun{}
 		}
-		return segmentCheck(words)
+		if s.sep == "&&" && cannotFail[words[0]] {
+			continue
+		}
+		kind := segmentCheck(words)
+		if kind == "" {
+			return checkRun{}
+		}
+		return gate(segs[:i+1], kind)
 	}
-	return ""
+	return checkRun{}
+}
+
+// gate reads the && and || chain that ends at the check, the last of segs,
+// back to the ; or newline that starts it.
+func gate(segs []segment, kind string) checkRun {
+	c := checkRun{kind: kind}
+	for i := len(segs) - 1; i > 0; i-- {
+		switch segs[i].sep {
+		case "&&":
+			if canFail(segs[i-1]) {
+				c.afterAnd = true
+			}
+		case "||":
+			c.afterOr = true
+		default:
+			return c
+		}
+	}
+	return c
+}
+
+// canFail reports whether a segment may exit non-zero: any command but a
+// cannotFail one, and any pipeline.
+func canFail(s segment) bool {
+	words := segmentWords(s.text)
+	return len(words) > 0 && (s.piped || !cannotFail[words[0]])
 }
 
 func segmentWords(seg string) []string {
@@ -176,7 +233,10 @@ func shellSegments(command string) []segment {
 			emit(i, ";")
 			start = i + 1
 		case c == '\n':
-			emit(i, "\n")
+			if !continued(command, start, i, cut, sep) {
+				emit(i, "\n")
+			}
+			cut = -1
 			start = skipHeredocBodies(command, i+1, pending)
 			pending = nil
 			i = start - 1
@@ -190,6 +250,16 @@ func shellSegments(command string) []segment {
 	}
 	emit(len(command), "")
 	return segs
+}
+
+// continued reports whether the line ending at end only finishes an && or
+// || before it (blank, or a comment): the shell reads the next line as the
+// rest of that list, so the newline separates nothing.
+func continued(command string, start, end, cut int, sep string) bool {
+	if cut >= 0 {
+		end = cut
+	}
+	return (sep == "&&" || sep == "||") && strings.TrimSpace(command[start:end]) == ""
 }
 
 // skipHeredocBodies returns the offset just past the here-document bodies

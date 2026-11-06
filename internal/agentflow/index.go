@@ -313,12 +313,12 @@ func countCommands(turns []*parse.Turn, errored map[string]bool) commandCounts {
 			if !ok {
 				continue
 			}
-			if u.Name == parse.BashToolName && !u.Concurrent {
-				if kind := checkKind(u.Input); kind != "" {
+			if u.Name == parse.BashToolName && !u.Concurrent && !parse.ToolInputSnippetCut(u.Input) {
+				if c := checkKind(u.Input); c.owns(isErr) {
 					if checks == nil {
 						checks = map[string]run{}
 					}
-					checks[kind] = run{isErr, i, FailingCheck{Check: kind, Command: firstLine(u.Input, SummaryInputRunes), Turn: t.UUID, InputKey: storyInputKey(u.InputKey)}}
+					checks[c.kind] = run{isErr, i, FailingCheck{Check: c.kind, Command: firstLine(u.Input, SummaryInputRunes), Turn: t.UUID, InputKey: storyInputKey(u.InputKey)}}
 				}
 			}
 			k := call{u.Name, u.Input, u.InputKey}

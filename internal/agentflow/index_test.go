@@ -543,3 +543,92 @@ func TestBuildSessionIndex_ConcurrentCallRunsNoCheck(t *testing.T) {
 		t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
 	}
 }
+
+// TestBuildSessionIndex_GatedCheckOwnsNoAmbiguousExit: a check whose exit
+// the call may not carry neither fails nor clears that check. A piped
+// trailing `echo ok | false` exits with false; an errored
+// `go build && go vet` may be build's failure with vet never run (a recorded
+// corpus case); a passing `ls || make` may be ls's success with make never
+// run. Each call keeps what it can say: a passing && chain ran its check.
+func TestBuildSessionIndex_GatedCheckOwnsNoAmbiguousExit(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	key := func(cmd string) string { return strconv.FormatUint(parse.ToolInputKey(cmd), 16) }
+	cases := []struct {
+		name           string
+		first, second  string
+		firstErr, sErr bool
+		want           []FailingCheck
+	}{
+		{"piped trailing stage fails no check", "go test ./...", "go test ./... && echo ok | false", false, true, nil},
+		{"piped trailing stage clears no check", "go test ./...", "go test ./... && echo ok | false", true, false,
+			[]FailingCheck{{Check: "go test", Command: "go test ./...", Turn: "a1", InputKey: key("go test ./...")}}},
+		{"errored && chain fails no gated check", "go vet ./...", "go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room", false, true, nil},
+		{"passing && chain clears its check", "go vet ./...", "go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room", true, false, nil},
+		{"passing || chain clears no check", "make", "ls || make", true, false,
+			[]FailingCheck{{Check: "make", Command: "make", Turn: "a1", InputKey: key("make")}}},
+		{"errored || chain fails its check", "make", "ls || make", false, true,
+			[]FailingCheck{{Check: "make", Command: "ls || make", Turn: "a2", InputKey: key("ls || make")}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := findRow(t, BuildSessionIndex(&corpus.Snapshot{
+				Turns: []parse.Turn{
+					bashTurn("a1", "s1", t0, "t1", tc.first),
+					bashTurn("a2", "s1", t0.Add(time.Minute), "t2", tc.second),
+				},
+				ToolResults: []parse.ToolResult{
+					{ToolUseID: "t1", IsError: tc.firstErr, Content: "out"},
+					{ToolUseID: "t2", IsError: tc.sErr, Content: "out"},
+				},
+			}, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+			if len(row.FailingChecks) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(row.FailingChecks, tc.want) {
+				t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildSessionIndex_TruncatedInputRunsNoCheck: the parser caps a tool
+// input, so a long `go test ... && tmux x` reaches the index without its
+// trailing tmux. Its exit is tmux's, so it neither fails nor clears go test.
+func TestBuildSessionIndex_TruncatedInputRunsNoCheck(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	long := "go test -run " + strings.Repeat("A", 2100) + " ./... && tmux x"
+	for _, tc := range []struct {
+		name            string
+		firstErr, sErr  bool
+		wantFailedCheck bool
+	}{
+		{"errored long call fails no check", false, true, false},
+		{"passing long call clears no check", true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := func(n int, id, cmd string) string {
+				input, _ := json.Marshal(map[string]string{"command": cmd})
+				return `{"type":"assistant","sessionId":"s1","uuid":"a` + strconv.Itoa(n) + `","timestamp":"2026-05-01T12:0` + strconv.Itoa(n) + `:00Z","message":{"id":"m` + strconv.Itoa(n) + `","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1},"content":[{"type":"tool_use","id":"` + id + `","name":"Bash","input":` + string(input) + `}]}}`
+			}
+			result := func(n int, id string, isErr bool) string {
+				return `{"type":"user","sessionId":"s1","uuid":"r` + strconv.Itoa(n) + `","timestamp":"2026-05-01T12:0` + strconv.Itoa(n) + `:30Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + id + `","is_error":` + strconv.FormatBool(isErr) + `,"content":"out"}]}}`
+			}
+			lines := strings.Join([]string{call(1, "t1", "go test ./..."), result(1, "t1", tc.firstErr), call(2, "t2", long), result(2, "t2", tc.sErr)}, "\n")
+			res, err := parse.ParseFile(strings.NewReader(lines), "/root/-p-x/s1.jsonl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Turns) != 2 {
+				t.Fatalf("parsed %d turns, want 2", len(res.Turns))
+			}
+			if in := res.Turns[1].ToolUses[0].Input; strings.Contains(in, "tmux") || checkKind(in).kind != "go test" {
+				t.Fatalf("fixture does not exercise the cap: parsed input keeps %q, classifies %+v", in[len(in)-20:], checkKind(in))
+			}
+			row := findRow(t, BuildSessionIndex(&corpus.Snapshot{Turns: res.Turns, ToolResults: res.ToolResults}, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+			if got := len(row.FailingChecks) == 1 && row.FailingChecks[0].Turn == "a1"; got != tc.wantFailedCheck || (!tc.wantFailedCheck && len(row.FailingChecks) != 0) {
+				t.Errorf("failing_checks = %+v, want first call's go test failing: %v", row.FailingChecks, tc.wantFailedCheck)
+			}
+		})
+	}
+}

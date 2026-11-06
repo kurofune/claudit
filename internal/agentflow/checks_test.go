@@ -78,6 +78,8 @@ func TestCheckKind(t *testing.T) {
 		{"go test ./...\n# done\n", "go test"},
 		{"go test ./... # all of it", "go test"},
 		{"time go test ./... | tail", ""},
+		{"go test ./... && echo ok | false", ""},
+		{"go test ./... && printf x | tee log", ""},
 
 		{"echo '<<EOF'\ngo test ./...", "go test"},
 		{"# example <<EOF\ngo test ./...", "go test"},
@@ -99,8 +101,38 @@ func TestCheckKind(t *testing.T) {
 		{"", ""},
 	}
 	for _, tc := range cases {
-		if got := checkKind(tc.cmd); got != tc.want {
+		if got := checkKind(tc.cmd).kind; got != tc.want {
 			t.Errorf("checkKind(%q) = %q, want %q", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+// TestCheckKindGate: an earlier command joined by && may fail and stop the
+// chain before the check runs; one joined by || may succeed and skip it.
+func TestCheckKindGate(t *testing.T) {
+	cases := []struct {
+		cmd               string
+		afterAnd, afterOr bool
+	}{
+		{"go test ./...", false, false},
+		{"ls; go test ./...", false, false},
+		{"ls\ngo test ./...", false, false},
+		{"echo x && go test ./...", false, false},
+		{"echo x && true && go test ./... && echo ok", false, false},
+		{"go build ./cmd/djinn && go vet ./cmd/djinn ./internal/djinn/ops/room", true, false},
+		{"cd web && npm test", true, false},
+		{"ls; echo a && go test ./...", false, false},
+		{"echo a | grep a && go test ./...", true, false},
+		{"go build ./... &&\ngo vet ./...", true, false},
+		{"go build ./... && # then vet\n  go vet ./...", true, false},
+		{"go build ./... &&\n\ngo vet ./...", true, false},
+		{"ls || cargo check", false, true},
+		{"go build ./... && ls || make", true, true},
+	}
+	for _, tc := range cases {
+		got := checkKind(tc.cmd)
+		if got.kind == "" || got.afterAnd != tc.afterAnd || got.afterOr != tc.afterOr {
+			t.Errorf("checkKind(%q) = %+v, want a check with afterAnd=%v afterOr=%v", tc.cmd, got, tc.afterAnd, tc.afterOr)
 		}
 	}
 }
