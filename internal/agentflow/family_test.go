@@ -309,3 +309,14 @@ func TestFamily_PastedContentTitlesByItsFirstLine(t *testing.T) {
 		t.Errorf("unclosed block title = %q, want the pasted first line", unclosed.Title)
 	}
 }
+
+func TestFamily_PastedContentUnwrapped(t *testing.T) {
+	f := SessionFamily([]string{"<pasted_content id=\"41a8\">\nfix the login bug\nmore</pasted_content>"})
+	if f.Title != "fix the login bug" || f.Key != "fix the login bug" {
+		t.Errorf("pasted block: title %q key %q, want both %q", f.Title, f.Key, "fix the login bug")
+	}
+	before := SessionFamily([]string{"look at this\n<pasted_content id=\"41a8\">\nfix the login bug\nmore</pasted_content>"})
+	if before.Title != "look at this" || before.Key != "look at this" {
+		t.Errorf("text before block: title %q key %q, want both %q", before.Title, before.Key, "look at this")
+	}
+}
