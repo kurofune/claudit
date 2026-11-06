@@ -1836,10 +1836,8 @@
   .sh-model, .sh-id { font-family: var(--font-mono); }
   .sh-id { cursor: help; }
   .sh-last { font-variant-numeric: tabular-nums; }
-  .sh-last-message { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2);
-                     font-size: var(--t-4); color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
-  .sh-lm-label { font-weight: 700; color: var(--ink-2); }
-  .sh-lm-text { min-width: 0; }
+  .sh-last-message { margin: 0; font-size: var(--t-4); color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
+  .sh-lm-label { font-weight: 700; color: var(--ink-2); margin-right: var(--s-1); }
   .sh-last-message.is-loading .skel-line { display: block; }
   .sh-skel-last { width: 70%; height: 1.4em; }
   .sh-failures { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0;
