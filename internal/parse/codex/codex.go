@@ -133,16 +133,22 @@ func ParseFile(r io.Reader, path string) (parse.Result, error) {
 // textCaps bounds the text a parse keeps: snippets for the corpus, none
 // for FindTexts. verbatim keeps a prompt's every input_text item as
 // written, injected ones included, in place of its person's own text.
+// skipUnread passes over the lines no turn, prompt or tool input text comes
+// from (skipUnread) without decoding them, so a parse that reads only text
+// skips most of a rollout's bytes; skipCalls passes over tool calls too, for
+// a parse that wants no tool input.
 type textCaps struct {
-	prompt   func(string) string
-	join     func(text, block string) string
-	input    func(string) string
-	verbatim bool
+	prompt     func(string) string
+	join       func(text, block string) string
+	input      func(string) string
+	verbatim   bool
+	skipUnread bool
+	skipCalls  bool
 }
 
 var (
 	snippets = textCaps{prompt: parse.PromptSnippet, join: parse.JoinTurnText, input: parse.ToolInputSnippet}
-	fullText = textCaps{prompt: func(s string) string { return s }, join: parse.JoinText, input: func(s string) string { return s }, verbatim: true}
+	fullText = textCaps{prompt: func(s string) string { return s }, join: parse.JoinText, input: func(s string) string { return s }, verbatim: true, skipUnread: true}
 )
 
 func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
@@ -168,7 +174,7 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 	for sc.Scan() {
 		lineNumber++
 		line := sc.Bytes()
-		if len(line) == 0 {
+		if len(line) == 0 || caps.skipUnread && skipUnread(line, !caps.skipCalls) {
 			continue
 		}
 		var rec rawRecord
@@ -434,8 +440,15 @@ func toolCall(it rawItem) (name, input, detail string) {
 // AGENTS.md and environment items included, in order. A Codex turn
 // carries no thinking. path names the thread, as for ParseFile.
 func FindTexts(r io.Reader, path string, want parse.TextRequest) parse.FullTexts {
+	caps := fullText
+	caps.skipCalls = len(want.Tools) == 0
+	res, _ := parseFile(r, path, caps)
+	return textsOf(res, want)
+}
+
+// textsOf is what want asks of a full-text parse.
+func textsOf(res parse.Result, want parse.TextRequest) parse.FullTexts {
 	out := parse.NewFullTexts()
-	res, _ := parseFile(r, path, fullText)
 	for _, t := range res.Turns {
 		if want.Turns[t.UUID] {
 			out.Turns[t.UUID] = parse.TurnTextDetail{Text: t.Text}
@@ -452,6 +465,134 @@ func FindTexts(r io.Reader, path string, want parse.TextRequest) parse.FullTexts
 		}
 	}
 	return out
+}
+
+// skipUnread reports whether a rollout line is one no text comes from: a
+// tool output, a reasoning item, an event other than a token count, or a
+// record of a type parseFile reads no text or turn from (a compaction, say),
+// and with calls false a tool call too. It reads only the record's leading
+// scalar keys, its type and its payload's first key; a line it cannot place
+// that way is kept.
+func skipUnread(line []byte, calls bool) bool {
+	p := prefixScanner{b: line}
+	if !p.byte('{') {
+		return false
+	}
+	top := ""
+	for {
+		key, ok := p.str()
+		if !ok || !p.byte(':') {
+			return false
+		}
+		switch key {
+		case "type":
+			if top, ok = p.str(); !ok {
+				return false
+			}
+			switch top {
+			case "session_meta", "turn_context", "token_usage_record":
+				return false
+			case "response_item", "event_msg":
+			default:
+				return true
+			}
+		case "payload":
+			if top == "" || !p.byte('{') {
+				return false
+			}
+			if k, ok := p.str(); !ok || k != "type" || !p.byte(':') {
+				return false
+			}
+			kind, ok := p.str()
+			if !ok {
+				return false
+			}
+			if top == "event_msg" {
+				return kind != "token_count"
+			}
+			switch kind {
+			case "function_call_output", "custom_tool_call_output", "reasoning":
+				return true
+			case "function_call", "custom_tool_call":
+				return !calls
+			}
+			return false
+		default:
+			if !p.scalar() {
+				return false
+			}
+		}
+		if !p.byte(',') {
+			return false
+		}
+	}
+}
+
+// prefixScanner reads the leading keys and scalar values of one JSON
+// object line in place, failing on anything it does not model.
+type prefixScanner struct {
+	b []byte
+	i int
+}
+
+func (p *prefixScanner) space() {
+	for p.i < len(p.b) && (p.b[p.i] == ' ' || p.b[p.i] == '\t' || p.b[p.i] == '\r' || p.b[p.i] == '\n') {
+		p.i++
+	}
+}
+
+// byte consumes c after any whitespace.
+func (p *prefixScanner) byte(c byte) bool {
+	p.space()
+	if p.i < len(p.b) && p.b[p.i] == c {
+		p.i++
+		return true
+	}
+	return false
+}
+
+// str reads a string with no escapes.
+func (p *prefixScanner) str() (string, bool) {
+	if !p.byte('"') {
+		return "", false
+	}
+	start := p.i
+	for p.i < len(p.b) {
+		switch p.b[p.i] {
+		case '"':
+			p.i++
+			return string(p.b[start : p.i-1]), true
+		case '\\':
+			return "", false
+		}
+		p.i++
+	}
+	return "", false
+}
+
+// scalar skips a string, number, true, false or null value.
+func (p *prefixScanner) scalar() bool {
+	p.space()
+	if p.i >= len(p.b) {
+		return false
+	}
+	if p.b[p.i] == '"' {
+		for p.i++; p.i < len(p.b); p.i++ {
+			switch p.b[p.i] {
+			case '\\':
+				p.i++
+			case '"':
+				p.i++
+				return true
+			}
+		}
+		return false
+	}
+	start := p.i
+	for p.i < len(p.b) && strings.IndexByte("-+.0123456789eEtruefalsn", p.b[p.i]) >= 0 {
+		p.i++
+	}
+	return p.i > start
 }
 
 // FindTurnText is FindTexts for one turn; found is false when the rollout
