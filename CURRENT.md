@@ -4,7 +4,7 @@
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
-**Last change:** sessions flagged as failed 45% → 5.8% by failing checks and failed edits (claudit-me6); about half of the 85 check flags are false (heredoc lines, a check not last in a chain).
+**Last change:** failing-check flags 81 → 7 sessions (claudit-b0r): a check counts only as the call's final command, and a multi-tool Codex exec script runs none; all 7 left hand-checked true.
 
 **Assumptions:**
 - Projects key on the session cwd's git repo root (`internal/project/`); a deleted cwd outside any surviving repo is its own `missing` bucket (DECISIONS).
@@ -13,7 +13,7 @@
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** operator decides a precision fix for failing-check detection; then dogfoods the list.
+**Next checkpoint:** operator dogfoods the list with the precise failing-check signal.
 
 **Stop conditions:**
 - Claude Code or Codex changes the log schema → parser catch-up becomes the priority.
