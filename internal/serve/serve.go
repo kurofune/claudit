@@ -128,6 +128,10 @@ type Server struct {
 	indexMemoGen   int64
 	indexHist      map[string]*indexHistory
 	indexRowBuilds map[string]int
+	// cursorInstance names this server in the /sessions cursors it
+	// issues, so a cursor from an earlier instance, whose generations
+	// overlap this one's, answers the full index.
+	cursorInstance string
 	// storySF collapses concurrent builds of one story; storyBuildN
 	// counts the builds.
 	storySF     singleflight.Group
@@ -192,6 +196,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 		shutdownCh:      make(chan struct{}),
 		indexHist:       map[string]*indexHistory{},
 		indexRowBuilds:  map[string]int{},
+		cursorInstance:  newCursorInstance(),
 	}
 	if opts.MaxCachedRenders > 0 {
 		// One LRU holds entries for every section (html, data, and

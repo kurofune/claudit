@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -31,7 +32,9 @@ const storyMemoMax = 8
 // named: {cursor, changed, removed}, changed holding every row rebuilt or
 // whose active flag flipped since, removed the ids no longer listed. A
 // cursor the server cannot answer from — another filter's, or older than
-// the last indexHistoryMax builds — gets the full {cursor, sessions}.
+// the last indexHistoryMax builds, or one another server instance issued
+// (generations restart at 1 with each instance) — gets the full
+// {cursor, sessions}.
 func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
 		section:     apiSectionSessions,
@@ -42,7 +45,7 @@ func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
 			idx := s.sessionIndex(snap, q)
 			key := filterQueryKey(q)
-			cur := sessionCursor{gen: snap.Generation, atMs: now.UnixMilli(), filter: filterHash(key)}.String()
+			cur := sessionCursor{gen: snap.Generation, atMs: now.UnixMilli(), filter: filterHash(key), instance: s.cursorInstance}.String()
 			if d, ok := s.sessionDelta(snap, key, idx, q.cursor, now); ok {
 				d.Cursor = cur
 				return d, nil
@@ -74,7 +77,7 @@ type sessionIndexDelta struct {
 // answer carried was read at.
 func (s *Server) sessionDelta(snap *Snapshot, key string, idx agentflow.SessionIndex, raw string, now time.Time) (sessionIndexDelta, bool) {
 	c, ok := parseSessionCursor(raw)
-	if !ok || c.filter != filterHash(key) {
+	if !ok || c.filter != filterHash(key) || c.instance != s.cursorInstance {
 		return sessionIndexDelta{}, false
 	}
 	s.filterAggMu.Lock()
@@ -207,19 +210,23 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 }
 
 // sessionCursor names one /sessions answer: the generation it was built
-// at, its clock reading in Unix milliseconds and filterHash of its filter.
-// It travels as c<gen>-<ms>-<hash>, which no ?since date reads as.
+// at, its clock reading in Unix milliseconds, filterHash of its filter and
+// the instance token of the server that issued it, since generations
+// restart with each server. It travels as c<gen>-<ms>-<hash>-<instance>,
+// which no ?since date reads as; a cursor without the instance, from a
+// build before it was added, still reads as one and names no instance.
 type sessionCursor struct {
-	gen    int64
-	atMs   int64
-	filter string
+	gen      int64
+	atMs     int64
+	filter   string
+	instance string
 }
 
 func (c sessionCursor) String() string {
-	return fmt.Sprintf("c%d-%d-%s", c.gen, c.atMs, c.filter)
+	return fmt.Sprintf("c%d-%d-%s-%s", c.gen, c.atMs, c.filter, c.instance)
 }
 
-var sessionCursorRE = regexp.MustCompile(`^c(\d{1,18})-(\d{1,18})-([0-9a-f]{8})$`)
+var sessionCursorRE = regexp.MustCompile(`^c(\d{1,18})-(\d{1,18})-([0-9a-f]{8})(?:-([0-9a-f]{16}))?$`)
 
 // isSessionCursor reports whether a ?since value is a cursor, not a date.
 func isSessionCursor(raw string) bool { return sessionCursorRE.MatchString(raw) }
@@ -234,7 +241,15 @@ func parseSessionCursor(raw string) (sessionCursor, bool) {
 	if err1 != nil || err2 != nil {
 		return sessionCursor{}, false
 	}
-	return sessionCursor{gen: gen, atMs: at, filter: m[3]}, true
+	return sessionCursor{gen: gen, atMs: at, filter: m[3], instance: m[4]}, true
+}
+
+// newCursorInstance is a random token naming one server instance in the
+// cursors it issues.
+func newCursorInstance() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // filterHash is a short digest of a filterQueryKey, so a cursor from one

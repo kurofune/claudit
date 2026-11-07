@@ -714,6 +714,39 @@ func TestAPISessions_UnknownOrExpiredCursorAnswersTheFullIndex(t *testing.T) {
 	}
 }
 
+// TestAPISessions_CursorFromAnEarlierServerAnswersTheFullIndex: a cursor
+// one server issued at generation 1, sent to a restarted server whose own
+// history starts again at generation 1 after a session was removed while
+// it was down, answers the full current index, not an empty delta.
+func TestAPISessions_CursorFromAnEarlierServerAnswersTheFullIndex(t *testing.T) {
+	dir := t.TempDir()
+	a, _ := twoSessionCorpus(t, dir)
+	first := newTestServer(t, dir)
+	old := getSessionsBody(t, first, "?scope=all", fullKeys...)
+	if len(old.Sessions) != 2 {
+		t.Fatalf("first server rows = %d, want 2", len(old.Sessions))
+	}
+
+	if err := os.Remove(a); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newTestServer(t, dir)
+	if g, f := restarted.cache.Snapshot().Generation, first.cache.Snapshot().Generation; g != f {
+		t.Fatalf("restarted generation %d, want it to collide with the first server's %d", g, f)
+	}
+	got := getSessionsBody(t, restarted, "?scope=all&since="+url.QueryEscape(old.Cursor), fullKeys...)
+	if ids := sessionIDs(got.Sessions, func(r agentflow.SessionIndexRow) string { return r.SessionID }); !reflect.DeepEqual(ids, []string{"s-b"}) {
+		t.Errorf("restarted server rows = %v, want the current index [s-b]", ids)
+	}
+	if got.Cursor == old.Cursor {
+		t.Errorf("restarted server reissued the old cursor %q", got.Cursor)
+	}
+	again := getSessionsBody(t, restarted, "?scope=all&since="+url.QueryEscape(got.Cursor), deltaKeys...)
+	if len(again.Changed) != 0 || len(again.Removed) != 0 {
+		t.Errorf("delta from the restarted server's own cursor = %+v, want empty", again)
+	}
+}
+
 // TestAPISessions_DeltasFoldToTheFullIndex: three deltas (a session grown,
 // a session file added, a session file removed) applied in turn to the
 // first full index equal a fresh full fetch at the final generation.
