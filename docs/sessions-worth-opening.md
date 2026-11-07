@@ -254,3 +254,61 @@ The 5 left are rows 2, 3, 5, 6 and 7 above, each re-read in its raw log:
 the check is the final command and no failable `&&` gates it (row 5's
 `go build` follows a `;`, row 7's `go vet` a `;`, row 6's follows a closed
 here-document on its own line). All 5 are true.
+
+**Landed 2026-11-06, code at d64c513 (claudit-dbz): an open list stays light
+while logs write.** Before (2026-11-06, Chromium via playwright-cli, list
+open at #agents on the real corpus, 1,553 sessions, while agent sessions
+wrote): 36 full index fetches and 42 MB downloaded in 5 minutes, about
+1.2 MB per fetch; JS heap flat at 14–18 MB. Now a hidden tab fetches
+nothing until it is shown (one fetch then, none if no bump arrived), and a
+visible list asks `/_claudit/api/sessions?since=<cursor>` for only the rows
+rebuilt or whose active flag flipped since its last answer, merges them by
+`session_id` and rebuilds only those rows' elements.
+
+After: `claudit serve --port 18831 --open=false` built at d64c513 over an
+APFS clone of this machine's corpus (`cp -cR ~/.claude/projects`,
+`~/.codex/sessions`; 1,568 sessions in the default 7-day window; the full
+index is 1,240,283 bytes, 265,811 gzipped), list visible at #agents in
+Chromium (playwright-cli 0.1.23), `node jstest/fixtures/gen-live-write.mjs
+<clone>/…/64d68439-….jsonl 1000 300` appending one turn per second,
+04:17:42–04:22:46 UTC 2026-11-07:
+
+| | before (2026-11-06) | after (d64c513) |
+|---|---|---|
+| `/sessions` fetches in 5 min | 36 (full index) | 147 (every one a `since=c…` delta) |
+| transferred in 5 min | 42 MB | 108,049 bytes (106 KB) |
+| per fetch | ~1.2 MB | median transferSize 736 bytes (725–739) |
+
+Read with `performance.getEntriesByType('resource')` filtered on
+`/_claudit/api/sessions` (story and summary excluded), the timing buffer
+cleared at the start. More fetches than before because each one is cheap
+enough to finish inside the 2 s poll, so every generation gets its own;
+the in-flight coalescing (one out, one trailing) is unchanged. The live
+row, captured 11 s apart during the run (`.playwright-cli/dbz-row-t30.png`
+at 04:18:14 and `dbz-row-t40.png` at 04:18:25), read $3.50 · 103 turns and
+then $3.51 · 113 turns.
+
+Firefox: Firefox 158.0 (playwright build 1569, installed with
+`playwright-cli install-browser firefox`; `npx playwright install firefox`
+fetched build 1572, which playwright-cli 0.1.23 does not launch), opened
+with `playwright-cli open --browser=firefox` at #agents, list visible, the
+same writer at one turn per second for 15 minutes (900 turns,
+04:23:32–04:38:33 UTC). Each minute, the sum of RSS over every process
+whose command names `ms-playwright/firefox-1569/firefox/Nightly.app`
+(`ps -A -o rss=,command=`, 9 processes every sample), in MB:
+
+| minute | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| RSS MB | 1150.1 | 1146.4 | 1149.8 | 1153.7 | 1158.1 | 1160.2 | 1163.9 | 1167.5 | 1171.4 | 1156.9 | 1156.6 | 1158.9 | 1139.2 | 1144.3 | 1149.2 |
+
+Minute 15 minus minute 2: +2.8 MB. The list fetched `/sessions` 193 times
+over the run and its row ended at $5.37, 1,273 turns. No Firefox
+before-figure exists; this is the first.
+
+Console: a fresh #overview and a fresh #agents beside it, 130 s each with
+no writer, logged the same 3 errors: the `favicon.ico` 404 and two
+`net::ERR_INCOMPLETE_CHUNKED_ENCODING` on `/events`, so the list adds 0.
+The `/events` errors are the server's 60 s `WriteTimeout`
+(`internal/serve/serve.go:480`) cutting the SSE stream once a minute on
+every route (`curl -sN …/events` exits 18 after 60 s); filed as
+claudit-n6f.
