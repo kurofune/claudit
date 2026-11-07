@@ -11,7 +11,7 @@
 import { fetchSessions } from './api.js';
 import { escHtml, fmtNum } from './format.js';
 import { parseAgentsSub } from './router.js';
-import { setLiveHandler, clearLiveHandler } from './sse.js';
+import { setLiveHandler, clearLiveHandler, deferLive } from './sse.js';
 import { clearSkeletonFlag } from './skeleton.js';
 import { paintStory } from './session-story.js';
 import { paintSessionHeader } from './session-header.js';
@@ -71,7 +71,10 @@ function absorb(data) {
 // number. fresh asks for an index read after this call: when a request is
 // already out (it may have been answered before the change that prompted
 // this call), it waits for that one and fetches again. Every fresh call
-// made while one request is out shares the one follow-up.
+// made while one request is out shares the one follow-up. A follow-up that
+// comes due while the tab is hidden sends nothing: it answers with the
+// request it waited on and leaves the view stale, so the tab becoming
+// visible refreshes once (web/sse.js deferLive).
 /** @param {boolean} [fresh] @returns {Promise<Answer>} */
 const load = (fresh = false) => {
   if (!inFlight) {
@@ -84,7 +87,12 @@ const load = (fresh = false) => {
   }
   if (!fresh) return inFlight;
   if (!followUp) {
-    followUp = inFlight.then(() => { followUp = null; return load(); });
+    followUp = inFlight.then(prev => {
+      followUp = null;
+      if (!document.hidden) return load();
+      deferLive();
+      return prev;
+    });
   }
   return followUp;
 };

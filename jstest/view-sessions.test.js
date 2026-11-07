@@ -709,3 +709,34 @@ test('five bumps while the first index fetch is out make exactly two fetches: th
   assert.equal(view.querySelectorAll('.sl-group').length, 3);
   clearLiveHandler();
 });
+
+test('a trailing refresh queued while visible waits, unsent, through a hide and fetches once on becoming visible', async () => {
+  const releases = [];
+  const calls = stubFetch(() => new Promise(r => { releases.push(r); }));
+  let onMessage;
+  globalThis.EventSource = class { constructor() {} addEventListener(_t, fn) { onMessage = fn; } };
+  const { view, done, document } = await mount();
+  startSSE({});
+  onMessage({ data: JSON.stringify({ generation: 1 }) });
+  onMessage({ data: JSON.stringify({ generation: 2 }) });
+  await settle();
+  assert.equal(calls.length, 1, 'the visible bump queued a trailing fetch behind the one out');
+
+  document.hidden = true;
+  document.dispatchEvent(new Event('visibilitychange'));
+  for (let g = 3; g <= 5; g++) onMessage({ data: JSON.stringify({ generation: g }) });
+  releases[0](fullAnswer(THREE(), 1));
+  await done;
+  await settle(); await settle(); await settle();
+  assert.equal(calls.length, 1, 'the trailing fetch does not go out while the tab is hidden');
+  assert.equal(view.querySelectorAll('.sl-group').length, 3, 'the first answer still paints');
+
+  document.hidden = false;
+  document.dispatchEvent(new Event('visibilitychange'));
+  await settle(); await settle();
+  assert.equal(calls.length, 2, 'one fetch on becoming visible carries the pending work');
+  releases[1]({ cursor: 'c5-0-abcdef12', changed: [], removed: [] });
+  await settle(); await settle(); await settle();
+  assert.equal(calls.length, 2, 'no further fetches once caught up');
+  clearLiveHandler();
+});

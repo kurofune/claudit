@@ -88,6 +88,10 @@ export function clearLiveHandler(fn) {
   if (!fn || liveHandler === fn) { liveHandler = null; liveStale = false; }
 }
 
+// deferLive leaves the active view stale when it put off work because the
+// tab is hidden: the next 'visible' event runs its handler once.
+export function deferLive() { if (liveHandler) liveStale = true; }
+
 // decideLive is the in-place path's pure decision: whether the live
 // handler runs now, and whether the view is left stale. A hidden tab does
 // no work on a 'bump' (a new generation), only marks itself stale; the
