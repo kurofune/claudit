@@ -28,6 +28,8 @@ func run(args []string) error {
 		return nil
 	case "watch":
 		return runWatch(rest)
+	case "prices":
+		return runPrices(rest, os.Stdout)
 	default:
 		return runServe(rest)
 	}
@@ -44,7 +46,7 @@ func dispatch(args []string) (cmd string, rest []string, err error) {
 		return "help", args[1:], nil
 	case "version", "--version":
 		return "version", args[1:], nil
-	case "watch", "serve":
+	case "watch", "serve", "prices":
 		return args[0], args[1:], nil
 	}
 	return "", nil, fmt.Errorf("unknown command %q", args[0])
@@ -67,6 +69,7 @@ Usage:
 Commands:
   serve    Run a local web daemon that serves a live-updating dashboard (filters via URL query).
   watch    Tail a live session and print running cost.
+  prices   Print the effective rate table (bundled prices plus your prices.yaml), USD per MTok.
   version  Print the installed claudit version and exit (also: --version).
 
 Run "claudit <command> --help" for command-specific flags.

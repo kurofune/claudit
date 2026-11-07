@@ -21,6 +21,7 @@ func TestDispatch(t *testing.T) {
 		{"serve with flags", []string{"serve", "--port=1"}, "serve", []string{"--port=1"}},
 		{"bare flags go to serve", []string{"--port=1"}, "serve", []string{"--port=1"}},
 		{"watch", []string{"watch", "-x"}, "watch", []string{"-x"}},
+		{"prices", []string{"prices", "--json"}, "prices", []string{"--json"}},
 		{"version", []string{"version"}, "version", []string{}},
 		{"--version", []string{"--version"}, "version", []string{}},
 		{"help", []string{"help"}, "help", []string{}},
@@ -83,7 +84,7 @@ func TestTopLevelUsage(t *testing.T) {
 			got = append(got, f[0])
 		}
 	}
-	if want := []string{"serve", "watch", "version"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"serve", "watch", "prices", "version"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Commands = %q, want %q", got, want)
 	}
 	if !strings.Contains(topLevelUsage, `alias for "claudit serve"`) {
