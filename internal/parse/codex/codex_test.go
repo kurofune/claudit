@@ -284,6 +284,13 @@ func TestExecCommands(t *testing.T) {
 		{"tools.exec_command({cmd:'git status', w:`${ {a:'}'}.a }`, cmd:'go test ./...'})", []string{"go test ./..."}},
 		{"tools.exec_command({cmd:'git status', w:`${\"`\"}}`, cmd:'go test ./...'})", []string{"go test ./..."}},
 		{"tools.exec_command({cmd:`a${\"`\"}b`})", nil},
+		{"// tools.exec_command({cmd:\"git status\"})\nawait tools.exec_command(opts);", nil},
+		{`const s = "tools.exec_command({cmd:'rm -rf /'})"; await tools.exec_command({cmd:"ls"});`, []string{"ls"}},
+		{`await tools.exec_command({cmd:"ls"}); /* tools.exec_command({cmd:"pwd"}) */`, []string{"ls"}},
+		{"const t = `tools.exec_command({cmd:'pwd'})`; const r = /exec_command({cmd:'x'})/; await tools.exec_command({cmd:\"ls\"});", []string{"ls"}},
+		{`tools.exec_command({cmd:"ls"}); tools.exec_command(opts)`, nil},
+		{`tools.exec_command()`, nil},
+		{`tools.exec_command( /* opts */ {cmd:"ls"})`, []string{"ls"}},
 	}
 	for _, c := range cases {
 		got, ok := execCommands(c.src)
@@ -317,6 +324,23 @@ func TestToolUse_UnresolvedExecCmdIsBashWithoutPattern(t *testing.T) {
 		if tu.Name != parse.BashToolName || tu.Input != "go test ./..." || tu.Detail != "go test" {
 			t.Errorf("toolUse(%q) = Name %q Input %q Detail %q, want Bash, the final cmd and its Bash pattern", src, tu.Name, tu.Input, tu.Detail)
 		}
+	}
+}
+
+func TestToolUse_CommentedExecCallIsNotItsCommand(t *testing.T) {
+	src := "// tools.exec_command({cmd:\"git status\"})\nawait tools.exec_command(opts);"
+	line := `{"timestamp":"2026-10-31T23:53:17.000Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"c1","name":"exec","input":"// tools.exec_command({cmd:\"git status\"})\nawait tools.exec_command(opts);"}}
+{"timestamp":"2026-10-31T23:53:18.000Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":1}}}`
+	res, err := ParseFile(strings.NewReader(line+"\n"), "x.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 || len(res.Turns[0].ToolUses) != 1 {
+		t.Fatalf("turns = %+v", res.Turns)
+	}
+	want := parse.ToolUse{ID: "c1", Name: parse.BashToolName, Input: src, Detail: "", InputKey: parse.ToolInputKey(src)}
+	if got := res.Turns[0].ToolUses[0]; got != want {
+		t.Errorf("tool use = %+v, want %+v", got, want)
 	}
 }
 

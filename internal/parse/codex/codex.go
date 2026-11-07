@@ -647,9 +647,9 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 	return out, found
 }
 
-// execCall matches the opening of a tools.exec_command({...}) call inside
-// the JavaScript an exec custom tool runs, through the object's brace.
-var execCall = regexp.MustCompile(`exec_command\(\s*\{`)
+// execCall matches the opening of an exec_command(...) call inside the
+// JavaScript an exec custom tool runs, through its open paren.
+var execCall = regexp.MustCompile(`exec_command\s*\(`)
 
 // toolsCall matches a call of a tools.* function, capturing its name.
 var toolsCall = regexp.MustCompile(`\btools\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(`)
@@ -866,19 +866,35 @@ func blankTemplate(b []byte, lit string) {
 
 // execCommands returns the final cmd string of every exec_command call in an exec
 // tool's JavaScript source, wherever cmd sits among the object's properties,
-// and reports whether every call's cmd resolved. A cmd that is anything but
-// one complete static string literal (a variable, a concatenation, an
-// interpolated template) cannot be resolved, so the source has no faithful
+// and reports whether every call's cmd resolved. Calls written inside a
+// comment or a string, template or regular expression literal do not count.
+// A call whose argument is not an object literal, or whose cmd is anything
+// but one complete static string literal (a variable, a concatenation, an
+// interpolated template), cannot be resolved, so the source has no faithful
 // command list and ok is false.
 func execCommands(src string) (cmds []string, ok bool) {
-	for _, loc := range execCall.FindAllStringIndex(src, -1) {
-		s, ok := objectCmd(src[loc[1]:])
+	code := jsCode(src)
+	for _, loc := range execCall.FindAllStringIndex(code, -1) {
+		i := nextCode(code, loc[1])
+		if i >= len(code) || code[i] != '{' {
+			return nil, false
+		}
+		s, ok := objectCmd(src[i+1:])
 		if !ok {
 			return nil, false
 		}
 		cmds = append(cmds, s)
 	}
 	return cmds, len(cmds) > 0
+}
+
+// nextCode returns the index of the first byte at or after i in code
+// that is not whitespace, or len(code).
+func nextCode(code string, i int) int {
+	for i < len(code) && strings.IndexByte(" \t\r\n", code[i]) >= 0 {
+		i++
+	}
+	return i
 }
 
 // objectCmd walks every top-level property of the object literal whose body
