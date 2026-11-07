@@ -237,6 +237,7 @@ export function topSentence(rows, window) {
  * @typedef {Object} WorthRow
  * @property {SessionIndexRow} row
  * @property {string} reason  the literal reason it is listed
+ * @property {string} check   the failing check's name as reason holds it, set as code; '' on any other reason
  * @property {string} turn    the turn to land on: the failing check's or the first unfixed failure's, or ''
  */
 
@@ -253,18 +254,18 @@ export function worthOpening(rows, window = DEFAULT_WINDOW) {
   /** @type {WorthRow[]} */
   const out = [];
   const taken = new Set();
-  /** @param {SessionIndexRow} r @param {string} reason @param {string} [turn] */
-  const add = (r, reason, turn = '') => {
+  /** @param {SessionIndexRow} r @param {string} reason @param {string} [turn] @param {string} [check] */
+  const add = (r, reason, turn = '', check = '') => {
     if (out.length >= WORTH_MAX || taken.has(r.session_id)) return;
     taken.add(r.session_id);
-    out.push({ row: r, reason, turn });
+    out.push({ row: r, check, reason, turn });
   };
   const byCost = (/** @type {SessionIndexRow} */ a, /** @type {SessionIndexRow} */ b) =>
     (cost(b) - cost(a)) || (ts(b.last_activity) - ts(a.last_activity));
 
   for (const r of rows.filter(r => failingChecksOf(r).length > 0).sort(byCost)) {
     const c = failingChecksOf(r)[0];
-    add(r, `Last \`${c.check}\` failed`, c.turn || '');
+    add(r, `Last ${c.check} failed`, c.turn || '', c.check);
   }
   for (const r of rows.filter(r => failedEditsOf(r) > 0).sort(byCost)) {
     add(r, `${plural(failedEditsOf(r), 'edit')} failed and never applied`, r.first_failed_turn || '');

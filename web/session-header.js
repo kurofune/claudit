@@ -11,7 +11,7 @@
 // for the comparison line, the index.
 
 import { fetchSessionSummary, fetchSessions } from './api.js';
-import { escHtml, fmtCompact } from './format.js';
+import { escHtml, escHtmlCode, fmtCompact } from './format.js';
 import { API_EQUIVALENT_TIP, providerLabel } from './provider-filter.js';
 import { sessionHash } from './router.js';
 import { skelLine } from './skeleton.js';
@@ -118,7 +118,7 @@ export function renderSessionHeader(host, story, opts = {}) {
     copyTimer: undefined,
   };
   states.set(host, st);
-  const n = headerNumbers(story);
+  const n = headerNumbers(story, st.failures);
   const notes = worthALook(sessionOf(story), st.nowMs);
   const sid = story.session_id || '';
   const provider = story.provider || 'claude-code';
@@ -137,7 +137,7 @@ export function renderSessionHeader(host, story, opts = {}) {
         escHtml(fmtUSD(n.costUSD)), 'sum of every turn')}
       ${tile('duration', 'Duration', escHtml(fmtDuration(n.durationMs)), escHtml(n.durationSub))}
       ${tile('tokens', 'Tokens', escHtml(fmtCompact(n.tokens)), escHtml(n.tokensSub))}
-      ${tile('failed', 'Failed', String(n.failed), escHtml(n.failedSub), n.failed > 0 ? ' is-failed' : '')}
+      ${tile('failed', 'Failing', String(n.failed), escHtml(n.failedSub), n.failed > 0 ? ' is-failed' : '')}
     </div>
     <div class="sh-strip-head">
       <h3 class="sh-strip-title">${st.mode === 'time' ? 'Time per turn' : 'Cost added per turn'}</h3>
@@ -186,7 +186,7 @@ function failuresHTML(st) {
 
 /** @param {HeaderState} st @param {import('./session-header-logic.js').FailureRow[]} rows */
 const failureItems = (st, rows) => rows.map(f =>
-  `<li><a class="sh-failure" href="${escHtml(sessionHash(st.story.session_id, f.link))}" data-link="${escHtml(f.link)}">${escHtml(f.text)}</a></li>`).join('');
+  `<li><a class="sh-failure" href="${escHtml(sessionHash(st.story.session_id, f.link))}" data-link="${escHtml(f.link)}">${escHtmlCode(f.text, f.check)}</a></li>`).join('');
 
 // toggleOtherFailures expands the other errored calls under their button,
 // or collapses them, and says which on the button's aria-expanded. The

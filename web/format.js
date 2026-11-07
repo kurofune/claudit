@@ -54,6 +54,15 @@ export const fmtDate = ts => {
 export const escHtml = s => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// escHtmlCode is escHtml(text) with the first occurrence of code inside it
+// set in <code>; escHtml(text) alone when code is empty or not in text.
+export const escHtmlCode = (text, code) => {
+  const s = String(text == null ? '' : text), c = String(code == null ? '' : code);
+  const i = c ? s.indexOf(c) : -1;
+  if (i < 0) return escHtml(s);
+  return `${escHtml(s.slice(0, i))}<code>${escHtml(c)}</code>${escHtml(s.slice(i + c.length))}`;
+};
+
 // Semantic pill for hit-ratio values. Tier thresholds match the
 // rules-of-thumb in the cache guide — kept in sync with the legacy JS.
 // Pass extraClass="tier-sm" for the compact totals/nav-metric variant.

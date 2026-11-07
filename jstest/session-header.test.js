@@ -102,8 +102,9 @@ test('the header names the session and fills the four tiles', async () => {
   assert.equal(text(tile('duration').querySelector('.sh-sub')), '4 turns · 7 commands');
   assert.equal(text(tile('tokens').querySelector('.sh-value')), '4.2k');
   assert.equal(text(tile('tokens').querySelector('.sh-sub')), '73% re-read from cache');
+  assert.equal(text(tile('failed').querySelector('.sh-label')), 'Failing');
   assert.equal(text(tile('failed').querySelector('.sh-value')), '3');
-  assert.equal(text(tile('failed').querySelector('.sh-sub')), 'npm test, make lint +1 more');
+  assert.equal(text(tile('failed').querySelector('.sh-sub')), 'npm test, make +1 more');
   assert.ok(tile('failed').classList.contains('is-failed'));
 });
 
@@ -201,7 +202,7 @@ test('Worth a look: a slow-tool note renders with its own class and neither fail
   assert.ok(!notes[0].classList.contains('note-retry-storm') && !notes[0].classList.contains('note-error-cascade'));
 });
 
-test('a session with no tool calls reads Failed 0, has no Worth a look section and still one bar per turn', async () => {
+test('a session with no tool calls reads Failing 0, has no Worth a look section and still one bar per turn', async () => {
   const { host, done } = await mount(CLEAN());
   await done;
   assert.equal(text(host.querySelector('[data-tile="failed"] .sh-value')), '0');
@@ -336,12 +337,16 @@ test('failures: no failing check, no failed edit and no errored call renders no 
   assert.equal(host.querySelector('.sh-failures'), null);
 });
 
-test('failures: three failing checks read "Last `<check>` failed · <command>", link to their turn and follow on click and Enter', async () => {
+test('failures: three failing checks read "Last <check> failed · <command>" with the check as code, link to their turn and follow on click and Enter', async () => {
   const { host, done, location } = await mount(route(FAILED()));
   await done;
   assert.equal(text(host.querySelector('.sh-failures-title')), '3 failing checks');
+  assert.equal(text(host.querySelector('[data-tile="failed"] .sh-value')), '3', 'the tile agrees with the heading');
   const links = host.querySelectorAll('.sh-failures a.sh-failure');
-  assert.deepEqual(links.map(text), ['Last `npm test` failed · npm test', 'Last `make` failed · make lint', 'Last `go vet` failed · go vet ./...']);
+  assert.deepEqual(links.map(text), ['Last npm test failed · npm test', 'Last make failed · make lint', 'Last go vet failed · go vet ./...']);
+  assert.deepEqual(links.map(a => a.innerHTML), ['Last <code>npm test</code> failed · npm test',
+    'Last <code>make</code> failed · make lint', 'Last <code>go vet</code> failed · go vet ./...']);
+  assert.ok(!host.innerHTML.includes('`'), 'no backtick anywhere in the header');
   assert.deepEqual(links.map(a => a.getAttribute('href')), Array(3).fill(`#agents/${SID}/a3`));
   assert.equal(host.querySelector('.sh-failures-more'), null);
   location.hash = '';
@@ -363,7 +368,12 @@ test('failures: checks, then edits never applied, then the other errors behind a
   await done;
   assert.equal(text(host.querySelector('.sh-failures-title')), '1 failing check · 1 edit never applied');
   const lead = host.querySelectorAll('.sh-failure');
-  assert.deepEqual(lead.map(text), ['Last `go test` failed · go test ./...', 'Edit failed and never applied · /p/a.go']);
+  assert.deepEqual(lead.map(text), ['Last go test failed · go test ./...', 'Edit failed and never applied · /p/a.go']);
+  assert.equal(lead[1].querySelector('code'), null, 'an edit row sets nothing as code');
+  const tile = host.querySelector('[data-tile="failed"]');
+  assert.equal(text(tile.querySelector('.sh-label')), 'Failing');
+  assert.equal(text(tile.querySelector('.sh-value')), '2', 'the check and the edit; the two other errors do not count');
+  assert.equal(text(tile.querySelector('.sh-sub')), 'go test, Edit /p/a.go');
   assert.deepEqual(lead.map(a => a.getAttribute('href')), [`#agents/${SID}/a3`, `#agents/${SID}/a2`]);
   const more = host.querySelector('button.sh-failures-more');
   assert.equal(text(more), '2 other commands errored and were not retried');
@@ -388,6 +398,34 @@ test('failures: checks, then edits never applied, then the other errors behind a
   keydown(more, 'Enter');
   assert.equal(more.getAttribute('aria-expanded'), 'true', 'Enter expands');
   assert.equal(host.querySelectorAll('.sh-failure-other .sh-failure').length, 2);
+});
+
+test('failures: a check name of <b>x</b> renders escaped inside <code>', async () => {
+  const st = story([step('a1', 0, [tool('make', 'error', { input_key: 'mk' })])], [],
+    { failing_checks: [{ check: '<b>x</b>', command: 'make', turn: 'a1', input_key: 'mk' }] });
+  const { host, done } = await mount(route(st));
+  await done;
+  const link = host.querySelector('a.sh-failure');
+  assert.equal(link.innerHTML, 'Last <code>&lt;b&gt;x&lt;/b&gt;</code> failed · make');
+  assert.equal(link.querySelector('b'), null, 'no injected element');
+});
+
+test('failures: no check, no failed edit and two other errors read Failing 0 and none, the errors only behind the disclosure', async () => {
+  const { host, done } = await mount(route(failing(2)));
+  await done;
+  const tile = host.querySelector('[data-tile="failed"]');
+  assert.equal(text(tile.querySelector('.sh-label')), 'Failing');
+  assert.equal(text(tile.querySelector('.sh-value')), '0');
+  assert.equal(text(tile.querySelector('.sh-sub')), 'none');
+  assert.ok(!tile.classList.contains('is-failed'));
+  assert.equal(host.querySelector('.sh-failures-title'), null);
+  const more = host.querySelector('.sh-failures-more');
+  assert.equal(text(more), '2 other commands errored and were not retried');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(host.querySelectorAll('.sh-failure').length, 0, 'the errors show only once the disclosure opens');
+  click(more);
+  assert.deepEqual(host.querySelectorAll('.sh-failure-other .sh-failure').map(text),
+    ['Bash · npm test -- case0', 'Bash · npm test -- case1']);
 });
 
 test('failures: 200 errored calls and no check or edit show only the collapsed count until expanded', async () => {

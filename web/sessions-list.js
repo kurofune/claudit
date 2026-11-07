@@ -6,7 +6,7 @@
 // the markup, the keyboard model and keeping focus and scroll across a
 // repaint.
 
-import { escHtml, fmtMoney } from './format.js';
+import { escHtml, escHtmlCode, fmtMoney } from './format.js';
 import { sessionHash } from './router.js';
 import { providerLabel, API_EQUIVALENT_TIP } from './provider-filter.js';
 import { sessionListSkeleton } from './skeleton.js';
@@ -103,7 +103,7 @@ function worthRowHTML(w, now) {
   return `<a class="sl-row sl-worth-row" href="${escHtml(sessionHash(id, w.turn))}" data-session="${escHtml(id)}" data-focus-key="worth:${escHtml(id)}">
       <span class="sl-main">
         <span class="sl-label">${escHtml(rowTitle(r))}</span>
-        <span class="sl-reason">${escHtml(w.reason)}</span>
+        <span class="sl-reason">${escHtmlCode(w.reason, w.check)}</span>
       </span>
       <span class="sl-meta">
         <span class="sl-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</span>

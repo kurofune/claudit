@@ -135,10 +135,13 @@ test('Worth opening lists each session once with its reason, cost and last activ
   assert.equal(block.querySelector('.sl-worth-title').textContent, 'Worth opening');
   const rows = block.querySelectorAll('.sl-row');
   assert.deepEqual(rows.map(r => [r.getAttribute('data-session'), r.querySelector('.sl-reason').textContent]), [
-    ['s-a', 'Last `go test` failed'],
+    ['s-a', 'Last go test failed'],
     ['s-d', '1 edit failed and never applied'],
     ['s-b', 'Context compacted 2 times'],
   ]);
+  assert.equal(rows[0].querySelector('.sl-reason').innerHTML, 'Last <code>go test</code> failed', 'the check is set as code');
+  assert.equal(rows[1].querySelector('.sl-reason code'), null, 'a reason with no check sets nothing as code');
+  assert.ok(!block.innerHTML.includes('`'), 'no backtick in the block');
   assert.equal(rows[0].querySelector('.sl-label').textContent, 'work bead claudit-9yx next');
   assert.equal(rows[0].querySelector('.sl-cost').textContent, '$2.50');
   assert.equal(rows[0].querySelector('.sl-when').textContent, '1m ago');
@@ -153,6 +156,15 @@ test('Worth opening lists each session once with its reason, cost and last activ
   rows[0].focus();
   keydown(rows[0], 'Enter');
   assert.equal(location.hash, '#agents/s-a/turn-gt');
+});
+
+test('Worth opening renders a check name of <b>x</b> escaped inside <code>', async () => {
+  stubFetch(() => ({ sessions: [row('s-x', { failing_checks: [{ check: '<b>x</b>', command: 'make', turn: 't1' }] })] }));
+  const { view, done } = await mount();
+  await done;
+  const reason = view.querySelector('.sl-worth [data-session="s-x"] .sl-reason');
+  assert.equal(reason.innerHTML, 'Last <code>&lt;b&gt;x&lt;/b&gt;</code> failed');
+  assert.equal(reason.querySelector('b'), null, 'no injected element');
 });
 
 test('clicking a row or pressing Enter on it opens #agents/<session-id>', async () => {

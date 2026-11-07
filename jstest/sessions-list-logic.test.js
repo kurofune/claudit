@@ -205,8 +205,8 @@ test('worthOpening lists each session once under its first reason, in reason ord
   ];
   const w = worthOpening(rows);
   assert.deepEqual(w.map(x => [x.row.session_id, x.reason]), [
-    ['f-dear', 'Last `go test` failed'],
-    ['f-cheap', 'Last `go build` failed'],
+    ['f-dear', 'Last go test failed'],
+    ['f-cheap', 'Last go build failed'],
     ['e-dear', '2 edits failed and never applied'],
     ['e-cheap', '1 edit failed and never applied'],
     ['k-four', 'Context compacted 4 times'],
@@ -216,6 +216,12 @@ test('worthOpening lists each session once under its first reason, in reason ord
   ]);
   assert.deepEqual(w.map(x => x.turn), ['u-9', 'u-build', 'u-e', 'u-f', '', '', '', ''],
     'a check lands on its run, an edit on first_failed_turn');
+  assert.deepEqual(w.map(x => x.check), ['go test', 'go build', '', '', '', '', '', ''],
+    'a failing-check row carries its check beside the reason; no other row has one');
+  for (const x of w) {
+    for (const k of ['check', 'reason', 'turn']) assert.ok(!x[k].includes('`'), `${k} of ${x.reason} holds no backtick`);
+    if (x.check) assert.ok(x.reason.includes(x.check), 'the reason holds its check name');
+  }
   assert.ok(!w.some(x => x.row.session_id === 'noisy'), 'errored commands alone are no reason');
   assert.ok(!w.some(x => x.row.session_id.startsWith('small')), 'no "10%" row from a 4-row family');
   const ids = w.map(x => x.row.session_id);
@@ -276,7 +282,7 @@ test('20 hand-typed sessions in 20 families of one read sensibly', () => {
   const v = listView(rows, {});
   assert.match(v.sentence, /^20 sessions in the last 7 days/);
   assert.deepEqual(v.worth.map(x => [x.row.session_id, x.reason]), [
-    ['h4', 'Last `npm test` failed'],
+    ['h4', 'Last npm test failed'],
     ['h7', 'Context compacted 1 time'],
     ['h19', 'Most expensive session this week'],
   ]);

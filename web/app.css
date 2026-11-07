@@ -1773,6 +1773,8 @@
   .sl-worth-title { margin: 0; font-size: var(--t-3); font-weight: 600; color: var(--ink); }
   .sl-worth .sl-rows { border-color: color-mix(in oklch, var(--hot) 30%, var(--border)); }
   .sl-reason { font-size: var(--t-2); color: var(--hot); font-weight: 600; }
+  .sl-reason code, .sh-failure code { font-family: var(--font-mono); font-size: 0.95em; padding: 0 4px;
+    border-radius: 3px; background: var(--surface-2); color: var(--ink); }
   .sl-worth-row .sl-meta { display: flex; gap: var(--s-3); }
   .sl-when { color: var(--muted); white-space: nowrap; }
   .sl-rows {

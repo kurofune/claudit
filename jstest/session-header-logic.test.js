@@ -53,9 +53,41 @@ test('headerNumbers sums cost, turns, commands and tokens across main and sub-ag
   assert.equal(n.cachePct, Math.round(100 * 7000 / (100 + 10 + 1 + 4 + 1200 + 7000)));
   assert.equal(n.tokensSub, '84% re-read from cache');
   // The main agent's go build recovered; the sub-agent's did not (same
-  // agent only), and the last turn's three failures never recovered.
-  assert.equal(n.failed, 4);
-  assert.equal(n.failedSub, 'go build ./..., npm test +2 more');
+  // agent only), and the last turn's three failures never recovered: four
+  // unretried errors, but no failing check and no failed edit.
+  assert.equal(unresolvedFailures(st).length, 4);
+  assert.equal(n.failed, 0);
+  assert.equal(n.failedSub, 'none');
+});
+
+test('tile counts failing checks and failed edits, not other errors', () => {
+  const st = story([
+    step('a1', 0, [tool('go test ./...', 'error', { input_key: 'gt' }), tool('ls missing', 'error', { input_key: 'ls' })]),
+    step('a2', 10, [tool('rg nothing', 'error', { input_key: 'rg' })]),
+  ], [], { failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a1', input_key: 'gt' }] });
+  const n = headerNumbers(st);
+  assert.equal(failureRows(st).other.length, 2, 'two other unretried Bash calls');
+  assert.equal(n.failed, 1);
+  assert.equal(n.failedSub, 'go test');
+});
+
+test('the tile counts a failing check and an edit never applied, naming both', () => {
+  const st = story([
+    step('a1', 0, [tool('go test ./...', 'error', { input_key: 'gt' })]),
+    step('a2', 10, [tool('/p/x/a.go', 'error', { name: 'Edit', kind: 'edit', detail: 'a.go', input_key: 'e1' })]),
+  ], [], { failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a1', input_key: 'gt' }] });
+  const n = headerNumbers(st);
+  assert.equal(n.failed, 2);
+  assert.equal(n.failedSub, 'go test, Edit a.go');
+  assert.deepEqual(headerNumbers(st, failureRows(st)), n, 'passing the rows the renderer already built changes nothing');
+});
+
+test('the tile reads 0 and "none" over other errored calls alone', () => {
+  const st = story([step('a1', 0, [tool('npm test', 'error'), tool('make lint', 'error')])]);
+  const n = headerNumbers(st);
+  assert.equal(n.failed, 0);
+  assert.equal(n.failedSub, 'none');
+  assert.equal(failureRows(st).other.length, 2);
 });
 
 test('headerNumbers of a session with no tool calls reads 0 failed', () => {
@@ -216,9 +248,9 @@ test('worthALook keeps a retry storm whose peak attempt has no result yet, and d
   const pending = worthALook(sessionFrom(tries(undefined)), T0 + 16e3);
   assert.deepEqual(pending.map(n => [n.kind, n.link]), [['retry-storm', 'a4'], ['error-cascade', 'a1']],
     'three unresolved failures and an unanswered fourth attempt are no recovery');
-  assert.equal(headerNumbers(tries(undefined)).failed, 3);
+  assert.equal(unresolvedFailures(tries(undefined)).length, 3);
   assert.deepEqual(worthALook(sessionFrom(tries('ok')), T0 + 16e3), []);
-  assert.equal(headerNumbers(tries('ok')).failed, 0);
+  assert.equal(unresolvedFailures(tries('ok')).length, 0);
 });
 
 test('worthALook keeps a retry storm a different input_key succeeds after, and drops it once the same input_key does', () => {
@@ -233,9 +265,9 @@ test('worthALook keeps a retry storm a different input_key succeeds after, and d
   assert.deepEqual(other.map(n => [n.kind, n.link]), [['retry-storm', 'a3'], ['error-cascade', 'a1']],
     'a success of another whole input is no recovery of the storm');
   assert.match(other[0].body, /go test \.\/internal\/aggregate/, 'the note still names the readable command');
-  assert.equal(headerNumbers(tries('bbbb')).failed, 3);
+  assert.equal(unresolvedFailures(tries('bbbb')).length, 3);
   assert.deepEqual(worthALook(sessionFrom(tries('aaaa')), T0 + 16e3), []);
-  assert.equal(headerNumbers(tries('aaaa')).failed, 0);
+  assert.equal(unresolvedFailures(tries('aaaa')).length, 0);
 });
 
 test('unresolvedFailures matches a later success by input_key, not the capped input', () => {
@@ -246,8 +278,7 @@ test('unresolvedFailures matches a later success by input_key, not the capped in
   ]);
   assert.deepEqual(unresolvedFailures(distinct).map(f => f.tool.input_key), ['aaaa'],
     'equal snippets with distinct input_key are two commands');
-  const n = headerNumbers(distinct);
-  assert.equal(n.failed, 1);
+  assert.equal(failureRows(distinct).other.length, 1);
   assert.match(explainPrompt(distinct), /Unresolved failures:\n10:00:00  go test /);
   assert.deepEqual(stripBars(distinct, 'cost').map(b => b.failed), [true, false]);
 
@@ -256,7 +287,7 @@ test('unresolvedFailures matches a later success by input_key, not the capped in
     step('a2', 5, [tool(capped, 'ok', { input_key: 'aaaa' })]),
   ]);
   assert.deepEqual(unresolvedFailures(same), [], 'the same input_key later ok recovers it');
-  assert.equal(headerNumbers(same).failed, 0);
+  assert.equal(failureRows(same).other.length, 0);
 });
 
 test('sessionTurns links each turn to its own uuid, a uuid-less one to the latest main turn before it', () => {
@@ -401,15 +432,19 @@ test('failureRows leads with the failing checks, then the edits never applied, t
   });
   const g = failureRows(st);
   assert.deepEqual(g.checks, [
-    { text: 'Last `go test` failed · go test ./...', link: 'a4' },
-    { text: 'Last `go build` failed · go build ./...', link: 'a4' },
+    { check: 'go test', name: 'go test', text: 'Last go test failed · go test ./...', link: 'a4' },
+    { check: 'go build', name: 'go build', text: 'Last go build failed · go build ./...', link: 'a4' },
   ]);
   assert.deepEqual(g.edits, [
-    { text: 'Edit failed and never applied · /p/x/a.go', link: 'a2' },
-    { text: 'apply_patch failed and never applied · *** Begin Patch', link: 'a5' },
+    { check: '', name: 'Edit a.go', text: 'Edit failed and never applied · /p/x/a.go', link: 'a2' },
+    { check: '', name: 'apply_patch patch', text: 'apply_patch failed and never applied · *** Begin Patch', link: 'a5' },
   ], 'the Write retried identically applied');
-  assert.deepEqual(g.other, [{ text: 'Bash · ls missing', link: 'a1' }],
+  assert.deepEqual(g.other, [{ check: '', name: 'ls missing', text: 'Bash · ls missing', link: 'a1' }],
     'both go test runs fold into their check row; the ls stays');
+  for (const r of [...g.checks, ...g.edits, ...g.other]) {
+    for (const [k, v] of Object.entries(r)) assert.ok(!String(v).includes('`'), `${k} of ${r.text} holds no backtick`);
+    if (r.check) assert.ok(r.text.includes(r.check), 'a check row\'s text holds its check name');
+  }
   assert.equal(failuresHeading(g), '2 failing checks · 2 edits never applied');
   assert.equal(failuresHeading({ checks: g.checks.slice(0, 1), edits: [], other: [] }), '1 failing check');
   assert.equal(failuresHeading({ checks: [], edits: g.edits.slice(0, 1), other: [] }), '1 edit never applied');
@@ -423,8 +458,8 @@ test('failureRows folds only the failing check\'s own call, by input_key, never 
     step('a2', 10, [tool('cd /repo\ngo test ./...', 'error', { input_key: 'gt' }), tool('cd /repo\nrg x', 'error')]),
   ], [], { failing_checks: [{ check: 'go test', command: 'cd /repo', turn: 'a2', input_key: 'gt' }] });
   const g = failureRows(st);
-  assert.deepEqual(g.checks, [{ text: 'Last `go test` failed · cd /repo', link: 'a2' }]);
-  assert.deepEqual(g.other, [{ text: 'Bash · cd /repo', link: 'a1' }, { text: 'Bash · cd /repo', link: 'a2' }],
+  assert.deepEqual(g.checks, [{ check: 'go test', name: 'go test', text: 'Last go test failed · cd /repo', link: 'a2' }]);
+  assert.deepEqual(g.other.map(r => ({ text: r.text, link: r.link })), [{ text: 'Bash · cd /repo', link: 'a1' }, { text: 'Bash · cd /repo', link: 'a2' }],
     'the ls and the rg stay though they read like the check row; only the go test call folds');
   const keyless = story([step('a1', 0, [tool('go test ./...', 'error')])],
     [], { failing_checks: [{ check: 'go test', command: 'go test ./...', turn: 'a1', input_key: '' }] });

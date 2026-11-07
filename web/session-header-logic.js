@@ -130,6 +130,8 @@ const clipRunes = (s, n) => { const r = Array.from(s); return r.length > n ? r.s
 /**
  * One row of the failure block.
  * @typedef {Object} FailureRow
+ * @property {string} check  the failing check's name as text holds it, set as code; '' on an edit or other row
+ * @property {string} name   the row's short name, as the Failing tile's sub-line lists it
  * @property {string} text   what failed, as the row reads
  * @property {string} link   turn uuid the row links to
  */
@@ -137,7 +139,7 @@ const clipRunes = (s, n) => { const r = Array.from(s); return r.length > n ? r.s
 /**
  * The failure block's rows in its three groups.
  * @typedef {Object} FailureGroups
- * @property {FailureRow[]} checks  "Last `<check>` failed · <command>", one per failing_checks entry
+ * @property {FailureRow[]} checks  "Last <check> failed · <command>", one per failing_checks entry
  * @property {FailureRow[]} edits   "<tool> failed and never applied · <input>", one per edit never applied
  * @property {FailureRow[]} other   "<tool> · <input>", every other errored call not retried
  */
@@ -160,16 +162,23 @@ export function failureRows(story) {
   const checkKeys = new Set(failing.map(c => c.input_key).filter(Boolean));
   /** @type {FailureGroups} */
   const out = {
-    checks: failing.map(c => ({ text: `Last \`${c.check}\` failed · ${c.command}`, link: c.turn })),
+    checks: failing.map(c => ({
+      check: c.check, name: c.check, text: `Last ${c.check} failed · ${c.command}`, link: c.turn,
+    })),
     edits: [],
     other: [],
   };
   for (const { turn, tool } of unresolvedFailures(story)) {
     const what = clipRunes(firstLine(tool.input || ''), CMD_RUNES) || tool.detail || '';
     if (EDIT_TOOLS.has(tool.name || '')) {
-      out.edits.push({ text: [`${tool.name} failed and never applied`, what].filter(Boolean).join(' · '), link: turn.link });
+      out.edits.push({
+        check: '', name: [tool.name, tool.detail || what].filter(Boolean).join(' '),
+        text: [`${tool.name} failed and never applied`, what].filter(Boolean).join(' · '), link: turn.link,
+      });
     } else if (!(tool.input_key && checkKeys.has(tool.input_key))) {
-      out.other.push({ text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link });
+      out.other.push({
+        check: '', name: commandOf(tool), text: [tool.name || '', what].filter(Boolean).join(' · '), link: turn.link,
+      });
     }
   }
   return out;
@@ -238,10 +247,11 @@ const tokenParts = t => ({
 
 // headerNumbers is the four tiles: what the session cost, how long it ran
 // with how many turns and commands, how many tokens it moved with the share
-// re-read from cache, and its unresolved failures with up to two of their
-// commands.
-/** @param {WholeStory} story */
-export function headerNumbers(story) {
+// re-read from cache, and what it ended failing: the failure block's
+// failing checks and edits never applied, with up to two of their names.
+// The other errored calls count only in the block's collapsed disclosure.
+/** @param {WholeStory} story @param {FailureGroups} [groups] the story's failureRows, when the caller has them */
+export function headerNumbers(story, groups = failureRows(story)) {
   const turns = sessionTurns(story);
   let cost = 0, commands = 0, input = 0, output = 0, c5 = 0, c1 = 0, read = 0;
   for (const { step } of turns) {
@@ -255,8 +265,8 @@ export function headerNumbers(story) {
   const tokens = input + output + c5 + c1 + read;
   const prompt = input + c5 + c1 + read;
   const cachePct = prompt > 0 ? Math.round(100 * read / prompt) : 0;
-  const failures = unresolvedFailures(story, turns);
-  const names = [...new Set(failures.map(f => commandOf(f.tool)).filter(Boolean))];
+  const failing = [...groups.checks, ...groups.edits];
+  const names = [...new Set(failing.map(f => f.name).filter(Boolean))];
   const shown = names.slice(0, 2).map(c => clip(c, 40));
   const more = names.length > 2 ? ` +${names.length - 2} more` : '';
   return {
@@ -268,7 +278,7 @@ export function headerNumbers(story) {
     tokens,
     cachePct,
     tokensSub: `${cachePct}% re-read from cache`,
-    failed: failures.length,
+    failed: failing.length,
     failedSub: shown.length ? shown.join(', ') + more : 'none',
   };
 }
