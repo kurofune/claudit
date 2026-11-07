@@ -487,14 +487,38 @@ export function looksTruncated(s) {
 }
 
 // unwrapExit removes the "Exit code: N" / "Output:" header lines Codex
-// writes above a command's full output, as the story's snippets already do.
+// writes above a command's full output, as the story's snippets already do;
+// under a "Script completed" header it returns the JSON chunk's output.
 /** @param {string} text */
 export function unwrapExit(text) {
   const s = String(text || '');
   const cut = s.indexOf('\nOutput:\n');
   const head = cut >= 0 ? s.slice(0, cut) : s.endsWith('\nOutput:') ? s.slice(0, -8) : null;
-  if (head == null || !/^(?:Exit code: |Process exited with code )-?\d+[ \t]*$/m.test(head)) return s;
-  return cut >= 0 ? s.slice(cut + 9) : '';
+  if (head == null) return s;
+  const body = cut >= 0 ? s.slice(cut + 9) : '';
+  if (/^(?:Exit code: |Process exited with code )-?\d+[ \t]*$/m.test(head)) return body;
+  if (head.startsWith('Script completed\n')) {
+    const out = scriptChunkOutput(body);
+    if (out != null) return out;
+  }
+  return s;
+}
+
+// scriptChunkOutput is the output of the JSON chunk a "Script completed"
+// envelope carries, perhaps behind a "Warning: truncated output" block, or
+// null when the body is not one such chunk.
+/** @param {string} body */
+function scriptChunkOutput(body) {
+  let rest = body.replace(/^\n+/, '');
+  if (rest.startsWith('Warning: truncated output')) {
+    const gap = rest.indexOf('\n\n');
+    if (gap < 0) return null;
+    rest = rest.slice(gap + 2);
+  }
+  let chunk;
+  try { chunk = JSON.parse(rest); } catch { return null; }
+  if (!chunk || typeof chunk !== 'object' || !Number.isInteger(chunk.exit_code) || typeof chunk.output !== 'string') return null;
+  return chunk.output;
 }
 
 // firstLineOf is a prompt's first non-empty line, for the jump list.

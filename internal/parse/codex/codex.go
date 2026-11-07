@@ -1297,7 +1297,9 @@ var (
 // ExitEnvelope splits the header Codex writes above a command's output:
 // an "Exit code: N" (or "Process exited with code N") line, perhaps with
 // others such as "Wall time:", then an "Output:" line. It returns N and the
-// text after the "Output:" line; ok is false when text carries no such
+// text after the "Output:" line. A "Script completed" header instead carries
+// the command's result as a JSON chunk after the "Output:" line; it returns
+// that chunk's exit_code and output. ok is false when text carries neither
 // envelope.
 func ExitEnvelope(text string) (code int, body string, ok bool) {
 	head, body, found := strings.Cut(text, "\nOutput:\n")
@@ -1309,6 +1311,9 @@ func ExitEnvelope(text string) (code int, body string, ok bool) {
 	}
 	m := exitHeader.FindStringSubmatch(head)
 	if m == nil {
+		if strings.HasPrefix(head, "Script completed\n") {
+			return scriptChunk(body)
+		}
 		return 0, "", false
 	}
 	code, err := strconv.Atoi(m[1])
@@ -1316,6 +1321,29 @@ func ExitEnvelope(text string) (code int, body string, ok bool) {
 		return 0, "", false
 	}
 	return code, body, true
+}
+
+// scriptChunk reads the JSON result a "Script completed" envelope carries
+// after its "Output:" line, perhaps behind a "Warning: truncated output"
+// block. ok is false unless the body is one JSON object with both an
+// exit_code and an output.
+func scriptChunk(body string) (code int, output string, ok bool) {
+	body = strings.TrimLeft(body, "\n")
+	if strings.HasPrefix(body, "Warning: truncated output") {
+		_, rest, found := strings.Cut(body, "\n\n")
+		if !found {
+			return 0, "", false
+		}
+		body = rest
+	}
+	var chunk struct {
+		ExitCode *int    `json:"exit_code"`
+		Output   *string `json:"output"`
+	}
+	if json.Unmarshal([]byte(body), &chunk) != nil || chunk.ExitCode == nil || chunk.Output == nil {
+		return 0, "", false
+	}
+	return *chunk.ExitCode, *chunk.Output, true
 }
 
 // exitError reports whether a tool output records a failure. Codex writes
