@@ -98,6 +98,36 @@ func TestCheckKind(t *testing.T) {
 		{"python3 - <<'EOF'\nprint(1)\nEOF\ngo vet ./internal/registry/", "go vet"},
 		{"cat >> internal/corpus/corpus_test.go <<'EOF'\nfunc TestX(t *testing.T) {}\nEOF\ngo test ./internal/corpus/", "go test"},
 
+		{"go test ./... && echo ok >&-", ""},
+		{"echo x >&- && go test ./...", ""},
+		{"go test ./... & false", ""},
+		{"go test ./... &", ""},
+		{"go test ./... > out.log", ""},
+		{"go test ./... >&2", "go test"},
+		{"go test ./... 1>&2", "go test"},
+		{"go test ./... 2>&1 >&2", "go test"},
+		{"go test ./... 2>&1 | tee out.log", ""},
+		{"go test ./... >> out.log", ""},
+		{"go test ./... 2>/dev/null", ""},
+		{"go test ./... &> out.log", ""},
+		{"go test ./... < in.txt", ""},
+		{"go test ./... >&out.log", ""},
+		{"go test ./... 2>&-", ""},
+		{"go test ./... && echo ok > f", ""},
+		{"go test ./... && echo ok &", ""},
+		{"ls && go test ./... &", ""},
+		{"sleep 1 & go test ./...", "go test"},
+		{"sleep 1 &\ngo test ./...", "go test"},
+		{"go test ./... 2>&1&", ""},
+		{"echo 'a > b' && go test ./...", "go test"},
+		{"echo \"a & b\" && go test ./...", "go test"},
+		{"echo a \\> b && go test ./...", "go test"},
+		{"go test ./... # > out.log &", "go test"},
+		{"cat <<EOF > f\nx > y &\nEOF\ngo test ./...", "go test"},
+		{"ls > f; go test ./...", "go test"},
+		{"ls > f\ngo test ./...", "go test"},
+		{"diff <(ls) <(ls) ; go vet ./...", "go vet"},
+
 		{"", ""},
 	}
 	for _, tc := range cases {
@@ -128,6 +158,8 @@ func TestCheckKindGate(t *testing.T) {
 		{"go build ./... &&\n\ngo vet ./...", true, false},
 		{"ls || cargo check", false, true},
 		{"go build ./... && ls || make", true, true},
+		{"go build ./... 2>&1 && go vet ./... 2>&1", true, false},
+		{"sleep 1 & echo x && go test ./...", false, false},
 	}
 	for _, tc := range cases {
 		got := checkKind(tc.cmd)

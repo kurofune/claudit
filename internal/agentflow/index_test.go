@@ -592,6 +592,65 @@ func TestBuildSessionIndex_GatedCheckOwnsNoAmbiguousExit(t *testing.T) {
 	}
 }
 
+// twoCalls indexes session s1 with one Bash call per command, a minute
+// apart, each errored as errs says, and returns its row.
+func twoCalls(t *testing.T, cmds []string, errs []bool) SessionIndexRow {
+	t.Helper()
+	prices, _ := pricing.LoadDefault()
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	snap := &corpus.Snapshot{}
+	for i, cmd := range cmds {
+		id := "t" + strconv.Itoa(i+1)
+		snap.Turns = append(snap.Turns, bashTurn("a"+strconv.Itoa(i+1), "s1", t0.Add(time.Duration(i)*time.Minute), id, cmd))
+		snap.ToolResults = append(snap.ToolResults, parse.ToolResult{ToolUseID: id, IsError: errs[i], Content: "out"})
+	}
+	return findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+}
+
+// TestBuildSessionIndex_RedirectedBuiltinOwnsNoCheck: `echo ok >&-` fails
+// on its closed stdout, so an errored `go test && echo ok >&-` may be the
+// echo's exit and is no go test failure; it still counts as a failed call.
+func TestBuildSessionIndex_RedirectedBuiltinOwnsNoCheck(t *testing.T) {
+	row := twoCalls(t, []string{"go test ./... && echo ok >&-"}, []bool{true})
+	if len(row.FailingChecks) != 0 {
+		t.Errorf("failing_checks = %+v, want none (echo's write error, not go test's)", row.FailingChecks)
+	}
+	if row.Failed != 1 {
+		t.Errorf("failed = %d, want 1 (the errored call still counts)", row.Failed)
+	}
+}
+
+// TestBuildSessionIndex_BackgroundRunClearsNothing: a backgrounded go test's
+// exit is unknown when the call returns, so a passing call that ran one in
+// the background clears no earlier go test failure.
+func TestBuildSessionIndex_BackgroundRunClearsNothing(t *testing.T) {
+	key := strconv.FormatUint(parse.ToolInputKey("go test ./..."), 16)
+	want := []FailingCheck{{Check: "go test", Command: "go test ./...", Turn: "a1", InputKey: key}}
+	for _, second := range []string{"go test ./... & false", "go test ./... &"} {
+		t.Run(second, func(t *testing.T) {
+			row := twoCalls(t, []string{"go test ./...", second}, []bool{true, false})
+			if !reflect.DeepEqual(row.FailingChecks, want) {
+				t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
+			}
+		})
+	}
+}
+
+// TestBuildSessionIndex_FdDuplicationStillAttributed: `2>&1` cannot fail,
+// so a check run with it still fails and clears that check.
+func TestBuildSessionIndex_FdDuplicationStillAttributed(t *testing.T) {
+	cleared := twoCalls(t, []string{"go test ./...", "go test ./... 2>&1"}, []bool{true, false})
+	if len(cleared.FailingChecks) != 0 {
+		t.Errorf("failing_checks = %+v, want none (the 2>&1 run passed)", cleared.FailingChecks)
+	}
+	failed := twoCalls(t, []string{"go test ./... 2>&1"}, []bool{true})
+	want := []FailingCheck{{Check: "go test", Command: "go test ./... 2>&1", Turn: "a1",
+		InputKey: strconv.FormatUint(parse.ToolInputKey("go test ./... 2>&1"), 16)}}
+	if !reflect.DeepEqual(failed.FailingChecks, want) {
+		t.Errorf("failing_checks = %+v, want %+v", failed.FailingChecks, want)
+	}
+}
+
 // TestBuildSessionIndex_TruncatedInputRunsNoCheck: the parser caps a tool
 // input, so a long `go test ... && tmux x` reaches the index without its
 // trailing tmux. Its exit is tmux's, so it neither fails nor clears go test.
