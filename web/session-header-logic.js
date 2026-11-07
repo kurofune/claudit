@@ -370,6 +370,19 @@ export function worthALook(session, nowMs) {
   const opts = typeof nowMs === 'number' && !Number.isNaN(nowMs) ? { nowMs } : {};
   const signals = detectSignals(/** @type {any} */ ({ sessions: [sessionOf(story)] }), opts);
 
+  /** @type {Map<number, {flat: StoryTool[], at: Map<StoryTool, number>}>} */
+  const flatOf = new Map();
+  /** @param {number} ai */
+  const flatTools = ai => {
+    let f = flatOf.get(ai);
+    if (!f) {
+      const flat = (agents[ai] || { steps: [] }).steps.flatMap(st => st.tools || []);
+      f = { flat, at: new Map(flat.map((t, i) => [t, i])) };
+      flatOf.set(ai, f);
+    }
+    return f;
+  };
+
   /** @param {Signal} s */
   const resolved = s => {
     const r = parseRefKey(s.ref);
@@ -379,9 +392,8 @@ export function worthALook(session, nowMs) {
     if (!tool) return false;
     if (s.kind === 'retry-storm') return ok.has(tool);
     // error-cascade: the run of consecutive errors starting at ref.
-    const flat = steps.flatMap(st => st.tools || []);
-    let i = flat.indexOf(tool);
-    for (; i >= 0 && i < flat.length && flat[i].status === 'error'; i++) {
+    const { flat, at } = flatTools(r.agentIndex);
+    for (let i = at.get(tool) ?? -1; i >= 0 && i < flat.length && flat[i].status === 'error'; i++) {
       if (!ok.has(flat[i])) return false;
     }
     return true;

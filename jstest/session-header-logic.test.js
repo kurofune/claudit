@@ -513,3 +513,41 @@ test('headerFamilyStats: no stats for the prompt-less family, an empty key or a 
   assert.equal(headerFamilyStats(family(COSTS, DURS, 6), ''), null);
   assert.equal(headerFamilyStats(undefined, 'fix the login bug'), null);
 });
+
+test('worthALook: an error cascade every errored call of which is later repeated with an ok result has no cascade note', () => {
+  const st = story([
+    step('a1', 0, [tool('git status', 'ok')]),
+    step('a2', 5, [tool('npm test', 'error'), tool('make lint', 'error')]),
+    step('a3', 10, [tool('go vet ./...', 'error'), tool('rg foo', 'ok')]),
+    step('a4', 15, [tool('go vet ./...', 'ok')]),
+    step('a5', 20, [tool('make lint', 'ok'), tool('npm test', 'ok')]),
+  ]);
+  const notes = worthALook(sessionFrom(st), T0 + 25e3);
+  assert.equal(notes.filter(n => n.kind === 'error-cascade').length, 0);
+});
+
+test('worthALook keeps an error cascade one of whose errored calls is never repeated with an ok result', () => {
+  const st = story([
+    step('a1', 0, [tool('git status', 'ok')]),
+    step('a2', 5, [tool('npm test', 'error'), tool('make lint', 'error')]),
+    step('a3', 10, [tool('go vet ./...', 'error'), tool('rg foo', 'ok')]),
+    step('a4', 15, [tool('go vet ./...', 'error')]),
+    step('a5', 20, [tool('make lint', 'ok'), tool('npm test', 'ok')]),
+  ]);
+  const cascades = worthALook(sessionFrom(st), T0 + 25e3).filter(n => n.kind === 'error-cascade');
+  assert.equal(cascades.length, 1);
+  assert.equal(cascades[0].link, 'a2');
+  assert.equal(cascades[0].head, '3 tools errored back-to-back, starting with Bash');
+});
+
+test('worthALook returns in under 2 s on a 50,000-turn session of distinct commands erroring three in four', () => {
+  const statuses = ['error', 'error', 'error', 'ok'];
+  const st = story(Array.from({ length: 50000 }, (_, i) =>
+    step(`a${i}`, i, [tool(`echo ${i}`, statuses[i % 4])])));
+  const t0 = performance.now();
+  const notes = worthALook(sessionFrom(st), T0 + 50001e3);
+  const ms = performance.now() - t0;
+  assert.ok(ms < 2000, `worthALook took ${Math.round(ms)} ms`);
+  assert.equal(notes.length, 3, 'the distinct-command cascades never resolve, so they fill the notes');
+  assert.ok(notes.every(n => n.kind === 'error-cascade'));
+});
