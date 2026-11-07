@@ -31,3 +31,10 @@ Worked 2 of 2 pending at HEAD c58e8c7. That clears the queue.
 - claudit-xef (from claudit-hts): still reproduces. `execCommands` runs `execCall` over the raw source while `execFunction` scans `jsCode(src)` (internal/parse/codex/codex.go:873 against :662). Re-authored as claudit-3gm (parent claudit-lft), then closed.
 
 Both new beads are filed `proposed` (bug, P2, from:seat:lead), because ## Self-approval is still [TODO]. They go to triage.
+
+## 2026-11-07 01:14 — triage
+
+Decided 2 of 2 listed, oldest first, at HEAD 8a48a17. The lead voted go on both, with no hard-rule flag, after confirming each claim in the code.
+
+- claudit-3gm: go (3-0-0). Reproduces: execCommands (codex.go:873) matches execCall over raw src, while execFunction (:662) scans jsCode(src).
+- claudit-zpb: go (3-0-0). Reproduces: resolved runs flatMap plus indexOf for each error-cascade signal (web/session-header-logic.js:382-383).
