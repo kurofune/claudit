@@ -778,3 +778,25 @@ test('a repaint while the rest of a long list is still being appended draws each
   assert.deepEqual(families, many(total).map(r => r.family_key));
   assert.equal(view.querySelectorAll('.sl-group .sl-row').length, total, 'one row per session, none doubled');
 });
+
+test('opening a family drawn after the first paint keeps it on the next paint and focuses its first revealed row', async () => {
+  const { FIRST_GROUPS } = await import('../web/sessions-list.js');
+  const total = FIRST_GROUPS * 3;
+  const late = `family ${FIRST_GROUPS * 2}`;
+  const extra = Array.from({ length: 4 }, (_, i) => row(`late-${i}`, { family_key: late, title: late, last_activity: at(-1000 - i) }));
+  stubFetch(() => ({ sessions: [...many(total), ...extra] }));
+  const { view, done, document } = await mount();
+  await done;
+  await settleAll();
+  const g = () => view.querySelector(`.sl-group[data-family="${late}"]`);
+  const more = g().querySelector('.sl-more');
+  assert.equal(more.textContent, 'Show all 5');
+  more.focus();
+  click(more);
+  assert.ok(g(), 'the opened family is drawn in the same task');
+  assert.equal(g().querySelectorAll('.sl-row').length, 5);
+  assert.equal(document.activeElement.closest('.sl-group'), g(), 'focus lands on a row it revealed');
+  assert.ok(document.activeElement.classList.contains('sl-row'));
+  await settleAll();
+  assert.equal(view.querySelectorAll('.sl-group').length, total);
+});

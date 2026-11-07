@@ -59,7 +59,23 @@ export const rowLabel = r => r.remainder || r.title || '';
 /** @param {SessionIndexRow} r */
 export const rowTitle = r => r.title || r.remainder || '(no prompt)';
 
-const ts = (/** @type {string} */ s) => { const t = Date.parse(s || ''); return isNaN(t) ? 0 : t; };
+// ts is a timestamp's epoch ms, 0 when it does not parse. The sorts call it
+// in every comparison, so each string is parsed once and kept; the cache
+// starts over past TS_CACHE_MAX strings so a long-lived tab stays bounded.
+const TS_CACHE_MAX = 100_000;
+/** @type {Map<string, number>} */
+const parsedTs = new Map();
+const ts = (/** @type {string} */ s) => {
+  const key = s || '';
+  let t = parsedTs.get(key);
+  if (t === undefined) {
+    if (parsedTs.size >= TS_CACHE_MAX) parsedTs.clear();
+    t = Date.parse(key);
+    if (isNaN(t)) t = 0;
+    parsedTs.set(key, t);
+  }
+  return t;
+};
 
 // groupByFamily buckets rows by exact family_key, keeping each bucket's
 // rows in input order, and orders the buckets by their newest member.

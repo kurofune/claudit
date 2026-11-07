@@ -154,6 +154,31 @@ const afterPaint = fn => {
   else setTimeout(fn, 0);
 };
 
+// onScreen reads, before a repaint, the family groups in the viewport: the
+// first (with its offset from the viewport top, so the repaint can put it
+// back exactly) and the last. Groups off screen are sized by estimate
+// until drawn, so a scroll offset alone would land somewhere else. Null
+// when no group is in the viewport.
+/** @param {Element} body @returns {{anchor: string, top: number, last: string}|null} */
+function onScreen(body) {
+  const groups = Array.from(body.children).filter(c => c.classList.contains('sl-group'));
+  const rect = (/** @type {number} */ i) => groups[i].getBoundingClientRect();
+  let lo = 0, hi = groups.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (rect(mid).bottom > 0) hi = mid; else lo = mid + 1;
+  }
+  const height = window.innerHeight || 0;
+  if (lo === groups.length || rect(lo).top >= height) return null;
+  let last = lo;
+  while (last + 1 < groups.length && rect(last + 1).top < height) last++;
+  return {
+    anchor: groups[lo].getAttribute('data-family') || '',
+    top: rect(lo).top,
+    last: groups[last].getAttribute('data-family') || '',
+  };
+}
+
 /** @param {Element} body @param {string} html */
 function appendHTML(body, html) {
   const tmp = body.ownerDocument.createElement('div');
@@ -176,6 +201,8 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   const token = {};
   painting.set(root, token);
   const keep = captureFocus(root);
+  const focusedGroup = focusGroup(root);
+  const seen = onScreen(body);
   const scrollY = typeof window.scrollY === 'number' ? window.scrollY : 0;
   const before = drawn.get(root) || new Map();
   /** @type {Map<string, string>} */
@@ -193,7 +220,7 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   sorts.innerHTML = `<span class="sl-sort-label" aria-hidden="true">Sort</span>` + SORTS.map(s => `<button type="button"
       class="sl-sort" data-sort="${s.id}" data-focus-key="sort:${s.id}" aria-pressed="${ui.sort === s.id}">${escHtml(s.label)}</button>`).join('');
 
-  /** @type {string[]} */
+  /** @type {ViewGroup[]} */
   let later = [];
   if (v.empty === 'none') {
     body.innerHTML = `<p class="empty-state sl-empty" role="status">No sessions in this window (${escHtml(windowText(search))})</p>`;
@@ -211,11 +238,16 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
           <div class="sl-rows">${v.worth.map(w => draw(`worth:${w.row.session_id}`, worthRowHTML(w, now))).join('')}</div>
         </section>`
       : '';
-    const groups = v.empty ? [] : v.groups.map(g => groupHTML(g, draw));
-    later = groups.slice(FIRST_GROUPS);
+    // The first batch also reaches every group that was on screen or held
+    // focus, so a repaint redraws what the reader sees in one go and an
+    // expanded family's rows are there to focus.
+    const at = new Map(v.groups.map((g, i) => [g.key, i + 1]));
+    const first = Math.max(FIRST_GROUPS, at.get(focusedGroup) || 0,
+      (seen && at.get(seen.anchor)) || 0, (seen && at.get(seen.last)) || 0);
+    if (!v.empty) later = v.groups.slice(first);
     body.innerHTML = active + sentence + (v.empty
       ? `<p class="empty-state sl-empty" role="status">${escHtml(v.empty)}</p>`
-      : worth + groups.slice(0, FIRST_GROUPS).join(''));
+      : worth + v.groups.slice(0, first).map(g => groupHTML(g, draw)).join(''));
   }
 
   const putBack = () => {
@@ -227,16 +259,30 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
       }
     }
   };
+  // The group that led the viewport goes back to the offset it had; with
+  // none, the scroll offset does, batch by batch as the height it needs
+  // arrives, until the reader scrolls themselves.
+  let lastY = typeof window.scrollY === 'number' ? window.scrollY : 0;
+  const placeScroll = () => {
+    const el = seen && body.querySelector(`.sl-group[data-family="${cssEsc(seen.anchor)}"]`);
+    if (el && typeof window.scrollBy === 'function') {
+      const by = el.getBoundingClientRect().top - (seen ? seen.top : 0);
+      if (by) window.scrollBy(0, by);
+      return true;
+    }
+    if (typeof window.scrollTo !== 'function' || window.scrollY === scrollY) return true;
+    if (window.scrollY !== lastY) return true;
+    window.scrollTo(0, scrollY);
+    lastY = window.scrollY;
+    return window.scrollY === scrollY;
+  };
   // Each batch puts back its kept rows, then focus and scroll once the
-  // element and the height they need are there; a scroll the reader made
-  // meanwhile is left alone.
-  let focused = false;
-  let lastY = 0;
+  // element and the height they need are there.
+  let focused = false, placed = false;
   const settle = () => {
     putBack();
     if (!focused) focused = restoreFocus(root, keep);
-    if (typeof window.scrollTo === 'function' && window.scrollY !== scrollY && window.scrollY === lastY) window.scrollTo(0, scrollY);
-    lastY = window.scrollY;
+    if (!placed) placed = placeScroll();
   };
   const finish = () => {
     /** @type {Map<string, {html: string, el: Element}>} */
@@ -248,7 +294,6 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
     }
     drawn.set(root, after);
   };
-  lastY = typeof window.scrollY === 'number' ? window.scrollY : 0;
   settle();
   if (!later.length) {
     finish();
@@ -256,7 +301,7 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   }
   const step = () => {
     if (painting.get(root) !== token) return;
-    appendHTML(body, later.splice(0, LATER_GROUPS).join(''));
+    appendHTML(body, later.splice(0, LATER_GROUPS).map(g => groupHTML(g, draw)).join(''));
     settle();
     if (later.length) afterPaint(step);
     else finish();
@@ -267,6 +312,7 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
 // renderListLoading paints the skeleton while the index is in flight.
 /** @param {Element} root */
 export function renderListLoading(root) {
+  painting.delete(root);
   const body = root.querySelector('.sl-body');
   if (body) body.innerHTML = `<div aria-busy="true" aria-label="Loading sessions">${sessionListSkeleton(8)}</div>`;
 }
@@ -281,6 +327,7 @@ function failureReason(err) {
 // renderListError paints the failed fetch with its HTTP status and a Retry.
 /** @param {Element} root @param {any} err */
 export function renderListError(root, err) {
+  painting.delete(root);
   const body = root.querySelector('.sl-body');
   if (!body) return;
   body.innerHTML = `<div class="warning-card sl-error" role="alert"><strong class="danger">Could not load sessions:</strong>
@@ -302,6 +349,15 @@ export function renderRefreshError(root, err) {
 export function clearRefreshError(root) {
   const status = root.querySelector('.sl-status');
   if (status && status.innerHTML) status.innerHTML = '';
+}
+
+// focusGroup is the family of the group holding focus, '' for none.
+/** @param {Element} root */
+function focusGroup(root) {
+  const a = /** @type {Element|null} */ (document.activeElement);
+  if (!a || !root.contains(a) || !a.closest) return '';
+  const g = a.closest('.sl-group');
+  return (g && g.getAttribute('data-family')) || '';
 }
 
 /** @param {Element} root */

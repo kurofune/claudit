@@ -336,3 +336,24 @@ test('a window with no failing check and no failed edit: one clause, a 0 chip, W
     ['n1', 'Most expensive session this week'],
   ]);
 });
+
+// The whole corpus is thousands of rows sorted several ways; parsing each
+// row's timestamp again in every comparison held the list's first paint
+// back by most of a second.
+test('listView parses each distinct timestamp once however many comparisons its sorts make', () => {
+  const rows = Array.from({ length: 2000 }, (_, i) => row(`s${i}`, {
+    family_key: `family ${i % 300}`, last_activity: at(-(i % 500)), cost_usd: (i % 13) + 0.5,
+    compactions: i % 9 === 0 ? 1 : 0, failed_edits: i % 17 === 0 ? 1 : 0,
+  }));
+  const distinct = new Set(rows.map(r => r.last_activity)).size;
+  const realParse = Date.parse;
+  let calls = 0;
+  Date.parse = s => { calls++; return realParse(s); };
+  try {
+    listView(rows, { sort: 'cost' });
+    listView(rows, {});
+  } finally {
+    Date.parse = realParse;
+  }
+  assert.ok(calls <= distinct + 10, `Date.parse ran ${calls} times for ${distinct} distinct timestamps`);
+});
