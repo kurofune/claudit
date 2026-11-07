@@ -341,34 +341,36 @@ every route (`curl -sN …/events` exits 18 after 60 s); filed as
 claudit-n6f.
 ## Harness runs keyed by their task line (2026-11-06, claudit-9rc)
 
-**Measured 2026-11-06, code at ce946d5 (claudit-9rc),** after a prompt's
-leading paragraphs that appear verbatim, as whole lines, in an instruction
+**Measured 2026-11-06, code at e0558ac (claudit-9rc),** after a prompt's
+leading paragraphs that equal, trimmed, a whole paragraph of an instruction
 document injected into the same session (Codex's `# AGENTS.md instructions
 for …` item, Claude Code's `<system-reminder>`) stopped counting as its
-own text. The Codex parser drops them before the 2,000-rune snippet cap and
-carries the rest as `UserMessage.OwnText`, since the djinn harness's copy
-of the work contract alone runs past the cap. `claudit serve --open=false`
-built at ce946d5 on port 18832 beside a build at 1d84f4c (its parent) on
-18831, both read at 19:52:18 PST, the list's default window (the last 7
-days, no query):
+own text. A paragraph is the lines between blank lines or lone wrapper
+lines (`<INSTRUCTIONS>`, `</system-reminder>`, `<!-- … -->`); part of a
+document paragraph is not one. Both parsers drop the copy before the
+2,000-rune snippet cap and carry the rest as `UserMessage.OwnText`, since
+the djinn harness's copy of the work contract alone runs past the cap.
+`claudit serve --open=false` built at e0558ac on port 18842 beside a build
+at 1d84f4c (its parent) on 18841, both read at 19:58:05 PST, the list's
+default window (the last 7 days, no query):
 
 ```sh
-curl -s http://127.0.0.1:18832/_claudit/api/sessions | jq '{total: (.sessions | length), contract: ([.sessions[] | select(.family_key == "# Per-Bead Work Contract")] | length), top: ([.sessions[] | .family_key] | group_by(.) | map({key: .[0], n: length}) | sort_by(-.n) | .[:10])}'
+curl -s http://127.0.0.1:18842/_claudit/api/sessions | jq '{total: (.sessions | length), contract: ([.sessions[] | select(.family_key == "# Per-Bead Work Contract")] | length), top: ([.sessions[] | .family_key] | group_by(.) | map({key: .[0], n: length}) | sort_by(-.n) | .[:10])}'
 ```
 
-| | 1d84f4c (parent) | ce946d5 (change) |
+| | 1d84f4c (parent) | e0558ac (change) |
 |---|---|---|
-| sessions | 1,556 | 1,556 (same ids) |
-| family `# Per-Bead Work Contract` | 223 | 4 |
+| sessions | 1,560 | 1,560 (same ids) |
+| family `# Per-Bead Work Contract` | 224 | 4 |
 
 Top 10 families after the change:
 
 | sessions | family key |
 |---|---|
-| 542 | `LOOP CONTEXT: Iteration _.` |
+| 543 | `LOOP CONTEXT: Iteration _.` |
 | 248 | ``You are running the `implement` step of the Djinn harness for bead _.`` |
 | 229 | `You are a triage judge for this repository's workshop. Decide whether …` |
-| 156 | `## Fix step _` |
+| 157 | `## Fix step _` |
 | 141 | `TRIAGE JUDGE: you are a fresh headless session judging one proposal. …` |
 | 29 | `You hold the gardener seat. Run its "_" duty now (schedule: daily _:_), …` |
 | 20 | `You hold the lead seat. Run its "triage" duty now (schedule: every _m), …` |
@@ -376,8 +378,9 @@ Top 10 families after the change:
 | 18 | `You hold the lead seat. Run its "_" duty now (schedule: every _m), …` |
 | 15 | `## _. Browser-verify web/ changes` |
 
-Per session, only the 223 contract-keyed sessions changed key, all Codex:
-- 204 moved to `LOOP CONTEXT: Iteration _.` (338 → 542). The harness writes
+Per session, only 220 of the 224 contract-keyed sessions changed key, all
+Codex (no Claude Code session's key moved):
+- 205 moved to `LOOP CONTEXT: Iteration _.` (338 → 543). The harness writes
   `LOOP CONTEXT: Iteration N.` after the contract copy and before the task
   line, and no instruction document holds it, so by the rule it stays the
   first line. These runs are now keyed together with the loop runs that
@@ -387,9 +390,14 @@ Per session, only the 223 contract-keyed sessions changed key, all Codex:
   AGENTS.md block, which renamed §4 to "Verify visual work by capture
   beside its reference"; dropping stops at the first paragraph the
   document does not hold.
-- 4 (`summoner-scr-*` worktrees, 2026-11-01) keep `# Per-Bead Work
-  Contract`: that repo's AGENTS.md has no contract block, and no other
-  record of those sessions injects one, so nothing in the session marks
-  the copy. The criterion's 0 is not met; reaching it needs a rule that
-  reads beyond the session (or names the contract), which the bead rules
-  out.
+- 4 (`summoner-scr-bha` and `summoner-scr-69u` worktrees, 2026-11-01:
+  01a196a7, 01a196a6, 01a1964e, 01a1964d) keep `# Per-Bead Work Contract`.
+  Each rollout's only injected instruction item is the global AGENTS.md
+  (9,425 characters, `# Global Agent Rules`), which holds no contract, and
+  none of the prompt's first 3 paragraphs appears in it: nothing in the
+  session marks the copy. The criterion's 0 is not met. Matched instead
+  against the paragraphs of every `# AGENTS.md instructions` item in the
+  October–November Codex corpus, each drops its first 22 paragraphs and
+  would key `LOOP CONTEXT: Iteration _.` like the other 205; that rule reads
+  beyond the session, which the bead's design rules out, so the choice is
+  the operator's.
