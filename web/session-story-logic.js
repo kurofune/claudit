@@ -446,25 +446,30 @@ export function storyRows(prompt, steps, children = [], keyPrefix = '') {
 
 // searchEntries flattens the rows a search can land on, in page order:
 // the prompt by its text, agent messages by their text and step rows by
-// the call's input and detail.
-/** @param {StoryRow[]} rows @returns {{key: string, text: string}[]} */
-export function searchEntries(rows) {
+// the call's input and detail. A sub-agent's own rows follow the row that
+// holds it, keyed as its body paints them; `open` lists the sub-agent keys
+// to expand before the entry's row is on the page.
+/** @typedef {{key: string, text: string, open: string[]}} SearchEntry */
+/** @param {(StoryRow|StoryItem)[]} rows @param {string[]} [open] @returns {SearchEntry[]} */
+export function searchEntries(rows, open = []) {
+  /** @type {SearchEntry[]} */
   const out = [];
+  /** @param {string} key @param {ChildEntry} e */
+  const child = (key, e) => out.push(...searchEntries(storyRows(null, e.child.steps || [], [], `${key}/`), [...open, key]));
   for (const r of rows) {
-    if (r.kind === 'prompt') out.push({ key: r.key, text: `${r.text}\n${r.hidden}` });
-    else if (r.kind === 'agent') out.push({ key: r.key, text: r.text });
-    else if (r.kind === 'group') {
-      for (const it of r.items) {
-        if (it.kind === 'step') out.push({ key: it.key, text: `${fullInput(it.tool)}\n${it.tool.detail || ''}` });
-      }
-    }
+    if (r.kind === 'prompt') out.push({ key: r.key, text: `${r.text}\n${r.hidden}`, open });
+    else if (r.kind === 'agent') out.push({ key: r.key, text: r.text, open });
+    else if (r.kind === 'step') out.push({ key: r.key, text: `${fullInput(r.tool)}\n${r.tool.detail || ''}`, open });
+    else if (r.kind === 'group') out.push(...searchEntries(r.items, open));
+    else if (r.kind === 'child') child(r.key, r);
+    else if (r.kind === 'parallel') r.children.forEach((e, k) => child(`${r.key}.${k}`, e));
   }
   return out;
 }
 
 // searchSteps finds the next entry after `after` whose text contains the
 // query, case-insensitively, wrapping to the top; -1 when none does.
-/** @param {{key: string, text: string}[]} entries @param {string} query @param {number} [after] */
+/** @param {{text: string}[]} entries @param {string} query @param {number} [after] */
 export function searchSteps(entries, query, after = -1) {
   const q = String(query || '').trim().toLowerCase();
   if (!q || !entries.length) return -1;

@@ -284,6 +284,93 @@ test('search: Enter jumps to the next match, wrapping; Esc clears; no match says
   assert.equal(host.querySelector('.story-find-status').textContent, 'No step matches');
 });
 
+// nestedPage is page0 with sub-agents: one spawned alone at 0s and, when
+// parallel, two spawned together at 100s; each runs one call per input.
+const nestedPage = ({ alone = [], parallel = [], top = 'ls' } = {}) => {
+  const sub = (id, desc, start, inputs) => ({ kind: 'subagent', agent_type: 'Explore', description: desc, parent_tool_use_id: id,
+    started_at: at(start), ended_at: at(start + 40), cost_usd: 0.1, error_count: 0,
+    steps: inputs.map((input, k) => step(`${id}-${k}`, start + 1 + k, { tools: [tool(`${id}t${k}`, input, 'ok', start + 1 + k, start + 2 + k)] })) });
+  const p = page0();
+  p.steps = [step('a1', 0, { text: 'delegate', tools: [tool('t1', top, 'ok', 0, 1), tool('ag1', 'Agent one', 'ok', 1, 50, { name: 'Agent' })] })];
+  p.children = [sub('ag1', 'scan web', 2, alone)];
+  if (parallel.length) {
+    p.steps.push(step('a2', 100, { text: 'fan out', tools: [
+      tool('ag2', 'Agent two', 'ok', 100, 200, { name: 'Agent' }), tool('ag3', 'Agent three', 'ok', 100, 200, { name: 'Agent' })] }));
+    p.children.push(sub('ag2', 'scan api', 101, parallel[0]), sub('ag3', 'scan docs', 102, parallel[1]));
+  }
+  return p;
+};
+const childNamed = (host, desc) => host.querySelectorAll('.story-child').find(c => c.querySelector('.story-child-h').textContent.includes(desc));
+const findFor = (host, q) => {
+  const box = host.querySelector('.story-search');
+  box.value = q;
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  box.focus();
+  return box;
+};
+// landedOn reports the one row the search landed on: scrolled to and
+// flashed, with keyboard focus left in the search box for the next Enter.
+const landedOn = (host, document, key, box) => {
+  const jumped = host.querySelectorAll('.is-jumped');
+  assert.equal(jumped.length, 1, 'one row is flashed');
+  assert.equal(jumped[0].getAttribute('data-key'), key);
+  assert.ok(jumped[0].classList.contains('story-step'), 'the flashed row is the step row');
+  assert.equal(document.activeElement, box, 'focus stays in the search box');
+};
+
+test('search: an open sub-agent\'s step matches', async () => {
+  const { host, document } = mount();
+  stubFetch(() => nestedPage({ alone: ['rg Foo', 'echo uniquenestedcommand'] }));
+  await paintStory(host, 's1');
+  click(childNamed(host, 'scan web').querySelector('.story-child-h'));
+  const box = findFor(host, 'uniquenestedcommand');
+  keydown(box, 'Enter');
+  landedOn(host, document, 'c0/s1.0', box);
+  assert.equal(host.querySelector('.story-find-status').textContent, '1 of 1');
+});
+
+test('search: a match inside a collapsed sub-agent opens it and lands on the step', async () => {
+  const { host, document } = mount();
+  stubFetch(() => nestedPage({ alone: ['rg Foo', 'echo uniquenestedcommand'] }));
+  await paintStory(host, 's1');
+  assert.equal(childNamed(host, 'scan web').querySelector('.story-child-h').getAttribute('aria-expanded'), 'false');
+  const box = findFor(host, 'uniquenestedcommand');
+  keydown(box, 'Enter');
+  assert.equal(childNamed(host, 'scan web').querySelector('.story-child-h').getAttribute('aria-expanded'), 'true');
+  landedOn(host, document, 'c0/s1.0', box);
+  assert.equal(host.querySelector('.story-find-status').textContent, '1 of 1');
+});
+
+test('search: a match in a parallel block\'s second sub-agent opens that one only', async () => {
+  const { host, document } = mount();
+  stubFetch(() => nestedPage({ parallel: [['rg api'], ['rg docs', 'echo uniquenestedcommand']] }));
+  await paintStory(host, 's1');
+  assert.ok(host.querySelector('.story-parallel'), 'the two run in parallel');
+  const box = findFor(host, 'uniquenestedcommand');
+  keydown(box, 'Enter');
+  assert.equal(childNamed(host, 'scan docs').querySelector('.story-child-h').getAttribute('aria-expanded'), 'true');
+  assert.equal(childNamed(host, 'scan api').querySelector('.story-child-h').getAttribute('aria-expanded'), 'false');
+  landedOn(host, document, 'c1.1/s1.0', box);
+  assert.equal(host.querySelector('.story-find-status').textContent, '1 of 1');
+});
+
+test('search: Enter advances and wraps through top-level and sub-agent matches as one sequence', async () => {
+  const { host, document } = mount();
+  stubFetch(() => nestedPage({ top: 'make uniquenestedcommand', alone: ['echo uniquenestedcommand'] }));
+  await paintStory(host, 's1');
+  const box = findFor(host, 'uniquenestedcommand');
+  const status = () => host.querySelector('.story-find-status').textContent;
+  keydown(box, 'Enter');
+  landedOn(host, document, 's0.0', box);
+  assert.equal(status(), '1 of 2');
+  keydown(box, 'Enter');
+  landedOn(host, document, 'c0/s0.0', box);
+  assert.equal(status(), '2 of 2');
+  keydown(box, 'Enter');
+  landedOn(host, document, 's0.0', box);
+  assert.equal(status(), '1 of 2');
+});
+
 test('states: skeleton while loading, 404, an error banner whose Retry refetches, and no turns', async () => {
   let { host } = mount();
   stubFetch(() => new Promise(() => {}));

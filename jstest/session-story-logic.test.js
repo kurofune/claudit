@@ -212,6 +212,29 @@ test('searchSteps: next match after the cursor, case-insensitive, wrapping; -1 f
   assert.equal(searchSteps(entries, '  '), -1);
 });
 
+test('searchEntries lists each nested child step after the row that contains it, in page order', () => {
+  const steps = [
+    step('a1', 0, { text: 'fan out', tools: [tool('t1', 'ls', 'ok', 0, 1), tool('ag1', 'Agent one', 'ok', 1, 50, { name: 'Agent' })] }),
+    step('a2', 100, { text: 'twice', tools: [
+      tool('ag2', 'Agent two', 'ok', 100, 200, { name: 'Agent' }), tool('ag3', 'Agent three', 'ok', 100, 200, { name: 'Agent' })] }),
+    step('a3', 300, { tools: [tool('t9', 'pwd', 'ok', 300, 301)] }),
+  ];
+  const kid = (parent, start, uuid, input) => child({ parent_tool_use_id: parent, started_at: at(start), ended_at: at(start + 40),
+    steps: [step(uuid, start + 1, { text: `in ${uuid}`, tools: [tool(`${uuid}t`, input, 'ok', start + 1, start + 2)] })] });
+  const rows = storyRows(null, steps, [kid('ag1', 2, 'k1', 'rg one'), kid('ag2', 101, 'm1', 'rg two'), kid('ag3', 102, 'n1', 'rg three')]);
+  const entries = searchEntries(rows);
+  assert.deepEqual(entries.map(e => e.key), [
+    'a0', 's0.0', 's0.1', 'c0/a0', 'c0/s0.0',
+    'a1', 's1.0', 's1.1', 'c1.0/a0', 'c1.0/s0.0', 'c1.1/a0', 'c1.1/s0.0',
+    's2.0',
+  ]);
+  const by = Object.fromEntries(entries.map(e => [e.key, e]));
+  assert.deepEqual(by['c0/s0.0'].open, ['c0']);
+  assert.deepEqual(by['c1.1/s0.0'].open, ['c1.1']);
+  assert.deepEqual(by['s2.0'].open, []);
+  assert.equal(searchSteps(entries, 'rg three'), entries.findIndex(e => e.key === 'c1.1/s0.0'));
+});
+
 test('unwrapExit drops the Codex exit-code header lines from full output', () => {
   assert.equal(unwrapExit('Exit code: 1\nWall time: 0.2 seconds\nOutput:\nboom\n'), 'boom\n');
   assert.equal(unwrapExit('Process exited with code 2\nOutput:\nx'), 'x');

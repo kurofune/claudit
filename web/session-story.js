@@ -14,7 +14,7 @@ import {
 /** @import { ChildEntry } from './session-story-logic.js' */
 
 /** @import { SessionStoryPage, StoryStep, StoryTool, StoryChild, StoryPrompt } from './api-types.js' */
-/** @import { StoryRow, StoryItem } from './session-story-logic.js' */
+/** @import { StoryRow, StoryItem, SearchEntry } from './session-story-logic.js' */
 
 const FLASH_MS = 1900;
 
@@ -31,7 +31,7 @@ const FLASH_MS = 1900;
  * @property {{replays: number, outside_filter: number}} hidden
  * @property {Set<string>} open           expanded step rows, children and disclosures by key
  * @property {Map<string, StoryItem|StoryRow>} byKey
- * @property {{key: string, text: string}[]} entries
+ * @property {SearchEntry[]} entries
  * @property {number} cursor              search position in entries
  * @property {string} pageError           a failed "more"/"earlier" load, shown on its row
  */
@@ -537,7 +537,13 @@ function find(host, st, input) {
   const total = st.entries.filter(e => e.text.toLowerCase().includes(q.trim().toLowerCase())).length;
   const rank = st.entries.slice(0, i + 1).filter(e => e.text.toLowerCase().includes(q.trim().toLowerCase())).length;
   setFindStatus(host, `${rank} of ${total}`);
-  jumpTo(host, `.story-rows [data-key="${cssEsc(st.entries[i].key)}"]`);
+  const { key, open } = st.entries[i];
+  const shut = open.filter(k => !st.open.has(k));
+  if (shut.length) {
+    shut.forEach(k => st.open.add(k));
+    paintRows(host, st);
+  }
+  jumpTo(host, `.story-rows [data-key="${cssEsc(key)}"]`);
 }
 
 /** @param {Element} host @param {StoryState} st @param {HTMLInputElement} input */
