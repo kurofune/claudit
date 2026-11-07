@@ -244,7 +244,7 @@ func substituteVersionPlaceholder(m *assetManifest, version string) {
 	if version != "" {
 		replacement = []byte(`<footer class="nav-footer">` + htmlEscape(version) + `</footer>`)
 	}
-	entry.body = bytes.ReplaceAll(entry.body, []byte("{{version}}"), replacement)
+	entry.setBody(bytes.ReplaceAll(entry.body, []byte("{{version}}"), replacement))
 }
 
 // htmlEscape escapes the four characters that matter inside a text

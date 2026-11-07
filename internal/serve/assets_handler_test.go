@@ -160,3 +160,41 @@ func extractHashedAssetURL(body, prefix, suffix string) string {
 	re := regexp.MustCompile(`/_claudit/web/` + regexp.QuoteMeta(prefix) + `[0-9a-f]{8}` + regexp.QuoteMeta(suffix))
 	return re.FindString(body)
 }
+
+// TestApp_StaleShellETagAfterRebuildGets200 models a browser holding the
+// previous build's shell: its revalidation must get the new shell body,
+// not a 304 that keeps it on the old hashed stylesheet URL.
+func TestApp_StaleShellETagAfterRebuildGets200(t *testing.T) {
+	s := fixtureServer(t)
+	s.assets = rebuildFixture(t, fixtureCSS, fixtureRouter)
+
+	first := httptest.NewRecorder()
+	s.Handler().ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/", nil))
+	oldETag := first.Header().Get("ETag")
+	if oldETag == "" {
+		t.Fatal("first response carries no ETag")
+	}
+
+	revalidate := httptest.NewRequest(http.MethodGet, "/", nil)
+	revalidate.Header.Set("If-None-Match", oldETag)
+	same := httptest.NewRecorder()
+	s.Handler().ServeHTTP(same, revalidate)
+	if same.Code != http.StatusNotModified {
+		t.Fatalf("unchanged build: status = %d, want 304", same.Code)
+	}
+
+	s.assets = rebuildFixture(t, `.a { color: blue; }`, fixtureRouter)
+	newCSS := s.assets.bySourceName["app.css"].hashedName
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, revalidate)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rebuilt: status = %d, want 200 for stale ETag %s", rec.Code, oldETag)
+	}
+	if got := rec.Header().Get("ETag"); got == oldETag {
+		t.Errorf("rebuilt shell still carries ETag %s", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "/_claudit/web/"+newCSS) {
+		t.Errorf("rebuilt shell body does not name %s:\n%s", newCSS, body)
+	}
+}

@@ -52,6 +52,23 @@ type assetEntry struct {
 	contentType string
 	hash        string
 	body        []byte
+	etag        string // bodyETag(body); setBody keeps the two in step
+}
+
+// setBody replaces the served bytes and re-derives the ETag from them,
+// so a revalidating browser gets a 304 only for the exact bytes it holds.
+func (e *assetEntry) setBody(body []byte) {
+	e.body = body
+	e.etag = bodyETag(body)
+}
+
+// bodyETag is a weak validator over the served bytes. Hashing the final
+// body (not the raw source) makes the shell's ETag rotate whenever any
+// hashed URL it names rotates, or a startup substitution such as
+// {{version}} changes it.
+func bodyETag(body []byte) string {
+	sum := sha256.Sum256(body)
+	return `W/"asset-` + hex.EncodeToString(sum[:])[:16] + `"`
 }
 
 // assetManifest indexes the embedded SPA assets two ways: by source
@@ -190,8 +207,8 @@ func buildAssetManifest(fsys fs.FS, root string) (*assetManifest, error) {
 			hashedName:  hashedName,
 			contentType: contentTypeForExt(ext),
 			hash:        h,
-			body:        body,
 		}
+		e.setBody(body)
 		m.bySourceName[name] = e
 		m.byHashedName[hashedName] = e
 	}
@@ -226,8 +243,8 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", entry.contentType)
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-	w.Header().Set("ETag", `W/"asset-`+entry.hash+`"`)
-	if match := r.Header.Get("If-None-Match"); match != "" && ifNoneMatchHit(match, `W/"asset-`+entry.hash+`"`) {
+	w.Header().Set("ETag", entry.etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && ifNoneMatchHit(match, entry.etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

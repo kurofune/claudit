@@ -200,3 +200,78 @@ route();`)
 		t.Errorf("upgraded manifest still serves the pre-upgrade app.js URL")
 	}
 }
+
+// rebuildFixture is a minimal SPA tree for rebuild tests: the shell
+// references app.css and app.js, and app.js imports router.js. Each
+// argument overrides one file's source so two calls model two builds.
+func rebuildFixture(t *testing.T, css, router string) *assetManifest {
+	t.Helper()
+	m, err := buildAssetManifest(fstest.MapFS{
+		"web/index.html": &fstest.MapFile{Data: []byte(`<link rel="stylesheet" href="{{asset "app.css"}}"><script type="module" src="{{asset "app.js"}}"></script>{{version}}`)},
+		"web/app.js":     &fstest.MapFile{Data: []byte(`import { route } from './router.js'; route();`)},
+		"web/router.js":  &fstest.MapFile{Data: []byte(router)},
+		"web/app.css":    &fstest.MapFile{Data: []byte(css)},
+	}, "web")
+	if err != nil {
+		t.Fatalf("buildAssetManifest: %v", err)
+	}
+	return m
+}
+
+const (
+	fixtureCSS    = `.a { color: red; }`
+	fixtureRouter = `export function route() { return 'old'; }`
+)
+
+func TestBuildAssetManifest_StylesheetOnlyChangeRotatesShellETag(t *testing.T) {
+	before := rebuildFixture(t, fixtureCSS, fixtureRouter)
+	after := rebuildFixture(t, `.a { color: blue; }`, fixtureRouter)
+
+	if b, a := before.bySourceName["index.html"].etag, after.bySourceName["index.html"].etag; b == a {
+		t.Errorf("app.css changed but the shell ETag stayed %s", b)
+	}
+	newCSS := after.bySourceName["app.css"].hashedName
+	if !strings.Contains(string(after.bySourceName["index.html"].body), "/_claudit/web/"+newCSS) {
+		t.Errorf("rebuilt shell does not name %s:\n%s", newCSS, after.bySourceName["index.html"].body)
+	}
+}
+
+func TestBuildAssetManifest_ImportedModuleChangeRotatesImporterAndShell(t *testing.T) {
+	before := rebuildFixture(t, fixtureCSS, fixtureRouter)
+	after := rebuildFixture(t, fixtureCSS, `export function route() { return 'new'; }`)
+
+	if b, a := before.bySourceName["app.js"].hashedName, after.bySourceName["app.js"].hashedName; b == a {
+		t.Errorf("router.js changed but app.js (source unchanged) kept URL %s", b)
+	}
+	if b, a := before.bySourceName["index.html"].etag, after.bySourceName["index.html"].etag; b == a {
+		t.Errorf("router.js changed but the shell ETag stayed %s", b)
+	}
+}
+
+func TestBuildAssetManifest_IdenticalBuildsKeepEveryURLAndShellETag(t *testing.T) {
+	first := rebuildFixture(t, fixtureCSS, fixtureRouter)
+	second := rebuildFixture(t, fixtureCSS, fixtureRouter)
+
+	if len(first.bySourceName) != len(second.bySourceName) {
+		t.Fatalf("entry count differs: %d vs %d", len(first.bySourceName), len(second.bySourceName))
+	}
+	for name, e := range first.bySourceName {
+		if got := second.bySourceName[name].hashedName; got != e.hashedName {
+			t.Errorf("%s: hashed URL %s rotated to %s on a no-op rebuild", name, e.hashedName, got)
+		}
+	}
+	if b, a := first.bySourceName["index.html"].etag, second.bySourceName["index.html"].etag; b != a {
+		t.Errorf("shell ETag rotated on a no-op rebuild: %s vs %s", b, a)
+	}
+}
+
+func TestSubstituteVersionPlaceholder_RotatesShellETag(t *testing.T) {
+	v1 := rebuildFixture(t, fixtureCSS, fixtureRouter)
+	v2 := rebuildFixture(t, fixtureCSS, fixtureRouter)
+	substituteVersionPlaceholder(v1, "v1.0.0")
+	substituteVersionPlaceholder(v2, "v1.0.1")
+
+	if b, a := v1.bySourceName["index.html"].etag, v2.bySourceName["index.html"].etag; b == a {
+		t.Errorf("version label changed but the shell ETag stayed %s", b)
+	}
+}
