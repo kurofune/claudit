@@ -3,9 +3,14 @@
 // makes the chart and view modules drop-in equivalent to their
 // inline-IIFE ancestors — no per-call transformation lookup needed.
 
+// groupDigits is toLocaleString's grouping from one formatter built once:
+// toLocaleString builds a formatter on every call, which the Sessions list
+// pays per row.
+const groupDigits = new Intl.NumberFormat();
+
 export const fmtMoney = v => {
   if (v == null) return '—';
-  if (v >= 1000) return '$' + Math.round(v).toLocaleString();
+  if (v >= 1000) return '$' + groupDigits.format(Math.round(v));
   return '$' + v.toFixed(2);
 };
 
@@ -31,7 +36,7 @@ export function truncate(s, max) {
 
 export const fmtPct1 = v => (v == null || isNaN(v)) ? '—' : (100 * v).toFixed(1) + '%';
 
-export const fmtNum = v => v == null ? '0' : Number(v).toLocaleString();
+export const fmtNum = v => v == null ? '0' : groupDigits.format(Number(v));
 
 // fmtCompact abbreviates large counts for chart axes and tooltips
 // where a full comma-grouped integer is too wide: 1234567 → "1.2M",

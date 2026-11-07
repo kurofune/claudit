@@ -1757,6 +1757,16 @@
   .sl-status:empty { display: none; }
   .sl-body { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
   .sl-group, .sl-active { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+  /* The whole corpus draws over a thousand family groups; laying out the
+     off-screen ones held the first paint for seconds. content-visibility
+     skips them until they near the viewport (auto keeps their measured
+     size once drawn). Its paint containment would clip the 4px focus
+     outline of .sl-more, so the group pads 4px and takes it back with a
+     negative margin, leaving every box where it was. */
+  .sl-group {
+    content-visibility: auto; contain-intrinsic-size: auto 14rem;
+    padding: 4px; margin: -4px;
+  }
   .sl-group-head, .sl-active-title {
     display: flex; align-items: baseline; gap: var(--s-2); margin: 0;
     font-size: var(--t-3); font-weight: 600; color: var(--ink);

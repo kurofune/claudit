@@ -135,6 +135,32 @@ function groupHTML(g, draw) {
 /** @type {WeakMap<Element, Map<string, {html: string, el: Element}>>} */
 const drawn = new WeakMap();
 
+// FIRST_GROUPS family groups are drawn in the same task as the rest of the
+// list, enough to fill several screens; the others follow LATER_GROUPS at a
+// time, each batch after the browser has painted. The whole corpus holds
+// over a thousand families, and building them all before the first paint
+// held the list back for seconds.
+export const FIRST_GROUPS = 40;
+const LATER_GROUPS = 200;
+
+// painting is, per list, the token of the render whose later batches may
+// still append; a newer render replaces it, so stale batches stop.
+/** @type {WeakMap<Element, object>} */
+const painting = new WeakMap();
+
+/** @param {() => void} fn */
+const afterPaint = fn => {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(fn, 0));
+  else setTimeout(fn, 0);
+};
+
+/** @param {Element} body @param {string} html */
+function appendHTML(body, html) {
+  const tmp = body.ownerDocument.createElement('div');
+  tmp.innerHTML = html;
+  for (const c of [...tmp.childNodes]) body.appendChild(c);
+}
+
 /**
  * @param {Element} root  the .sessions-list element
  * @param {SessionIndexRow[]} rows
@@ -147,6 +173,8 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   const sorts = root.querySelector('.sl-sorts');
   const body = root.querySelector('.sl-body');
   if (!filters || !sorts || !body) return;
+  const token = {};
+  painting.set(root, token);
   const keep = captureFocus(root);
   const scrollY = typeof window.scrollY === 'number' ? window.scrollY : 0;
   const before = drawn.get(root) || new Map();
@@ -165,6 +193,8 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   sorts.innerHTML = `<span class="sl-sort-label" aria-hidden="true">Sort</span>` + SORTS.map(s => `<button type="button"
       class="sl-sort" data-sort="${s.id}" data-focus-key="sort:${s.id}" aria-pressed="${ui.sort === s.id}">${escHtml(s.label)}</button>`).join('');
 
+  /** @type {string[]} */
+  let later = [];
   if (v.empty === 'none') {
     body.innerHTML = `<p class="empty-state sl-empty" role="status">No sessions in this window (${escHtml(windowText(search))})</p>`;
   } else {
@@ -181,27 +211,57 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
           <div class="sl-rows">${v.worth.map(w => draw(`worth:${w.row.session_id}`, worthRowHTML(w, now))).join('')}</div>
         </section>`
       : '';
+    const groups = v.empty ? [] : v.groups.map(g => groupHTML(g, draw));
+    later = groups.slice(FIRST_GROUPS);
     body.innerHTML = active + sentence + (v.empty
       ? `<p class="empty-state sl-empty" role="status">${escHtml(v.empty)}</p>`
-      : worth + v.groups.map(g => groupHTML(g, draw)).join(''));
+      : worth + groups.slice(0, FIRST_GROUPS).join(''));
   }
-  for (const ph of body.querySelectorAll('[data-keep]')) {
-    const prev = before.get(ph.getAttribute('data-keep') || '');
-    if (prev && ph.parentNode) {
-      ph.parentNode.insertBefore(prev.el, ph);
-      ph.parentNode.removeChild(ph);
+
+  const putBack = () => {
+    for (const ph of body.querySelectorAll('[data-keep]')) {
+      const prev = before.get(ph.getAttribute('data-keep') || '');
+      if (prev && ph.parentNode) {
+        ph.parentNode.insertBefore(prev.el, ph);
+        ph.parentNode.removeChild(ph);
+      }
     }
+  };
+  // Each batch puts back its kept rows, then focus and scroll once the
+  // element and the height they need are there; a scroll the reader made
+  // meanwhile is left alone.
+  let focused = false;
+  let lastY = 0;
+  const settle = () => {
+    putBack();
+    if (!focused) focused = restoreFocus(root, keep);
+    if (typeof window.scrollTo === 'function' && window.scrollY !== scrollY && window.scrollY === lastY) window.scrollTo(0, scrollY);
+    lastY = window.scrollY;
+  };
+  const finish = () => {
+    /** @type {Map<string, {html: string, el: Element}>} */
+    const after = new Map();
+    for (const el of body.querySelectorAll('.sl-row')) {
+      const key = el.getAttribute('data-focus-key') || '';
+      const html = marks.get(key);
+      if (html !== undefined) after.set(key, { html, el });
+    }
+    drawn.set(root, after);
+  };
+  lastY = typeof window.scrollY === 'number' ? window.scrollY : 0;
+  settle();
+  if (!later.length) {
+    finish();
+    return;
   }
-  /** @type {Map<string, {html: string, el: Element}>} */
-  const after = new Map();
-  for (const el of body.querySelectorAll('.sl-row')) {
-    const key = el.getAttribute('data-focus-key') || '';
-    const html = marks.get(key);
-    if (html !== undefined) after.set(key, { html, el });
-  }
-  drawn.set(root, after);
-  restoreFocus(root, keep);
-  if (typeof window.scrollTo === 'function' && window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+  const step = () => {
+    if (painting.get(root) !== token) return;
+    appendHTML(body, later.splice(0, LATER_GROUPS).join(''));
+    settle();
+    if (later.length) afterPaint(step);
+    else finish();
+  };
+  afterPaint(step);
 }
 
 // renderListLoading paints the skeleton while the index is in flight.
@@ -251,11 +311,16 @@ function captureFocus(root) {
   return a.getAttribute('data-focus-key') || '';
 }
 
+// restoreFocus focuses the element under key again and says whether
+// there is nothing left to restore: no key, the search box (which keeps its
+// own focus), or the element found.
 /** @param {Element} root @param {string} key */
 function restoreFocus(root, key) {
-  if (!key || key === 'search') return;
+  if (!key || key === 'search') return true;
   const el = /** @type {HTMLElement|null} */ (root.querySelector(`[data-focus-key="${cssEsc(key)}"]`));
-  if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+  if (!el) return false;
+  if (document.activeElement !== el) el.focus({ preventScroll: true });
+  return true;
 }
 
 /** @param {Element} root */

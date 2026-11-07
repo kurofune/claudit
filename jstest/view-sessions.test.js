@@ -41,6 +41,15 @@ function stubFetch(route) {
 
 const settle = () => new Promise(r => setTimeout(r, 0));
 
+// settleAll lets a long list append the family groups it draws after the
+// first paint.
+const settleAll = async () => { for (let i = 0; i < 20; i++) await settle(); };
+
+// many is n single-run families, newest first: family 0 is a minute old,
+// family 1 two minutes, and so on.
+const many = n => Array.from({ length: n }, (_, i) =>
+  row(`s-${i}`, { family_key: `family ${i}`, title: `family ${i}`, last_activity: at(-1 - i), started_at: at(-2 - i) }));
+
 let n = 0;
 // mount installs a fresh DOM and a fresh copy of the view module (its list
 // state is module-level), then paints route.
@@ -392,6 +401,7 @@ test('the 3,000-row 88-family index draws the sentence, 8 Worth opening rows and
   stubFetch(() => ({ sessions: rows }));
   const { view, done } = await mount();
   await done;
+  await settleAll();
   assert.match(view.querySelector('.sl-sentence').textContent, /^3,000 sessions in the last 7 days/);
   assert.equal(view.querySelectorAll('.sl-worth .sl-row').length, 8);
   const groups = view.querySelectorAll('.sl-group');
@@ -739,4 +749,32 @@ test('a trailing refresh queued while visible waits, unsent, through a hide and 
   await settle(); await settle(); await settle();
   assert.equal(calls.length, 2, 'no further fetches once caught up');
   clearLiveHandler();
+});
+
+
+test('a long list paints its first family groups at once and appends the rest after that paint, in order', async () => {
+  const { FIRST_GROUPS } = await import('../web/sessions-list.js');
+  const total = FIRST_GROUPS * 5 + 7;
+  stubFetch(() => ({ sessions: many(total) }));
+  const { view, done } = await mount();
+  await done;
+  const families = () => view.querySelectorAll('.sl-group').map(g => g.getAttribute('data-family'));
+  assert.deepEqual(families(), many(FIRST_GROUPS).map(r => r.family_key), 'the first groups are drawn in the same task');
+  assert.ok(view.querySelector('.sl-sentence'), 'the sentence is drawn with them');
+  await settleAll();
+  assert.deepEqual(families(), many(total).map(r => r.family_key), 'every family follows, newest member first');
+});
+
+test('a repaint while the rest of a long list is still being appended draws each family once', async () => {
+  const { FIRST_GROUPS } = await import('../web/sessions-list.js');
+  const total = FIRST_GROUPS * 5 + 7;
+  stubFetch(() => ({ sessions: many(total) }));
+  const { view, done } = await mount();
+  await done;
+  await settle(); await settle();
+  click(view.querySelector('.sl-sort[data-sort="cost"]'));
+  await settleAll();
+  const families = view.querySelectorAll('.sl-group').map(g => g.getAttribute('data-family'));
+  assert.deepEqual(families, many(total).map(r => r.family_key));
+  assert.equal(view.querySelectorAll('.sl-group .sl-row').length, total, 'one row per session, none doubled');
 });
