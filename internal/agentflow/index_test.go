@@ -636,6 +636,28 @@ func TestBuildSessionIndex_BackgroundRunClearsNothing(t *testing.T) {
 	}
 }
 
+// TestBuildSessionIndex_SubstitutedCheckClearsNothing: a check inside a
+// command or process substitution runs under an outer command whose exit
+// is the call's, so `echo $(true & go test ./...)` passing (echo's exit)
+// clears no earlier go test failure.
+func TestBuildSessionIndex_SubstitutedCheckClearsNothing(t *testing.T) {
+	key := strconv.FormatUint(parse.ToolInputKey("go test ./..."), 16)
+	want := []FailingCheck{{Check: "go test", Command: "go test ./...", Turn: "a1", InputKey: key}}
+	for _, second := range []string{
+		"echo $(true & go test ./...)",
+		"echo $(true; go test ./...)",
+		"echo `true & go test ./...`",
+		"cat <(true & go test ./...)",
+	} {
+		t.Run(second, func(t *testing.T) {
+			row := twoCalls(t, []string{"go test ./...", second}, []bool{true, false})
+			if !reflect.DeepEqual(row.FailingChecks, want) {
+				t.Errorf("failing_checks = %+v, want %+v", row.FailingChecks, want)
+			}
+		})
+	}
+}
+
 // TestBuildSessionIndex_FdDuplicationStillAttributed: `2>&1` cannot fail,
 // so a check run with it still fails and clears that check.
 func TestBuildSessionIndex_FdDuplicationStillAttributed(t *testing.T) {

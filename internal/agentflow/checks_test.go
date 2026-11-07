@@ -128,6 +128,24 @@ func TestCheckKind(t *testing.T) {
 		{"ls > f\ngo test ./...", "go test"},
 		{"diff <(ls) <(ls) ; go vet ./...", "go vet"},
 
+		{"echo $(true & go test ./...)", ""},
+		{"echo $(true; go test ./...)", ""},
+		{"echo $(true && go test ./...)", ""},
+		{"echo $(true\ngo test ./...)", ""},
+		{"echo `true & go test ./...`", ""},
+		{"echo \"$(true & go test ./...)\"", ""},
+		{"echo \"$(echo \"a\" ; go test ./...)\"", ""},
+		{"echo $( (true) & go test ./...)", ""},
+		{"echo $((1 + 2)) & go test ./...", "go test"},
+		{"echo ${x:-a;b} && go test ./...", "go test"},
+		{"diff <(true & go test ./...) f", ""},
+		{"x=$(ls > f) && go test ./...", "go test"},
+		{"x=$(ls | wc -l) && go test ./...", "go test"},
+		{"echo $(cat <<EOF\n) & ;\nEOF\n) && go test ./...", "go test"},
+		{"echo $(true & go test ./...", ""},
+		{"echo $(ls # x\n) && go test ./...", "go test"},
+		{"echo $(ls # x\n) ; go test ./... # y", "go test"},
+
 		{"", ""},
 	}
 	for _, tc := range cases {

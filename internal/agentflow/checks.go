@@ -60,7 +60,8 @@ func (c checkRun) owns(isErr bool) bool {
 // leading "(", NAME=value assignments, `time` and `timeout N` are skipped,
 // and a `cd` runs no check, so `ps | rg 'go test'` and `echo go test` are
 // not checks. A here-document's body is data, not commands, so its lines
-// start no segment. A redirection other than fd duplication (`> out.log`,
+// start no segment, and a command or process substitution runs under the
+// command it sits in, so `echo $(true & go test ./...)` is echo's. A redirection other than fd duplication (`> out.log`,
 // `2>/dev/null`, `>&-`) can fail the command it is on, and a background job
 // (`go test &`) returns before its exit is known, so a call with either on
 // the check, on a trailing segment skipped after it, or on a command that
@@ -193,23 +194,27 @@ type segment struct {
 }
 
 // shellSegments splits a shell command at each &&, ||, ;, & and newline
-// that the shell reads as a separator: one outside '...' and "..." and not
-// escaped by a backslash, so `rg 'a; go test' .` is one segment. A # that
-// begins a word starts a comment through the end of its line, so a quote,
-// separator or << inside it is text: `# don't` opens no quote. A << outside
-// quotes and comments (not a <<< here-string) names a here-document whose
-// body, the lines after its line through the one that is only the
-// delimiter (leading tabs allowed) or to the end, is dropped. A single &
-// (not &&, |&, &> or part of a >& redirection) ends a background segment.
-// A >, >>, >|, <, <>, &> or >& outside quotes and comments marks its segment
-// redirected, except N>&M and <&M, which only duplicate a descriptor and
-// cannot fail; <( and >( are process substitutions, not redirections.
+// that the shell reads as a separator: one outside '...' and "...", outside
+// a $(...), `...`, <(...), >(...) or ${...} substitution, and not escaped by
+// a backslash, so `rg 'a; go test' .` and `echo $(true & go test)` are one
+// segment each. Substitutions nest, inside double quotes too, and one never
+// closed runs to the end of the command. A pipe or redirection inside a
+// substitution is the inner command's, not its segment's. A # that begins a
+// word starts a comment through the end of its line, so a quote, separator
+// or << inside it is text: `# don't` opens no quote. A << outside quotes and
+// comments (not a <<< here-string) names a here-document whose body, the
+// lines after its line through the one that is only the delimiter (leading
+// tabs allowed) or to the end, is dropped. A single & (not &&, |&, &> or
+// part of a >& redirection) ends a background segment. A >, >>, >|, <, <>,
+// &> or >& outside quotes and comments marks its segment redirected, except
+// N>&M and <&M, which only duplicate a descriptor and cannot fail.
 func shellSegments(command string) []segment {
 	var segs []segment
 	start, cut := 0, -1
 	sep := ""
 	var piped, redirected bool
 	var quote byte
+	var nest []byte
 	var pending []string
 	emit := func(end int, next string, background bool) {
 		if cut >= 0 {
@@ -218,8 +223,15 @@ func shellSegments(command string) []segment {
 		segs = append(segs, segment{command[start:end], sep, piped, redirected, background})
 		sep, piped, redirected, cut = next, false, false, -1
 	}
+	top := func() byte {
+		if len(nest) == 0 {
+			return 0
+		}
+		return nest[len(nest)-1]
+	}
 	for i := 0; i < len(command); i++ {
 		c := command[i]
+		nested := len(nest) > 0
 		switch {
 		case quote == '\'':
 			if c == '\'' {
@@ -227,17 +239,44 @@ func shellSegments(command string) []segment {
 			}
 		case c == '\\':
 			i++
-		case quote == '"':
-			if c == '"' {
-				quote = 0
+		case top() == '"':
+			switch {
+			case c == '"':
+				nest = nest[:len(nest)-1]
+			case c == '`':
+				nest = append(nest, '`')
+			case strings.HasPrefix(command[i:], "$("):
+				nest = append(nest, '(')
+				i++
+			case strings.HasPrefix(command[i:], "${"):
+				nest = append(nest, '{')
+				i++
 			}
 		case c == '#' && (i == 0 || strings.IndexByte(" \t\n;&|()<>", command[i-1]) >= 0):
-			cut = i
+			if !nested {
+				cut = i
+			}
 			for i+1 < len(command) && command[i+1] != '\n' {
 				i++
 			}
-		case c == '\'' || c == '"':
+		case c == '\'':
 			quote = c
+		case c == '"':
+			nest = append(nest, '"')
+		case c == '`' && top() == '`':
+			nest = nest[:len(nest)-1]
+		case c == '`':
+			nest = append(nest, '`')
+		case strings.HasPrefix(command[i:], "$("), strings.HasPrefix(command[i:], "<("), strings.HasPrefix(command[i:], ">("):
+			nest = append(nest, '(')
+			i++
+		case strings.HasPrefix(command[i:], "${"):
+			nest = append(nest, '{')
+			i++
+		case c == '(' && nested:
+			nest = append(nest, '(')
+		case c == ')' && top() == '(', c == '}' && top() == '{':
+			nest = nest[:len(nest)-1]
 		case strings.HasPrefix(command[i:], "<<<"):
 			i += 2
 		case strings.HasPrefix(command[i:], "<<"):
@@ -246,17 +285,23 @@ func shellSegments(command string) []segment {
 				pending = append(pending, m[1])
 				i += len(m[0])
 			}
+		case c == '\n':
+			if !nested && !continued(command, start, i, cut, sep) {
+				emit(i, "\n", false)
+			}
+			if !nested {
+				cut = -1
+			}
+			next := skipHeredocBodies(command, i+1, pending)
+			pending = nil
+			if !nested {
+				start = next
+			}
+			i = next - 1
+		case nested:
 		case c == ';':
 			emit(i, ";", false)
 			start = i + 1
-		case c == '\n':
-			if !continued(command, start, i, cut, sep) {
-				emit(i, "\n", false)
-			}
-			cut = -1
-			start = skipHeredocBodies(command, i+1, pending)
-			pending = nil
-			i = start - 1
 		case (c == '&' || c == '|') && i+1 < len(command) && command[i+1] == c:
 			emit(i, command[i:i+2], false)
 			i++
@@ -284,18 +329,16 @@ func shellSegments(command string) []segment {
 	return segs
 }
 
-// redirection reads the > or < operator at the start of s (a << is read
-// before this) and returns how many bytes it spans and whether it only
-// duplicates a descriptor (>&2, <&0) or opens a process substitution, so it
-// cannot fail the command. The operand after a plain >, >> or < is left
+// redirection reads the > or < operator at the start of s (a << and a
+// process substitution's <( or >( are read before this) and returns how
+// many bytes it spans and whether it only duplicates a descriptor (>&2,
+// <&0), so it cannot fail the command. The operand after a plain >, >> or < is left
 // to the scan.
 func redirection(s string) (n int, harmless bool) {
 	if len(s) < 2 {
 		return 1, false
 	}
 	switch s[1] {
-	case '(':
-		return 1, true
 	case '>', '|':
 		return 2, false
 	case '&':
