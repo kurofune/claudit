@@ -330,6 +330,28 @@ test('windowText names the since/until filter, or the default window', () => {
   assert.equal(windowText(''), 'the last 7 days');
 });
 
+test('windowText names ?scope=all and ?last=Nd|Nw the way the server applies them', () => {
+  assert.equal(windowText('?scope=all'), 'all time');
+  assert.equal(windowText('?last=30d'), 'the last 30 days');
+  assert.equal(windowText('?last=1d'), 'the last 1 day');
+  assert.equal(windowText('?last=2w'), 'the last 2 weeks');
+  assert.equal(windowText('?last=1w'), 'the last 1 week');
+  assert.equal(windowText('?last=30d&until=2026-11-01'), 'the last 30 days, until 2026-11-01');
+  assert.equal(windowText('?scope=all&since=2026-10-25'), 'since 2026-10-25', 'an explicit window still narrows ?scope=all');
+  assert.equal(windowText('?scope=all&last=30d'), 'the last 30 days');
+  assert.equal(windowText('?last=bogus'), 'the last 7 days', 'a ?last the server rejects names no window');
+  assert.equal(windowText('?last=0d'), 'the last 7 days');
+});
+
+test('the top sentence and costliest reason read naturally under all time and ?last', () => {
+  const rows = [row('a', { cost_usd: 5 }), row('b', { cost_usd: 2 })];
+  assert.equal(topSentence(rows, 'all time'), '2 sessions all time, $7.00.');
+  assert.equal(topSentence(rows, 'the last 30 days'), '2 sessions in the last 30 days, $7.00.');
+  assert.deepEqual(worthOpening(rows, 'all time').map(x => x.reason), ['Most expensive session of all time']);
+  assert.deepEqual(worthOpening(rows, 'the last 30 days').map(x => x.reason), ['Most expensive session in the last 30 days']);
+  assert.deepEqual(worthOpening(rows, 'since 2026-10-25').map(x => x.reason), ['Most expensive session since 2026-10-25']);
+});
+
 test('agoText names the time since last activity in its coarsest unit', () => {
   const now = Date.parse(at(0));
   assert.equal(agoText(at(-0.5), now), 'just now');

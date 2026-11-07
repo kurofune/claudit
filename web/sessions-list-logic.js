@@ -20,6 +20,7 @@ export const WORTH_MAX = 8;
 // expensive tenth is named.
 export const TOP_TENTH_MIN_RUNS = 5;
 export const DEFAULT_WINDOW = 'the last 7 days';
+export const ALL_TIME = 'all time';
 
 /** @typedef {'all'|'active'|'failed'} ListFilter */
 /** @typedef {'newest'|'cost'|'duration'} ListSort */
@@ -274,8 +275,7 @@ export function topSentence(rows, window) {
   const total = rows.reduce((a, r) => a + cost(r), 0);
   const checks = rows.filter(r => failingChecksOf(r).length > 0).length;
   const edits = rows.filter(r => failedEditsOf(r) > 0).length;
-  const w = String(window || DEFAULT_WINDOW);
-  const where = /^(since|until)\b/.test(w) ? w : `in ${w}`;
+  const where = windowPhrase(window);
   const label = rows.some(isCodex) ? ' API-equivalent' : '';
   let text = `${plural(rows.length, 'session')} ${where}, ${fmtMoney(total)}${label}.`;
   if (checks) text += ` ${fmtNum(checks)} ended with a failing check (go test, build, commit…).`;
@@ -337,7 +337,8 @@ export function worthOpening(rows, window = DEFAULT_WINDOW) {
   const costliest = [...rows].sort(byCost)[0];
   if (costliest) {
     const w = String(window || DEFAULT_WINDOW);
-    add(costliest, `Most expensive session ${w === DEFAULT_WINDOW ? 'this week' : w}`);
+    const where = w === DEFAULT_WINDOW ? 'this week' : w === ALL_TIME ? 'of all time' : windowPhrase(w);
+    add(costliest, `Most expensive session ${where}`);
   }
   return out;
 }
@@ -363,15 +364,28 @@ export function agoText(at, now) {
   return `${Math.floor(min / 1440)}d ago`;
 }
 
-// windowText names the page's date filter for the empty state, matching
-// the server's default 7-day window when the URL names none.
+// windowText names the window the server applies for this URL (see
+// parseQuery and applyDefaults in internal/serve): ?last=Nd|Nw and
+// ?since/?until as given, else every session under ?scope=all, else the
+// server's default 7-day window. A ?last the server rejects names nothing.
 /** @param {string} search */
 export function windowText(search) {
   const p = new URLSearchParams(search || '');
   const parts = [];
+  const last = /^(\d+)([dw])$/.exec((p.get('last') || '').trim());
+  if (last && Number(last[1]) > 0) parts.push(`the last ${plural(Number(last[1]), last[2] === 'd' ? 'day' : 'week')}`);
   if (p.get('since')) parts.push(`since ${p.get('since')}`);
   if (p.get('until')) parts.push(`until ${p.get('until')}`);
-  return parts.length ? parts.join(', ') : 'the last 7 days';
+  if (parts.length) return parts.join(', ');
+  return p.get('scope') === 'all' ? ALL_TIME : DEFAULT_WINDOW;
+}
+
+// windowPhrase fits a windowText answer after a count: "in the last 7
+// days", but "since 2026-10-25" and "all time" as they are.
+/** @param {string} [window] */
+function windowPhrase(window) {
+  const w = String(window || DEFAULT_WINDOW);
+  return /^(since|until)\b/.test(w) || w === ALL_TIME ? w : `in ${w}`;
 }
 
 /**
