@@ -3,6 +3,8 @@ package agentflow
 import (
 	"regexp"
 	"strings"
+
+	"github.com/kurofune/claudit/internal/parse"
 )
 
 // NoPromptKey is the family key of a prompt (or session) with no text of
@@ -20,20 +22,23 @@ const titleMaxRunes = 200
 // its marker, so a prompt without the marker skips the regexp. A block
 // with keep set is the person's own text in a harness's tags (Claude
 // Code's pasted_content): only its tags are stripped, so its first line
-// can title the prompt.
+// can title the prompt. A block with doc set is an instruction document
+// (Codex's AGENTS.md, Claude Code's system-reminder context): a prompt's
+// leading copy of one is not its own text either.
 var wrapperBlocks = []struct {
 	marker string
 	re     *regexp.Regexp
 	keep   bool
+	doc    bool
 }{
-	{"<local-command-", regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`), false},
-	{"<system-reminder>", regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`), false},
-	{"<command-", regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`), false},
-	{"# AGENTS.md instructions", regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`), false},
-	{"<environment_context>", regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`), false},
-	{"<codex_internal_context", regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`), false},
-	{"<guardian_tool_descriptions>", regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`), false},
-	{"<pasted_content", regexp.MustCompile(`(?s)<pasted_content(?:\s[^>]*)?>(.*?)(?:</pasted_content>|\z)`), true},
+	{"<local-command-", regexp.MustCompile(`(?s)<local-command-[a-z-]+>.*?(?:</local-command-[a-z-]+>|\z)`), false, false},
+	{"<system-reminder>", regexp.MustCompile(`(?s)<system-reminder>.*?(?:</system-reminder>|\z)`), false, true},
+	{"<command-", regexp.MustCompile(`(?s)<command-[a-z-]+>.*?(?:</command-[a-z-]+>|\z)`), false, false},
+	{"# AGENTS.md instructions", regexp.MustCompile(`(?s)# AGENTS\.md instructions[^\n]*.*?(?:</INSTRUCTIONS>|\z)`), false, true},
+	{"<environment_context>", regexp.MustCompile(`(?s)<environment_context>.*?(?:</environment_context>|\z)`), false, false},
+	{"<codex_internal_context", regexp.MustCompile(`(?s)<codex_internal_context[^>]*>.*?(?:</codex_internal_context>|\z)`), false, false},
+	{"<guardian_tool_descriptions>", regexp.MustCompile(`(?s)<guardian_tool_descriptions>.*?(?:</guardian_tool_descriptions>|\z)`), false, false},
+	{"<pasted_content", regexp.MustCompile(`(?s)<pasted_content(?:\s[^>]*)?>(.*?)(?:</pasted_content>|\z)`), true, false},
 }
 
 // promptToken is one candidate for blanking: a run of characters that can
@@ -62,10 +67,24 @@ func stripWrappers(prompt string) string {
 	return prompt
 }
 
-// family derives a prompt's key, remainder and title in one pass; ok is
-// false when the prompt has no text of its own once wrappers are stripped.
-func family(prompt string) (Family, bool) {
-	body := stripWrappers(prompt)
+// instructionDocs is every instruction-document block in prompts.
+func instructionDocs(prompts []string) []string {
+	var docs []string
+	for _, p := range prompts {
+		for _, w := range wrapperBlocks {
+			if w.doc && strings.Contains(p, w.marker) {
+				docs = append(docs, w.re.FindAllString(p, -1)...)
+			}
+		}
+	}
+	return docs
+}
+
+// family derives a prompt's key, remainder and title in one pass, from its
+// text once wrappers are stripped and its leading copy of docs dropped; ok
+// is false when the prompt has no text of its own.
+func family(prompt string, docs []string) (Family, bool) {
+	body := parse.DropInstructionCopy(stripWrappers(prompt), docs)
 	line := ""
 	for rest := body; rest != "" && line == ""; {
 		var l string
@@ -125,7 +144,7 @@ func runningTextBead(body string) string {
 // paths, hex strings of 7+ characters and digit runs blanked to "_". A prompt
 // with no text of its own keys as NoPromptKey.
 func FamilyKey(prompt string) string {
-	f, _ := family(prompt)
+	f, _ := family(prompt, instructionDocs([]string{prompt}))
 	return f.Key
 }
 
@@ -134,7 +153,7 @@ func FamilyKey(prompt string) string {
 // blanked from the key line joined by " · ", else the first digit-bearing
 // bead id in the prompt's running text (runningTextBead).
 func Remainder(prompt string) string {
-	f, _ := family(prompt)
+	f, _ := family(prompt, instructionDocs([]string{prompt}))
 	return f.Remainder
 }
 
@@ -148,10 +167,12 @@ type Family struct {
 
 // SessionFamily picks a session's family from its prompts in order: the
 // first prompt with text of its own once wrappers are stripped, else
-// NoPromptKey.
+// NoPromptKey. A prompt's leading paragraphs found verbatim in an
+// instruction document of any of the session's prompts are not its own.
 func SessionFamily(prompts []string) Family {
+	docs := instructionDocs(prompts)
 	for _, p := range prompts {
-		if f, ok := family(p); ok {
+		if f, ok := family(p, docs); ok {
 			return f
 		}
 	}

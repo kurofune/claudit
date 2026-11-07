@@ -422,6 +422,8 @@ func mostUsed(counts map[string]int) string {
 // sessionPrompts lists each collected session's own prompts in time order,
 // whatever the window: user messages from the session's main files, not a
 // sub-agent's file and not a folded sub-agent thread.
+// A prompt that opens with a copy of its session's instruction documents is
+// listed from its own text after the copy (UserMessage.OwnText).
 func sessionPrompts(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessionAccum) map[string][]string {
 	type msg struct {
 		ts   time.Time
@@ -438,7 +440,11 @@ func sessionPrompts(snap *corpus.Snapshot, l *Layout, sessions map[string]*sessi
 			if _, ok := sessions[m.SessionID]; !ok || parse.IsSubagentFile(m.SourceFile) {
 				continue
 			}
-			byID[m.SessionID] = append(byID[m.SessionID], msg{m.Timestamp, m.Text})
+			text := m.Text
+			if m.OwnText != "" {
+				text = m.OwnText
+			}
+			byID[m.SessionID] = append(byID[m.SessionID], msg{m.Timestamp, text})
 		}
 	}
 	out := make(map[string][]string, len(byID))

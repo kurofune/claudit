@@ -927,3 +927,27 @@ func TestToolUse_ConcurrentWhenExecCallsSeveralTools(t *testing.T) {
 		t.Error("an exec_command function call is concurrent, want not")
 	}
 }
+
+// TestParseFile_OwnTextDropsInstructionCopy: a prompt that repeats the
+// injected AGENTS.md item's text before its task line keeps Text as
+// written and carries the task onward in OwnText, though the copy runs past
+// the snippet cap; a prompt with no copy leaves OwnText empty.
+func TestParseFile_OwnTextDropsInstructionCopy(t *testing.T) {
+	res := parseFixture(t, "preamble.jsonl", "")
+	if len(res.UserMessages) != 1 {
+		t.Fatalf("UserMessages = %d, want the one prompt", len(res.UserMessages))
+	}
+	m := res.UserMessages[0]
+	if !strings.HasPrefix(m.Text, "# Work Rules\n\n") {
+		t.Errorf("Text = %.60q…, want the prompt as written", m.Text)
+	}
+	const task = "You are running the `review` step of the Djinn harness for bead claudit-b0r."
+	if !strings.HasPrefix(m.OwnText, task+"\n\n## Step contract") {
+		t.Errorf("OwnText = %.120q, want it to open on the task line", m.OwnText)
+	}
+	for _, u := range parseFixture(t, "prompts.jsonl", "").UserMessages {
+		if u.OwnText != "" {
+			t.Errorf("prompt %q OwnText = %q, want empty", u.Text, u.OwnText)
+		}
+	}
+}

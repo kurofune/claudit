@@ -320,3 +320,50 @@ func TestFamily_PastedContentUnwrapped(t *testing.T) {
 		t.Errorf("text before block: title %q key %q, want both %q", before.Title, before.Key, "look at this")
 	}
 }
+
+// workRules stands in for an instruction document a harness injects and
+// then repeats ahead of its task line.
+const workRules = "# Work Rules\n\nAlways-on rules for working one task.\n\n## 1. Claim before code\n\n- Claim the task first.\n- Read every field."
+
+const reviewTask = "You are running the `review` step of the Djinn harness for bead claudit-b0r."
+
+// TestSessionFamily_StripsInstructionCopy: a prompt that opens with the
+// session's injected instruction document verbatim keys and titles on its
+// task line; the injected item itself has no text of its own.
+func TestSessionFamily_StripsInstructionCopy(t *testing.T) {
+	injected := "# AGENTS.md instructions for /home/u/proj\n\n<INSTRUCTIONS>\n" + workRules + "\n<!-- END -->\n</INSTRUCTIONS>"
+	wantKey, _ := blank(reviewTask)
+	for name, prompts := range map[string][]string{
+		"separate injected message": {injected, workRules + "\n\n" + reviewTask + "\n\n## Step contract"},
+		"injected in the prompt":    {injected + "\n" + workRules + "\n\n" + reviewTask},
+		"system-reminder":           {"<system-reminder>\n" + workRules + "\n</system-reminder>\n" + workRules + "\n\n" + reviewTask},
+	} {
+		f := SessionFamily(prompts)
+		if f.Key != wantKey || f.Title != reviewTask || f.Remainder != "claudit-b0r" {
+			t.Errorf("%s: SessionFamily = %+v, want key %q title %q remainder claudit-b0r", name, f, wantKey, reviewTask)
+		}
+	}
+	notCopied := SessionFamily([]string{injected, "# Work Rules\nnot in the document\n\n" + reviewTask})
+	if notCopied.Key != "# Work Rules" {
+		t.Errorf("prompt whose first paragraph is not in the document keys %q, want %q", notCopied.Key, "# Work Rules")
+	}
+	if only := SessionFamily([]string{injected, workRules}); only.Key != "# Work Rules" {
+		t.Errorf("prompt that is only a copy keys %q, want today's %q", only.Key, "# Work Rules")
+	}
+}
+
+// TestSessionFamily_LoopContextSkippedOnlyWhenInDocument: harness lines
+// before the task line drop only when the instruction document holds them.
+func TestSessionFamily_LoopContextSkippedOnlyWhenInDocument(t *testing.T) {
+	loop := "LOOP CONTEXT: Iteration 3.\nYou MUST git commit your changes before stopping."
+	prompt := workRules + "\n\n" + loop + "\n\n" + reviewTask
+	wantKey, _ := blank(reviewTask)
+	in := SessionFamily([]string{"# AGENTS.md instructions for /home/u/proj\n\n<INSTRUCTIONS>\n" + workRules + "\n\n" + loop + "\n</INSTRUCTIONS>", prompt})
+	if in.Key != wantKey || in.Title != reviewTask {
+		t.Errorf("loop lines in the document: key %q title %q, want %q / %q", in.Key, in.Title, wantKey, reviewTask)
+	}
+	out := SessionFamily([]string{"# AGENTS.md instructions for /home/u/proj\n\n<INSTRUCTIONS>\n" + workRules + "\n</INSTRUCTIONS>", prompt})
+	if out.Key != "LOOP CONTEXT: Iteration _." || out.Title != "LOOP CONTEXT: Iteration 3." {
+		t.Errorf("loop lines absent from the document: key %q title %q, want the loop line", out.Key, out.Title)
+	}
+}

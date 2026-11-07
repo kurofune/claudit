@@ -2,6 +2,8 @@ package agentflow
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"github.com/kurofune/claudit/internal/aggregate"
 	"github.com/kurofune/claudit/internal/corpus"
 	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/internal/parse/codex"
 	"github.com/kurofune/claudit/internal/pricing"
 )
 
@@ -711,5 +714,28 @@ func TestBuildSessionIndex_TruncatedInputRunsNoCheck(t *testing.T) {
 				t.Errorf("failing_checks = %+v, want first call's go test failing: %v", row.FailingChecks, tc.wantFailedCheck)
 			}
 		})
+	}
+}
+
+// TestBuildSessionIndex_PromptPreambleFromInstructionsIsSkipped: a Codex
+// rollout whose injected AGENTS.md item is repeated at the head of its
+// prompt, past the snippet cap, keys and titles on the task line after it.
+func TestBuildSessionIndex_PromptPreambleFromInstructionsIsSkipped(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	f, err := os.Open(filepath.Join("..", "parse", "codex", "testdata", "preamble.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	const id = "01a1b2dd-7fcf-72c0-8c9c-aa39dfb5245a"
+	res, err := codex.ParseFile(f, "/codex/2026/11/06/rollout-2026-11-06T13-57-03-"+id+".jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := &corpus.Snapshot{Turns: res.Turns, Users: res.UserMessages, Links: res.ParentLinks}
+	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), id)
+	const task = "You are running the `review` step of the Djinn harness for bead claudit-b0r."
+	if wantKey, _ := blank(task); row.FamilyKey != wantKey || row.Title != task || row.Remainder != "claudit-b0r" {
+		t.Errorf("row = key %q title %q remainder %q, want key %q title %q remainder claudit-b0r", row.FamilyKey, row.Title, row.Remainder, wantKey, task)
 	}
 }

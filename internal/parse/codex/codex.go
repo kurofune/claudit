@@ -16,6 +16,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -166,6 +167,9 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 		// prompt is the latest real user prompt's UUID, provisional until
 		// stampThread names the thread.
 		prompt string
+		// docs are the instruction documents injected into the thread so
+		// far, each once.
+		docs []string
 	)
 	sc := bufio.NewScanner(r)
 	// session_meta carries the full base instructions and tool outputs can
@@ -221,9 +225,13 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 				if json.Unmarshal(rec.Payload, &m) != nil {
 					continue
 				}
+				docs = m.appendInstructions(docs)
 				if text := m.userText(); text != "" {
+					own := ""
 					if caps.verbatim {
 						text = m.verbatimText()
+					} else if o := parse.DropInstructionCopy(text, docs); o != text {
+						own = caps.prompt(o)
 					}
 					prompt = "u" + strconv.Itoa(lineNumber)
 					res.UserMessages = append(res.UserMessages, parse.UserMessage{
@@ -231,6 +239,7 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 						Timestamp:  ts,
 						CWD:        turnCWD,
 						Text:       caps.prompt(text),
+						OwnText:    own,
 						SourceFile: path,
 					})
 					continue
@@ -1153,11 +1162,15 @@ type rawMessage struct {
 	} `json:"content"`
 }
 
+// instructionsPrefix opens the injected item that carries the AGENTS.md
+// instructions.
+const instructionsPrefix = "# AGENTS.md instructions for"
+
 // injectedPrefixes open the input_text items Codex writes into a user
 // message on the person's behalf: the AGENTS.md instructions, the
 // environment context, a goal reminder and the guardian's tool list.
 var injectedPrefixes = []string{
-	"# AGENTS.md instructions for",
+	instructionsPrefix,
 	"<environment_context>",
 	"<codex_internal_context",
 	"<guardian_tool_descriptions>",
@@ -1178,6 +1191,20 @@ func (m rawMessage) userText() string {
 		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// appendInstructions appends to docs each injected AGENTS.md item of a user
+// message that docs does not already hold.
+func (m rawMessage) appendInstructions(docs []string) []string {
+	if m.Role != "user" {
+		return docs
+	}
+	for _, c := range m.Content {
+		if c.Type == "input_text" && strings.HasPrefix(c.Text, instructionsPrefix) && !slices.Contains(docs, c.Text) {
+			docs = append(docs, c.Text)
+		}
+	}
+	return docs
 }
 
 // verbatimText is a user message's input_text items as written, joined on

@@ -148,7 +148,12 @@ type UserMessage struct {
 	CWD        string
 	// Text is a bounded snippet (turnTextMaxChars) of the prompt — consumers
 	// only ever render a prefix, and the full text stays on disk.
-	Text       string
+	Text string
+	// OwnText is the snippet of the prompt with its leading copy of the
+	// session's injected instruction documents dropped (DropInstructionCopy),
+	// taken before the cap so a long copy cannot hide the task behind it; ""
+	// when the prompt opens with no such copy.
+	OwnText    string
 	SourceFile string
 }
 
