@@ -400,7 +400,7 @@ async function refreshing() {
   return { ...env, bump, ids, more };
 }
 
-test('a refresh that pages the focused row out of its family draws the family whole and keeps focus on that row', async () => {
+test('a refresh that pages the focused row out of its family keeps that row drawn beside the page and focus on it', async () => {
   const { view, document, bump, ids, more } = await refreshing();
   await bump(FOUR());
   assert.deepEqual(ids(), ['f-1', 'f-2', 'f-3']);
@@ -410,8 +410,40 @@ test('a refresh that pages the focused row out of its family draws the family wh
   await bump([...FOUR(), OUTRANKS()]);
   assert.ok(view.contains(document.activeElement), 'focus is on an element in the list');
   assert.equal(document.activeElement.getAttribute('data-session'), 'f-3');
-  assert.deepEqual(ids(), ['f-5', 'f-1', 'f-2', 'f-3', 'f-4'], 'every run of the family is drawn');
-  assert.equal(more(), null, 'no Show all 5');
+  assert.deepEqual(ids(), ['f-5', 'f-1', 'f-2', 'f-3'], 'the page plus the focused f-3');
+  assert.equal(more(), 'Show all 5');
+  clearLiveHandler();
+});
+
+test('a refresh adding a newer costlier run to a collapsed family of 21 keeps the focused row drawn once, in place, with focus on it and Show all 22 tabbable', async () => {
+  const fam = () => Array.from({ length: 21 }, (_, i) => row(`t-${i}`, {
+    family_key: 'twenty-one', title: `twenty-one ${i}`, last_activity: at(-100 + i), cost_usd: 1 + i / 100,
+  }));
+  let data = fam();
+  const calls = stubFetch(() => ({ sessions: data }));
+  let onMessage;
+  globalThis.EventSource = class { constructor() {} addEventListener(_t, fn) { onMessage = fn; } };
+  const { view, done, document } = await mount();
+  await done;
+  startSSE({});
+  onMessage({ data: JSON.stringify({ generation: 1 }) });
+  await settle(); await settle();
+  const g = () => view.querySelector('.sl-group[data-family="twenty-one"]');
+  const ids = () => g().querySelectorAll('.sl-row').map(r => r.getAttribute('data-session'));
+  assert.deepEqual(ids(), ['t-20', 't-19', 't-18']);
+  g().querySelector('[data-session="t-18"]').focus();
+
+  data = [...fam(), row('t-new', { family_key: 'twenty-one', title: 'twenty-one new', last_activity: at(-1), cost_usd: 40 })];
+  onMessage({ data: JSON.stringify({ generation: 2 }) });
+  await settle(); await settle(); await settle();
+  assert.equal(calls.length, 2, 'the bump refetched the index');
+  assert.ok(g().contains(document.activeElement), 'focus is inside the family');
+  assert.ok(document.activeElement.classList.contains('sl-row'));
+  assert.equal(document.activeElement.getAttribute('data-session'), 't-18');
+  assert.deepEqual(ids(), ['t-new', 't-20', 't-19', 't-18'], 't-18 drawn once, after t-19 in newest-first order');
+  const more = g().querySelector('.sl-more');
+  assert.equal(more.textContent, 'Show all 22');
+  assert.ok(more.tabIndex >= 0, 'Show all 22 stays tabbable');
   clearLiveHandler();
 });
 

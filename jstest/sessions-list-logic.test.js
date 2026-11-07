@@ -135,13 +135,29 @@ test('pageGroup shows the 3 rows most worth opening, in the given order, and hid
   assert.deepEqual(pageGroup(rows.slice(0, 3), false), { visible: rows.slice(0, 3), hidden: 0 });
 });
 
-test('pageGroup draws a family whole when the focused session would fall outside its page, and pages it as before otherwise', () => {
+test('pageGroup keeps the focused session drawn at its sort position beside the page when it would fall outside it, and pages as before otherwise', () => {
   const rows = Array.from({ length: 5 }, (_, i) => row(`r${i}`, { cost_usd: 5 - i }));
-  assert.deepEqual(pageGroup(rows, false, 'r3'), { visible: rows, hidden: 0 }, 'r3 ranks fourth: the family draws whole');
+  const out = pageGroup(rows, false, 'r3');
+  assert.deepEqual(out.visible.map(r => r.session_id), ['r0', 'r1', 'r2', 'r3'], 'r3 ranks fourth: drawn after the page, in sort order');
+  assert.equal(out.hidden, 1, 'hidden is the family minus the drawn rows');
   const kept = pageGroup(rows, false, 'r1');
   assert.deepEqual(kept.visible.map(r => r.session_id), ['r0', 'r1', 'r2'], 'r1 stays on the page');
   assert.equal(kept.hidden, 2);
   assert.deepEqual(pageGroup(rows, false, 'elsewhere').visible.map(r => r.session_id), ['r0', 'r1', 'r2'], 'a session in another family changes nothing');
+  assert.deepEqual(pageGroup(rows.slice(0, 4), false, 'r3'), { visible: rows.slice(0, 4), hidden: 0 }, 'a family of 4 with its fourth focused draws all 4');
+});
+
+test('listView with the focused session id keeps that row in its family\'s rows, in sort order, and reports hidden as the count minus the drawn rows', () => {
+  const fam = Array.from({ length: 21 }, (_, i) => row(`s${i}`, { family_key: 'twenty-one', cost_usd: 1 + i / 100, last_activity: new Date(Date.UTC(2026, 10, 1, 0, i)).toISOString() }));
+  const fresh = row('new', { family_key: 'twenty-one', cost_usd: 50, last_activity: new Date(Date.UTC(2026, 10, 1, 1)).toISOString() });
+  const before = listView(fam, {}).groups[0];
+  assert.deepEqual(before.rows.map(r => r.session_id), ['s20', 's19', 's18']);
+  const unfocused = listView([...fam, fresh], {}).groups[0];
+  assert.deepEqual(unfocused.rows.map(r => r.session_id), ['new', 's20', 's19'], 'without focus, s18 pages out');
+  const g = listView([...fam, fresh], { focused: 's18' }).groups[0];
+  assert.deepEqual(g.rows.map(r => r.session_id), ['new', 's20', 's19', 's18'], 'the focused s18 stays, once, at its newest-first position');
+  assert.equal(g.count, 22);
+  assert.equal(g.hidden, g.count - g.rows.length);
 });
 
 test('worthRank: a failing check or failed edit by cost, then compactions, then cost; failed alone ranks nothing', () => {

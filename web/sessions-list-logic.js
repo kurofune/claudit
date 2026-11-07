@@ -210,15 +210,15 @@ export function worthRank(a, b) {
 
 // pageGroup is the slice of a family's rows the list draws: until the
 // family is expanded, its GROUP_PAGE rows most worth opening, kept in the
-// rows' own (sort) order, and how many stay behind "Show all N". A family
-// whose focused session would fall outside that page is drawn whole, so
-// the row holding focus stays on screen.
+// rows' own (sort) order, and how many stay behind "Show all N". The
+// focused session is drawn too, at its place in that order, so a refresh
+// that outranks it leaves the row holding focus on screen.
 /** @param {SessionIndexRow[]} rows @param {boolean} expanded @param {string} [focused] the session_id of the row holding focus */
 export function pageGroup(rows, expanded, focused = '') {
   if (expanded || rows.length <= GROUP_PAGE) return { visible: rows, hidden: 0 };
   const keep = new Set([...rows].sort(worthRank).slice(0, GROUP_PAGE));
-  if (focused && rows.some(r => r.session_id === focused && !keep.has(r))) return { visible: rows, hidden: 0 };
-  return { visible: rows.filter(r => keep.has(r)), hidden: rows.length - GROUP_PAGE };
+  const visible = rows.filter(r => keep.has(r) || (focused !== '' && r.session_id === focused));
+  return { visible, hidden: rows.length - visible.length };
 }
 
 // modelShort names a Claude model by its family ("claude-opus-4-7" →
