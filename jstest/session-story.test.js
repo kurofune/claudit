@@ -323,10 +323,32 @@ test('search: an open sub-agent\'s step matches', async () => {
   stubFetch(() => nestedPage({ alone: ['rg Foo', 'echo uniquenestedcommand'] }));
   await paintStory(host, 's1');
   click(childNamed(host, 'scan web').querySelector('.story-child-h'));
+  const head = childNamed(host, 'scan web').querySelector('.story-child-h');
+  assert.equal(head.getAttribute('aria-expanded'), 'true');
   const box = findFor(host, 'uniquenestedcommand');
   keydown(box, 'Enter');
   landedOn(host, document, 'c0/s1.0', box);
   assert.equal(host.querySelector('.story-find-status').textContent, '1 of 1');
+  assert.equal(head.getAttribute('aria-expanded'), 'true', 'the open sub-agent stays open');
+  assert.equal(childNamed(host, 'scan web').querySelector('.story-child-h'), head, 'no repaint: the same header is still on the page');
+  keydown(box, 'Enter');
+  landedOn(host, document, 'c0/s1.0', box);
+  assert.equal(head.getAttribute('aria-expanded'), 'true', 'a second Enter does not toggle it shut');
+});
+
+test('search: no match, parent or nested, says so and leaves every sub-agent as it was', async () => {
+  const { host } = mount();
+  stubFetch(() => nestedPage({ alone: ['rg Foo'], parallel: [['rg api'], ['rg docs']] }));
+  await paintStory(host, 's1');
+  click(childNamed(host, 'scan api').querySelector('.story-child-h'));
+  const expanded = () => host.querySelectorAll('.story-child-h').map(h => h.getAttribute('aria-expanded'));
+  const before = expanded();
+  assert.deepEqual(before, ['false', 'true', 'false']);
+  const box = findFor(host, 'zebra');
+  keydown(box, 'Enter');
+  assert.equal(host.querySelector('.story-find-status').textContent, 'No step matches');
+  assert.deepEqual(expanded(), before);
+  assert.equal(host.querySelectorAll('.is-jumped').length, 0);
 });
 
 test('search: a match inside a collapsed sub-agent opens it and lands on the step', async () => {
