@@ -400,6 +400,27 @@ test('forecastChart keeps the generic empty text when the payload names no month
   assert.match(forecastChart({ projected_month_end_usd: 0, month_start: '2026-02-01T00:00:00+09:00' }, []), /No projection for February yet/);
 });
 
+test('forecastChart names the month-end date from month_end\'s own calendar date, whatever its offset', async () => {
+  const { forecastChart } = await import('../web/charts.js');
+  const cases = [
+    ['2026-10-01T00:00:00+09:00', '2026-11-01T00:00:00+09:00', '2026-10-31'],
+    ['2026-10-01T00:00:00-08:00', '2026-11-01T00:00:00-08:00', '2026-10-31'],
+    ['2026-02-01T00:00:00Z', '2026-03-01T00:00:00Z', '2026-02-28'],
+    ['2024-12-01T00:00:00+05:30', '2025-01-01T00:00:00+05:30', '2024-12-31'],
+  ];
+  for (const [start, end, want] of cases) {
+    const ws = new Date(start).getTime();
+    const points = [0, 1, 2].map(d => ({ time: new Date(ws + d * 86400000 + 3600000).toISOString(), cost_usd: 1 }));
+    const html = forecastChart({
+      window_start: start, month_start: start, month_end: end,
+      projected_month_end_usd: 30, mtd_cost_usd: 3, days_elapsed: 3, daily_rate_usd: 1,
+    }, points);
+    const legend = /Projected by ([^:<]+):/.exec(html);
+    assert.ok(legend, `no Projected-by legend for month_end ${end}`);
+    assert.equal(legend[1], want, `month_end ${end}`);
+  }
+});
+
 const SELECTIONS = [
   { name: 'All', search: '', tiles: ['claude-code', 'codex'] },
   { name: 'Claude Code', search: '?provider=claude-code', tiles: ['claude-code'] },

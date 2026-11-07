@@ -527,6 +527,17 @@ function forecastMonthName(forecast) {
   return MONTH_NAMES[Number(m[2]) - 1] || '';
 }
 
+// forecastLastDate names the month's last calendar day from month_end's own
+// date digits (the server's local midnight starting next month), stepped back
+// one calendar day, so neither the server's offset nor the browser's zone
+// shifts it.
+function forecastLastDate(forecast) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((forecast && forecast.month_end) || '');
+  if (!m) return '';
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - 1));
+  return `${String(dt.getUTCFullYear()).padStart(4, '0')}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
 // forecastChart — cumulative cost burn-up with a dashed projection to
 // month-end. X spans [window_start, month_end), Y is cumulative $.
 export function forecastChart(forecast, points) {
@@ -603,8 +614,7 @@ export function forecastChart(forecast, points) {
   const todayLabel = `<text class="trend-tick" x="${lastX.toFixed(2)}" y="${(pad.t - 8).toFixed(2)}" text-anchor="middle">today</text>`;
   const projLabel = `<text class="trend-forecast-label" x="${endX.toFixed(2)}" y="${(endY - 12).toFixed(2)}" text-anchor="end">${escHtml(fmtMoney(projected))}</text>`;
 
-  const lastDt = new Date(me - 86400000);
-  const lastDateStr = `${lastDt.getUTCFullYear()}-${String(lastDt.getUTCMonth() + 1).padStart(2,'0')}-${String(lastDt.getUTCDate()).padStart(2,'0')}`;
+  const lastDateStr = forecastLastDate(forecast);
 
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const data = [];
