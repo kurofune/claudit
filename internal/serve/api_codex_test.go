@@ -209,3 +209,72 @@ func TestAPISessionsStory_CodexSubagentWithoutParentTurn(t *testing.T) {
 		t.Errorf("story for the folded child thread id: status %d, want 404", w.Code)
 	}
 }
+
+// TestAPISessionsStory_CodexScriptCompletedChunk: a Codex exec call whose
+// output is a "Script completed … Output:" header over a JSON chunk carries
+// the chunk's exit_code and output in the story, not the header.
+func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
+	const (
+		sessionID = "01a19999-0000-7000-8000-000000000002"
+		callID    = "call_script_completed"
+	)
+	line := func(ts, typ string, payload any) string {
+		b, err := json.Marshal(map[string]any{"timestamp": ts, "type": typ, "payload": payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "2026", "10", "31", "rollout-2026-10-31T10-00-00-"+sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output := []map[string]string{
+		{"type": "input_text", "text": "Script completed\nWall time 0.1 seconds\nOutput:\n"},
+		{"type": "input_text", "text": "Warning: truncated output (original token count: 10612)\nTotal output lines: 1\n"},
+		{"type": "input_text", "text": `{"chunk_id":"c0","wall_time_seconds":0.1,"exit_code":1,"original_token_count":10612,"output":"--- FAIL: TestX\nFAIL\n"}`},
+	}
+	writeJSONL(t, path,
+		line("2026-10-31T10:00:00.000Z", "session_meta", map[string]any{"session_id": sessionID, "id": sessionID, "cwd": "/p/codex", "originator": "codex_exec", "thread_source": "user"}),
+		line("2026-10-31T10:00:01.000Z", "turn_context", map[string]any{"cwd": "/p/codex", "model": "gpt-6-astra"}),
+		line("2026-10-31T10:00:02.000Z", "response_item", map[string]any{"type": "custom_tool_call", "call_id": callID, "name": "exec", "input": `text(await tools.exec_command({cmd:"go test ./..."}));`}),
+		line("2026-10-31T10:00:03.000Z", "token_usage_record", map[string]any{"response_id": "resp_1", "usage": map[string]any{"input_tokens": 100, "output_tokens": 10}}),
+		line("2026-10-31T10:00:04.000Z", "response_item", map[string]any{"type": "custom_tool_call_output", "call_id": callID, "output": output}),
+	)
+	cache := corpus.New(provider.NewClaudeCode(t.TempDir()), provider.NewCodex(root))
+	if _, err := cache.Refresh(); err != nil {
+		t.Fatalf("seed refresh: %v", err)
+	}
+	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
+
+	body := getStory(t, srv, "?scope=all&whole=1&provider=codex&session="+sessionID)
+	var steps []struct {
+		Tools []struct {
+			ID       string `json:"id"`
+			Output   string `json:"output"`
+			ExitCode *int   `json:"exit_code"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(body["steps"], &steps); err != nil {
+		t.Fatalf("story steps: %v", err)
+	}
+	found := false
+	for _, st := range steps {
+		for _, tool := range st.Tools {
+			if tool.ID != callID {
+				continue
+			}
+			found = true
+			if tool.ExitCode == nil || *tool.ExitCode != 1 {
+				t.Errorf("exit_code = %v, want 1", tool.ExitCode)
+			}
+			if !strings.HasPrefix(tool.Output, "--- FAIL: TestX\nFAIL") {
+				t.Errorf("output = %q, want the chunk's output text", tool.Output)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s missing from the story", callID)
+	}
+}

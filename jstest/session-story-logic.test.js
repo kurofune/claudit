@@ -217,6 +217,9 @@ test('unwrapExit drops the Codex exit-code header lines from full output', () =>
   assert.equal(unwrapExit('Process exited with code 2\nOutput:\nx'), 'x');
   assert.equal(unwrapExit('plain output\nOutput:\nmore'), 'plain output\nOutput:\nmore');
   assert.equal(unwrapExit('no envelope'), 'no envelope');
+  assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\n\n{"chunk_id":"c0","exit_code":1,"output":"FAIL x\\nline2"}'), 'FAIL x\nline2');
+  assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\n\nWarning: truncated output (original token count: 10612)\nTotal output lines: 1\n\n{"chunk_id":"c1","exit_code":2,"output":"boom"}'), 'boom');
+  assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\nhello'), 'Script completed\nWall time 0.1 seconds\nOutput:\nhello');
 });
 
 test('fmtDuration reads spans', () => {
