@@ -1,6 +1,6 @@
 # CURRENT
 
-**Mode:** Sessions rework landed (epic claudit-255): fast opens, a Worth opening block with counted reasons, session page leads with how it ended. Dogfooding it next.
+**Mode:** Sessions rework done (epic claudit-255 closed). Next: a Sessions tab that stays light while live logs write, a session page whose tiles agree with its failure block, and Codex runs grouped by what they did.
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
@@ -13,7 +13,7 @@
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** operator dogfoods the list with the precise failing-check signal.
+**Next checkpoint:** the drain of the memory, session-page and Codex-grouping beads lands; then the operator dogfoods Sessions.
 
 **Stop conditions:**
 - Claude Code or Codex changes the log schema → parser catch-up becomes the priority.
