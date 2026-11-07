@@ -44,8 +44,8 @@ func ownPromptText(text string, docs *[]string) string {
 // verbatim in any of docs, the instruction documents a harness injected
 // into the same session: a harness that prepends a copy of those documents
 // to its task leaves the task. A paragraph is the lines between blank lines
-// or lone markup lines (a wrapper's <INSTRUCTIONS> or </system-reminder>, an
-// <!-- … --> marker), compared trimmed, and matches only a whole paragraph
+// or lone instruction-wrapper lines (<INSTRUCTIONS>, </system-reminder>, an
+// <!-- … --> marker; other markup is paragraph text), compared trimmed, and matches only a whole paragraph
 // of a document, never part of one. Dropping stops at the first paragraph
 // found in no document. The prompt comes back unchanged when nothing drops,
 // or when everything would: a prompt that is only a copy keeps its own
@@ -76,13 +76,15 @@ func DropInstructionCopy(prompt string, docs []string) string {
 	return rest
 }
 
-// markupLine is a line holding only one markup tag or comment: a wrapper's
-// delimiter, which separates paragraphs rather than belonging to one.
-var markupLine = regexp.MustCompile(`^\s*(?:</?[A-Za-z][\w:-]*(?:\s[^<>]*)?>|<!--.*?-->)\s*$`)
+// wrapperLine is a line holding only an instruction wrapper's delimiter: a
+// Codex <INSTRUCTIONS> or Claude Code <system-reminder> tag, or an
+// <!-- … --> marker such as an AGENTS.md block's. It separates paragraphs
+// rather than belonging to one; any other markup line is paragraph text.
+var wrapperLine = regexp.MustCompile(`^\s*(?:</?(?:INSTRUCTIONS|system-reminder)>|<!--.*?-->)\s*$`)
 
 // breakLine reports whether a line ends a paragraph.
 func breakLine(line string) bool {
-	return strings.TrimSpace(line) == "" || markupLine.MatchString(line)
+	return strings.TrimSpace(line) == "" || wrapperLine.MatchString(line)
 }
 
 // skipBreaks is s from its first line that does not end a paragraph, or ""

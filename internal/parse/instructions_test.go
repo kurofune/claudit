@@ -56,6 +56,24 @@ func TestDropInstructionCopy(t *testing.T) {
 			want:   "task",
 		},
 		{
+			name:   "other markup belongs to the prompt paragraph",
+			prompt: "<request>\n# Work rules\n</request>\n\nFix login",
+			docs:   []string{doc},
+			want:   "<request>\n# Work rules\n</request>\n\nFix login",
+		},
+		{
+			name:   "markup after a dropped copy stays",
+			prompt: "# Work rules\n\n<request>\nFix login\n</request>",
+			docs:   []string{doc},
+			want:   "<request>\nFix login\n</request>",
+		},
+		{
+			name:   "markup after a wrapped copy stays",
+			prompt: "<INSTRUCTIONS>\n# Work rules\n</INSTRUCTIONS>\n<request>\nFix login\n</request>",
+			docs:   []string{doc},
+			want:   "<request>\nFix login\n</request>",
+		},
+		{
 			name:   "any document",
 			prompt: "LOOP CONTEXT: Iteration 1.\n\ntask",
 			docs:   []string{"other", doc},
