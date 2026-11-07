@@ -370,6 +370,78 @@ test('an SSE generation bump refetches and repaints, keeping search, filter, sor
   clearLiveHandler();
 });
 
+// FOUR is a family of four runs ranked by cost alone: f-1, f-2 and f-3 are
+// its rows most worth opening, f-4 waits behind "Show all 4".
+const FOUR = () => [1, 2, 3, 4].map(i => row(`f-${i}`, {
+  family_key: 'four runs', title: `four runs ${i}`, last_activity: at(-10 - i), cost_usd: 5 - i,
+}));
+// OUTRANKS is a fifth run of that family costlier than every other.
+const OUTRANKS = () => row('f-5', { family_key: 'four runs', title: 'four runs 5', last_activity: at(-1), cost_usd: 10 });
+
+// refreshing mounts FOUR plus one other family under a live SSE stream and
+// returns bump(rows), which answers the next index fetch with rows.
+async function refreshing() {
+  let data = [...FOUR(), row('other', { family_key: 'other', last_activity: at(-60) })];
+  stubFetch(() => ({ sessions: data }));
+  let onMessage;
+  globalThis.EventSource = class { constructor() {} addEventListener(_t, fn) { onMessage = fn; } };
+  const env = await mount();
+  await env.done;
+  startSSE({});
+  let gen = 0;
+  const bump = async rows => {
+    data = [...rows, row('other', { family_key: 'other', last_activity: at(-60) })];
+    onMessage({ data: JSON.stringify({ generation: ++gen }) });
+    await settle(); await settle(); await settle();
+  };
+  const g = () => env.view.querySelector('.sl-group[data-family="four runs"]');
+  const ids = () => g().querySelectorAll('.sl-row').map(r => r.getAttribute('data-session'));
+  const more = () => { const b = g().querySelector('.sl-more'); return b && b.textContent; };
+  return { ...env, bump, ids, more };
+}
+
+test('a refresh that pages the focused row out of its family draws the family whole and keeps focus on that row', async () => {
+  const { view, document, bump, ids, more } = await refreshing();
+  await bump(FOUR());
+  assert.deepEqual(ids(), ['f-1', 'f-2', 'f-3']);
+  assert.equal(more(), 'Show all 4');
+  view.querySelector('.sl-group [data-session="f-3"]').focus();
+
+  await bump([...FOUR(), OUTRANKS()]);
+  assert.ok(view.contains(document.activeElement), 'focus is on an element in the list');
+  assert.equal(document.activeElement.getAttribute('data-session'), 'f-3');
+  assert.deepEqual(ids(), ['f-5', 'f-1', 'f-2', 'f-3', 'f-4'], 'every run of the family is drawn');
+  assert.equal(more(), null, 'no Show all 5');
+  clearLiveHandler();
+});
+
+test('a refresh that keeps the focused row among its family\'s 3 most worth opening pages the family as before', async () => {
+  const { view, document, bump, ids, more } = await refreshing();
+  await bump(FOUR());
+  view.querySelector('.sl-group [data-session="f-1"]').focus();
+
+  const refreshed = FOUR();
+  refreshed[1].cost_usd = 9;
+  await bump(refreshed);
+  assert.deepEqual(ids(), ['f-1', 'f-2', 'f-3']);
+  assert.equal(more(), 'Show all 4');
+  assert.equal(document.activeElement.getAttribute('data-session'), 'f-1');
+  clearLiveHandler();
+});
+
+test('with focus in the search box, a refresh adding a fifth run pages the family to its 3 rows most worth opening', async () => {
+  const { view, document, bump, ids, more } = await refreshing();
+  await bump(FOUR());
+  const input = view.querySelector('.sl-search');
+  input.focus();
+
+  await bump([...FOUR(), OUTRANKS()]);
+  assert.deepEqual(ids(), ['f-5', 'f-1', 'f-2']);
+  assert.equal(more(), 'Show all 5');
+  assert.equal(document.activeElement, input);
+  clearLiveHandler();
+});
+
 test('a family starts collapsed to its 3 rows most worth opening behind "Show all N"; opening it focuses the first revealed row', async () => {
   const seven = Array.from({ length: 7 }, (_, i) => row(`s7-${i}`, {
     family_key: 'seven runs', title: `seven runs ${i}`, last_activity: at(-i), cost_usd: i + 1,

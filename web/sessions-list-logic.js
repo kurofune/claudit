@@ -210,11 +210,14 @@ export function worthRank(a, b) {
 
 // pageGroup is the slice of a family's rows the list draws: until the
 // family is expanded, its GROUP_PAGE rows most worth opening, kept in the
-// rows' own (sort) order, and how many stay behind "Show all N".
-/** @param {SessionIndexRow[]} rows @param {boolean} expanded */
-export function pageGroup(rows, expanded) {
+// rows' own (sort) order, and how many stay behind "Show all N". A family
+// whose focused session would fall outside that page is drawn whole, so
+// the row holding focus stays on screen.
+/** @param {SessionIndexRow[]} rows @param {boolean} expanded @param {string} [focused] the session_id of the row holding focus */
+export function pageGroup(rows, expanded, focused = '') {
   if (expanded || rows.length <= GROUP_PAGE) return { visible: rows, hidden: 0 };
   const keep = new Set([...rows].sort(worthRank).slice(0, GROUP_PAGE));
+  if (focused && rows.some(r => r.session_id === focused && !keep.has(r))) return { visible: rows, hidden: 0 };
   return { visible: rows.filter(r => keep.has(r)), hidden: rows.length - GROUP_PAGE };
 }
 
@@ -399,16 +402,17 @@ export function windowText(search) {
 // GROUP_PAGE rows most worth opening unless expanded.
 /**
  * @param {SessionIndexRow[]} rows
- * @param {{query?: string, filter?: ListFilter|string, sort?: ListSort|string, expanded?: Set<string>, window?: string}} opts
+ * @param {{query?: string, filter?: ListFilter|string, sort?: ListSort|string, expanded?: Set<string>, focused?: string, window?: string}} opts
+ *   focused is the session_id of the family row holding focus, drawn even when its family is collapsed
  * @returns {ListView}
  */
-export function listView(rows, { query = '', filter = 'all', sort = 'newest', expanded = new Set(), window = DEFAULT_WINDOW } = {}) {
+export function listView(rows, { query = '', filter = 'all', sort = 'newest', expanded = new Set(), focused = '', window = DEFAULT_WINDOW } = {}) {
   const matched = searchRows(rows, query);
   const counts = filterCounts(matched);
   const shown = applyFilter(matched, filter);
   const groups = groupByFamily(shown).map(g => {
     const sorted = applySort(g.rows, sort);
-    const page = pageGroup(sorted, expanded.has(g.key));
+    const page = pageGroup(sorted, expanded.has(g.key), focused);
     return { key: g.key, label: g.label, count: sorted.length, rows: page.visible, hidden: page.hidden, stats: familyStats(sorted) };
   });
   /** @type {ListView['empty']} */

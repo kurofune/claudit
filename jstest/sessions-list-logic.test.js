@@ -135,6 +135,15 @@ test('pageGroup shows the 3 rows most worth opening, in the given order, and hid
   assert.deepEqual(pageGroup(rows.slice(0, 3), false), { visible: rows.slice(0, 3), hidden: 0 });
 });
 
+test('pageGroup draws a family whole when the focused session would fall outside its page, and pages it as before otherwise', () => {
+  const rows = Array.from({ length: 5 }, (_, i) => row(`r${i}`, { cost_usd: 5 - i }));
+  assert.deepEqual(pageGroup(rows, false, 'r3'), { visible: rows, hidden: 0 }, 'r3 ranks fourth: the family draws whole');
+  const kept = pageGroup(rows, false, 'r1');
+  assert.deepEqual(kept.visible.map(r => r.session_id), ['r0', 'r1', 'r2'], 'r1 stays on the page');
+  assert.equal(kept.hidden, 2);
+  assert.deepEqual(pageGroup(rows, false, 'elsewhere').visible.map(r => r.session_id), ['r0', 'r1', 'r2'], 'a session in another family changes nothing');
+});
+
 test('worthRank: a failing check or failed edit by cost, then compactions, then cost; failed alone ranks nothing', () => {
   const rows = [
     row('cheap-check', { failing_checks: gt(), cost_usd: 1 }),

@@ -193,14 +193,14 @@ function appendHTML(body, html) {
  * @param {{now?: number, search?: string}} [opts]
  */
 export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {}) {
-  const v = listView(rows, { ...ui, window: windowText(search) });
+  const keep = captureFocus(root);
+  const v = listView(rows, { ...ui, focused: keep.startsWith('row:') ? keep.slice('row:'.length) : '', window: windowText(search) });
   const filters = root.querySelector('.sl-filters');
   const sorts = root.querySelector('.sl-sorts');
   const body = root.querySelector('.sl-body');
   if (!filters || !sorts || !body) return;
   const token = {};
   painting.set(root, token);
-  const keep = captureFocus(root);
   const focusedGroup = focusGroup(root);
   const seen = onScreen(body);
   const scrollY = typeof window.scrollY === 'number' ? window.scrollY : 0;
