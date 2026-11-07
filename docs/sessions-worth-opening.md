@@ -402,3 +402,49 @@ Codex (no Claude Code session's key moved):
   would key `LOOP CONTEXT: Iteration _.` like the other 205; that rule reads
   beyond the session, which the bead's design rules out, so the choice is
   the operator's.
+
+**Ruled 2026-11-07 (operator, answer a):** the 4 sessions whose own
+instructions hold no contract keep their key; criterion 6 allows at most
+4, each listed. Matching stays within the session (a session keys the same
+alone or beside others, `TestBuildSessionIndex_FamilyIsTheSameAloneOrAlongsideOthers`).
+
+**Remeasured 2026-11-06, code at b331007 (claudit-9rc) on main 382c21e,**
+the change rebased onto main with the cba9360 paragraph rule. Same jq
+command, `claudit serve --open=false` built at b331007 on port 18852
+beside a build at 382c21e (its parent) on 18851, both read at 22:51:39
+PST, the list's default window:
+
+| | 382c21e (parent) | b331007 (change) |
+|---|---|---|
+| sessions (`.sessions \| length`) | 1,636 | 1,636 (same ids) |
+| family `# Per-Bead Work Contract` | 258 | 4 |
+
+Of the parent's 258: 239 moved to `LOOP CONTEXT: Iteration _.`, 15 to
+`## _. Browser-verify web/ changes`, 4 stayed. The 4 left, as above
+(`summoner-scr-*` worktrees, global AGENTS.md only):
+
+| session id | project | started |
+|---|---|---|
+| 01a196a7-4f15-7b82-811c-95a424292b4d | summoner-scr-bha | 2026-11-01T10:28:36Z |
+| 01a196a6-97fe-7a42-9b02-a0a989d8d03d | summoner-scr-bha | 2026-11-01T10:27:55Z |
+| 01a1964e-a3a8-7133-95a7-a2f21a8b71f7 | summoner-scr-69u | 2026-11-01T08:51:49Z |
+| 01a1964d-584c-7ac1-a314-6a12c249345b | summoner-scr-69u | 2026-11-01T08:50:32Z |
+
+Top 10 families after the change:
+
+| sessions | family key |
+|---|---|
+| 577 | `LOOP CONTEXT: Iteration _.` |
+| 263 | ``You are running the `implement` step of the Djinn harness for bead _.`` |
+| 229 | `You are a triage judge for this repository's workshop. Decide whether …` |
+| 168 | `## Fix step _` |
+| 141 | `TRIAGE JUDGE: you are a fresh headless session judging one proposal. …` |
+| 29 | `You hold the gardener seat. Run its "_" duty now (schedule: daily _:_), …` |
+| 22 | `You hold the lead seat. Run its "rule" duty now (schedule: every _m), …` |
+| 20 | `You hold the lead seat. Run its "triage" duty now (schedule: every _m), …` |
+| 19 | `You hold the lead seat. Run its "_" duty now (schedule: every _m), …` |
+| 15 | `## _. Browser-verify web/ changes` |
+
+The `LOOP CONTEXT: Iteration _.` group is the harness's own line before the
+task; splitting it is not this rule's (the lead routes it to djinn's loop
+context, pending the operator).
