@@ -31,7 +31,7 @@ The operator's words, `djinn ops snapshot --json`, .djinn/summoner-state.json,
 
 ## Outputs
 
-Beads filed through /create-bead or /plan-to-beads, drains started,
+Beads filed through /create-bead, drains started,
 .djinn/digest/<date>.md, and one dated ledger entry per session or duty run,
 except a duty run its duty says writes none.
 
