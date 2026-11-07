@@ -1323,10 +1323,13 @@ func ExitEnvelope(text string) (code int, body string, ok bool) {
 	return code, body, true
 }
 
-// scriptChunk reads the JSON result a "Script completed" envelope carries
+// scriptChunk reads the JSON results a "Script completed" envelope carries
 // after its "Output:" line, perhaps behind a "Warning: truncated output"
-// block. ok is false unless the body is one JSON object with both an
-// exit_code and an output.
+// block: one chunk object per exec_command the script ran or polled. code is
+// the last non-zero exit_code among the chunks, else the last exit_code;
+// output is the chunks' outputs joined on a line break. ok is false unless
+// the body is a sequence of such objects, each with an output and at least
+// one with an exit_code.
 func scriptChunk(body string) (code int, output string, ok bool) {
 	body = strings.TrimLeft(body, "\n")
 	if strings.HasPrefix(body, "Warning: truncated output") {
@@ -1336,14 +1339,31 @@ func scriptChunk(body string) (code int, output string, ok bool) {
 		}
 		body = rest
 	}
-	var chunk struct {
-		ExitCode *int    `json:"exit_code"`
-		Output   *string `json:"output"`
+	dec := json.NewDecoder(strings.NewReader(body))
+	var outputs []string
+	coded := false
+	for {
+		var chunk struct {
+			ExitCode *int    `json:"exit_code"`
+			Output   *string `json:"output"`
+		}
+		err := dec.Decode(&chunk)
+		if err == io.EOF {
+			break
+		}
+		if err != nil || chunk.Output == nil {
+			return 0, "", false
+		}
+		outputs = append(outputs, *chunk.Output)
+		if chunk.ExitCode != nil && (!coded || *chunk.ExitCode != 0 || code == 0) {
+			code = *chunk.ExitCode
+			coded = true
+		}
 	}
-	if json.Unmarshal([]byte(body), &chunk) != nil || chunk.ExitCode == nil || chunk.Output == nil {
+	if !coded {
 		return 0, "", false
 	}
-	return *chunk.ExitCode, *chunk.Output, true
+	return code, strings.Join(outputs, "\n"), true
 }
 
 // exitForm rewrites a "Script completed" envelope whose JSON chunk reads

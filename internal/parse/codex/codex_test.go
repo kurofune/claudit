@@ -234,6 +234,12 @@ func TestExitEnvelope(t *testing.T) {
 		{"Script completed\nWall time 0.1 seconds\nOutput:\nhello world", 0, "", false},
 		{"Script completed\nWall time 0.1 seconds\nOutput:\n\n{\"chunk_id\":\"c3\",\"output\":\"no code\"}", 0, "", false},
 		{"Script completed\nWall time 0.1 seconds\nOutput:\n\n{\"chunk_id\":\"c4\",\"exit_code\":1,\"output\":\"cut", 0, "", false},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"exit_code\":0,\"output\":\"one\\n\"}\n{\"chunk_id\":\"b\",\"exit_code\":2,\"output\":\"two\\n\"}", 2, "one\n\ntwo\n", true},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"exit_code\":3,\"output\":\"x\"}\n{\"chunk_id\":\"b\",\"exit_code\":0,\"output\":\"y\"}", 3, "x\ny", true},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"session_id\":5,\"output\":\"\"}\n{\"chunk_id\":\"b\",\"exit_code\":0,\"output\":\"done\"}", 0, "\ndone", true},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"session_id\":5,\"output\":\"still running\"}", 0, "", false},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"exit_code\":0,\"output\":\"one\"}\n{\"i\":1,\"result\":{\"status\":\"fulfilled\"}}", 0, "", false},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"exit_code\":0,\"output\":\"one\"}\ntrailing text", 0, "", false},
 		{"total 0\nOutput:\nx", 0, "", false},
 		{"plain output", 0, "", false},
 		{"", 0, "", false},
@@ -250,6 +256,7 @@ func TestExitForm(t *testing.T) {
 	cases := []struct{ text, want string }{
 		{"Script completed\nWall time 0.1 seconds\nOutput:\nWarning: truncated output (original token count: 10612)\nTotal output lines: 1\n\n{\"chunk_id\":\"c1\",\"exit_code\":2,\"output\":\"boom\\nline2\"}", "Exit code: 2\nWall time 0.1 seconds\nOutput:\nboom\nline2"},
 		{"Script completed\nWall time 0.1 seconds\nOutput:\nhello world", "Script completed\nWall time 0.1 seconds\nOutput:\nhello world"},
+		{"Script completed\nWall time 1 seconds\nOutput:\n\n{\"chunk_id\":\"a\",\"exit_code\":0,\"output\":\"one\\n\"}\n{\"chunk_id\":\"b\",\"exit_code\":2,\"output\":\"two\\n\"}", "Exit code: 2\nWall time 1 seconds\nOutput:\none\n\ntwo\n"},
 		{"Exit code: 1\nOutput:\nboom", "Exit code: 1\nOutput:\nboom"},
 		{"plain output", "plain output"},
 	}

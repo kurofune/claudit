@@ -214,17 +214,30 @@ func TestAPISessionsStory_CodexSubagentWithoutParentTurn(t *testing.T) {
 // output is a "Script completed … Output:" header over a JSON chunk carries
 // the chunk's exit_code and output in the story, not the header.
 func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
+	failing := func(out string) map[string]any {
+		return map[string]any{"chunk_id": "c0", "wall_time_seconds": 0.1, "exit_code": 1, "original_token_count": 10612, "output": out}
+	}
 	t.Run("short", func(t *testing.T) {
-		checkScriptCompletedStory(t, "--- FAIL: TestX\nFAIL\n", "?scope=all&whole=1")
+		checkScriptCompletedStory(t, "?scope=all&whole=1", 1, "--- FAIL: TestX\nFAIL", failing("--- FAIL: TestX\nFAIL\n"))
 	})
 	// A chunk longer than the parse-time result snippet still reads: the
 	// envelope is split before the snippet cuts its JSON.
 	t.Run("past the snippet cap", func(t *testing.T) {
-		checkScriptCompletedStory(t, "--- FAIL: TestX\nFAIL\n"+strings.Repeat("log line of the failing run\n", 300), "?scope=all")
+		checkScriptCompletedStory(t, "?scope=all", 1, "--- FAIL: TestX\nFAIL", failing("--- FAIL: TestX\nFAIL\n"+strings.Repeat("log line of the failing run\n", 300)))
+	})
+	// One chunk per exec_command the script ran: the call carries the last
+	// non-zero exit_code and the chunks' outputs in order, even past the cap.
+	t.Run("two chunks past the snippet cap", func(t *testing.T) {
+		checkScriptCompletedStory(t, "?scope=all", 3,
+			"ok  pkg/one\n",
+			map[string]any{"chunk_id": "c0", "exit_code": 0, "output": "ok  pkg/one\n" + strings.Repeat("first chunk log line\n", 60)},
+			map[string]any{"chunk_id": "c1", "exit_code": 3, "output": strings.Repeat("second chunk log line\n", 60)},
+			map[string]any{"chunk_id": "c2", "exit_code": 0, "output": "tail\n"},
+		)
 	})
 }
 
-func checkScriptCompletedStory(t *testing.T, chunkOutput, query string) {
+func checkScriptCompletedStory(t *testing.T, query string, wantCode int, wantPrefix string, chunks ...map[string]any) {
 	t.Helper()
 	const (
 		sessionID = "01a19999-0000-7000-8000-000000000002"
@@ -237,9 +250,17 @@ func checkScriptCompletedStory(t *testing.T, chunkOutput, query string) {
 		}
 		return string(b)
 	}
-	chunk, err := json.Marshal(map[string]any{"chunk_id": "c0", "wall_time_seconds": 0.1, "exit_code": 1, "original_token_count": 10612, "output": chunkOutput})
-	if err != nil {
-		t.Fatal(err)
+	var lines []string
+	for _, c := range chunks {
+		b, err := json.Marshal(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, string(b))
+	}
+	chunkText := strings.Join(lines, "\n")
+	if len(chunkText) <= 2000 && len(chunks) > 1 {
+		t.Fatalf("chunks are %d chars: want them past the 2000-char result snippet", len(chunkText))
 	}
 	root := t.TempDir()
 	path := filepath.Join(root, "2026", "10", "31", "rollout-2026-10-31T10-00-00-"+sessionID+".jsonl")
@@ -249,7 +270,7 @@ func checkScriptCompletedStory(t *testing.T, chunkOutput, query string) {
 	output := []map[string]string{
 		{"type": "input_text", "text": "Script completed\nWall time 0.1 seconds\nOutput:\n"},
 		{"type": "input_text", "text": "Warning: truncated output (original token count: 10612)\nTotal output lines: 1\n"},
-		{"type": "input_text", "text": string(chunk)},
+		{"type": "input_text", "text": chunkText},
 	}
 	writeJSONL(t, path,
 		line("2026-10-31T10:00:00.000Z", "session_meta", map[string]any{"session_id": sessionID, "id": sessionID, "cwd": "/p/codex", "originator": "codex_exec", "thread_source": "user"}),
@@ -282,11 +303,11 @@ func checkScriptCompletedStory(t *testing.T, chunkOutput, query string) {
 				continue
 			}
 			found = true
-			if tool.ExitCode == nil || *tool.ExitCode != 1 {
-				t.Errorf("exit_code = %v, want 1", tool.ExitCode)
+			if tool.ExitCode == nil || *tool.ExitCode != wantCode {
+				t.Errorf("exit_code = %v, want %d", tool.ExitCode, wantCode)
 			}
-			if !strings.HasPrefix(tool.Output, "--- FAIL: TestX\nFAIL") {
-				t.Errorf("output = %q, want the chunk's output text", tool.Output)
+			if !strings.HasPrefix(tool.Output, wantPrefix) || strings.Contains(tool.Output, `"chunk_id"`) {
+				t.Errorf("output = %q, want the chunks' output text starting %q", tool.Output, wantPrefix)
 			}
 		}
 	}

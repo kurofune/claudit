@@ -247,6 +247,12 @@ test('unwrapExit drops the Codex exit-code header lines from full output', () =>
   assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\n\n{"chunk_id":"c0","exit_code":1,"output":"FAIL x\\nline2"}'), 'FAIL x\nline2');
   assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\n\nWarning: truncated output (original token count: 10612)\nTotal output lines: 1\n\n{"chunk_id":"c1","exit_code":2,"output":"boom"}'), 'boom');
   assert.equal(unwrapExit('Script completed\nWall time 0.1 seconds\nOutput:\nhello'), 'Script completed\nWall time 0.1 seconds\nOutput:\nhello');
+  assert.equal(unwrapExit('Script completed\nWall time 1 seconds\nOutput:\n\n{"chunk_id":"a","exit_code":0,"output":"one\\n"}\n{"chunk_id":"b","exit_code":2,"output":"two\\n"}'), 'one\n\ntwo\n');
+  assert.equal(unwrapExit('Script completed\nWall time 1 seconds\nOutput:\n\n{"chunk_id":"a","session_id":5,"output":""}\n{"chunk_id":"b","exit_code":0,"output":"done"}'), '\ndone');
+  const running = 'Script completed\nWall time 1 seconds\nOutput:\n\n{"chunk_id":"a","session_id":5,"output":"still running"}';
+  assert.equal(unwrapExit(running), running);
+  const wrapped = 'Script completed\nWall time 1 seconds\nOutput:\n\n{"chunk_id":"a","exit_code":0,"output":"one"}\n{"i":1,"result":{"status":"fulfilled"}}';
+  assert.equal(unwrapExit(wrapped), wrapped);
 });
 
 test('fmtDuration reads spans', () => {

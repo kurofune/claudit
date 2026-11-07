@@ -504,9 +504,11 @@ export function unwrapExit(text) {
   return s;
 }
 
-// scriptChunkOutput is the output of the JSON chunk a "Script completed"
-// envelope carries, perhaps behind a "Warning: truncated output" block, or
-// null when the body is not one such chunk.
+// scriptChunkOutput is the output of the JSON chunks a "Script completed"
+// envelope carries, perhaps behind a "Warning: truncated output" block — one
+// object per line, one per exec_command the script ran or polled — joined on
+// a line break, as codex.ExitEnvelope reads them; null when the body is not
+// such chunks or none carries an exit_code.
 /** @param {string} body */
 function scriptChunkOutput(body) {
   let rest = body.replace(/^\n+/, '');
@@ -515,10 +517,31 @@ function scriptChunkOutput(body) {
     if (gap < 0) return null;
     rest = rest.slice(gap + 2);
   }
-  let chunk;
-  try { chunk = JSON.parse(rest); } catch { return null; }
-  if (!chunk || typeof chunk !== 'object' || !Number.isInteger(chunk.exit_code) || typeof chunk.output !== 'string') return null;
-  return chunk.output;
+  /** @type {unknown[]} */
+  let chunks;
+  try {
+    chunks = [JSON.parse(rest)];
+  } catch {
+    try {
+      chunks = rest.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l));
+    } catch {
+      return null;
+    }
+  }
+  /** @type {string[]} */
+  const outputs = [];
+  let coded = false;
+  for (const chunk of chunks) {
+    if (!chunk || typeof chunk !== 'object') return null;
+    const { output, exit_code: code } = /** @type {{output?: unknown, exit_code?: unknown}} */ (chunk);
+    if (typeof output !== 'string') return null;
+    outputs.push(output);
+    if (code !== undefined) {
+      if (!Number.isInteger(code)) return null;
+      coded = true;
+    }
+  }
+  return coded ? outputs.join('\n') : null;
 }
 
 // firstLineOf is a prompt's first non-empty line, for the jump list.
