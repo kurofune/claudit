@@ -868,3 +868,18 @@ func TestAPISessions_CursorBesideADateWindow(t *testing.T) {
 		t.Errorf("two cursors: status %d, want 400", w.Code)
 	}
 }
+
+// TestAPISessions_EmptyCorpus asserts a server over no logs, whose
+// snapshot generation is 0, answers /sessions twice with an empty list
+// rather than panicking on an unmade index memo.
+func TestAPISessions_EmptyCorpus(t *testing.T) {
+	srv := newTestServer(t, t.TempDir())
+	if gen := srv.cache.Snapshot().Generation; gen != 0 {
+		t.Fatalf("empty corpus generation = %d, want 0", gen)
+	}
+	for i := 1; i <= 2; i++ {
+		if rows := getSessions(t, srv, ""); len(rows) != 0 {
+			t.Fatalf("GET %d: rows = %d, want 0: %+v", i, len(rows), rows)
+		}
+	}
+}

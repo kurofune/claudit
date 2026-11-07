@@ -196,6 +196,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 		shutdownCh:      make(chan struct{}),
 		indexHist:       map[string]*indexHistory{},
 		indexRowBuilds:  map[string]int{},
+		indexMemo:       map[string]agentflow.SessionIndex{},
 		cursorInstance:  newCursorInstance(),
 	}
 	if opts.MaxCachedRenders > 0 {
