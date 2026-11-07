@@ -22,3 +22,12 @@ Decided 5 of 5 listed, oldest first, at HEAD 086137a. The lead's vote and reason
 - claudit-b30: go (3-0-0). Reproduces: pageGroup has no focus awareness.
 
 cko and df0 both edit .djinn/seats/. If either one is approved, it becomes a lead attended edit plus the matching change to djinn's seat template, not drain work.
+
+## 2026-11-07 — follow-ups
+
+Worked 2 of 2 pending at HEAD c58e8c7. That clears the queue.
+
+- claudit-ovu (from claudit-yu4): still reproduces. `worthALook`'s `resolved` runs flatMap and indexOf over the agent's tools for each cascade signal (web/session-header-logic.js:382-383). Re-authored as claudit-zpb (parent claudit-fw1), then closed.
+- claudit-xef (from claudit-hts): still reproduces. `execCommands` runs `execCall` over the raw source while `execFunction` scans `jsCode(src)` (internal/parse/codex/codex.go:873 against :662). Re-authored as claudit-3gm (parent claudit-lft), then closed.
+
+Both new beads are filed `proposed` (bug, P2, from:seat:lead), because ## Self-approval is still [TODO]. They go to triage.
