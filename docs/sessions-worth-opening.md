@@ -255,6 +255,33 @@ the check is the final command and no failable `&&` gates it (row 5's
 `go build` follows a `;`, row 7's `go vet` a `;`, row 6's follows a closed
 here-document on its own line). All 5 are true.
 
+**Remeasured 2026-11-06, code at f4bd4ea (claudit-19a),** after a
+redirection or a background job stops a call from running a check. A
+redirection other than fd duplication (`> out.log`, `2>/dev/null`, `>&-`,
+`&>`, `<`) can fail the command it is on, so `go test ./... && echo ok >&-`
+may exit on echo's write error; a single `&` ends a background segment
+whose exit the call never carries, so `go test ./... & false` and
+`go test ./... &` say nothing about go test. A call with either on the
+check, on a trailing `echo`/`printf`/`true`/`:` skipped after it, or on a
+command that gates it with `&&`/`||` neither fails nor clears the check.
+`N>&M` (`2>&1`, `>&2`) cannot fail and stays attributed. Same query,
+`claudit serve --open=false` built at f4bd4ea on port 18842 beside a build
+at 1adcdf1 (its parent) on 18841, both read at 20:52:51 PST:
+
+| | 1adcdf1 (parent) | f4bd4ea (change) |
+|---|---|---|
+| sessions | 1,583 ($4,393) | 1,583 ($4,393) |
+| non-empty `failing_checks` (`checks`) | 5 sessions ($9.71) | 5 sessions ($9.71) |
+| `by_check` | `go test` 2, `go vet` 2, `go build` 1 | `go test` 2, `go vet` 2, `go build` 1 |
+| `either` (check or `failed_edits`) | 10 sessions ($322) | 10 sessions ($322) |
+
+The rule changed no session: `failing_checks` (check, command, turn,
+input key) is identical per session on both builds, and the 5 left are the
+same 5 hand-checked true above (4 Claude Code, 1 Codex). cfe42aa0 keeps its
+`go build`: its `(brew install … > log 2>&1 &)` is a background subshell
+before a `;`, outside the check's chain. The accepted trade-off
+(`go test ./... > out.log` no longer counts) cost no flag on this corpus.
+
 **Landed 2026-11-06, code at d64c513 (claudit-dbz): an open list stays light
 while logs write.** Before (2026-11-06, Chromium via playwright-cli, list
 open at #agents on the real corpus, 1,553 sessions, while agent sessions
