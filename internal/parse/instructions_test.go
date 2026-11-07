@@ -38,8 +38,20 @@ func TestDropInstructionCopy(t *testing.T) {
 			want:   "Claim before\n\ntask",
 		},
 		{
-			name:   "paragraph spanning only part of a document paragraph still matches whole lines",
+			name:   "part of a document paragraph is not a paragraph of it",
 			prompt: "Read the whole task.\n\ntask",
+			docs:   []string{doc},
+			want:   "Read the whole task.\n\ntask",
+		},
+		{
+			name:   "wrapper lines end a document paragraph",
+			prompt: "# Work rules\n\nLOOP CONTEXT: Iteration 1.\n\ntask",
+			docs:   []string{"<system-reminder>\n# Work rules\n<!-- end -->\nLOOP CONTEXT: Iteration 1.\n</system-reminder>"},
+			want:   "task",
+		},
+		{
+			name:   "wrapper lines end a prompt paragraph",
+			prompt: "<INSTRUCTIONS>\n# Work rules\n</INSTRUCTIONS>\ntask",
 			docs:   []string{doc},
 			want:   "task",
 		},

@@ -739,3 +739,38 @@ func TestBuildSessionIndex_PromptPreambleFromInstructionsIsSkipped(t *testing.T)
 		t.Errorf("row = key %q title %q remainder %q, want key %q title %q remainder claudit-b0r", row.FamilyKey, row.Title, row.Remainder, wantKey, task)
 	}
 }
+
+// TestBuildSessionIndex_ClaudePromptPreambleFromReminderIsSkipped: a Claude
+// Code prompt whose system-reminder carries an instruction document, followed
+// by a copy of that document, together past the snippet cap, keys and titles
+// on the task line after them.
+func TestBuildSessionIndex_ClaudePromptPreambleFromReminderIsSkipped(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	var rules strings.Builder
+	rules.WriteString("# Work Rules")
+	for i := 1; i <= 40; i++ {
+		rules.WriteString("\n\n## Rule " + strconv.Itoa(i) + "\n\nEvery task follows rule " + strconv.Itoa(i) + " before it lands.")
+	}
+	const task = "You are running the `review` step of the Djinn harness for bead claudit-b0r."
+	prompt := "<system-reminder>\nContents of /home/u/proj/CLAUDE.md:\n\n" + rules.String() + "\n</system-reminder>\n" + rules.String() + "\n\n" + task + "\n\n## Step contract"
+	if n := len([]rune(prompt)); n < 2*2000 {
+		t.Fatalf("fixture prompt is %d runes; it must run past the snippet cap", n)
+	}
+	content, _ := json.Marshal(prompt)
+	lines := strings.Join([]string{
+		`{"type":"user","sessionId":"s1","uuid":"u1","timestamp":"2026-05-01T12:00:00Z","message":{"role":"user","content":` + string(content) + `}}`,
+		`{"type":"assistant","sessionId":"s1","uuid":"a1","parentUuid":"u1","timestamp":"2026-05-01T12:01:00Z","message":{"id":"m1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1},"content":[{"type":"text","text":"ok"}]}}`,
+	}, "\n")
+	res, err := parse.ParseFile(strings.NewReader(lines), "/root/-p-x/s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UserMessages) != 1 || strings.Contains(res.UserMessages[0].Text, task) {
+		t.Fatalf("fixture does not exercise the cap: %d prompts, snippet holds the task", len(res.UserMessages))
+	}
+	snap := &corpus.Snapshot{Turns: res.Turns, Users: res.UserMessages, Links: res.ParentLinks}
+	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	if wantKey, _ := blank(task); row.FamilyKey != wantKey || row.Title != task || row.Remainder != "claudit-b0r" {
+		t.Errorf("row = key %q title %q remainder %q, want key %q title %q remainder claudit-b0r", row.FamilyKey, row.Title, row.Remainder, wantKey, task)
+	}
+}

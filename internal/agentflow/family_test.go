@@ -367,3 +367,14 @@ func TestSessionFamily_LoopContextSkippedOnlyWhenInDocument(t *testing.T) {
 		t.Errorf("loop lines absent from the document: key %q title %q, want the loop line", out.Key, out.Title)
 	}
 }
+
+// TestSessionFamily_PartOfDocumentParagraphIsOwnText: a prompt paragraph
+// that is only part of a document paragraph is the prompt's own text, so it
+// keys and titles the session.
+func TestSessionFamily_PartOfDocumentParagraphIsOwnText(t *testing.T) {
+	injected := "# AGENTS.md instructions for /home/u/proj\n\n<INSTRUCTIONS>\nClaim the task first.\nRead every field.\n</INSTRUCTIONS>"
+	f := SessionFamily([]string{injected, "Read every field.\n\n" + reviewTask})
+	if f.Key != "Read every field." || f.Title != "Read every field." {
+		t.Errorf("SessionFamily = key %q title %q, want both %q", f.Key, f.Title, "Read every field.")
+	}
+}

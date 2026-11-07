@@ -149,10 +149,10 @@ type UserMessage struct {
 	// Text is a bounded snippet (turnTextMaxChars) of the prompt — consumers
 	// only ever render a prefix, and the full text stays on disk.
 	Text string
-	// OwnText is the snippet of the prompt with its leading copy of the
-	// session's injected instruction documents dropped (DropInstructionCopy),
-	// taken before the cap so a long copy cannot hide the task behind it; ""
-	// when the prompt opens with no such copy.
+	// OwnText is the snippet of the prompt with the session's injected
+	// instruction documents and its leading copy of them dropped
+	// (DropInstructionCopy), taken before the cap so long instructions
+	// cannot hide the task behind them; "" when the prompt holds neither.
 	OwnText    string
 	SourceFile string
 }
@@ -292,7 +292,7 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return Turn{}, UserMessage{}, LineMalformed
 	}
-	return classifyRaw(&raw, path)
+	return classifyRaw(&raw, path, nil)
 }
 
 // classifyRaw turns an already-decoded rawLine into the Turn or
@@ -301,7 +301,11 @@ func ParseLine(line []byte, path string) (Turn, UserMessage, LineKind) {
 // link and tool-result extraction too — the per-line JSON decode is the
 // dominant cost on a full-corpus load, so re-unmarshaling the same line
 // three times (here, peekParentLink, peekToolResults) was the bottleneck.
-func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
+//
+// docs, when non-nil, holds the system-reminder blocks of the file's earlier
+// prompts and gains this prompt's: Claude Code's injected instruction
+// context, against which a prompt's own text is found (ownPromptText).
+func classifyRaw(raw *rawLine, path string, docs *[]string) (Turn, UserMessage, LineKind) {
 	switch raw.Type {
 	case "assistant":
 		if len(raw.Message) == 0 {
@@ -353,6 +357,10 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 			return Turn{}, UserMessage{}, LineUnknown
 		}
 		ts, _ := time.Parse(time.RFC3339, raw.Timestamp)
+		own := ""
+		if o := ownPromptText(text, docs); o != text {
+			own = PromptSnippet(o)
+		}
 		return Turn{}, UserMessage{
 			SessionID:  raw.SessionID,
 			UUID:       raw.UUID,
@@ -360,6 +368,7 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 			Timestamp:  ts,
 			CWD:        raw.CWD,
 			Text:       PromptSnippet(text),
+			OwnText:    own,
 			SourceFile: path,
 		}, LineUserMessage
 	}
@@ -370,6 +379,7 @@ func classifyRaw(raw *rawLine, path string) (Turn, UserMessage, LineKind) {
 // aggregator can later resolve subagent metadata via the sibling .meta.json.
 func ParseFile(r io.Reader, path string) (Result, error) {
 	var res Result
+	var docs []string
 	sc := bufio.NewScanner(r)
 	// Some session lines are very large (>1 MB) — bump the buffer.
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
@@ -388,7 +398,7 @@ func ParseFile(r io.Reader, path string) (Result, error) {
 			res.Malformed++
 			continue
 		}
-		t, u, kind := classifyRaw(&raw, path)
+		t, u, kind := classifyRaw(&raw, path, &docs)
 		switch kind {
 		case LineMalformed:
 			res.Malformed++
