@@ -141,7 +141,7 @@ func TestParseRollout_ToolCalls(t *testing.T) {
 	if ok.IsError {
 		t.Errorf("exit-code-0 exec result IsError = true")
 	}
-	if !strings.Contains(ok.Content, `"exit_code":0`) || ok.OutputBytes != len(ok.Content) || ok.OutputLines < 2 {
+	if !strings.HasPrefix(ok.Content, "Exit code: 0\n") || !strings.Contains(ok.Content, "\nOutput:\nd74c6b3 fix: one") || ok.OutputBytes != len(ok.Content) || ok.OutputLines < 2 {
 		t.Errorf("exec result = %+v", ok)
 	}
 	if want := mustTime(t, "2026-10-31T23:53:18.261Z"); !ok.Timestamp.Equal(want) {
@@ -242,6 +242,28 @@ func TestExitEnvelope(t *testing.T) {
 		code, body, ok := ExitEnvelope(c.text)
 		if code != c.code || body != c.body || ok != c.ok {
 			t.Errorf("ExitEnvelope(%q) = (%d, %q, %v), want (%d, %q, %v)", c.text, code, body, ok, c.code, c.body, c.ok)
+		}
+	}
+}
+
+func TestExitForm(t *testing.T) {
+	cases := []struct{ text, want string }{
+		{"Script completed\nWall time 0.1 seconds\nOutput:\nWarning: truncated output (original token count: 10612)\nTotal output lines: 1\n\n{\"chunk_id\":\"c1\",\"exit_code\":2,\"output\":\"boom\\nline2\"}", "Exit code: 2\nWall time 0.1 seconds\nOutput:\nboom\nline2"},
+		{"Script completed\nWall time 0.1 seconds\nOutput:\nhello world", "Script completed\nWall time 0.1 seconds\nOutput:\nhello world"},
+		{"Exit code: 1\nOutput:\nboom", "Exit code: 1\nOutput:\nboom"},
+		{"plain output", "plain output"},
+	}
+	for _, c := range cases {
+		if got := exitForm(c.text); got != c.want {
+			t.Errorf("exitForm(%q) = %q, want %q", c.text, got, c.want)
+		}
+		if code, body, ok := ExitEnvelope(c.text); ok {
+			if gotCode, gotBody, gotOK := ExitEnvelope(exitForm(c.text)); !gotOK || gotCode != code || gotBody != body {
+				t.Errorf("ExitEnvelope(exitForm(%q)) = (%d, %q, %v), want (%d, %q, true)", c.text, gotCode, gotBody, gotOK, code, body)
+			}
+		}
+		if exitError(exitForm(c.text)) != exitError(c.text) {
+			t.Errorf("exitError changed across exitForm(%q)", c.text)
 		}
 	}
 }

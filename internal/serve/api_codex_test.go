@@ -214,6 +214,18 @@ func TestAPISessionsStory_CodexSubagentWithoutParentTurn(t *testing.T) {
 // output is a "Script completed … Output:" header over a JSON chunk carries
 // the chunk's exit_code and output in the story, not the header.
 func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
+	t.Run("short", func(t *testing.T) {
+		checkScriptCompletedStory(t, "--- FAIL: TestX\nFAIL\n", "?scope=all&whole=1")
+	})
+	// A chunk longer than the parse-time result snippet still reads: the
+	// envelope is split before the snippet cuts its JSON.
+	t.Run("past the snippet cap", func(t *testing.T) {
+		checkScriptCompletedStory(t, "--- FAIL: TestX\nFAIL\n"+strings.Repeat("log line of the failing run\n", 300), "?scope=all")
+	})
+}
+
+func checkScriptCompletedStory(t *testing.T, chunkOutput, query string) {
+	t.Helper()
 	const (
 		sessionID = "01a19999-0000-7000-8000-000000000002"
 		callID    = "call_script_completed"
@@ -225,6 +237,10 @@ func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
 		}
 		return string(b)
 	}
+	chunk, err := json.Marshal(map[string]any{"chunk_id": "c0", "wall_time_seconds": 0.1, "exit_code": 1, "original_token_count": 10612, "output": chunkOutput})
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	path := filepath.Join(root, "2026", "10", "31", "rollout-2026-10-31T10-00-00-"+sessionID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -233,7 +249,7 @@ func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
 	output := []map[string]string{
 		{"type": "input_text", "text": "Script completed\nWall time 0.1 seconds\nOutput:\n"},
 		{"type": "input_text", "text": "Warning: truncated output (original token count: 10612)\nTotal output lines: 1\n"},
-		{"type": "input_text", "text": `{"chunk_id":"c0","wall_time_seconds":0.1,"exit_code":1,"original_token_count":10612,"output":"--- FAIL: TestX\nFAIL\n"}`},
+		{"type": "input_text", "text": string(chunk)},
 	}
 	writeJSONL(t, path,
 		line("2026-10-31T10:00:00.000Z", "session_meta", map[string]any{"session_id": sessionID, "id": sessionID, "cwd": "/p/codex", "originator": "codex_exec", "thread_source": "user"}),
@@ -248,7 +264,7 @@ func TestAPISessionsStory_CodexScriptCompletedChunk(t *testing.T) {
 	}
 	srv := NewServer(cache, Options{Prices: loadPricesForTest(t)})
 
-	body := getStory(t, srv, "?scope=all&whole=1&provider=codex&session="+sessionID)
+	body := getStory(t, srv, query+"&provider=codex&session="+sessionID)
 	var steps []struct {
 		Tools []struct {
 			ID       string `json:"id"`
