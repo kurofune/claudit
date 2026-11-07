@@ -45,6 +45,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The server-wide WriteTimeout bounds a whole response, which would
+	// cut this long-lived stream about a minute in. Lift it for this
+	// response only; the keepalive ticker below still finds a dead peer.
+	// A writer without deadline support (a test recorder) streams as is.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		s.reqLogger(r.Context()).LogAttrs(r.Context(), slog.LevelDebug, "serve: events write deadline not cleared",
+			slog.Any("err", err),
+			slog.String("path", "/events"))
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

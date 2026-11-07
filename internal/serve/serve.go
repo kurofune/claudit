@@ -476,7 +476,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // indefinite hold (headers, body, response write, idle keep-alive)
 // gets a bound. Values are conservative defaults — claudit renders
 // can be heavy so WriteTimeout is generous, and IdleTimeout permits
-// keep-alive reuse for the auto-reload poller.
+// keep-alive reuse for the auto-reload poller. The /events stream lifts
+// WriteTimeout for its own response (handleEvents); every other route
+// keeps it.
 func (s *Server) buildHTTPServer() *http.Server {
 	return &http.Server{
 		Handler:           s.Handler(),

@@ -375,3 +375,95 @@ func doOneConnect(t *testing.T, base string) {
 		t.Errorf("close body: %v", err)
 	}
 }
+
+// shortWriteTimeoutServer starts the claudit http.Server exactly as
+// buildHTTPServer configures it, except WriteTimeout is 200ms, so a test
+// can cross the deadline in well under a second. /slow is a non-SSE
+// route that sleeps 600ms before writing; every other path goes to the
+// claudit handler.
+func shortWriteTimeoutServer(t *testing.T, srv *Server) *httptest.Server {
+	t.Helper()
+	hs := srv.buildHTTPServer()
+	hs.WriteTimeout = 200 * time.Millisecond
+	claudit := hs.Handler
+	mux := http.NewServeMux()
+	mux.Handle("/", claudit)
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(600 * time.Millisecond)
+		_, _ = io.WriteString(w, "slow body")
+	})
+	hs.Handler = mux
+	ts := httptest.NewUnstartedServer(mux)
+	ts.Config = hs
+	ts.Start()
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestEvents_OutlivesWriteTimeout: the /events stream is long-lived, so
+// the server-wide WriteTimeout must not cut it. A generation bump 600ms
+// after connect (3x the 200ms deadline) still reaches the client.
+func TestEvents_OutlivesWriteTimeout(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	path := filepath.Join(dir, "s.jsonl")
+	writeJSONL(t, path, mkAssistantLine("a1", "", t0))
+	srv := newTestServer(t, dir)
+	ts := shortWriteTimeoutServer(t, srv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected := time.Now()
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	br := bufio.NewReader(resp.Body)
+	if err := waitForGenerationEvent(br, srv.cache.Snapshot().Generation, 2*time.Second); err != nil {
+		t.Fatalf("initial event: %v", err)
+	}
+
+	time.Sleep(time.Until(connected.Add(600 * time.Millisecond)))
+	writeJSONL(t, path,
+		mkAssistantLine("a1", "", t0),
+		mkAssistantLine("a2", "a1", t0.Add(time.Second)),
+	)
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.cache.Refresh(); err != nil {
+		t.Fatalf("trigger refresh: %v", err)
+	}
+
+	if err := waitForGenerationEvent(br, srv.cache.Snapshot().Generation, 2*time.Second); err != nil {
+		t.Fatalf("post-deadline event: %v", err)
+	}
+	if elapsed := time.Since(connected); elapsed <= 600*time.Millisecond {
+		t.Fatalf("frame arrived %v after connect, want > 600ms", elapsed)
+	}
+}
+
+// TestWriteTimeout_StillAppliesOutsideEvents: clearing the deadline is
+// scoped to /events. A non-SSE handler that writes 600ms in, past the
+// 200ms WriteTimeout, must still be cut.
+func TestWriteTimeout_StillAppliesOutsideEvents(t *testing.T) {
+	srv := newTestServer(t, t.TempDir())
+	ts := shortWriteTimeoutServer(t, srv)
+
+	resp, err := ts.Client().Get(ts.URL + "/slow")
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err == nil && string(body) == "slow body" {
+		t.Fatalf("/slow returned its full body %q past the 200ms WriteTimeout", body)
+	}
+}

@@ -178,8 +178,8 @@ func TestServer_HardenedTimeouts(t *testing.T) {
 	if hs.ReadTimeout <= 0 {
 		t.Errorf("ReadTimeout = %v, want > 0", hs.ReadTimeout)
 	}
-	if hs.WriteTimeout <= 0 {
-		t.Errorf("WriteTimeout = %v, want > 0", hs.WriteTimeout)
+	if hs.WriteTimeout != 60*time.Second {
+		t.Errorf("WriteTimeout = %v, want 60s (slow-client bound for every route but /events)", hs.WriteTimeout)
 	}
 	if hs.IdleTimeout <= 0 {
 		t.Errorf("IdleTimeout = %v, want > 0", hs.IdleTimeout)
