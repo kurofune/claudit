@@ -774,3 +774,48 @@ func TestBuildSessionIndex_ClaudePromptPreambleFromReminderIsSkipped(t *testing.
 		t.Errorf("row = key %q title %q remainder %q, want key %q title %q remainder claudit-b0r", row.FamilyKey, row.Title, row.Remainder, wantKey, task)
 	}
 }
+
+// TestBuildSessionIndex_FamilyIsTheSameAloneOrAlongsideOthers: a session's
+// family key and title come from its own instruction documents only, so
+// indexing it beside a session whose instructions hold its LOOP CONTEXT line
+// moves neither.
+func TestBuildSessionIndex_FamilyIsTheSameAloneOrAlongsideOthers(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	const rules = "# Work Rules\n\nEvery task follows the rules before it lands."
+	const loop = "LOOP CONTEXT: Iteration 3."
+	const task = "You are running the `review` step of the Djinn harness for bead claudit-b0r."
+	session := func(id, doc, prompt string) *parse.Result {
+		t.Helper()
+		content, _ := json.Marshal("<system-reminder>\nContents of /home/u/proj/CLAUDE.md:\n\n" + doc + "\n</system-reminder>\n" + prompt)
+		lines := strings.Join([]string{
+			`{"type":"user","sessionId":"` + id + `","uuid":"u-` + id + `","timestamp":"2026-05-01T12:00:00Z","message":{"role":"user","content":` + string(content) + `}}`,
+			`{"type":"assistant","sessionId":"` + id + `","uuid":"a-` + id + `","parentUuid":"u-` + id + `","timestamp":"2026-05-01T12:01:00Z","message":{"id":"m-` + id + `","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1},"content":[{"type":"text","text":"ok"}]}}`,
+		}, "\n")
+		res, err := parse.ParseFile(strings.NewReader(lines), "/root/-p-x/"+id+".jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &res
+	}
+	own := session("s1", rules, rules+"\n\n"+loop+"\n\n"+task)
+	other := session("s2", rules+"\n\n"+loop, rules+"\n\n"+loop+"\n\nWrite the release notes.")
+	index := func(sid string, results ...*parse.Result) SessionIndexRow {
+		snap := &corpus.Snapshot{}
+		for _, r := range results {
+			snap.Turns = append(snap.Turns, r.Turns...)
+			snap.Users = append(snap.Users, r.UserMessages...)
+			snap.Links = append(snap.Links, r.ParentLinks...)
+		}
+		return findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), sid)
+	}
+	alone, together := index("s1", own), index("s1", own, other)
+	if wantKey, _ := blank(loop); alone.FamilyKey != wantKey || alone.Title != loop {
+		t.Fatalf("alone: key %q title %q, want key %q title %q", alone.FamilyKey, alone.Title, wantKey, loop)
+	}
+	if together.FamilyKey != alone.FamilyKey || together.Title != alone.Title {
+		t.Errorf("alongside another session: key %q title %q, alone: key %q title %q", together.FamilyKey, together.Title, alone.FamilyKey, alone.Title)
+	}
+	if o := index("s2", own, other); o.Title != "Write the release notes." {
+		t.Errorf("other session's title = %q, want its own task line", o.Title)
+	}
+}

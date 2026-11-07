@@ -339,6 +339,7 @@ The `/events` errors are the server's 60 s `WriteTimeout`
 (`internal/serve/serve.go:480`) cutting the SSE stream once a minute on
 every route (`curl -sN …/events` exits 18 after 60 s); filed as
 claudit-n6f.
+
 ## Harness runs keyed by their task line (2026-11-06, claudit-9rc)
 
 **Measured 2026-11-06, code at e0558ac (claudit-9rc),** after a prompt's
