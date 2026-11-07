@@ -9,11 +9,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kurofune/claudit/internal/agentflow"
 	"github.com/kurofune/claudit/internal/aggregate"
 )
 
@@ -45,7 +47,7 @@ func getSessions(t *testing.T, srv *Server, query string) []indexRowWire {
 		t.Fatalf("GET sessions%s: status %d; body=%s", query, w.Code, w.Body.String())
 	}
 	body := readJSONResponse(t, w)
-	assertTopLevelKeys(t, body, []string{"sessions"})
+	assertTopLevelKeys(t, body, []string{"cursor", "sessions"})
 	var rows []indexRowWire
 	if err := json.Unmarshal(body["sessions"], &rows); err != nil {
 		t.Fatalf("unmarshal sessions: %v", err)
@@ -597,5 +599,239 @@ func TestAPISessionsStory_Whole(t *testing.T) {
 	}
 	if w := doAPI(t, srv, http.MethodGet, apiPathSessionsStory+"?session=s-story&whole=1&prompt=1", nil); w.Code != http.StatusBadRequest {
 		t.Errorf("whole with prompt: status %d, want 400", w.Code)
+	}
+}
+
+// sessionsBody is the /sessions body, full or delta.
+type sessionsBody struct {
+	Cursor   string                      `json:"cursor"`
+	Sessions []agentflow.SessionIndexRow `json:"sessions"`
+	Changed  []agentflow.SessionIndexRow `json:"changed"`
+	Removed  []string                    `json:"removed"`
+}
+
+// getSessionsBody GETs /sessions with query and asserts its top-level keys.
+func getSessionsBody(t *testing.T, srv *Server, query string, keys ...string) sessionsBody {
+	t.Helper()
+	w := doAPI(t, srv, http.MethodGet, apiPathSessions+query, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET sessions%s: status %d; body=%s", query, w.Code, w.Body.String())
+	}
+	raw := w.Body.Bytes()
+	m := readJSONResponse(t, w)
+	assertTopLevelKeys(t, m, keys)
+	var b sessionsBody
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, raw)
+	}
+	if b.Cursor == "" {
+		t.Fatalf("GET sessions%s: no cursor", query)
+	}
+	return b
+}
+
+var fullKeys, deltaKeys = []string{"cursor", "sessions"}, []string{"cursor", "changed", "removed"}
+
+// TestAPISessions_SinceCursorAnswersOnlyTheGrownRow: after one session's
+// log grows, ?since=<cursor> answers that session's row alone, its turns
+// one higher, and removes nothing.
+func TestAPISessions_SinceCursorAnswersOnlyTheGrownRow(t *testing.T) {
+	dir := t.TempDir()
+	_, b := twoSessionCorpus(t, dir)
+	srv := newTestServer(t, dir)
+
+	full := getSessionsBody(t, srv, "?scope=all", fullKeys...)
+	before := map[string]agentflow.SessionIndexRow{}
+	for _, r := range full.Sessions {
+		before[r.SessionID] = r
+	}
+	appendTurn(t, srv, b, "s-b", "b3", "b2", time.Date(2026, 5, 1, 12, 10, 0, 0, time.UTC))
+
+	d := getSessionsBody(t, srv, "?scope=all&since="+url.QueryEscape(full.Cursor), deltaKeys...)
+	if len(d.Changed) != 1 || d.Changed[0].SessionID != "s-b" {
+		t.Fatalf("changed = %v, want only s-b", sessionIDs(d.Changed, func(r agentflow.SessionIndexRow) string { return r.SessionID }))
+	}
+	if got, want := d.Changed[0].Turns, before["s-b"].Turns+1; got != want {
+		t.Errorf("s-b turns = %d, want %d", got, want)
+	}
+	if d.Removed == nil || len(d.Removed) != 0 {
+		t.Errorf("removed = %#v, want []", d.Removed)
+	}
+	if d.Cursor == full.Cursor {
+		t.Errorf("delta cursor %q did not move", d.Cursor)
+	}
+
+	again := getSessionsBody(t, srv, "?scope=all&since="+url.QueryEscape(d.Cursor), deltaKeys...)
+	if len(again.Changed) != 0 || len(again.Removed) != 0 {
+		t.Errorf("delta from the current cursor = %+v, want empty", again)
+	}
+}
+
+// TestAPISessions_UnknownOrExpiredCursorAnswersTheFullIndex: no ?since, a
+// cursor naming a generation never built, one from another filter, and
+// one older than the history all answer the full index.
+func TestAPISessions_UnknownOrExpiredCursorAnswersTheFullIndex(t *testing.T) {
+	dir := t.TempDir()
+	_, b := twoSessionCorpus(t, dir)
+	srv := newTestServer(t, dir)
+
+	first := getSessionsBody(t, srv, "?scope=all", fullKeys...)
+	if len(first.Sessions) != 2 {
+		t.Fatalf("full index rows = %d, want 2", len(first.Sessions))
+	}
+	c, ok := parseSessionCursor(first.Cursor)
+	if !ok {
+		t.Fatalf("cursor %q does not parse", first.Cursor)
+	}
+	unknown := c
+	unknown.gen += 1000
+	other := c
+	other.filter = "00000000"
+	if other.filter == c.filter {
+		other.filter = "11111111"
+	}
+	for _, cur := range []string{unknown.String(), other.String(), "c1-0-abcdef12"} {
+		got := getSessionsBody(t, srv, "?scope=all&since="+url.QueryEscape(cur), fullKeys...)
+		if len(got.Sessions) != 2 {
+			t.Errorf("since=%s: %d rows, want the full 2", cur, len(got.Sessions))
+		}
+	}
+
+	parent := "b2"
+	ts := time.Date(2026, 5, 1, 12, 10, 0, 0, time.UTC)
+	for i := 0; i <= indexHistoryMax; i++ {
+		id := fmt.Sprintf("bx%03d", i)
+		appendTurn(t, srv, b, "s-b", id, parent, ts.Add(time.Duration(i)*time.Second))
+		parent = id
+		getSessionsBody(t, srv, "?scope=all", fullKeys...)
+	}
+	expired := getSessionsBody(t, srv, "?scope=all&since="+url.QueryEscape(first.Cursor), fullKeys...)
+	if len(expired.Sessions) != 2 {
+		t.Errorf("expired cursor: %d rows, want the full 2", len(expired.Sessions))
+	}
+	if w := doAPI(t, srv, http.MethodGet, apiPathOverview+"?since="+url.QueryEscape(first.Cursor), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("cursor on /overview: status %d, want 400", w.Code)
+	}
+}
+
+// TestAPISessions_DeltasFoldToTheFullIndex: three deltas (a session grown,
+// a session file added, a session file removed) applied in turn to the
+// first full index equal a fresh full fetch at the final generation.
+func TestAPISessions_DeltasFoldToTheFullIndex(t *testing.T) {
+	dir := t.TempDir()
+	a, b := twoSessionCorpus(t, dir)
+	srv := newTestServer(t, dir)
+	t0 := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	full := getSessionsBody(t, srv, "?scope=all", fullKeys...)
+	rows := map[string]agentflow.SessionIndexRow{}
+	for _, r := range full.Sessions {
+		rows[r.SessionID] = r
+	}
+	cursor := full.Cursor
+	refresh := func() {
+		t.Helper()
+		gen := srv.cache.Snapshot().Generation
+		if _, err := srv.cache.Refresh(); err != nil {
+			t.Fatal(err)
+		}
+		if srv.cache.Snapshot().Generation == gen {
+			t.Fatal("the change did not move the generation")
+		}
+	}
+	steps := []struct {
+		name    string
+		change  func()
+		changed []string
+		removed []string
+	}{
+		{"s-b grew", func() { appendTurn(t, srv, b, "s-b", "b3", "b2", t0.Add(10*time.Minute)) }, []string{"s-b"}, []string{}},
+		{"s-c added", func() {
+			writeJSONL(t, filepath.Join(dir, "s-c.jsonl"),
+				mkUserLineWithSession("s-c", "uc", "/p/c", "write docs", t0.Add(time.Hour)),
+				mkAssistantLineWithCWD("s-c", "c1", "uc", "/p/c", "claude-opus-4-7", 100, 10, t0.Add(time.Hour+time.Second)))
+			refresh()
+		}, []string{"s-c"}, []string{}},
+		{"s-a removed", func() {
+			if err := os.Remove(a); err != nil {
+				t.Fatal(err)
+			}
+			refresh()
+		}, []string{}, []string{"s-a"}},
+	}
+	for _, st := range steps {
+		st.change()
+		d := getSessionsBody(t, srv, "?scope=all&since="+url.QueryEscape(cursor), deltaKeys...)
+		if got := sessionIDs(d.Changed, func(r agentflow.SessionIndexRow) string { return r.SessionID }); !reflect.DeepEqual(got, st.changed) {
+			t.Errorf("%s: changed %v, want %v", st.name, got, st.changed)
+		}
+		if !reflect.DeepEqual(d.Removed, st.removed) {
+			t.Errorf("%s: removed %v, want %v", st.name, d.Removed, st.removed)
+		}
+		for _, r := range d.Changed {
+			rows[r.SessionID] = r
+		}
+		for _, id := range d.Removed {
+			delete(rows, id)
+		}
+		cursor = d.Cursor
+	}
+
+	merged := make([]agentflow.SessionIndexRow, 0, len(rows))
+	for _, r := range rows {
+		merged = append(merged, r)
+	}
+	fresh := getSessionsBody(t, srv, "?scope=all", fullKeys...).Sessions
+	byID := func(s []agentflow.SessionIndexRow) {
+		sort.Slice(s, func(i, j int) bool { return s[i].SessionID < s[j].SessionID })
+	}
+	byID(merged)
+	byID(fresh)
+	if !reflect.DeepEqual(merged, fresh) {
+		t.Errorf("folded deltas differ from a fresh fetch:\n got  %+v\n want %+v", merged, fresh)
+	}
+}
+
+// TestAPISessions_DeltaCarriesRowsWhoseActiveFlagExpired: with the
+// snapshot standing still, a row active when the cursor was issued and
+// inactive now comes back in changed with active false.
+func TestAPISessions_DeltaCarriesRowsWhoseActiveFlagExpired(t *testing.T) {
+	srv := fixtureServer(t)
+	betaLast := time.Date(2026, 5, 1, 11, 0, 1, 0, time.UTC)
+	now := betaLast.Add(30 * time.Second)
+	srv.now = func() time.Time { return now }
+
+	full := getSessionsBody(t, srv, "", fullKeys...)
+	now = betaLast.Add(45 * time.Second)
+	if d := getSessionsBody(t, srv, "?since="+url.QueryEscape(full.Cursor), deltaKeys...); len(d.Changed) != 0 {
+		t.Errorf("inside the window: changed %d rows, want none", len(d.Changed))
+	}
+	now = betaLast.Add(61 * time.Second)
+	d := getSessionsBody(t, srv, "?since="+url.QueryEscape(full.Cursor), deltaKeys...)
+	if len(d.Changed) != 1 || d.Changed[0].SessionID != "s-beta" || d.Changed[0].Active {
+		t.Errorf("past the window: changed %+v, want s-beta inactive", d.Changed)
+	}
+}
+
+// TestAPISessions_CursorBesideADateWindow: the page's ?since date and the
+// list's ?since cursor share the URL; the date still narrows the window,
+// a second cursor is a 400, and a cursor issued under another window
+// answers the full index.
+func TestAPISessions_CursorBesideADateWindow(t *testing.T) {
+	dir := t.TempDir()
+	_, b := twoSessionCorpus(t, dir)
+	srv := newTestServer(t, dir)
+
+	full := getSessionsBody(t, srv, "?since=2026-05-01", fullKeys...)
+	appendTurn(t, srv, b, "s-b", "b3", "b2", time.Date(2026, 5, 1, 12, 10, 0, 0, time.UTC))
+	d := getSessionsBody(t, srv, "?since=2026-05-01&since="+url.QueryEscape(full.Cursor), deltaKeys...)
+	if len(d.Changed) != 1 || d.Changed[0].SessionID != "s-b" {
+		t.Errorf("changed = %+v, want only s-b", d.Changed)
+	}
+	if other := getSessionsBody(t, srv, "?since=2026-04-01&since="+url.QueryEscape(full.Cursor), fullKeys...); len(other.Sessions) != 2 {
+		t.Errorf("cursor from another window: %d rows, want the full 2", len(other.Sessions))
+	}
+	if w := doAPI(t, srv, http.MethodGet, apiPathSessions+"?since="+url.QueryEscape(full.Cursor)+"&since="+url.QueryEscape(d.Cursor), nil); w.Code != http.StatusBadRequest {
+		t.Errorf("two cursors: status %d, want 400", w.Code)
 	}
 }

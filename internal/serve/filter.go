@@ -49,6 +49,11 @@ type Query struct {
 	// rawQuery is the original query string, for cache-key purposes.
 	// Kept private — callers should treat Query as opaque.
 	rawQuery string
+
+	// cursor is a ?since value naming an earlier Sessions index answer
+	// (sessionCursor) rather than a date; "" when there is none. Only
+	// /sessions reads it.
+	cursor string
 }
 
 // parseQuery reads the supported keys off a url.Values and returns a
@@ -76,7 +81,20 @@ func parseQuery(v url.Values, now time.Time) (Query, error) {
 	}
 
 	last := strings.TrimSpace(v.Get("last"))
-	since := strings.TrimSpace(v.Get("since"))
+	var since string
+	for _, raw := range v["since"] {
+		raw = strings.TrimSpace(raw)
+		switch {
+		case !isSessionCursor(raw):
+			if since == "" {
+				since = raw
+			}
+		case q.cursor != "":
+			return q, fmt.Errorf("?since: at most one cursor, got %q and %q", q.cursor, raw)
+		default:
+			q.cursor = raw
+		}
+	}
 	until := strings.TrimSpace(v.Get("until"))
 	if last != "" && since != "" {
 		return q, fmt.Errorf("?last and ?since are mutually exclusive")

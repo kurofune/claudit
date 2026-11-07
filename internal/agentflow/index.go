@@ -114,6 +114,23 @@ type indexRowEntry struct {
 	ok bool
 }
 
+// Gone returns, sorted, the sessions prev holds a row for that r does
+// not: their files left the snapshot, or the filter now leaves them no
+// turn.
+func (r *IndexRows) Gone(prev *IndexRows) []string {
+	gone := []string{}
+	if prev == nil {
+		return gone
+	}
+	for id, e := range prev.rows {
+		if e.ok && !r.rows[id].ok {
+			gone = append(gone, id)
+		}
+	}
+	sort.Strings(gone)
+	return gone
+}
+
 // ReuseSessionIndex is BuildSessionIndex over l, taking each session's row
 // from prev, built under the same filter and prices, when the session's
 // Layout key is unchanged and building only the rest. It returns the rows

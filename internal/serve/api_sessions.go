@@ -1,8 +1,12 @@
 package serve
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,26 +21,161 @@ const storyMemoMax = 8
 
 // handleAPISessions serves /_claudit/api/sessions — the Sessions list:
 // one light row per session in the filtered window, with its prompt-family
-// key. Built straight from the snapshot like /agents. A row's active flag
-// expires with wall-clock time while the snapshot stands still, so the
-// variant counts the rows no longer active at the request's now: the body
-// and ETag change the moment any row's window runs out.
+// key, and a cursor naming this answer. Built straight from the snapshot
+// like /agents. A row's active flag expires with wall-clock time while the
+// snapshot stands still, so the variant counts the rows no longer active
+// at the request's now: the body and ETag change the moment any row's
+// window runs out.
+//
+// ?since=<cursor> asks only for what changed since the answer that cursor
+// named: {cursor, changed, removed}, changed holding every row rebuilt or
+// whose active flag flipped since, removed the ids no longer listed. A
+// cursor the server cannot answer from — another filter's, or older than
+// the last indexHistoryMax builds — gets the full {cursor, sessions}.
 func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	s.serveAPISection(w, r, apiSectionSpec{
-		section: apiSectionSessions,
+		section:     apiSectionSessions,
+		takesCursor: true,
 		variant: func(snap *Snapshot, q Query, now time.Time) string {
 			return "inactive" + strconv.Itoa(s.sessionIndex(snap, q).Inactive(now, agentActiveWindow))
 		},
 		buildFromSnapshot: func(snap *Snapshot, q Query, now time.Time) (any, error) {
-			return s.sessionIndex(snap, q).At(now, agentActiveWindow), nil
+			idx := s.sessionIndex(snap, q)
+			key := filterQueryKey(q)
+			cur := sessionCursor{gen: snap.Generation, atMs: now.UnixMilli(), filter: filterHash(key)}.String()
+			if d, ok := s.sessionDelta(snap, key, idx, q.cursor, now); ok {
+				d.Cursor = cur
+				return d, nil
+			}
+			return sessionIndexBody{Cursor: cur, Sessions: idx.At(now, agentActiveWindow).Sessions}, nil
 		},
 	})
+}
+
+// sessionIndexBody is the full /sessions answer.
+type sessionIndexBody struct {
+	Cursor   string                      `json:"cursor"`
+	Sessions []agentflow.SessionIndexRow `json:"sessions"`
+}
+
+// sessionIndexDelta is the ?since answer: the rows to replace or add and
+// the ids to drop, by session_id.
+type sessionIndexDelta struct {
+	Cursor  string                      `json:"cursor"`
+	Changed []agentflow.SessionIndexRow `json:"changed"`
+	Removed []string                    `json:"removed"`
+}
+
+// sessionDelta answers raw, a ?since cursor, against idx, the index of
+// the filter key at snap; ok is false when raw names no build the history
+// still holds, and the caller answers the full index. A row is changed
+// when it was rebuilt after the cursor's build or its active flag at now
+// differs from the one at the cursor's time, which every row the cursor's
+// answer carried was read at.
+func (s *Server) sessionDelta(snap *Snapshot, key string, idx agentflow.SessionIndex, raw string, now time.Time) (sessionIndexDelta, bool) {
+	c, ok := parseSessionCursor(raw)
+	if !ok || c.filter != filterHash(key) {
+		return sessionIndexDelta{}, false
+	}
+	s.filterAggMu.Lock()
+	built, gone, ok := s.indexHist[key].since(c.gen, snap.Generation)
+	s.filterAggMu.Unlock()
+	if !ok {
+		return sessionIndexDelta{}, false
+	}
+	then := time.UnixMilli(c.atMs)
+	d := sessionIndexDelta{Changed: []agentflow.SessionIndexRow{}, Removed: []string{}}
+	listed := make(map[string]bool, len(idx.Sessions))
+	for _, r := range idx.Sessions {
+		listed[r.SessionID] = true
+		row := r.At(now, agentActiveWindow)
+		if built[r.SessionID] || r.At(then, agentActiveWindow).Active != row.Active {
+			d.Changed = append(d.Changed, row)
+		}
+	}
+	for id := range gone {
+		if !listed[id] {
+			d.Removed = append(d.Removed, id)
+		}
+	}
+	sort.Strings(d.Removed)
+	return d, true
+}
+
+// indexHistoryMax bounds how many builds of one filter's index a ?since
+// cursor can name: about a minute of generations while logs write.
+const indexHistoryMax = 32
+
+// indexHistory is one filter's last index rows and its last builds, oldest
+// first, each step relative to the one before it.
+type indexHistory struct {
+	rows  *agentflow.IndexRows
+	steps []indexStep
+}
+
+// indexStep is one index build: its generation, the sessions whose rows it
+// built and those whose rows it dropped against the build before.
+type indexStep struct {
+	gen     int64
+	built   []string
+	removed []string
+}
+
+// since folds the steps after the build at from up to the one at to: the
+// sessions rebuilt and those dropped along the way. ok is false when h
+// holds no build at from or its last build is not at to.
+func (h *indexHistory) since(from, to int64) (built, removed map[string]bool, ok bool) {
+	if h == nil || len(h.steps) == 0 || h.steps[len(h.steps)-1].gen != to {
+		return nil, nil, false
+	}
+	i := len(h.steps) - 1
+	for i >= 0 && h.steps[i].gen != from {
+		i--
+	}
+	if i < 0 {
+		return nil, nil, false
+	}
+	built, removed = map[string]bool{}, map[string]bool{}
+	for _, st := range h.steps[i+1:] {
+		for _, id := range st.built {
+			built[id] = true
+		}
+		for _, id := range st.removed {
+			removed[id] = true
+		}
+	}
+	return built, removed, true
+}
+
+// recordIndexBuild files the build of key's index at gen, made from prev,
+// in its history. A build landing after one at gen or later is dropped;
+// one made from rows other than the history's last starts the history
+// over, since its step would not be relative to the last one. Called with
+// filterAggMu held.
+func (s *Server) recordIndexBuild(key string, gen int64, prev, rows *agentflow.IndexRows, built []string) {
+	h := s.indexHist[key]
+	switch {
+	case h != nil && len(h.steps) > 0 && h.steps[len(h.steps)-1].gen >= gen:
+		return
+	case h != nil && prev != nil && h.rows == prev:
+		steps := append(h.steps, indexStep{gen: gen, built: built, removed: rows.Gone(prev)})
+		if len(steps) > indexHistoryMax {
+			steps = append([]indexStep(nil), steps[len(steps)-indexHistoryMax:]...)
+		}
+		h.rows, h.steps = rows, steps
+	default:
+		if h == nil && len(s.indexHist) >= storyMemoMax {
+			s.indexHist = map[string]*indexHistory{}
+		}
+		s.indexHist[key] = &indexHistory{rows: rows, steps: []indexStep{{gen: gen}}}
+	}
 }
 
 // sessionIndex returns the session index for q's filter, memoized per
 // generation; its Active flags are stale, so read it through At. A new
 // generation rebuilds only the rows of the sessions whose files changed
-// (agentflow.ReuseSessionIndex) and reuses the rest.
+// (agentflow.ReuseSessionIndex) and reuses the rest, and records which in
+// the filter's history for ?since.
 func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 	key := filterQueryKey(q)
 	s.filterAggMu.Lock()
@@ -46,7 +185,10 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 			return idx
 		}
 	}
-	prev := s.indexRows[key]
+	var prev *agentflow.IndexRows
+	if h := s.indexHist[key]; h != nil {
+		prev = h.rows
+	}
 	s.filterAggMu.Unlock()
 
 	idx, rows, built := agentflow.ReuseSessionIndex(snap, s.opts.Prices, q.Filter, s.layout(snap), prev, agentflow.IndexOptions{})
@@ -60,11 +202,46 @@ func (s *Server) sessionIndex(snap *Snapshot, q Query) agentflow.SessionIndex {
 		s.indexMemoGen = snap.Generation
 	}
 	s.indexMemo[key] = idx
-	if _, ok := s.indexRows[key]; !ok && len(s.indexRows) >= storyMemoMax {
-		s.indexRows = map[string]*agentflow.IndexRows{}
-	}
-	s.indexRows[key] = rows
+	s.recordIndexBuild(key, snap.Generation, prev, rows, built)
 	return idx
+}
+
+// sessionCursor names one /sessions answer: the generation it was built
+// at, its clock reading in Unix milliseconds and filterHash of its filter.
+// It travels as c<gen>-<ms>-<hash>, which no ?since date reads as.
+type sessionCursor struct {
+	gen    int64
+	atMs   int64
+	filter string
+}
+
+func (c sessionCursor) String() string {
+	return fmt.Sprintf("c%d-%d-%s", c.gen, c.atMs, c.filter)
+}
+
+var sessionCursorRE = regexp.MustCompile(`^c(\d{1,18})-(\d{1,18})-([0-9a-f]{8})$`)
+
+// isSessionCursor reports whether a ?since value is a cursor, not a date.
+func isSessionCursor(raw string) bool { return sessionCursorRE.MatchString(raw) }
+
+func parseSessionCursor(raw string) (sessionCursor, bool) {
+	m := sessionCursorRE.FindStringSubmatch(raw)
+	if m == nil {
+		return sessionCursor{}, false
+	}
+	gen, err1 := strconv.ParseInt(m[1], 10, 64)
+	at, err2 := strconv.ParseInt(m[2], 10, 64)
+	if err1 != nil || err2 != nil {
+		return sessionCursor{}, false
+	}
+	return sessionCursor{gen: gen, atMs: at, filter: m[3]}, true
+}
+
+// filterHash is a short digest of a filterQueryKey, so a cursor from one
+// filter never answers another.
+func filterHash(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:4])
 }
 
 // indexRowBuildCount is how many times session's index row was built.

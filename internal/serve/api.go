@@ -88,6 +88,9 @@ type apiSectionSpec struct {
 	// previous window of equal length (nil for an unbounded window).
 	// Takes precedence over build.
 	buildWithPrev func(a, prev *aggregate.Aggregator) (any, error)
+	// takesCursor marks a section that reads a ?since cursor; any other
+	// answers 400 to one.
+	takesCursor bool
 	// promptFree marks a payload that reads no per-prompt figure
 	// (Aggregator.ByPrompt), so its Aggregators skip the PromptIndex.
 	promptFree bool
@@ -110,6 +113,10 @@ func (s *Server) serveAPISection(w http.ResponseWriter, r *http.Request, spec ap
 	q, err := parseQuery(r.URL.Query(), now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if q.cursor != "" && !spec.takesCursor {
+		http.Error(w, "?since: a cursor applies only to "+apiPathSessions, http.StatusBadRequest)
 		return
 	}
 	s.applyDefaults(&q, now)

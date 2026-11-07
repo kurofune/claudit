@@ -117,16 +117,16 @@ type Server struct {
 
 	// filterAggMu guards storyMemo, the stories built per (filter,
 	// session, stamps of its files) (sessionStory), indexMemo, the session
-	// indexes built at the current generation, and indexRows, each
-	// filter's last index rows for the next generation to reuse
-	// (sessionIndex), with indexRowBuilds counting each session's row
-	// builds.
+	// indexes built at the current generation, and indexHist, each
+	// filter's last index rows for the next generation to reuse and the
+	// builds a ?since cursor can name (sessionIndex), with indexRowBuilds
+	// counting each session's row builds.
 	filterAggMu    sync.Mutex
 	storyMemo      map[string]*storyMemoEntry
 	storyMemoTick  int64
 	indexMemo      map[string]agentflow.SessionIndex
 	indexMemoGen   int64
-	indexRows      map[string]*agentflow.IndexRows
+	indexHist      map[string]*indexHistory
 	indexRowBuilds map[string]int
 	// storySF collapses concurrent builds of one story; storyBuildN
 	// counts the builds.
@@ -190,7 +190,7 @@ func NewServer(cache *Cache, opts Options) *Server {
 		subagentLookup:  aggregate.NewMemoizedSubagentLookup(),
 		shutdownTimeout: 3 * time.Second,
 		shutdownCh:      make(chan struct{}),
-		indexRows:       map[string]*agentflow.IndexRows{},
+		indexHist:       map[string]*indexHistory{},
 		indexRowBuilds:  map[string]int{},
 	}
 	if opts.MaxCachedRenders > 0 {
