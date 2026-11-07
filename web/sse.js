@@ -74,15 +74,34 @@ export function decideReload(state) {
 // timers all survive. When no handler is set (every other view), the
 // classic decideReload path below runs unchanged.
 let liveHandler = null;
+// liveStale is true when a bump reached the in-place path while the tab
+// was hidden and the handler has not run since.
+let liveStale = false;
 
 // setLiveHandler installs the in-place updater for the active view.
-export function setLiveHandler(fn) { liveHandler = fn; }
+export function setLiveHandler(fn) { liveHandler = fn; liveStale = false; }
 
 // clearLiveHandler removes the updater (call when leaving the view). With
 // no argument it always clears; with one it clears only if it still owns
 // the slot, so a stale view can't unregister its successor.
 export function clearLiveHandler(fn) {
-  if (!fn || liveHandler === fn) liveHandler = null;
+  if (!fn || liveHandler === fn) { liveHandler = null; liveStale = false; }
+}
+
+// decideLive is the in-place path's pure decision: whether the live
+// handler runs now, and whether the view is left stale. A hidden tab does
+// no work on a 'bump' (a new generation), only marks itself stale; the
+// 'visible' event (the tab shown again) runs the handler once when a bump
+// arrived while it was hidden, and not at all otherwise.
+/**
+ * @param {{hidden: boolean, stale: boolean}} state
+ * @param {'bump'|'visible'} event
+ * @returns {{run: boolean, stale: boolean}}
+ */
+export function decideLive({ hidden, stale }, event) {
+  if (event === 'bump') return hidden ? { run: false, stale: true } : { run: true, stale: false };
+  if (!hidden && stale) return { run: true, stale: false };
+  return { run: false, stale };
 }
 
 // start opens the EventSource and wires up the silent-auto-reload
@@ -153,10 +172,25 @@ export function start({ toastEl = null, btnEl = null } = {}) {
     timerId = setInterval(tick, RECHECK_INTERVAL_MS);
   };
 
+  // live runs the in-place handler for event as decideLive says, with the
+  // newest generation seen. False when no view has one.
+  let liveGeneration = null;
+  /** @param {'bump'|'visible'} event */
+  const live = (event) => {
+    if (!liveHandler) return false;
+    const d = decideLive({ hidden: document.hidden, stale: liveStale }, event);
+    liveStale = d.stale;
+    if (d.run) {
+      try { liveHandler(liveGeneration); } catch { /* a render error must not kill the stream */ }
+    }
+    return true;
+  };
+
   // Re-check immediately when conditions that gate the reload change.
-  // visibilitychange handles tab focus/blur; toggle (bubbles from any
-  // <details>) handles open/close.
-  document.addEventListener('visibilitychange', tick);
+  // visibilitychange handles tab focus/blur, and runs a live view that a
+  // bump left stale while hidden; toggle (bubbles from any <details>)
+  // handles open/close.
+  document.addEventListener('visibilitychange', () => { live('visible'); tick(); });
   document.addEventListener('toggle', tick, true);
 
   const es = new EventSource('/events');
@@ -171,11 +205,12 @@ export function start({ toastEl = null, btnEl = null } = {}) {
       return;
     }
     if (gen > loadedGeneration) {
-      // In-place path: the active view patches itself instead of reloading.
-      // Mark this generation consumed and hand off — no pending/toast.
+      // In-place path: the active view patches itself instead of reloading
+      // — or, hidden, only marks itself stale. Mark this generation
+      // consumed and hand off — no pending/toast.
       if (liveHandler) {
-        loadedGeneration = gen;
-        try { liveHandler(gen); } catch { /* a render error must not kill the stream */ }
+        loadedGeneration = liveGeneration = gen;
+        live('bump');
         return;
       }
       // Track the OLDEST pending generation so the pile-up timer

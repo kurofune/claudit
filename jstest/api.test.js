@@ -39,6 +39,8 @@ test('fetchSessions requests the session index with the page query', async () =>
   assert.equal(await fetchURL(() => api.fetchSessions()), '/_claudit/api/sessions');
   assert.equal(await fetchURL(() => api.fetchSessions(), '?since=2026-10-01'),
     '/_claudit/api/sessions?since=2026-10-01');
+  assert.equal(await fetchURL(() => api.fetchSessions('c42-1700000000000-abcdef12'), '?since=2026-10-01'),
+    '/_claudit/api/sessions?since=c42-1700000000000-abcdef12&since=2026-10-01');
 });
 test('fetchSessionStory encodes the session and pages by prompt and offset', async () => {
   assert.equal(await fetchURL(() => api.fetchSessionStory('a b/c&d', { prompt: 2, offset: 200 })),

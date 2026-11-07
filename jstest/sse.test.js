@@ -147,3 +147,29 @@ test('decideReload still escalates to toast past the pile-up window even when be
     now: 1_000_000 + TOAST_AFTER_MS,
   }), 'toast');
 });
+
+// decideLive gates the in-place path (a view with a live handler): a
+// hidden tab only marks itself stale on a bump, and showing it again runs
+// the handler once if, and only if, a bump arrived while hidden.
+test('decideLive runs a visible bump at once', async () => {
+  const { decideLive } = await import('../web/sse.js');
+  assert.deepEqual(decideLive({ hidden: false, stale: false }, 'bump'), { run: true, stale: false });
+});
+
+test('decideLive leaves a hidden bump stale, however many arrive', async () => {
+  const { decideLive } = await import('../web/sse.js');
+  let state = { hidden: true, stale: false };
+  for (let i = 0; i < 5; i++) {
+    const d = decideLive(state, 'bump');
+    assert.equal(d.run, false);
+    state = { hidden: true, stale: d.stale };
+  }
+  assert.equal(state.stale, true);
+  assert.deepEqual(decideLive({ hidden: false, stale: true }, 'visible'), { run: true, stale: false });
+});
+
+test('decideLive does nothing on becoming visible when no bump arrived, or while still hidden', async () => {
+  const { decideLive } = await import('../web/sse.js');
+  assert.deepEqual(decideLive({ hidden: false, stale: false }, 'visible'), { run: false, stale: false });
+  assert.deepEqual(decideLive({ hidden: true, stale: true }, 'visible'), { run: false, stale: true });
+});

@@ -3,7 +3,10 @@
 // window grouped by prompt family; #agents/<session>[/<turn>] is that
 // session's page, whose story web/session-story.js paints. The list
 // refreshes in place on each SSE generation bump, keeping the search,
-// filter, sort, focused row and scroll position.
+// filter, sort, focused row and scroll position. A refresh asks only for
+// the rows changed since the last answer (its cursor) and folds them into
+// the rows kept by session_id; a hidden tab does not refresh until shown
+// (web/sse.js decideLive).
 
 import { fetchSessions } from './api.js';
 import { escHtml, fmtNum } from './format.js';
@@ -12,9 +15,10 @@ import { setLiveHandler, clearLiveHandler } from './sse.js';
 import { clearSkeletonFlag } from './skeleton.js';
 import { paintStory } from './session-story.js';
 import { paintSessionHeader } from './session-header.js';
+import { rowsById, merge, indexOrder } from './sessions-list-logic.js';
 import { listShellHTML, renderList, renderListLoading, renderListError, renderRefreshError, clearRefreshError, wireList } from './sessions-list.js';
 
-/** @import { SessionIndexRow } from './api-types.js' */
+/** @import { SessionIndex, SessionIndexDelta, SessionIndexRow } from './api-types.js' */
 /** @import { ListUI } from './sessions-list.js' */
 
 const ICON = '<svg class="icon" aria-hidden="true"><use href="#icon-agents"/></svg>';
@@ -22,9 +26,15 @@ const ICON = '<svg class="icon" aria-hidden="true"><use href="#icon-agents"/></s
 /** @type {ListUI} */
 const ui = { query: '', filter: 'all', sort: 'newest', expanded: new Set() };
 
+// byId is every row of the index by session_id, cursor names the answer
+// it was last brought up to date by, and rows is byId in index order:
+// what the list draws.
+/** @type {Map<string, SessionIndexRow>|null} */
+let byId = null;
+let cursor = '';
 /** @type {SessionIndexRow[]|null} */
 let rows = null;
-/** @typedef {{req: number, data?: {sessions: SessionIndexRow[]}, error?: unknown}} Answer */
+/** @typedef {{req: number, data?: SessionIndex|SessionIndexDelta, error?: unknown}} Answer */
 /** @type {Promise<Answer>|null} */
 let inFlight = null;
 /** @type {Promise<Answer>|null} */
@@ -42,18 +52,32 @@ let gen = 0;
 /** @type {Element|null} */
 let listRoot = null;
 
-// load fetches the index, sharing a request already in flight. It never
-// rejects: the answer carries the data or the error, tagged with its
-// request number. fresh asks for an index read after this call: when a
-// request is already out (it may have been answered before the change
-// that prompted this call), it waits for that one and fetches again.
-// Every fresh call made while one request is out shares the one follow-up.
+// absorb brings the rows up to date with an index answer: a full index
+// replaces them, a delta (changed and removed since the cursor sent) is
+// merged into them. Answers arrive one at a time in request order, so
+// each delta lands on the rows its cursor named or newer ones.
+/** @param {SessionIndex|SessionIndexDelta|undefined} data */
+function absorb(data) {
+  const delta = data && 'changed' in data && byId ? /** @type {SessionIndexDelta} */ (data) : null;
+  byId = delta && byId ? merge(byId, delta)
+    : rowsById((data && /** @type {SessionIndex} */ (data).sessions) || []);
+  cursor = (data && data.cursor) || '';
+  rows = indexOrder(byId);
+}
+
+// load fetches the index, sharing a request already in flight, and
+// absorbs its answer before anyone awaiting it runs. It never rejects:
+// the answer carries the data or the error, tagged with its request
+// number. fresh asks for an index read after this call: when a request is
+// already out (it may have been answered before the change that prompted
+// this call), it waits for that one and fetches again. Every fresh call
+// made while one request is out shares the one follow-up.
 /** @param {boolean} [fresh] @returns {Promise<Answer>} */
 const load = (fresh = false) => {
   if (!inFlight) {
     const req = ++lastReq;
-    inFlight = fetchSessions().then(
-      data => ({ req, data }),
+    inFlight = fetchSessions(byId ? cursor : '').then(
+      data => { absorb(data); return { req, data }; },
       error => ({ req, error }),
     ).finally(() => { inFlight = null; });
     return inFlight;
@@ -97,8 +121,7 @@ function updateNavMetric(list) {
 export async function paintNav() {
   if (rows) return;
   const answer = await load();
-  if (rows || 'error' in answer || !fresher(answer)) return;
-  rows = (answer.data && answer.data.sessions) || [];
+  if ('error' in answer || !fresher(answer) || !rows) return;
   updateNavMetric(rows);
 }
 
@@ -147,11 +170,10 @@ async function fetchInto(root, my) {
     if (rows) repaint(root);
     return;
   }
-  if ('error' in answer) {
+  if ('error' in answer || !rows) {
     renderListError(root, answer.error);
     return;
   }
-  rows = (answer.data && answer.data.sessions) || [];
   updateNavMetric(rows);
   repaint(root);
 }
@@ -169,14 +191,13 @@ async function refresh(root, my) {
     else renderListError(root, answer.error);
     return;
   }
-  rows = (answer.data && answer.data.sessions) || [];
   clearRefreshError(root);
   updateNavMetric(rows);
   repaint(root);
 }
 
-// liveUpdate is the list's SSE handler: a new generation refetches the
-// index and repaints it in place.
+// liveUpdate is the list's SSE handler: a new generation fetches what
+// changed in the index and repaints it in place.
 function liveUpdate() {
   if (listRoot) return refresh(listRoot, gen);
   return undefined;

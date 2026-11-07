@@ -13,7 +13,7 @@
 // revalidation on each call; a 304 returns the cached body without
 // re-decoding the JSON payload.
 
-/** @import { SessionIndex, SessionStoryPage, SessionSummary, ToolUseDetail, TurnTextDetail } from './api-types.js' */
+/** @import { SessionIndex, SessionIndexDelta, SessionStoryPage, SessionSummary, ToolUseDetail, TurnTextDetail } from './api-types.js' */
 
 const apiBase = '/_claudit/api';
 
@@ -77,9 +77,12 @@ export const fetchAgentTurnFull = (sessionId, turnUuid) =>
   getJSON('/agents/full?session=' + encodeURIComponent(sessionId) +
     '&turn=' + encodeURIComponent(turnUuid));
 // fetchSessions pulls the Sessions list's index: one light row per session
-// in the page's filter window, each with its prompt-family key.
-/** @returns {Promise<SessionIndex>} */
-export const fetchSessions = () => getJSON('/sessions');
+// in the page's filter window, each with its prompt-family key. Given the
+// cursor of an earlier answer it asks only for what changed since; the
+// server answers the whole index when it can no longer tell.
+/** @param {string} [cursor] @returns {Promise<SessionIndex|SessionIndexDelta>} */
+export const fetchSessions = (cursor = '') =>
+  getJSON('/sessions' + (cursor ? '?since=' + encodeURIComponent(cursor) : ''));
 // fetchSessionStory pulls one page of a session's story: the turns of user
 // prompt `prompt` (default 0), 200 at a time from turn `offset` (default 0),
 // or, given `turn`, the page that carries that turn uuid.

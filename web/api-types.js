@@ -185,7 +185,17 @@
  * /_claudit/api/sessions payload, newest last_activity first.
  * Mirrors internal/agentflow/index.go (agentflow.SessionIndex).
  * @typedef {Object} SessionIndex
+ * @property {string} cursor            names this answer for a later ?since
  * @property {SessionIndexRow[]} sessions
+ */
+
+/**
+ * The /sessions?since=<cursor> answer: the rows changed since that cursor's
+ * answer and the session ids no longer listed (internal/serve/api_sessions.go).
+ * @typedef {Object} SessionIndexDelta
+ * @property {string} cursor
+ * @property {SessionIndexRow[]} changed
+ * @property {string[]} removed
  */
 
 /**

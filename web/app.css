@@ -1797,14 +1797,15 @@
   .sl-outcome { font-size: var(--t-2); color: var(--ink-2); overflow-wrap: anywhere; }
   .sl-outcome.is-empty { color: var(--muted); }
   .sl-meta {
-    display: grid; grid-template-columns: 7.5em 5em 5em 5.5em; align-items: center;
+    display: grid; grid-template-columns: 7.5em 5em 5.5em 5em 5.5em; align-items: center;
     column-gap: var(--s-3); flex: none;
     font-size: var(--t-2); color: var(--ink-2); font-variant-numeric: tabular-nums;
   }
   .sl-meta > .sl-provider { grid-column: 1; justify-self: end; }
   .sl-meta > .sl-cost { grid-column: 2; }
-  .sl-meta > .sl-dur { grid-column: 3; }
-  .sl-meta > .sl-failed { grid-column: 4; text-align: right; }
+  .sl-meta > .sl-turns { grid-column: 3; }
+  .sl-meta > .sl-dur { grid-column: 4; }
+  .sl-meta > .sl-failed { grid-column: 5; text-align: right; }
   .sl-active-row .sl-meta { display: flex; }
   .sl-provider {
     font-family: var(--font-mono); font-size: var(--t-1); line-height: 1;
@@ -1813,7 +1814,7 @@
   }
   .sl-provider.s-provider-codex { color: var(--accent-2); border-color: color-mix(in oklch, var(--accent-2) 35%, var(--border)); }
   .sl-cost { text-align: right; color: var(--ink); }
-  .sl-dur { text-align: right; }
+  .sl-turns, .sl-dur { text-align: right; }
   .sl-failed { color: var(--hot); font-weight: 600; white-space: nowrap; }
   .sl-elapsed { color: var(--accent-2); }
   .sl-more {

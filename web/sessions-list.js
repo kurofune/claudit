@@ -3,15 +3,15 @@
 // the pinned "Active in the last minute" row, the counted top sentence, the
 // Worth opening rows and the prompt-family groups.
 // What to draw comes from sessions-list-logic.js listView; this module owns
-// the markup, the keyboard model and keeping focus and scroll across a
-// repaint.
+// the markup, the keyboard model and keeping focus, scroll and every
+// unchanged row's element across a repaint.
 
 import { escHtml, escHtmlCode, fmtMoney } from './format.js';
 import { sessionHash } from './router.js';
 import { providerLabel, API_EQUIVALENT_TIP } from './provider-filter.js';
 import { sessionListSkeleton } from './skeleton.js';
 import { fmtDuration } from './session-story-logic.js';
-import { listView, rowTitle, elapsedText, agoText, windowText, FILTERS, SORTS, failureBadge } from './sessions-list-logic.js';
+import { listView, rowTitle, elapsedText, agoText, windowText, FILTERS, SORTS, failureBadge, turnsText } from './sessions-list-logic.js';
 
 /** @import { SessionIndexRow } from './api-types.js' */
 /** @import { WorthRow, ViewGroup } from './sessions-list-logic.js' */
@@ -79,6 +79,7 @@ function rowHTML(r) {
       <span class="sl-meta">
         ${providerChip(r)}
         <span class="sl-cost">${escHtml(fmtMoney(r.cost_usd || 0))}</span>
+        <span class="sl-turns">${escHtml(turnsText(r))}</span>
         <span class="sl-dur">${escHtml(fmtDuration(r.duration_ms || 0))}</span>
         ${failed}
       </span>
@@ -112,16 +113,27 @@ function worthRowHTML(w, now) {
     </a>`;
 }
 
-/** @param {ViewGroup} g */
-function groupHTML(g) {
+/** @param {ViewGroup} g @param {Draw} draw */
+function groupHTML(g, draw) {
   return `<section class="sl-group" data-family="${escHtml(g.key)}">
         <h2 class="sl-group-head"><span class="sl-family">${escHtml(g.label)}</span>
           <span class="sl-stats">${withApiEq(g.stats.text)}</span></h2>
-        <div class="sl-rows">${g.rows.map(rowHTML).join('')}</div>
+        <div class="sl-rows">${g.rows.map(r => draw(`row:${r.session_id}`, rowHTML(r))).join('')}</div>
         ${g.hidden ? `<button type="button" class="sl-more" data-expand="${escHtml(g.key)}"
             data-focus-key="more:${escHtml(g.key)}">Show all ${escHtml(String(g.count))}</button>` : ''}
       </section>`;
 }
+
+// Draw emits a row's markup under its focus key, or a placeholder for the
+// row already on screen with that markup.
+/** @typedef {(key: string, html: string) => string} Draw */
+
+// drawn is, per list, each row on screen by its focus key: the markup it
+// was drawn from and its element. A repaint puts back the element of every
+// row whose markup is unchanged, so only changed rows are rebuilt and the
+// rest keep their elements, hover and any state the browser holds on them.
+/** @type {WeakMap<Element, Map<string, {html: string, el: Element}>>} */
+const drawn = new WeakMap();
 
 /**
  * @param {Element} root  the .sessions-list element
@@ -137,6 +149,15 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
   if (!filters || !sorts || !body) return;
   const keep = captureFocus(root);
   const scrollY = typeof window.scrollY === 'number' ? window.scrollY : 0;
+  const before = drawn.get(root) || new Map();
+  /** @type {Map<string, string>} */
+  const marks = new Map();
+  /** @type {Draw} */
+  const draw = (key, html) => {
+    marks.set(key, html);
+    const prev = before.get(key);
+    return prev && prev.html === html ? `<i data-keep="${escHtml(key)}"></i>` : html;
+  };
 
   filters.innerHTML = FILTERS.map(f => `<button type="button" class="sl-chip" data-filter="${f.id}"
       data-focus-key="filter:${f.id}" aria-pressed="${ui.filter === f.id}">${escHtml(f.label)}
@@ -150,20 +171,35 @@ export function renderList(root, rows, ui, { now = Date.now(), search = '' } = {
     const active = v.active.length
       ? `<section class="sl-active" aria-label="Active in the last minute">
           <h2 class="sl-active-title">Active in the last minute · ${escHtml(String(v.active.length))}</h2>
-          <div class="sl-rows">${v.active.map(r => activeRowHTML(r, now)).join('')}</div>
+          <div class="sl-rows">${v.active.map(r => draw(`active:${r.session_id}`, activeRowHTML(r, now))).join('')}</div>
         </section>`
       : '';
     const sentence = `<p class="sl-sentence">${withApiEq(v.sentence)}</p>`;
     const worth = v.worth.length
       ? `<section class="sl-worth" aria-label="Worth opening">
           <h2 class="sl-worth-title">Worth opening</h2>
-          <div class="sl-rows">${v.worth.map(w => worthRowHTML(w, now)).join('')}</div>
+          <div class="sl-rows">${v.worth.map(w => draw(`worth:${w.row.session_id}`, worthRowHTML(w, now))).join('')}</div>
         </section>`
       : '';
     body.innerHTML = active + sentence + (v.empty
       ? `<p class="empty-state sl-empty" role="status">${escHtml(v.empty)}</p>`
-      : worth + v.groups.map(groupHTML).join(''));
+      : worth + v.groups.map(g => groupHTML(g, draw)).join(''));
   }
+  for (const ph of body.querySelectorAll('[data-keep]')) {
+    const prev = before.get(ph.getAttribute('data-keep') || '');
+    if (prev && ph.parentNode) {
+      ph.parentNode.insertBefore(prev.el, ph);
+      ph.parentNode.removeChild(ph);
+    }
+  }
+  /** @type {Map<string, {html: string, el: Element}>} */
+  const after = new Map();
+  for (const el of body.querySelectorAll('.sl-row')) {
+    const key = el.getAttribute('data-focus-key') || '';
+    const html = marks.get(key);
+    if (html !== undefined) after.set(key, { html, el });
+  }
+  drawn.set(root, after);
   restoreFocus(root, keep);
   if (typeof window.scrollTo === 'function' && window.scrollY !== scrollY) window.scrollTo(0, scrollY);
 }

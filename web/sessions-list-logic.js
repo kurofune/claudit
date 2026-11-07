@@ -124,6 +124,37 @@ export function activeRows(rows) {
   return applySort(rows.filter(r => r.active === true), 'newest');
 }
 
+// rowsById keys a full index answer's rows by session_id.
+/** @param {SessionIndexRow[]} rows @returns {Map<string, SessionIndexRow>} */
+export const rowsById = rows => new Map(rows.map(r => [r.session_id, r]));
+
+// merge folds a /sessions?since answer into rowsMap: each changed row
+// replaces its session's row or joins the list, each removed id leaves
+// it. rowsMap is not modified.
+/**
+ * @param {Map<string, SessionIndexRow>} rowsMap
+ * @param {{changed?: SessionIndexRow[], removed?: string[]}} delta
+ * @returns {Map<string, SessionIndexRow>}
+ */
+export function merge(rowsMap, { changed = [], removed = [] }) {
+  const out = new Map(rowsMap);
+  for (const id of removed) out.delete(id);
+  for (const r of changed) out.set(r.session_id, r);
+  return out;
+}
+
+// indexOrder lists rowsMap's rows in the server's index order: newest
+// last activity first, then by session_id.
+/** @param {Map<string, SessionIndexRow>} rowsMap @returns {SessionIndexRow[]} */
+export function indexOrder(rowsMap) {
+  return [...rowsMap.values()].sort((a, b) => (ts(b.last_activity) - ts(a.last_activity)) ||
+    (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0));
+}
+
+// turnsText is a row's turn count: "1 turn" or "N turns".
+/** @param {SessionIndexRow} r */
+export const turnsText = r => plural(r.turns || 0, 'turn');
+
 // plural is "1 run" or "N runs".
 /** @param {number} n @param {string} one @param {string} [many] */
 const plural = (n, one, many = one + 's') => `${fmtNum(n)} ${n === 1 ? one : many}`;

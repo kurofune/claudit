@@ -601,3 +601,111 @@ test('a shell without the guide template paints the list without one', async () 
   assert.equal(view.querySelector('.guide'), null);
   assert.equal(view.querySelectorAll('.sl-group').length, 3);
 });
+
+// An index answer as the server sends it: rows plus the cursor naming it.
+const fullAnswer = (sessions, gen) => ({ cursor: `c${gen}-0-abcdef12`, sessions });
+
+test('a hidden tab fetches nothing on any number of bumps and once on becoming visible; no bump while hidden, no fetch', async () => {
+  const { calls, bump, document } = await liveList(() => fullAnswer(THREE(), 1));
+  assert.equal(calls.length, 1, 'the mount loaded the index');
+
+  document.hidden = true;
+  for (let g = 2; g <= 6; g++) bump(g);
+  await settle(); await settle();
+  assert.equal(calls.length, 1, 'no fetch while hidden');
+
+  document.hidden = false;
+  document.dispatchEvent(new Event('visibilitychange'));
+  await settle(); await settle();
+  assert.equal(calls.length, 2, 'one fetch on becoming visible');
+
+  document.hidden = true;
+  document.dispatchEvent(new Event('visibilitychange'));
+  document.hidden = false;
+  document.dispatchEvent(new Event('visibilitychange'));
+  await settle(); await settle();
+  assert.equal(calls.length, 2, 'no bump while hidden, no fetch on becoming visible');
+  clearLiveHandler();
+});
+
+test('merge folds a delta (grown, added, removed) into the rows by session_id to equal a full fetch of the same change', async () => {
+  const { rowsById, merge, indexOrder } = await import('../web/sessions-list-logic.js');
+  const before = THREE();
+  const grown = { ...before[1], turns: 9, cost_usd: 12, last_activity: at(-1) };
+  const added = row('s-e', { family_key: 'review the diff', last_activity: at(-3) });
+  const after = [before[0], grown, before[3], added];
+  const start = rowsById(before);
+  const merged = merge(start, { changed: [grown, added], removed: ['s-c'] });
+  assert.deepStrictEqual(indexOrder(merged), indexOrder(rowsById(after)));
+  assert.deepStrictEqual([...merged.keys()].sort(), ['s-a', 's-b', 's-d', 's-e']);
+  assert.equal(start.size, 4, 'the rows merged into are not modified');
+  assert.equal(start.get('s-b').turns, 3);
+});
+
+test('a delta of one changed row replaces only that session\'s row elements and redraws the sentence and Worth opening from every row', async () => {
+  const sent = [];
+  let answer = () => fullAnswer(THREE(), 1);
+  const { view, calls, bump } = await liveList((path, params) => {
+    if (path === '/sessions') sent.push(params.getAll('since'));
+    return answer();
+  });
+  const elements = () => new Map(view.querySelectorAll('.sl-row').map(r => [r.getAttribute('data-focus-key'), r]));
+  const before = elements();
+  const sentenceBefore = view.querySelector('.sl-sentence').textContent;
+  assert.ok(before.has('row:s-b') && before.has('worth:s-b'), 's-b is drawn in its family and in Worth opening');
+  assert.match(before.get('row:s-b').querySelector('.sl-turns').textContent, /^3 turns$/);
+
+  const grown = { ...THREE()[1], turns: 7, cost_usd: 12 };
+  answer = () => ({ cursor: 'c2-0-abcdef12', changed: [grown], removed: [] });
+  bump(2);
+  await settle(); await settle();
+  assert.equal(calls.length, 2);
+  assert.deepEqual(sent[1], ['c1-0-abcdef12'], 'the refresh sent the cursor of the answer on screen');
+
+  const after = elements();
+  assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(), 'the same rows are drawn');
+  for (const [key, el] of before) {
+    if (key.endsWith(':s-b')) assert.ok(after.get(key) !== el, `${key} was replaced`);
+    else assert.ok(after.get(key) === el, `${key} kept its element`);
+  }
+  const b = after.get('row:s-b');
+  assert.equal(b.querySelector('.sl-turns').textContent, '7 turns');
+  assert.equal(b.querySelector('.sl-cost').textContent, '$12.00');
+  assert.equal(after.get('worth:s-b').querySelector('.sl-cost').textContent, '$12.00');
+  const sentence = view.querySelector('.sl-sentence').textContent;
+  assert.notEqual(sentence, sentenceBefore);
+  assert.match(sentence, /4 sessions in the last 7 days, \$1,250 API-equivalent/, 'the sentence totals every row, the grown one included');
+  assert.ok(view.querySelector('.sl-worth .sl-row[data-session="s-b"]'), 'Worth opening redrawn from every row');
+
+  answer = () => ({ cursor: 'c3-0-abcdef12', changed: [], removed: ['s-d'] });
+  bump(3);
+  await settle(); await settle();
+  assert.deepEqual(sent[2], ['c2-0-abcdef12']);
+  assert.equal(view.querySelector('[data-session="s-d"]'), null, 'a removed session leaves the list');
+  assert.ok(elements().get('row:s-a') === before.get('row:s-a'), 'row:s-a kept its element');
+  clearLiveHandler();
+});
+
+test('five bumps while the first index fetch is out make exactly two fetches: the one in flight and one trailing', async () => {
+  const releases = [];
+  const calls = stubFetch(() => new Promise(r => { releases.push(r); }));
+  let onMessage;
+  globalThis.EventSource = class { constructor() {} addEventListener(_t, fn) { onMessage = fn; } };
+  const { view, done } = await mount();
+  startSSE({});
+  onMessage({ data: JSON.stringify({ generation: 1 }) });
+  for (let g = 2; g <= 6; g++) {
+    onMessage({ data: JSON.stringify({ generation: g }) });
+    await settle();
+  }
+  assert.equal(calls.length, 1, 'only the first fetch is out');
+  releases[0](fullAnswer(THREE(), 1));
+  await done;
+  await settle(); await settle();
+  assert.equal(calls.length, 2, 'one trailing fetch for all five bumps');
+  releases[1]({ cursor: 'c6-0-abcdef12', changed: [], removed: [] });
+  await settle(); await settle(); await settle();
+  assert.equal(calls.length, 2, 'no further fetches once caught up');
+  assert.equal(view.querySelectorAll('.sl-group').length, 3);
+  clearLiveHandler();
+});
