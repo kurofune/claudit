@@ -265,7 +265,7 @@ func parseFile(r io.Reader, path string, caps textCaps) (parse.Result, error) {
 				old.tools = append(old.tools, use)
 				continue
 			}
-			text := outputText(it.Output)
+			text := exitForm(outputText(it.Output))
 			res.ToolResults = append(res.ToolResults, parse.NewToolResult(it.CallID, exitError(text), text, ts))
 		case "event_msg":
 			var kind rawKind
@@ -637,7 +637,7 @@ func FindToolUseDetail(r io.Reader, callID string) (parse.ToolUseDetail, bool) {
 			out.Name, out.Input, _ = toolCall(it)
 			found = true
 		case "custom_tool_call_output", "function_call_output":
-			out.Output = outputText(it.Output)
+			out.Output = exitForm(outputText(it.Output))
 			out.Status = "ok"
 			if exitError(out.Output) {
 				out.Status = "error"
@@ -1328,6 +1328,22 @@ func scriptChunk(body string) (code int, output string, ok bool) {
 		return 0, "", false
 	}
 	return *chunk.ExitCode, *chunk.Output, true
+}
+
+// exitForm rewrites a "Script completed" envelope whose JSON chunk reads
+// into the "Exit code: N" form above the chunk's output, so a snippet cut
+// from it still carries the exit code and the command's own text. Any other
+// text is returned unchanged.
+func exitForm(text string) string {
+	head, body, found := strings.Cut(text, "\nOutput:\n")
+	if !found || !strings.HasPrefix(head, "Script completed\n") {
+		return text
+	}
+	code, out, ok := scriptChunk(body)
+	if !ok {
+		return text
+	}
+	return "Exit code: " + strconv.Itoa(code) + "\n" + strings.TrimPrefix(head, "Script completed\n") + "\nOutput:\n" + out
 }
 
 // exitError reports whether a tool output records a failure. Codex writes
