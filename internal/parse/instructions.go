@@ -31,7 +31,7 @@ func ownPromptText(text string, docs *[]string) string {
 	}
 	body := text
 	if len(blocks) > 0 {
-		body = reminderBlock.ReplaceAllString(text, "")
+		body = reminderBlock.ReplaceAllString(text, "\n")
 	}
 	own := DropInstructionCopy(body, all)
 	if strings.TrimSpace(own) == "" {

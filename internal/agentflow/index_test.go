@@ -819,3 +819,25 @@ func TestBuildSessionIndex_FamilyIsTheSameAloneOrAlongsideOthers(t *testing.T) {
 		t.Errorf("other session's title = %q, want its own task line", o.Title)
 	}
 }
+
+// TestBuildSessionIndex_ReminderBlockInsideAPromptLineEndsTheLine: a
+// system-reminder block written mid-line splits the prompt there, so the
+// session keys and titles from the text before the block, as it does when
+// no instruction paragraph was copied.
+func TestBuildSessionIndex_ReminderBlockInsideAPromptLineEndsTheLine(t *testing.T) {
+	prices, _ := pricing.LoadDefault()
+	content, _ := json.Marshal("Fix login<system-reminder>context</system-reminder>Keep tests")
+	lines := strings.Join([]string{
+		`{"type":"user","sessionId":"s1","uuid":"u-s1","timestamp":"2026-05-01T12:00:00Z","message":{"role":"user","content":` + string(content) + `}}`,
+		`{"type":"assistant","sessionId":"s1","uuid":"a-s1","parentUuid":"u-s1","timestamp":"2026-05-01T12:01:00Z","message":{"id":"m-s1","model":"claude-opus-4-7","role":"assistant","usage":{"input_tokens":1},"content":[{"type":"text","text":"ok"}]}}`,
+	}, "\n")
+	res, err := parse.ParseFile(strings.NewReader(lines), "/root/-p-x/s1.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := &corpus.Snapshot{Turns: res.Turns, Users: res.UserMessages, Links: res.ParentLinks}
+	row := findRow(t, BuildSessionIndex(snap, prices, aggregate.Filter{}, IndexOptions{}), "s1")
+	if wantKey, _ := blank("Fix login"); row.FamilyKey != wantKey || row.Title != "Fix login" {
+		t.Errorf("row = key %q title %q, want key %q title %q", row.FamilyKey, row.Title, wantKey, "Fix login")
+	}
+}
