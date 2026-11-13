@@ -4,6 +4,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-11-12
+
+First v2 release `go install` can fetch: the module path is now `github.com/kurofune/claudit/v2`. Same features and prices as v2.1.0.
+
 ### Changed
 
 - **The Go module path is now `github.com/kurofune/claudit/v2`.** Install with `go install github.com/kurofune/claudit/v2/cmd/claudit@latest`. v2.0.0 and v2.1.0 could not be installed with `go install`: their `go.mod` still named `github.com/kurofune/claudit`, and Go's major-version rule makes the module proxy reject a v2+ tag on a module path without `/v2`, so `go install github.com/kurofune/claudit/cmd/claudit@latest` kept installing v1.9.2. Those two tags stay uninstallable through `go install` for good (their GitHub Release binaries still work); this release is the first v2 tag `go install` can fetch. Code importing claudit's packages must add `/v2` to the import path.
@@ -422,7 +426,8 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/kurofune/claudit/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/kurofune/claudit/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/kurofune/claudit/compare/v1.9.2...v2.0.0
 [1.9.2]: https://github.com/kurofune/claudit/compare/v1.9.1...v1.9.2
