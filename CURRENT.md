@@ -1,10 +1,10 @@
 # CURRENT
 
-**Mode:** Sessions rework done (epic claudit-255 closed). Next: a Sessions tab that stays light while live logs write, a session page whose tiles agree with its failure block, and Codex runs grouped by what they did.
+**Mode:** Sessions rework and Codex grouping landed and released (v2.1.0). Next: the operator dogfoods Sessions and settles a new design.
 
 **Goal:** Make claudit a local daemon (`claudit serve`) plus `watch` that a stranger can use to see what Claude Code and Codex agents did and what it cost, with numbers that say what they measure.
 
-**Last change:** failing-check flags 81 → 5 sessions (claudit-b0r): a check counts only when the call's exit is surely its own (final command, not gated by a failable `&&`, input not truncated); all 5 left hand-checked true.
+**Last change:** released v2.1.0 (Fable 5.2 / Mythos 5.2 priced, claudit-d68: a week of Fable 5.2 went $0 → $80.54); v2.0.0 tagged late at ae1d540, where it was cut.
 
 **Assumptions:**
 - Projects key on the session cwd's git repo root (`internal/project/`); a deleted cwd outside any surviving repo is its own `missing` bucket (DECISIONS).
@@ -13,7 +13,7 @@
 
 **Open questions:** see DECISIONS.md → Open questions.
 
-**Next checkpoint:** the drain of the memory, session-page and Codex-grouping beads lands; then the operator dogfoods Sessions.
+**Next checkpoint:** the operator dogfoods Sessions on live data and files what breaks.
 
 **Stop conditions:**
 - Claude Code or Codex changes the log schema → parser catch-up becomes the priority.

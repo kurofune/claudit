@@ -4,6 +4,12 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-11-12
+
+Pricing refresh against the live pricing page on 2026-11-12: **Claude Fable 5.2** and **Claude Mythos 5.2** are added. This release also ships Codex session support, the Sessions list and the session page.
+
+**Upgrade if you run Fable 5.2 or Mythos 5.2.** v2.0.0 and earlier price every Fable 5.2 and Mythos 5.2 turn at **$0**. Coming from v1.9.2? Read 2.0.0 below first: it removed the report and diff outputs.
+
 ### Added
 
 - **Codex sessions.** `claudit serve` reads Codex CLI rollouts (`$CODEX_HOME/sessions`, else `~/.codex/sessions`; `--codex-root` overrides, an empty value turns it off) beside Claude Code's logs. Each model response is one turn with provider `codex`; `exec` / `exec_command` shell calls are reported as Bash calls, bucketed by their shell command (an `exec` whose command cannot be read statically keeps the name `exec`), and a non-zero exit code marks the call failed. A subagent rollout is flagged sidechain and nests under its parent thread's session in the Agents view. Compressed `rollout-*.jsonl.zst` archives are not read yet.
@@ -412,7 +418,9 @@ Initial public release.
 
 - macOS, Linux, and Windows. CI runs the full test suite on all three. On Windows, `claudit watch`'s live status line requires a VT-capable terminal (Windows Terminal, PowerShell 7); legacy `cmd.exe` shows escape sequences literally.
 
-[Unreleased]: https://github.com/kurofune/claudit/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/kurofune/claudit/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/kurofune/claudit/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/kurofune/claudit/compare/v1.9.2...v2.0.0
 [1.9.2]: https://github.com/kurofune/claudit/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/kurofune/claudit/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/kurofune/claudit/compare/v1.8.2...v1.9.0
