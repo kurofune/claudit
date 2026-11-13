@@ -89,6 +89,40 @@ func TestDefault_Fable51AndMythos51(t *testing.T) {
 	}
 }
 
+func TestDefault_Fable52AndMythos52(t *testing.T) {
+	tab, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fable 5.2 and Mythos 5.2 share an $8 / $40 card with standard write
+	// ratios off the $8 input rate and cache hits at 0.025x input ($0.20).
+	// Fast mode doubles input and output ($16 / $80).
+	for _, m := range []string{
+		"claude-fable-5-2",
+		"claude-fable-5-2[1m]",
+		"claude-mythos-5-2",
+		"claude-mythos-5-2[1m]",
+	} {
+		p, ok := tab.Models[m]
+		if !ok {
+			t.Errorf("default missing %q", m)
+			continue
+		}
+		if p.Input != 8.00 || p.Output != 40.00 {
+			t.Errorf("%s base rates wrong: %+v", m, p.Rate)
+		}
+		if p.CacheRead != 0.20 || p.CacheWrite5m != 10.00 || p.CacheWrite1h != 16.00 {
+			t.Errorf("%s cache rates wrong: %+v", m, p.Rate)
+		}
+		if got, known := tab.CostAt(ClaudeCode, m, time.Time{}, 0, 0, 0, 0, 1_000_000, ""); !known || math.Abs(got-0.20) > 1e-9 {
+			t.Errorf("%s standard cache hit: cost=%v known=%v, want 0.20", m, got, known)
+		}
+		if got, known := tab.CostAt(ClaudeCode, m, time.Time{}, 1_000_000, 1_000_000, 0, 0, 0, "fast"); !known || math.Abs(got-96.00) > 1e-9 {
+			t.Errorf("%s fast input+output: cost=%v known=%v, want 96.00", m, got, known)
+		}
+	}
+}
+
 func TestDefault_Opus55(t *testing.T) {
 	tab, err := LoadDefault()
 	if err != nil {
@@ -147,6 +181,8 @@ func TestDefault_OneMillionContextVariantsMatchBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, base := range []string{
+		"claude-fable-5-2",
+		"claude-mythos-5-2",
 		"claude-fable-5-1",
 		"claude-mythos-5-1",
 		"claude-fable-5",
@@ -711,6 +747,8 @@ func TestDefault_FastRates(t *testing.T) {
 		model string
 		want  Rate
 	}{
+		{"claude-fable-5-2", Rate{Input: 16, Output: 80, CacheRead: .4, CacheWrite5m: 20, CacheWrite1h: 32}},
+		{"claude-mythos-5-2", Rate{Input: 16, Output: 80, CacheRead: .4, CacheWrite5m: 20, CacheWrite1h: 32}},
 		{"claude-opus-5-5", Rate{Input: 8, Output: 40, CacheRead: .4, CacheWrite5m: 10, CacheWrite1h: 16}},
 		{"claude-opus-5", Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 20}},
 		{"claude-opus-4-8", Rate{Input: 10, Output: 50, CacheRead: 1, CacheWrite5m: 12.5, CacheWrite1h: 20}},

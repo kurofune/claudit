@@ -4,7 +4,8 @@
 # https://platform.claude.com/docs/en/about-claude/pricing on 2026-09-01
 # (Fable 5.1 / Mythos 5.1 added then); Opus 5.5 added 2026-09-23; Sonnet 5.5
 # added and the full page re-checked 2026-10-02; Haiku 5.5 added 2026-10-23;
-# Sonnet 5.5 cache-read cut (2026-10-07) applied 2026-10-24. Entries
+# Sonnet 5.5 cache-read cut (2026-10-07) applied 2026-10-24; Fable 5.2 /
+# Mythos 5.2 added 2026-11-12. Entries
 # are tagged with the date they were last checked — refresh those tags if you
 # re-check the page.
 #
@@ -12,11 +13,11 @@
 #   cache_read     = input * 0.10
 #   cache_write_5m = input * 1.25
 #   cache_write_1h = input * 2.00
-# Exceptions: Fable 5.1 and Mythos 5.1 price cache hits at 0.025x input
-# ($0.25/MTok), not 0.10x.
+# Exceptions: Fable 5.2 and Mythos 5.2 ($0.20/MTok) and Fable 5.1 and
+# Mythos 5.1 ($0.25/MTok) price cache hits at 0.025x input, not 0.10x.
 # Opus 5.5 ($0.20/MTok) and Sonnet 5.5 ($0.10/MTok, from 2026-10-07) price cache hits at 0.05x input.
 #
-# 1M-context-window pricing: Fable 5.1, Mythos 5.1, Fable 5, Mythos 5, Opus 5.5, Opus 5, Opus 4.6, Opus 4.7,
+# 1M-context-window pricing: Fable 5.2, Mythos 5.2, Fable 5.1, Mythos 5.1, Fable 5, Mythos 5, Opus 5.5, Opus 5, Opus 4.6, Opus 4.7,
 # Opus 4.8, Sonnet 5.5, Sonnet 5, and Sonnet 4.6 include the full 1M context at *standard*
 # rates — no premium tier. The "[1m]" suffix claudit may see in the wild is
 # just a context-mode marker, not a pricing tier, so we list those at the same
@@ -45,6 +46,62 @@
 # Fast mode wins over the tier; like `fast:`, it carries current rates only.
 
 models:
+  # ── Fable 5.2 / Mythos 5.2 — $8 / $40 base, 0.025x cache reads ──
+  # Standard write ratios off the $8 input rate; cache hits at 0.025x input
+  # ($0.20/MTok), the Fable 5.1 ratio. Fast mode is $16 / $80, with the
+  # same cache ratios off the $16 fast input rate.
+  claude-fable-5-2:                 # verified 2026-11-12
+    input_per_mtok: 8.00
+    output_per_mtok: 40.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 10.00
+    cache_write_1h_per_mtok: 16.00
+    fast:
+      input_per_mtok: 16.00
+      output_per_mtok: 80.00
+      cache_read_per_mtok: 0.40
+      cache_write_5m_per_mtok: 20.00
+      cache_write_1h_per_mtok: 32.00
+
+  "claude-fable-5-2[1m]":           # verified 2026-11-12 — 1M context bundled at standard rates
+    input_per_mtok: 8.00
+    output_per_mtok: 40.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 10.00
+    cache_write_1h_per_mtok: 16.00
+    fast:
+      input_per_mtok: 16.00
+      output_per_mtok: 80.00
+      cache_read_per_mtok: 0.40
+      cache_write_5m_per_mtok: 20.00
+      cache_write_1h_per_mtok: 32.00
+
+  claude-mythos-5-2:                # verified 2026-11-12
+    input_per_mtok: 8.00
+    output_per_mtok: 40.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 10.00
+    cache_write_1h_per_mtok: 16.00
+    fast:
+      input_per_mtok: 16.00
+      output_per_mtok: 80.00
+      cache_read_per_mtok: 0.40
+      cache_write_5m_per_mtok: 20.00
+      cache_write_1h_per_mtok: 32.00
+
+  "claude-mythos-5-2[1m]":          # verified 2026-11-12 — 1M context bundled at standard rates
+    input_per_mtok: 8.00
+    output_per_mtok: 40.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 10.00
+    cache_write_1h_per_mtok: 16.00
+    fast:
+      input_per_mtok: 16.00
+      output_per_mtok: 80.00
+      cache_read_per_mtok: 0.40
+      cache_write_5m_per_mtok: 20.00
+      cache_write_1h_per_mtok: 32.00
+
   # ── Fable 5.1 / Mythos 5.1 — $10 / $50 base, 0.025x cache reads ──
   # Same rate card as Fable 5 except cache hits, which are priced at
   # 0.025x input ($0.25/MTok) instead of the usual 0.10x. Mythos 5.1 is
