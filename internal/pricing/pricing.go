@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 	"gopkg.in/yaml.v3"
 )
 

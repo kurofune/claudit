@@ -1,8 +1,8 @@
 package serve
 
 import (
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // The data layer lives in internal/corpus now — one loader shared by

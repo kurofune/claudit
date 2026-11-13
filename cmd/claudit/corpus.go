@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/pricing"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 func defaultProjectsRoot() string {

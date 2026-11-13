@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	webassets "github.com/kurofune/claudit"
+	webassets "github.com/kurofune/claudit/v2"
 )
 
 // BuildSPABundle returns the HTML fragment that inlines the SPA's

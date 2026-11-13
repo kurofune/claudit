@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/parse/codex"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse/codex"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // StoryPageTurns is how many main-agent turns one story page carries.

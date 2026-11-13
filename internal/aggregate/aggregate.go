@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
-	"github.com/kurofune/claudit/internal/project"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/project"
 )
 
 // Filter narrows which turns are counted.

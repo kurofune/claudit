@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // A resumed/forked session writes the prior transcript into a new file

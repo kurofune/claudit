@@ -33,8 +33,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // fileEntry is what the cache remembers for one JSONL path: when we

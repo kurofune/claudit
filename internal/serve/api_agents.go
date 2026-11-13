@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/parse/codex"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/agentflow"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse/codex"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // agentActiveWindow is how recently a session must have acted (relative to

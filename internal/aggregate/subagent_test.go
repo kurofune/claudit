@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // writeSubagentFixture creates <dir>/subagents/agent-x.jsonl plus its

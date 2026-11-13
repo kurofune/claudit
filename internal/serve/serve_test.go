@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 func loadPricesForTest(t *testing.T) *pricing.Table {

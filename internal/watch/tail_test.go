@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 func mkAssistantLine(uuid, parent string, ts time.Time) string {

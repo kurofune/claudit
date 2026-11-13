@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // mkSkillLine builds an assistant JSONL line carrying one Skill tool_use.

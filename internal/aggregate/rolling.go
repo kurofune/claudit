@@ -3,8 +3,8 @@ package aggregate
 import (
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // RollingTotals sums turn cost into four trailing buckets measured

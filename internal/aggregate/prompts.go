@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // promptKeyMaxRunes is how much of the normalized prompt text we use as

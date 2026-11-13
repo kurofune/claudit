@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
-	"github.com/kurofune/claudit/internal/watch"
-	"github.com/kurofune/claudit/internal/watch/term"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/watch"
+	"github.com/kurofune/claudit/v2/internal/watch/term"
 )
 
 // testPrices returns a tiny pricing table with one model so we can

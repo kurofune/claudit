@@ -11,7 +11,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // TestLoadConcurrent_RealCodexCorpus is the dogfood check for Codex rollouts,

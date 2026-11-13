@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kurofune/claudit/internal/watch/term"
+	"github.com/kurofune/claudit/v2/internal/watch/term"
 )
 
 // painter is the surface watchState and multiHub use to draw to the

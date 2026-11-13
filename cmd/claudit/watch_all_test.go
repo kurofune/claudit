@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/watch"
-	"github.com/kurofune/claudit/internal/watch/term"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/watch"
+	"github.com/kurofune/claudit/v2/internal/watch/term"
 )
 
 func TestMultiHub_HandleEvent_GroupsByProject(t *testing.T) {

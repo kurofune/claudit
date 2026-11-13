@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/watch/term"
+	"github.com/kurofune/claudit/v2/internal/watch/term"
 )
 
 // TestScreenPainterRenderDoesNotBlockOnSlowWriter pins the invariant

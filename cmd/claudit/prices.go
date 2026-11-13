@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // runPrices prints the rate table serve and watch price turns with: the

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kurofune/claudit/internal/watch/term"
+	"github.com/kurofune/claudit/v2/internal/watch/term"
 )
 
 // All color decisions for the watch UI live in this file so palette

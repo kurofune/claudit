@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // promptExamples returns two examples; the i-th carries providers[i %

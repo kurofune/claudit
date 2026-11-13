@@ -1,6 +1,6 @@
 package aggregate
 
-import "github.com/kurofune/claudit/internal/parse"
+import "github.com/kurofune/claudit/v2/internal/parse"
 
 // ReplaySet identifies the replayed (non-canonical) copies of assistant
 // turns produced when a session is resumed or forked. Claude Code writes the

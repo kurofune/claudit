@@ -4,6 +4,10 @@ All notable changes to claudit are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+
+- **The Go module path is now `github.com/kurofune/claudit/v2`.** Install with `go install github.com/kurofune/claudit/v2/cmd/claudit@latest`. v2.0.0 and v2.1.0 could not be installed with `go install`: their `go.mod` still named `github.com/kurofune/claudit`, and Go's major-version rule makes the module proxy reject a v2+ tag on a module path without `/v2`, so `go install github.com/kurofune/claudit/cmd/claudit@latest` kept installing v1.9.2. Those two tags stay uninstallable through `go install` for good (their GitHub Release binaries still work); this release is the first v2 tag `go install` can fetch. Code importing claudit's packages must add `/v2` to the import path.
+
 ## [2.1.0] — 2026-11-12
 
 Pricing refresh against the live pricing page on 2026-11-12: **Claude Fable 5.2** and **Claude Mythos 5.2** are added. This release also ships Codex session support, the Sessions list and the session page.

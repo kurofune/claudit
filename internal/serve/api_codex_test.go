@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // codexFixtureRoot lays the committed Codex fixtures into a temp sessions

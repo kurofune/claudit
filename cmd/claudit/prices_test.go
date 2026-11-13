@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // noOverlay is a --prices path that does not exist, so the run sees only the

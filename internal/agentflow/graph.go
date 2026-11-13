@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/corpus"
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
-	"github.com/kurofune/claudit/internal/project"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/corpus"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/project"
 )
 
 // AgentSession is one session's agent tree: the main agent plus the

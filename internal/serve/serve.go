@@ -21,9 +21,9 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/agentflow"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // Options configures the server. Bind defaults to loopback only; do

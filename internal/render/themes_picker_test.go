@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	webassets "github.com/kurofune/claudit"
+	webassets "github.com/kurofune/claudit/v2"
 )
 
 // TestThemeCatalogParity guards the three hand-maintained theme slug

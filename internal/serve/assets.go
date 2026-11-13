@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	webassets "github.com/kurofune/claudit"
+	webassets "github.com/kurofune/claudit/v2"
 )
 
 // webFS is the SPA source tree shipped inside the binary. The actual

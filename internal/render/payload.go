@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // HotspotForJSON is the same data as aggregate.Hotspot plus the rendered

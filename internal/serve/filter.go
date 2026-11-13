@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // Query is the parsed view of a request's URL query string: the

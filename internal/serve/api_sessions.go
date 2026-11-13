@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/agentflow"
+	"github.com/kurofune/claudit/v2/internal/agentflow"
 )
 
 // storyMemoMax bounds how many sessions' stories stay built: enough for a

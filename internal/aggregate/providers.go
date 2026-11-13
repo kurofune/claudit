@@ -3,8 +3,8 @@ package aggregate
 import (
 	"sort"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // ProviderBucket is one agent tool's share of the counted turns.

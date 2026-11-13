@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // Anomalies need at least anomalyWindow+1 buckets — without a full prior

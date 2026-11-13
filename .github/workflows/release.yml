@@ -61,7 +61,7 @@ jobs:
         # discover and cache the tag immediately, so the next @latest
         # resolution lands on the release we just published.
         run: |
-          curl -fsS "https://proxy.golang.org/github.com/kurofune/claudit/@v/${GITHUB_REF_NAME}.info" >/dev/null || \
+          curl -fsS "https://proxy.golang.org/github.com/kurofune/claudit/v2/@v/${GITHUB_REF_NAME}.info" >/dev/null || \
             echo "::warning::Proxy warm failed — @latest installs may briefly serve the previous version until the proxy catches up."
 
   # Prebuilt binaries for users without a Go toolchain. Each matrix leg

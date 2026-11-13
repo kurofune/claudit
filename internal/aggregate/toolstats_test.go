@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // toolStatsFixture: one turn calls Bash three times and Read once. The

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // TestServer_Singleflight_CollapsesConcurrentBuilds is the Phase-1

@@ -12,8 +12,8 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/parse/codex"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse/codex"
 )
 
 var _ Source = (*Codex)(nil)

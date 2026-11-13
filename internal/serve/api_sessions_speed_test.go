@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/agentflow"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // twoSessionCorpus writes sessions s-a (300 turns, so it pages) and s-b

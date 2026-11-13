@@ -3,7 +3,7 @@ package aggregate
 import (
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // PromptResolver maps any turn (or intermediate) UUID to the UUID of the user

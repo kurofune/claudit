@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/serve"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/serve"
 )
 
 // applyServeMemoryLimit sets a ~1.5 GiB soft limit — serve mode caches

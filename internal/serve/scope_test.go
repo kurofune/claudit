@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // newTestServerWithDefaults builds a Server with a 7-day default window,

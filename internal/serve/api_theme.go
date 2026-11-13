@@ -17,7 +17,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kurofune/claudit/internal/render"
+	"github.com/kurofune/claudit/v2/internal/render"
 )
 
 type themePostBody struct {

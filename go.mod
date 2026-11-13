@@ -1,4 +1,4 @@
-module github.com/kurofune/claudit
+module github.com/kurofune/claudit/v2
 
 go 1.26.3
 

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/agentflow"
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/agentflow"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 type indexRowWire struct {

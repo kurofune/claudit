@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/provider"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/provider"
 )
 
 // mkAssistantLine matches the schema used elsewhere so these fixtures

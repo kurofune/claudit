@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/render"
+	"github.com/kurofune/claudit/v2/internal/render"
 )
 
 // TestAPIOverview_BuildsNoPromptIndex: the overview reads no per-prompt

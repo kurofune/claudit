@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // everyText asks FindTexts for every turn, prompt and tool input a rollout

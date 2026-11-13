@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kurofune/claudit/internal/stat"
+	"github.com/kurofune/claudit/v2/internal/stat"
 )
 
 // AnomalyKind enumerates the kinds of statistical outliers the report

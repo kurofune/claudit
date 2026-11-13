@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 // opusTurn is one opus-4-7 turn billing 1M input tokens = $5 exactly,

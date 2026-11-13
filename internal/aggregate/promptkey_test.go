@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // normalizePromptKeyWhole is normalizePromptKey as it read before it

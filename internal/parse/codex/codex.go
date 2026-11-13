@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // rawKind is a response_item or event_msg payload's discriminator, decoded

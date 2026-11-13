@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
-	"github.com/kurofune/claudit/internal/render"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/render"
 )
 
 // API URL paths. Constants so the route registration in routes()

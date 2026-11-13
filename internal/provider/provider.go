@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kurofune/claudit/internal/parse"
+	"github.com/kurofune/claudit/v2/internal/parse"
 )
 
 // Source is one provider's logs.

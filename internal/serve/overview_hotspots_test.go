@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // mkCacheWriteLine is an assistant line with no tools whose usage writes

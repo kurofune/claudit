@@ -3,7 +3,7 @@ package render
 import (
 	"sort"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 // TokenCategory is one row of the token-composition breakdown — a

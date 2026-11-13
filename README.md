@@ -17,7 +17,7 @@ Its centrepiece is the **Agents** view: every session in the window, grouped by 
 ## Install
 
 ```sh
-go install github.com/kurofune/claudit/cmd/claudit@latest
+go install github.com/kurofune/claudit/v2/cmd/claudit@latest
 ```
 
 Requires Go 1.26 or later. The binary lands in `$GOBIN` (usually `~/go/bin`).

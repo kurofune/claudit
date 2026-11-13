@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/pricing"
+	"github.com/kurofune/claudit/v2/internal/pricing"
 )
 
 func TestPeriod_Truncate(t *testing.T) {

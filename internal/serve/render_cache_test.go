@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kurofune/claudit/internal/aggregate"
+	"github.com/kurofune/claudit/v2/internal/aggregate"
 )
 
 func newTestServerWithCache(t *testing.T, dir string, cacheSize int) *Server {
