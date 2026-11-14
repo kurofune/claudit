@@ -108,15 +108,16 @@ name = "tend-workshop"
 schedule = "daily 02:30"
 # Free check, no model: `djinn dolt-tend` restarts the beads Dolt server
 # around a `dolt gc --full` at most weekly on a quiet repo and exits 0 when
-# that failed, or while a failure waits for `--handed-off`; `djinn slow-watch` starts the nightly slow tier and exits 0
-# when the latest finished run is red and not handed off; otherwise run the
+# that failed, or while a failure waits for `--handed-off`; `djinn slow-watch` starts nothing (the workshop tick runs
+# main's whole slow tier daily, before the next drain) and exits 0 when the
+# latest finished daily run is red and not handed off; otherwise run the
 # duty when a vendored skill's upstream moved past its pin (repos
 # carrying scripts/sync-vendored-skills.sh, with no bump bead open yet) or a
 # workshop candidate survives the guards.
 check = "djinn dolt-tend || djinn slow-watch || { [ -x scripts/sync-vendored-skills.sh ] && ! bd list --label garden:vendor-bump -n 1 --json | grep -q '\"id\"' && { scripts/sync-vendored-skills.sh --check >/dev/null 2>&1; [ $? -eq 1 ]; }; } || djinn garden survey --bed workshop --check"
 max_cost_usd = 10.0
 prompt = """
-Tend the workshop's own health: file the slow-tier breaks the nightly local run
+Tend the workshop's own health: file the slow-tier breaks main's daily run
 found, turn the workshop survey's candidates into proposals, propose a bump for
 each vendored skill whose upstream moved past its pin, then file a failed
 weekly Dolt server restart and gc.
@@ -126,7 +127,8 @@ The `from:seat:gardener` label names the seat directory, gardener, and never
 the display name `djinn theme show` prints for this seat.
 
 1. Slow tier: run `djinn slow-watch`. When it exits 0 it prints one line: the
-   log path of the latest finished slow-tier run (go test -tags=slow ./...),
+   log path of the latest finished daily run of the whole slow tier (go test
+   -tags=slow ./... on origin/main, which the workshop tick runs once a day),
    which failed and has not been handed off. When it exits 1, or prints no log
    path, go to step 2.
    a. Read that log. Each failure is a `--- FAIL: <Test>` line under a
@@ -155,7 +157,8 @@ the display name `djinn theme show` prints for this seat.
    `garden-fp:<fingerprint>`. Its description names the measured symptom (the
    survey's symptom line) and the fix the category asks for:
    - slow-creep: find the packages whose time grew most across the recent
-     .djinn/slow-watch logs and bring the tier back under its median.
+     daily-run logs (djinn/main-health/daily/ in the git common dir) and
+     bring the tier back under its median.
    - flaky-test: make the test deterministic; its criterion is that
      `go test -tags=slow -count=5 -run '<TestName>' ./<file>` exits 0.
    - dolt-size: compact the store with writers stopped — `bd dolt stop`,
